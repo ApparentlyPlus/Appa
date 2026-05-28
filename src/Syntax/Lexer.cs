@@ -1,0 +1,323 @@
+namespace Appa;
+
+using System.Runtime.CompilerServices;
+
+/// <summary>
+/// Thrown by the lexer or parser when source text cannot be tokenized or parsed.
+/// Caught at every call site so it never escapes as an unhandled exception.
+/// </summary>
+sealed class ParseException(TextSpan span, string message) : Exception(message)
+{
+    public TextSpan Span { get; } = span;
+}
+
+/// <summary>
+/// Converts a Gata source string into a flat list of tokens.
+/// One instance per file. Call Tokenize() once and discard.
+/// Man, .NET 10 is rad. I love records and primary constructors.
+/// </summary>
+sealed class Lexer(string src)
+{
+    // Position pointer into the source string. _pp points to the index of the next character to read.
+    private int _pp;
+    // Start index of the current token being read. _ts is set to _pp when a new token starts.
+    private int _ts;
+
+    // The list of tokens produced by the lexer. This is the output of Tokenize().
+    private readonly List<Token> _tokens = [];
+
+    // Keyword lookup table. Maps keyword strings to their corresponding token kinds.
+    static readonly Dictionary<string, TK> kw = new()
+    {
+        ["import"]      = TK.Import,
+        ["kernel"]      = TK.Kernel,
+        ["user"]        = TK.User,
+        ["Process"]     = TK.Process,   
+        ["process"]     = TK.Process,
+        ["Thread"]      = TK.Thread,
+        ["thread"]      = TK.Thread,
+        ["foreground"]  = TK.Foreground,
+        ["background"]  = TK.Background,
+        ["class"]       = TK.Class,
+        ["enum"]        = TK.Enum,
+        ["module"]      = TK.Module,
+        ["func"]        = TK.Func,
+        ["static"]      = TK.Static,
+        ["public"]      = TK.Public,    
+        ["private"]     = TK.Private,
+        ["entry"]       = TK.Entry,
+        ["throws"]      = TK.Throws,
+        ["operator"]    = TK.Operator,
+        ["as"]          = TK.As,
+        ["fields"]      = TK.Fields,
+        ["ref"]         = TK.Ref,
+        ["return"]      = TK.Return,
+        ["if"]          = TK.If,
+        ["else"]        = TK.Else,
+        ["while"]       = TK.While,
+        ["for"]         = TK.For,       
+        ["in"]          = TK.In,
+        ["switch"]      = TK.Switch,    
+        ["case"]        = TK.Case,
+        ["break"]       = TK.Break,     
+        ["continue"]    = TK.Continue,
+        ["debug"]       = TK.Debug,     
+        ["panic"]       = TK.Panic,
+        ["try"]         = TK.Try,
+        ["catch"]       = TK.Catch,     
+        ["new"]         = TK.New,
+        ["let"]         = TK.Let,       
+        ["null"]        = TK.Null,
+        ["unsafe"]      = TK.Unsafe,    
+        ["throw"]       = TK.Throw,
+        ["sizeof"]      = TK.Sizeof,    
+        ["default"]     = TK.Default,
+        ["defer"]       = TK.Defer,     
+        ["match"]       = TK.Match,
+        ["union"]       = TK.Union,
+        ["bool"]        = TK.TBool,     
+        ["int"]         = TK.TInt,
+        ["char"]        = TK.TChar,     
+        ["float"]       = TK.TFloat,
+        ["double"]      = TK.TDouble,   
+        ["short"]       = TK.TShort,
+        ["void"]        = TK.TVoid,
+
+        // Width explicit family
+
+        ["int64"]       = TK.TPrim,
+        ["uint"]        = TK.TPrim,
+        ["uint64"]      = TK.TPrim,
+        ["ushort"]      = TK.TPrim,
+        ["byte"]        = TK.TPrim,
+        ["sbyte"]       = TK.TPrim,
+        ["usize"]       = TK.TPrim,
+        ["uintptr"]     = TK.TPrim,
+        ["true"]        = TK.BoolLit,
+        ["false"]       = TK.BoolLit,
+    };
+
+    // Alternate lookup for kw using ReadOnlySpan<char> to avoid allocations during tokenization
+    private static readonly Dictionary<string, TK>.AlternateLookup<ReadOnlySpan<char>> KeywordsLookup = 
+        kw.GetAlternateLookup<ReadOnlySpan<char>>();
+
+    // Array of keyword strings indexed by their corresponding TK enum values for quicker access
+    private static readonly string[] kwstr;
+    
+    // Constructor to initialize the static keyword string array based on the kw dictionary
+    static Lexer()
+    {
+        kwstr = new string[Enum.GetValues<TK>().Length];
+        foreach (var kvp in kw)
+        {
+            kwstr[(int)kvp.Value] = kvp.Key;
+        }
+    }
+
+    // Public method to tokenize the source string and return a list of tokens
+    public List<Token> Tokenize()
+    {
+        // Main loop to read tokens until the end of the source string is reached
+        while (_pp < src.Length) ReadOne();
+
+        // Emit an EOF token at the end of the token list to signify the end of input
+        _tokens.Add(new Token(TK.EOF, "", new TextSpan(src.Length, 0)));
+        return _tokens;
+    }
+
+    // Helper methods for character inspection and token emission
+    char Cur => _pp < src.Length ? src[_pp] : '\0';
+    char Peek(int n=1) => (_pp + n) < src.Length ? src[_pp + n] : '\0';
+    void Advance(int n=1) => _pp += n;
+
+    // Emits a token of the specified kind with the given value, using the current token start and position pointers to create a TextSpan.
+    void Emit(TK kind, string value) => _tokens.Add(new Token(kind, value, new TextSpan(_ts, _pp - _ts)));
+
+    // Throws a ParseException with the given message and a TextSpan covering the current token being read.
+    void Fail(string m) => throw new ParseException(new TextSpan(_ts, Math.Max(1, _pp - _ts)), m);
+
+    /// <summary>
+    /// Reads the next token from the source string and adds it to the token list.
+    /// </summary>
+    private void ReadOne()
+    {
+        // Whitespace
+        if (IsWhiteSpace(Cur)) { Advance(); return; }
+
+        // Line and block comments should be consumed silently
+        if (Cur == '/' && Peek() == '/') 
+        {
+            while (_pp < src.Length && Cur != '\n')
+                Advance(); 
+            return;
+        }
+
+        // For multiline comments
+        if (Cur == '/' && Peek() == '*')
+        {
+            // Consume block comment
+            Advance(2);
+
+            // Keep consuming until we find the closing '*/' or reach the end of the source string
+            while (_pp < src.Length - 1 && !(Cur == '*' && Peek() == '/')) Advance();
+            
+            // Consume the closing '*/' if we found it
+            Advance(2); 
+            return;
+        }
+
+        // About to read a new token, so set the token start pointer to the current position
+        _ts = _pp;
+
+        // native { }  or  native type Name { }
+        if (MatchKw("native"))
+        {
+            // Save the current position in case we need to backtrack
+            int start = _pp; Advance(6); SkipWS();
+
+            // If the next character is '{', we have a native block. Read the balanced content and emit a NativeContent token.
+            if (Cur == '{') { Emit(TK.NativeContent, ReadBalanced()); return; }
+
+            // If the next characters spell "type", we have a native type declaration. Read the type name and the balanced body, then emit a NativeTypeDecl token.
+            if (MatchKw("type"))
+            {
+                Advance(4); SkipWS();
+
+                // Read the type name, which must be a valid identifier. If we find a '{' after the type name, read the balanced body and emit a NativeTypeDecl token.
+                int ns = _pp;
+                while (_pp < src.Length && IsIdentPart(Cur)) Advance();
+                string tname = src[ns.._pp]; SkipWS();
+                if (Cur == '{' && !string.IsNullOrEmpty(tname))
+                {
+                    string body = ReadBalanced();
+                    Emit(TK.NativeTypeDecl, tname + "\x1F" + body);
+                    return;
+                }
+            }
+
+            // If we didn't find a valid native block or type declaration, backtrack and read an identifier instead.
+            _pp = start; 
+            ReadID(); 
+            
+            return;
+        }
+
+        // fields { }
+        if (MatchKw("fields"))
+        {
+            int start = _pp; Advance(6); SkipWS();
+            if (Cur != '{') { _pp = start; ReadID(); return; }
+            Emit(TK.Fields, ReadBalanced());
+            return;
+        }
+
+        if (IsIDStart(Cur)) { ReadID(); return; }
+
+        // Single character punctuation fallthrough
+        char c = Cur;
+        Advance(); 
+        Emit(TK.Punct, c.ToString());
+    }
+
+    /// <summary>
+    /// True when the next characters in src spell exactly kw and are not followed
+    /// by a letter, digit, or underscore (ie. it is a complete word boundary).
+    /// </summary>
+    bool MatchKw(string kw)
+    {
+        // Check if the next characters in src match kw and are not followed by an identifier part
+        if (_pp + kw.Length > src.Length) return false;
+
+        // Use AsSpan to avoid creating a new string for comparison
+        if (!src.AsSpan(_pp, kw.Length).Equals(kw, StringComparison.Ordinal)) return false;
+
+        // Check if the character after kw is not an identifier part (letter, digit, or underscore)
+        int after = _pp + kw.Length;
+        return after >= src.Length || (!IsIdentPart(src[after]));
+    }
+
+    /// <summary>
+    /// Consumes whitespace characters starting from the current position in the source string.
+    /// </summary>
+    void SkipWS() { while (_pp < src.Length && IsWhiteSpace(Cur)) Advance(); }
+
+    /// <summary>
+    /// Reads a balanced block of text enclosed in braces '{' and '}'.
+    /// Understands C style line comments, block comments, and string/char literals
+    /// so a brace inside any of those does not alter the nesting depth.
+    /// </summary>
+    string ReadBalanced()
+    {
+        Advance(); // opening {
+        int start = _pp;
+        int depth = 1;
+        while (_pp < src.Length && depth > 0)
+        {
+            char cur = Cur;
+            char peek = Peek();
+
+            if (cur == '/' && peek == '/')
+            {
+                while (_pp < src.Length && Cur != '\n') Advance();
+            }
+            else if (cur == '/' && peek == '*')
+            {
+                Advance(2);
+                while (_pp < src.Length && !(Cur == '*' && Peek() == '/')) Advance();
+                if (_pp < src.Length) Advance(2);
+            }
+            else if (cur == '"' || cur == '\'')
+            {
+                char quote = cur; Advance();
+                while (_pp < src.Length && Cur != quote)
+                {
+                    if (Cur == '\\' && _pp + 1 < src.Length) Advance();
+                    Advance();
+                }
+                if (_pp < src.Length) Advance();
+            }
+            else if (cur == '{') { depth++; Advance(); }
+            else if (cur == '}') { depth--; Advance(); }
+            else { Advance(); }
+        }
+
+        // If we reached the end of the source string and depth is still greater than 0, it means we have an unterminated native block. Throw a ParseException in that case.
+        if (depth > 0) Fail("Unterminated native block, missing closing '}'");
+        return src[start..(_pp - 1)];
+    }
+
+    /// <summary>
+    /// Reads an identifier or keyword from the source string starting at the current position.
+    /// </summary>
+    void ReadID()
+    {
+        // Save the starting position of the identifier
+        int start = _pp;
+        while (_pp < src.Length && IsIdentPart(Cur)) Advance();
+
+        // Use ReadOnlySpan<char> to avoid allocating a new string for the identifier
+        ReadOnlySpan<char> span = src.AsSpan(start, _pp - start);
+
+        // Check if the identifier matches a keyword in the KeywordsLookup dictionary. 
+        // If it does, emit the corresponding keyword token. Otherwise, emit an identifier token.
+        if (KeywordsLookup.TryGetValue(span, out var kw))
+        {
+            Emit(kw, kwstr[(int)kw]);
+        }
+        else
+        {
+            Emit(TK.Ident, new string(span));
+        }
+    }
+
+    // Helper methods for character classification
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsWhiteSpace(char c) => c == ' ' || (c >= '\t' && c <= '\r');
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsIDStart(char c) => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsIdentPart(char c) => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+}
