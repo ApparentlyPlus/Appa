@@ -46,3 +46,8 @@ enum TK
     // End of file
     EOF
 }
+
+/// <summary>
+/// A single token produced by the lexer. Carries its kind, raw text value, and source location.
+/// </summary>
+record Token(TK Kind, string Value, TextSpan Span);
