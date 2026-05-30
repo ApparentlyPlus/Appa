@@ -103,6 +103,9 @@ sealed class Lexer(string src)
 
     // Array of keyword strings indexed by their corresponding TK enum values for quicker access
     private static readonly string[] kwstr;
+
+    // Cache for character literal integer string values to avoid allocations
+    private static readonly string[] chrstrs;
     
     // Constructor to initialize the static keyword string array based on the kw dictionary
     static Lexer()
@@ -112,6 +115,9 @@ sealed class Lexer(string src)
         {
             kwstr[(int)kvp.Value] = kvp.Key;
         }
+
+        chrstrs = new string[256];
+        for (int i = 0; i < 256; i++) chrstrs[i] = i.ToString();
     }
 
     // Public method to tokenize the source string and return a list of tokens
@@ -213,9 +219,15 @@ sealed class Lexer(string src)
 
         if (IsIDStart(Cur)) { ReadID(); return; }
 
+        // Check for single-character punctuation and emit it as a token
+        if (Cur == '"')  { Emit(TK.StrLit, ReadString()); return; }
+
+        // Check for character literals and emit them as tokens
+        if (Cur == '\'') { ReadCharLit(); return; }
+
         // Single character punctuation fallthrough
         char c = Cur;
-        Advance(); 
+        Advance();
         Emit(TK.Punct, c.ToString());
     }
 
@@ -308,6 +320,79 @@ sealed class Lexer(string src)
         {
             Emit(TK.Ident, new string(span));
         }
+    }
+
+    /// <summary>
+    /// Maps a single escape character to its value. Returns false for unrecognized escapes.
+    /// </summary>
+    private static bool TryEscape(char c, out char val)
+    {
+        val = c switch
+        {
+            'n'  => '\n',
+            't'  => '\t',
+            'r'  => '\r',
+            '0'  => '\0',
+            '\'' => '\'',
+            '\\' => '\\',
+            '"'  => '"',
+            _    => '\0'
+        };
+        return c is 'n' or 't' or 'r' or '0' or '\'' or '\\' or '"';
+    }
+
+    /// <summary>
+    /// Reads a string literal from the source string starting at the current position.
+    /// </summary>
+    private string ReadString()
+    {
+        int start = _pp;
+        Advance(); // opening "
+
+        // Read until the closing quote or a newline is encountered, handling escape sequences
+        while (_pp < src.Length && Cur != '"' && Cur != '\n')
+        {
+            if (Cur == '\\')
+            {
+                Advance();
+                if (_pp >= src.Length) break;
+                if (!TryEscape(Cur, out _)) Fail($"unrecognized escape '\\{Cur}' in string literal");
+                Advance();
+            }
+            else Advance();
+        }
+
+        // If we reached the end of the source string or a newline without finding a closing quote, throw a ParseException for an unterminated string literal.
+        if (Cur != '"') Fail("unterminated string literal");
+        Advance(); // closing "
+        return src[start.._pp];
+    }
+
+    /// <summary>
+    /// Reads a character literal from the source string starting at the current position.
+    /// </summary>
+    private void ReadCharLit()
+    {
+        Advance(); // opening '
+        int val = 0;
+
+        // Handle escape sequences and ensure the character literal contains exactly one character
+        if (Cur == '\\')
+        {
+            Advance();
+            if (!TryEscape(Cur, out char e)) Fail($"unrecognized escape '\\{Cur}' in char literal");
+            val = e; Advance();
+        }
+        else if (Cur == '\'') Fail("empty char literal");
+        else if (Cur == '\n' || _pp >= src.Length) Fail("unterminated char literal");
+        else { val = Cur; Advance(); }
+
+        // Ensure the character literal contains exactly one character
+        if (Cur != '\'') Fail("char literal must hold exactly one character");
+        Advance(); // closing '
+        
+        string vstr = (val >= 0 && val < 256) ? chrstrs[val] : val.ToString();
+        Emit(TK.CharLit, vstr);
     }
 
     // Helper methods for character classification
