@@ -225,6 +225,62 @@ sealed class Lexer(string src)
         // Check for character literals and emit them as tokens
         if (Cur == '\'') { ReadCharLit(); return; }
 
+        // Compound assignment and multi character operators
+        switch (Cur)
+        {
+            case '+':
+                if (Peek() == '=') { Advance(2); Emit(TK.PlusEq, "+="); return; }
+                if (Peek() == '+') { Advance(2); Emit(TK.Inc, "++"); return; }
+                break;
+            case '-':
+                if (Peek() == '=') { Advance(2); Emit(TK.MinusEq, "-="); return; }
+                if (Peek() == '>') { Advance(2); Emit(TK.Arrow, "->"); return; }
+                if (Peek() == '-') { Advance(2); Emit(TK.Dec, "--"); return; }
+                break;
+            case '*':
+                if (Peek() == '=') { Advance(2); Emit(TK.StarEq, "*="); return; }
+                break;
+            case '/':
+                if (Peek() == '=') { Advance(2); Emit(TK.SlashEq, "/="); return; }
+                break;
+            case '%':
+                if (Peek() == '=') { Advance(2); Emit(TK.PercentEq, "%="); return; }
+                break;
+            case '&':
+                if (Peek() == '=') { Advance(2); Emit(TK.AmpEq, "&="); return; }
+                if (Peek() == '&') { Advance(2); Emit(TK.And, "&&"); return; }
+                break;
+            case '|':
+                if (Peek() == '=') { Advance(2); Emit(TK.PipeEq, "|="); return; }
+                if (Peek() == '|') { Advance(2); Emit(TK.Or, "||"); return; }
+                break;
+            case '^':
+                if (Peek() == '=') { Advance(2); Emit(TK.CaretEq, "^="); return; }
+                break;
+            case '=':
+                if (Peek() == '=') { Advance(2); Emit(TK.EqEq, "=="); return; }
+                break;
+            case '!':
+                if (Peek() == '=') { Advance(2); Emit(TK.NotEq, "!="); return; }
+                break;
+            case '<':
+                if (Peek() == '<')
+                {
+                    if (Peek(2) == '=') { Advance(3); Emit(TK.ShlEq, "<<="); return; }
+                    Advance(2); Emit(TK.Punct, "<<"); return;
+                }
+                if (Peek() == '=') { Advance(2); Emit(TK.LtEq, "<="); return; }
+                break;
+            case '>':
+                if (Peek() == '>')
+                {
+                    if (Peek(2) == '=') { Advance(3); Emit(TK.ShrEq, ">>="); return; }
+                    Advance(2); Emit(TK.Punct, ">>"); return;
+                }
+                if (Peek() == '=') { Advance(2); Emit(TK.GtEq, ">="); return; }
+                break;
+        }
+
         // Single character punctuation fallthrough
         char c = Cur;
         Advance();
