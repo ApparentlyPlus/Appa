@@ -217,7 +217,11 @@ sealed class Lexer(string src)
             return;
         }
 
+        // identifiers
         if (IsIDStart(Cur)) { ReadID(); return; }
+
+        // Check for interpolated strings and emit them as tokens
+        if (Cur == '$' && Peek() == '"') { ReadInterp(); return; }
 
         // Check for single-character punctuation and emit it as a token
         if (Cur == '"')  { Emit(TK.StrLit, ReadString()); return; }
@@ -327,19 +331,23 @@ sealed class Lexer(string src)
             char cur = Cur;
             char peek = Peek();
 
+            // Handle comments, string literals, and character literals to avoid misinterpreting braces inside them
             if (cur == '/' && peek == '/')
             {
                 while (_pp < src.Length && Cur != '\n') Advance();
             }
+            // Handle block comments
             else if (cur == '/' && peek == '*')
             {
                 Advance(2);
                 while (_pp < src.Length && !(Cur == '*' && Peek() == '/')) Advance();
                 if (_pp < src.Length) Advance(2);
             }
+            // Handle string literals
             else if (cur == '"' || cur == '\'')
             {
-                char quote = cur; Advance();
+                char quote = cur; 
+                Advance();
                 while (_pp < src.Length && Cur != quote)
                 {
                     if (Cur == '\\' && _pp + 1 < src.Length) Advance();
@@ -347,6 +355,7 @@ sealed class Lexer(string src)
                 }
                 if (_pp < src.Length) Advance();
             }
+            // Handle nested braces
             else if (cur == '{') { depth++; Advance(); }
             else if (cur == '}') { depth--; Advance(); }
             else { Advance(); }
@@ -459,6 +468,74 @@ sealed class Lexer(string src)
             _    => '\0'
         };
         return c is 'n' or 't' or 'r' or '0' or '\'' or '\\' or '"';
+    }
+
+    /// <summary>
+    /// Reads an interpolated string $"…{expr}…" as a sequence of distinct tokens.
+    /// Emits InterpStrStart, StrLit, Punct for braces, standard expression tokens, and InterpStrEnd.
+    /// </summary>
+    private void ReadInterp()
+    {
+        // $" has already been consumed by the caller
+        Emit(TK.InterpStrStart, "$\"");
+
+        while (_pp < src.Length && Cur != '"' && Cur != '\n')
+        {
+            if (Cur == '{')
+            {
+                // Emit opening '{'
+                _ts = _pp; Advance();
+                Emit(TK.Punct, "{");
+
+                int brdepth = 1;
+                while (_pp < src.Length && brdepth > 0)
+                {
+                    if (IsWhiteSpace(Cur)) { Advance(); continue; }
+
+                    if (Cur == '{') brdepth++;
+                    else if (Cur == '}')
+                    {
+                        brdepth--;
+                        if (brdepth == 0) break; // don't let ReadOne consume the final '}'
+                    }
+
+                    // recursively lex standard tokens inside the expression
+                    ReadOne();
+                }
+
+                // If we reached the end of the source string and brdepth is still greater than 0, 
+                // it means we have an unterminated '{' in the interpolated string. Throw a ParseException in that case.
+                if (brdepth > 0) Fail("unterminated '{' in interpolated string");
+
+                // emit closing '}'
+                _ts = _pp; Advance();
+                Emit(TK.Punct, "}");
+            }
+            // emit a string literal segment until the next '{', '"', or newline
+            else
+            {
+                int start = _pp;
+                while (_pp < src.Length && Cur != '{' && Cur != '"' && Cur != '\n')
+                {
+                    if (Cur == '\\')
+                    {
+                        Advance();
+                        if (_pp >= src.Length) break;
+                        if (!TryEscape(Cur, out _)) Fail($"unrecognized escape '\\{Cur}' in interpolated string");
+                        Advance();
+                    }
+                    else Advance();
+                }
+
+                Emit(TK.StrLit, src[start.._pp]);
+            }
+        }
+
+        if (Cur != '"') Fail("unterminated interpolated string");
+
+        // emit closing '"'
+        _ts = _pp; Advance();
+        Emit(TK.InterpStrEnd, "\"");
     }
 
     /// <summary>
