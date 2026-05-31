@@ -6,7 +6,7 @@ namespace Appa;
 enum TK
 {
     // Literals
-    Ident, IntLit, FloatLit, StrLit, BoolLit, InterpStr, CharLit,
+    Ident, IntLit, FloatLit, StrLit, BoolLit, InterpStrStart, InterpStrEnd, CharLit,
 
     // Native block / native type
     NativeContent, NativeTypeDecl,
@@ -50,4 +50,9 @@ enum TK
 /// <summary>
 /// A single token produced by the lexer. Carries its kind, raw text value, and source location.
 /// </summary>
-record Token(TK Kind, string Value, TextSpan Span);
+readonly struct Token(TK kind, string value, TextSpan span)
+{
+    public TK Kind { get; } = kind;
+    public string Value { get; } = value;
+    public TextSpan Span { get; } = span;
+}
