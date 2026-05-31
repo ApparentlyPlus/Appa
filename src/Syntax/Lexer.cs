@@ -175,6 +175,29 @@ sealed class Lexer(string src)
         // About to read a new token, so set the token start pointer to the current position
         _ts = _pp;
 
+        // Annotations like @intrinsic(role)  @preamble(target)  @extern  @environment  @keep
+        if (Cur == '@')
+        {
+            Advance();
+            int start = _pp;
+            while (_pp < src.Length && IsIdentPart(Cur)) Advance();
+            ReadOnlySpan<char> nn = src.AsSpan(start, _pp - start);
+
+            switch (nn)
+            {
+                case "intrinsic": Emit(TK.AtIntrinsic, ReadParenArg()); return;
+                case "preamble": Emit(TK.AtPreamble, ReadParenArg()); return;
+                case "extern": Emit(TK.AtExtern, "@extern"); return;
+                case "environment": Emit(TK.AtEnvironment, "@environment"); return;
+                case "keep": Emit(TK.AtKeep, "@keep"); return;
+                default:
+                    // If we reach here, it means the annotation name is not recognized. 
+                    // Throw a ParseException with a message indicating the unknown annotation and the expected ones.
+                    Fail($"unknown annotation '@{nn}'; expected '@intrinsic', '@preamble', '@extern', '@environment', or '@keep'");
+                    return;
+            }
+        }
+
         // native { }  or  native type Name { }
         if (MatchKw("native"))
         {
@@ -315,6 +338,25 @@ sealed class Lexer(string src)
     /// Consumes whitespace characters starting from the current position in the source string.
     /// </summary>
     void SkipWS() { while (_pp < src.Length && IsWhiteSpace(Cur)) Advance(); }
+
+    /// <summary>
+    /// Reads an optional (identifier) argument after an annotation keyword, like @intrinsic(retain). Returns "" when absent.
+    /// </summary>
+    string ReadParenArg()
+    {
+        SkipWS();
+        if (Cur != '(') return "";
+        Advance(); 
+        SkipWS();
+        int s = _pp;
+
+        // Read until we find a character that is not part of an identifier (letter, digit, or underscore)
+        while (_pp < src.Length && IsIdentPart(Cur)) Advance();
+        string arg = src[s.._pp];
+        SkipWS();
+        if (Cur == ')') Advance();
+        return arg;
+    }
 
     /// <summary>
     /// Reads a balanced block of text enclosed in braces '{' and '}'.
