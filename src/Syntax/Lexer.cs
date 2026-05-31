@@ -225,6 +225,9 @@ sealed class Lexer(string src)
         // Check for character literals and emit them as tokens
         if (Cur == '\'') { ReadCharLit(); return; }
 
+        // Check for numeric literals and emit them as tokens
+        if (Cur >= '0' && Cur <= '9') { ReadNumber(); return; }
+
         // Compound assignment and multi character operators
         switch (Cur)
         {
@@ -379,6 +382,67 @@ sealed class Lexer(string src)
     }
 
     /// <summary>
+    /// Reads a numeric literal: hex (0x…), integer, or float with optional suffix.
+    /// The full lexeme including any suffix is stored verbatim as the token value.
+    /// </summary>
+    private void ReadNumber()
+    {
+        int start = _pp;
+
+        // Hex literal
+        if (Cur == '0' && (Peek() == 'x' || Peek() == 'X'))
+        {
+            Advance(2);
+            while (_pp < src.Length && IsHexDigit(Cur)) Advance();
+            ReadIntSuffix();
+            Emit(TK.IntLit, src[start.._pp]);
+            return;
+        }
+
+        // Decimal integer or float literal
+        while (_pp < src.Length && Cur >= '0' && Cur <= '9') Advance();
+
+        bool isFloat = false;
+
+        // Decimal point followed by a digit starts the fractional part
+        if (Cur == '.' && Peek() >= '0' && Peek() <= '9')
+        {
+            isFloat = true;
+            Advance();
+            while (_pp < src.Length && Cur >= '0' && Cur <= '9') Advance();
+        }
+
+        // e/E, optional sign, then at least one digit
+        if ((Cur == 'e' || Cur == 'E') &&
+            (Peek() >= '0' && Peek() <= '9' || (Peek() == '+' || Peek() == '-') && Peek(2) >= '0' && Peek(2) <= '9'))
+        {
+            isFloat = true;
+            Advance();
+            if (Cur == '+' || Cur == '-') Advance();
+            while (_pp < src.Length && Cur >= '0' && Cur <= '9') Advance();
+        }
+
+        if (isFloat)
+        {
+            if (Cur == 'f' || Cur == 'F') Advance(); // single-precision suffix
+            Emit(TK.FloatLit, src[start.._pp]);
+        }
+        else
+        {
+            ReadIntSuffix();
+            Emit(TK.IntLit, src[start.._pp]);
+        }
+    }
+
+    /// <summary>
+    /// Consumes a trailing integer suffix: any run of u/U/l/L (e.g. ULL, u, L).
+    /// </summary>
+    private void ReadIntSuffix()
+    {
+        while (_pp < src.Length && (Cur is 'u' or 'U' or 'l' or 'L')) Advance();
+    }
+
+    /// <summary>
     /// Maps a single escape character to its value. Returns false for unrecognized escapes.
     /// </summary>
     private static bool TryEscape(char c, out char val)
@@ -461,4 +525,7 @@ sealed class Lexer(string src)
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool IsIdentPart(char c) => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsHexDigit(char c) => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
 }
