@@ -348,3 +348,121 @@ record SizeofExpr(string TypeName, TextSpan Span) : Expr(Span);
 record DefaultExpr(string TypeName, TextSpan Span) : Expr(Span);
 
 #endregion
+
+#region Statements
+
+/// <summary>
+/// A verbatim native C statement embedded inside a Gata method body.
+/// </summary>
+record NativeStmt(NativeBody Body, TextSpan Span) : Stmt(Span);
+
+/// <summary>
+/// A local variable declaration. Type is null when the type is inferred from the initializer.
+/// Init is null for declarations without an initializer.
+/// </summary>
+record LetStmt(string? Type, string Name, Expr? Init, TextSpan Span) : Stmt(Span);
+
+/// <summary>
+/// An assignment statement. Op is the assignment operator ("=", "+=", "-=", etc.).
+/// Target must be an lvalue expression.
+/// </summary>
+record AssignStmt(Expr Target, string Op, Expr Value, TextSpan Span) : Stmt(Span);
+
+/// <summary>
+/// An expression used as a statement, typically a call expression whose return value is discarded.
+/// </summary>
+record ExprStmt(Expr E, TextSpan Span) : Stmt(Span);
+
+/// <summary>
+/// An if/else statement. Else is null when there is no else branch.
+/// </summary>
+record IfStmt(Expr Cond, Stmt Then, Stmt? Else, TextSpan Span) : Stmt(Span);
+
+/// <summary>
+/// A while loop.
+/// </summary>
+record WhileStmt(Expr Cond, Stmt Body, TextSpan Span) : Stmt(Span);
+
+/// <summary>
+/// A C-style for loop. Init, Cond, and Step are all optional.
+/// </summary>
+record ForStmt(Stmt? Init, Expr? Cond, Expr? Step, Block Body, TextSpan Span) : Stmt(Span);
+
+/// <summary>
+/// A for-in loop that iterates over a collection. Var is the loop variable name.
+/// </summary>
+record ForInStmt(string Var, Expr Collection, Block Body, TextSpan Span) : Stmt(Span);
+
+/// <summary>
+/// A return statement. Value is null for void returns.
+/// </summary>
+record ReturnStmt(Expr? Value, TextSpan Span) : Stmt(Span);
+
+/// <summary>
+/// A break statement that exits the nearest enclosing loop or switch.
+/// </summary>
+record BreakStmt(TextSpan Span) : Stmt(Span);
+
+/// <summary>
+/// A continue statement that skips to the next iteration of the nearest enclosing loop.
+/// </summary>
+record ContinueStmt(TextSpan Span) : Stmt(Span);
+
+/// <summary>
+/// A try/catch statement for Result-based error propagation. The catch block receives
+/// control when the try block throws.
+/// </summary>
+record TryCatchStmt(Block Try, Block Catch, TextSpan Span) : Stmt(Span);
+
+/// <summary>
+/// A switch statement. Cases is the list of arms; Default is the optional fallback block.
+/// There is no fallthrough: break and continue inside a case target the enclosing loop.
+/// </summary>
+record SwitchStmt(Expr Scrutinee, IReadOnlyList<SwitchCase> Cases, Block? Default, TextSpan Span) : Stmt(Span);
+
+/// <summary>
+/// One arm of a switch statement. Labels is the list of values that route to this arm.
+/// </summary>
+record SwitchCase(IReadOnlyList<Expr> Labels, Block Body, TextSpan Span);
+
+/// <summary>
+/// A match statement that scrutinizes a union value by variant. Each case binds the
+/// variant's fields as locals in its body. Default is the optional fallback block.
+/// </summary>
+record MatchStmt(Expr Scrutinee, IReadOnlyList<MatchCase> Cases, Block? Default, TextSpan Span) : Stmt(Span);
+
+/// <summary>
+/// One arm of a match statement. Variant is the union variant name; Bindings are the
+/// local names bound to the variant's fields in source order.
+/// </summary>
+record MatchCase(string Variant, IReadOnlyList<string> Bindings, Block Body, TextSpan Span);
+
+/// <summary>
+/// An unsafe block. Pointer operations (address-of, dereference) are only legal inside one.
+/// </summary>
+record UnsafeBlock(IReadOnlyList<Stmt> Stmts, TextSpan Span) : Stmt(Span);
+
+/// <summary>
+/// A defer statement. Action runs on every exit from the enclosing block, in LIFO order
+/// with other defers. Action may not itself transfer control.
+/// </summary>
+record DeferStmt(Stmt Action, TextSpan Span) : Stmt(Span);
+
+/// <summary>
+/// A throw statement that aborts the enclosing throws function or try block with an error Result.
+/// </summary>
+record ThrowStmt(TextSpan Span) : Stmt(Span);
+
+/// <summary>
+/// A debug statement. Raw is the raw string literal including quotes. Lowered to the
+/// environment's debug binding. Hard error in a release build.
+/// </summary>
+record DebugStmt(string Raw, TextSpan Span) : Stmt(Span);
+
+/// <summary>
+/// A panic statement. Raw is the raw string literal including quotes. Lowered to the
+/// environment's panic binding. Only legal in kernel context. Hard error in a release build.
+/// </summary>
+record PanicStmt(string Raw, TextSpan Span) : Stmt(Span);
+
+#endregion
