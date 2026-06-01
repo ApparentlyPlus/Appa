@@ -120,10 +120,28 @@ record UnionVariant(string Name, IReadOnlyList<Param> Fields, TextSpan Span);
 record NativeBody(string KernelC, string UserC);
 
 /// <summary>
-/// Base class for all annotations (@intrinsic, @preamble, @keep). Concrete subtypes added
-/// in a follow-up commit.
+/// Base class for all annotations (@intrinsic, @preamble, @keep).
 /// </summary>
 abstract record Annotation;
+
+/// <summary>
+/// @intrinsic(role): binds a function or method to a named compiler intrinsic.
+/// Role identifies which intrinsic slot this declaration fills, eg. "arc_retain".
+/// </summary>
+record IntrinsicAnnotation(string Role, TextSpan Span) : Annotation;
+
+/// <summary>
+/// @preamble(target): marks a native block as a preamble to be emitted before all other
+/// generated output for the given target translation unit ("kernel" or "user").
+/// </summary>
+record PreambleAnnotation(string Target, TextSpan Span) : Annotation;
+
+/// <summary>
+/// @keep: exempts a class or free function from dead-code elimination and dense renaming.
+/// Use when native code references the Gata-mangled name directly and the compiler cannot
+/// see that reference through static analysis.
+/// </summary>
+record KeepAnnotation(TextSpan Span) : Annotation;
 
 #endregion
 
