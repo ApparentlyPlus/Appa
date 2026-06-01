@@ -8,16 +8,16 @@ using System.Collections.Generic;
 /// Root of the AST. Holds all top-level declarations in source order, plus generic instantiation
 /// requests collected during parsing and consumed by the Monomorphizer.
 /// </summary>
-record Program(IReadOnlyList<TopLevel> Items)
+record Program(TopLevel[] Items)
 {
-    public IReadOnlyList<GenericUse> GenericUses { get; init; } = [];
+    public GenericUse[] GenericUses { get; init; } = [];
 }
 
 /// <summary>
 /// A generic instantiation site found during parsing, eg. List[int]. The Monomorphizer
 /// reads these to know which concrete copies to generate before the type resolver runs.
 /// </summary>
-record GenericUse(string Base, IReadOnlyList<string> Args, TextSpan Span);
+record GenericUse(string Base, string[] Args, TextSpan Span);
 
 #region Top-level declarations
 
@@ -43,55 +43,55 @@ record EnvironmentDecl(TextSpan Span) : TopLevel(Span);
 /// A native { … } block containing raw C source captured verbatim. Routed to the
 /// kernel or user translation unit by NativeC based on the block's section marker.
 /// </summary>
-record NativeBlock(NativeBody Body, TextSpan Span, IReadOnlyList<Annotation>? Annotations = null) : TopLevel(Span);
+record NativeBlock(NativeBody Body, TextSpan Span, Annotation[]? Annotations = null) : TopLevel(Span);
 
 /// <summary>
 /// class or module declaration. IsModule = true means all members are implicitly static, meaning
 /// no self parameter, no instances. GenericParams non-empty makes it a generic class
 /// monomorphized per concrete type argument set.
 /// </summary>
-record ClassDecl(string Name, IReadOnlyList<string> GenericParams, IReadOnlyList<Annotation> Annotations,
-                 IReadOnlyList<ClassMember> Members, TextSpan Span, bool IsModule = false) : TopLevel(Span);
+record ClassDecl(string Name, string[] GenericParams, Annotation[] Annotations,
+                 ClassMember[] Members, TextSpan Span, bool IsModule = false) : TopLevel(Span);
 
 /// <summary>
 /// kernel { … } or user { … } block. Groups top-level declarations that belong to one
 /// execution environment. Kind is the keyword ("kernel" or "user").
 /// </summary>
-record ContextDecl(string Kind, IReadOnlyList<TopLevel> Items, TextSpan Span) : TopLevel(Span);
+record ContextDecl(string Kind, TopLevel[] Items, TextSpan Span) : TopLevel(Span);
 
 /// <summary>
 /// A free function declaration. GenericParams empty = ordinary function; non-empty = generic
 /// template monomorphized per call site with type arguments inferred from the argument types.
 /// IsEntry marks it as a thread entry point; Throws means it may propagate a Result error.
 /// </summary>
-record FuncDecl(IReadOnlyList<string> Modifiers, IReadOnlyList<Annotation> Annotations, string? ReturnType,
-                string Name, IReadOnlyList<string> GenericParams, IReadOnlyList<Param> Params,
+record FuncDecl(string[] Modifiers, Annotation[] Annotations, string? ReturnType,
+                string Name, string[] GenericParams, Param[] Params,
                 bool IsEntry, bool Throws, MethodBody Body, TextSpan Span) : TopLevel(Span);
 
 /// <summary>
 /// A process declaration is pure deployment topology. A process is a named bag of threads;
 /// it holds no logic of its own. Mode is the deployment mode ("foreground" or "background").
 /// </summary>
-record ProcessDecl(string Name, string Mode, IReadOnlyList<ThreadDecl> Threads, TextSpan Span) : TopLevel(Span);
+record ProcessDecl(string Name, string Mode, ThreadDecl[] Threads, TextSpan Span) : TopLevel(Span);
 
 /// <summary>
 /// An extern function pre-declaration that tells the compiler a C function exists so it can
 /// be called from Gata without a Gata body. Translated to a forward prototype in the backend.
 /// </summary>
-record ExternFuncDecl(string? ReturnType, string Name, IReadOnlyList<Param> Params,
-                      TextSpan Span, IReadOnlyList<Annotation>? Annotations = null) : TopLevel(Span);
+record ExternFuncDecl(string? ReturnType, string Name, Param[] Params,
+                      TextSpan Span, Annotation[]? Annotations = null) : TopLevel(Span);
 
 /// <summary>
 /// native type Name { C body }. It registers a C struct as a named Gata type. The CBody is
 /// emitted verbatim as a typedef; the name becomes resolvable in type positions.
 /// </summary>
-record NativeTypeDecl(string Name, string CBody, TextSpan Span, IReadOnlyList<Annotation>? Annotations = null) : TopLevel(Span);
+record NativeTypeDecl(string Name, string CBody, TextSpan Span, Annotation[]? Annotations = null) : TopLevel(Span);
 
 /// <summary>
 /// enum Name { A, B = 2, C } is a distinct integer-backed type with named members.
 /// Members may carry explicit integer values; unspecified members follow C's increment rule.
 /// </summary>
-record EnumDecl(string Name, IReadOnlyList<EnumMember> Members, TextSpan Span, IReadOnlyList<Annotation>? Annotations = null) : TopLevel(Span);
+record EnumDecl(string Name, EnumMember[] Members, TextSpan Span, Annotation[]? Annotations = null) : TopLevel(Span);
 
 /// <summary>
 /// One member of an enum. Value is null when the member takes the implicit next integer.
@@ -102,12 +102,12 @@ record EnumMember(string Name, Expr? Value, TextSpan Span);
 /// union Name { Circle(float radius), Square(float side), Point } is a tagged union.
 /// Each variant either carries named fields or no payload. Lowered to a tag enum + C union.
 /// </summary>
-record UnionDecl(string Name, IReadOnlyList<UnionVariant> Variants, TextSpan Span, IReadOnlyList<Annotation>? Annotations = null) : TopLevel(Span);
+record UnionDecl(string Name, UnionVariant[] Variants, TextSpan Span, Annotation[]? Annotations = null) : TopLevel(Span);
 
 /// <summary>
 /// One variant of a union. Fields is empty for a payload-free variant like Point.
 /// </summary>
-record UnionVariant(string Name, IReadOnlyList<Param> Fields, TextSpan Span);
+record UnionVariant(string Name, Param[] Fields, TextSpan Span);
 
 #endregion
 
@@ -161,20 +161,20 @@ record FieldsBlock(NativeBody Body, TextSpan Span) : ClassMember(Span);
 /// A Gata field declaration. Init is the optional initializer expression; Type is null
 /// when inferred.
 /// </summary>
-record FieldDecl(IReadOnlyList<string> Modifiers, string? Type, string Name, TextSpan Span, Expr? Init = null) : ClassMember(Span);
+record FieldDecl(string[] Modifiers, string? Type, string Name, TextSpan Span, Expr? Init = null) : ClassMember(Span);
 
 /// <summary>
 /// A method declaration inside a class or module. IsEntry marks it as a thread entry point;
 /// Throws means it participates in the Result error-propagation protocol.
 /// </summary>
-record MethodDecl(IReadOnlyList<string> Modifiers, IReadOnlyList<Annotation> Annotations, string? ReturnType,
-                  string Name, IReadOnlyList<Param> Params, bool IsEntry, bool Throws,
+record MethodDecl(string[] Modifiers, Annotation[] Annotations, string? ReturnType,
+                  string Name, Param[] Params, bool IsEntry, bool Throws,
                   MethodBody Body, TextSpan Span) : ClassMember(Span);
 
 /// <summary>
 /// An operator overload inside a class. Op is the operator symbol string ("+", "==").
 /// </summary>
-record OperatorDecl(string Op, IReadOnlyList<Param> Params, string? ReturnType, MethodBody Body, TextSpan Span) : ClassMember(Span);
+record OperatorDecl(string Op, Param[] Params, string? ReturnType, MethodBody Body, TextSpan Span) : ClassMember(Span);
 
 #endregion
 
@@ -209,7 +209,7 @@ record ThreadDecl(string Name, EntryFuncDecl Entry, TextSpan Span);
 /// The entry function of a thread. It consists of parameters and a single block body. Not a FuncDecl
 /// because it cannot be called from Gata code, only dispatched by the runtime.
 /// </summary>
-record EntryFuncDecl(IReadOnlyList<string> Modifiers, string? ReturnType, IReadOnlyList<Param> Params, Block Body, TextSpan Span);
+record EntryFuncDecl(string[] Modifiers, string? ReturnType, Param[] Params, Block Body, TextSpan Span);
 
 #endregion
 
@@ -238,7 +238,7 @@ abstract record Stmt(TextSpan Span);
 /// <summary>
 /// A brace-delimited sequence of statements forming a lexical scope.
 /// </summary>
-record Block(IReadOnlyList<Stmt> Stmts, TextSpan Span) : Stmt(Span);
+record Block(Stmt[] Stmts, TextSpan Span) : Stmt(Span);
 
 #endregion
 
@@ -281,7 +281,7 @@ record NullExpr(TextSpan Span) : Expr(Span);
 /// arbitrary Expr (embedded expressions). Built by the parser from the InterpStrStart,
 /// StrLit, brace-delimited expr, and InterpStrEnd token stream the lexer emits.
 /// </summary>
-record InterpStrExpr(IReadOnlyList<Expr> Parts, TextSpan Span) : Expr(Span);
+record InterpStrExpr(Expr[] Parts, TextSpan Span) : Expr(Span);
 
 /// <summary>
 /// A bare identifier used as an expression, eg. a variable or function name.
@@ -296,7 +296,7 @@ record CastExpr(string TargetType, Expr Value, TextSpan Span) : Expr(Span);
 /// <summary>
 /// A function or method call. Callee may be any expression that resolves to a callable.
 /// </summary>
-record CallExpr(Expr Callee, IReadOnlyList<Expr> Args, TextSpan Span) : Expr(Span);
+record CallExpr(Expr Callee, Expr[] Args, TextSpan Span) : Expr(Span);
 
 /// <summary>
 /// Member access via dot, eg. obj.field or obj.method. Member is the field or method name.
@@ -332,12 +332,12 @@ record PostfixExpr(string Op, Expr Operand, TextSpan Span) : Expr(Span);
 /// Object construction. Args holds constructor arguments for class instantiation;
 /// CollectionInit holds the bracketed element list for collection construction.
 /// </summary>
-record NewExpr(string Type, IReadOnlyList<Expr> Args, IReadOnlyList<Expr> CollectionInit, TextSpan Span) : Expr(Span);
+record NewExpr(string Type, Expr[] Args, Expr[] CollectionInit, TextSpan Span) : Expr(Span);
 
 /// <summary>
 /// A fixed-size array literal, eg. [e1, e2, e3].
 /// </summary>
-record ArrayLitExpr(IReadOnlyList<Expr> Elems, TextSpan Span) : Expr(Span);
+record ArrayLitExpr(Expr[] Elems, TextSpan Span) : Expr(Span);
 
 /// <summary>
 /// Address-of expression. Takes the address of an lvalue. Only legal inside unsafe blocks.
@@ -436,29 +436,29 @@ record TryCatchStmt(Block Try, Block Catch, TextSpan Span) : Stmt(Span);
 /// A switch statement. Cases is the list of arms; Default is the optional fallback block.
 /// There is no fallthrough: break and continue inside a case target the enclosing loop.
 /// </summary>
-record SwitchStmt(Expr Scrutinee, IReadOnlyList<SwitchCase> Cases, Block? Default, TextSpan Span) : Stmt(Span);
+record SwitchStmt(Expr Scrutinee, SwitchCase[] Cases, Block? Default, TextSpan Span) : Stmt(Span);
 
 /// <summary>
 /// One arm of a switch statement. Labels is the list of values that route to this arm.
 /// </summary>
-record SwitchCase(IReadOnlyList<Expr> Labels, Block Body, TextSpan Span);
+record SwitchCase(Expr[] Labels, Block Body, TextSpan Span);
 
 /// <summary>
 /// A match statement that scrutinizes a union value by variant. Each case binds the
 /// variant's fields as locals in its body. Default is the optional fallback block.
 /// </summary>
-record MatchStmt(Expr Scrutinee, IReadOnlyList<MatchCase> Cases, Block? Default, TextSpan Span) : Stmt(Span);
+record MatchStmt(Expr Scrutinee, MatchCase[] Cases, Block? Default, TextSpan Span) : Stmt(Span);
 
 /// <summary>
 /// One arm of a match statement. Variant is the union variant name; Bindings are the
 /// local names bound to the variant's fields in source order.
 /// </summary>
-record MatchCase(string Variant, IReadOnlyList<string> Bindings, Block Body, TextSpan Span);
+record MatchCase(string Variant, string[] Bindings, Block Body, TextSpan Span);
 
 /// <summary>
 /// An unsafe block. Pointer operations (address-of, dereference) are only legal inside one.
 /// </summary>
-record UnsafeBlock(IReadOnlyList<Stmt> Stmts, TextSpan Span) : Stmt(Span);
+record UnsafeBlock(Stmt[] Stmts, TextSpan Span) : Stmt(Span);
 
 /// <summary>
 /// A defer statement. Action runs on every exit from the enclosing block, in LIFO order

@@ -39,8 +39,13 @@ enum TK
 
     // Operators
     EqEq, NotEq, LtEq, GtEq, And, Or, Inc, Dec, Arrow,
+    Shl, Shr,
 
-    // Punctuation
+    // Structural punctuation
+    LParen, RParen, LBrace, RBrace, LBrack, RBrack,
+    Semi, Comma, Colon, Dot, Eq,
+
+    // Catch-all for remaining single-char operators: + - * / % & | ^ < > ! ~
     Punct,
 
     // End of file
