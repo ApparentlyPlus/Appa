@@ -334,6 +334,57 @@ sealed class Parser(IReadOnlyList<Token> tokens)
 
     #endregion
 
+    #region Enum and union
+
+    /// <summary>
+    /// Parses an enum declaration. Members may carry explicit integer values; if absent the
+    /// C compiler applies the usual increment rule. We accept a trailing comma before the brace.
+    /// </summary>
+    EnumDecl ParseEnumDecl(Annotation[] anns, int s)
+    {
+        Expect(TK.Enum);
+        var name = Expect(TK.Ident).Value;
+        Expect(TK.LBrace);
+        List<EnumMember>? members = null;
+        while (!At(TK.RBrace) && !At(TK.EOF))
+        {
+            int ms = Cur.Span.Start;
+            var mname = Expect(TK.Ident).Value;
+            Expr? value = Try(TK.Eq) ? ParseExpr() : null;
+            members ??= [];
+            members.Add(new EnumMember(mname, value, To(ms)));
+            if (!Try(TK.Comma)) break;
+        }
+        Expect(TK.RBrace);
+        return new EnumDecl(name, members?.ToArray() ?? [], To(s), anns);
+    }
+
+    /// <summary>
+    /// Parses a union declaration. Each variant is a name followed by an optional parenthesised
+    /// field list. A variant with no parens carries no payload.
+    /// </summary>
+    UnionDecl ParseUnionDecl(Annotation[] anns, int s)
+    {
+        Expect(TK.Union);
+        var name = Expect(TK.Ident).Value;
+        Expect(TK.LBrace);
+        List<UnionVariant>? variants = null;
+        while (!At(TK.RBrace) && !At(TK.EOF))
+        {
+            int vs = Cur.Span.Start;
+            var vname = Expect(TK.Ident).Value;
+            Param[] fields = [];
+            if (At(TK.LParen)) { Advance(); fields = ParseParamList(); Expect(TK.RParen); }
+            variants ??= [];
+            variants.Add(new UnionVariant(vname, fields, To(vs)));
+            if (!Try(TK.Comma)) break;
+        }
+        Expect(TK.RBrace);
+        return new UnionDecl(name, variants?.ToArray() ?? [], To(s), anns);
+    }
+
+    #endregion
+
     #region Type specs
 
     /// <summary>
@@ -661,9 +712,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
 
     #region Stubs
 
-    EnumDecl ParseEnumDecl(Annotation[] anns, int s) => throw new NotImplementedException();
-    UnionDecl ParseUnionDecl(Annotation[] anns, int s) => throw new NotImplementedException();
-    public Block ParseBlock() => throw new NotImplementedException();
+public Block ParseBlock() => throw new NotImplementedException();
     public Expr ParseExpr() => throw new NotImplementedException();
 
     #endregion
