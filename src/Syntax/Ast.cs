@@ -14,7 +14,7 @@ record Program(IReadOnlyList<TopLevel> Items)
 }
 
 /// <summary>
-/// A generic instantiation site found during parsing, e.g. List[int]. The Monomorphizer
+/// A generic instantiation site found during parsing, eg. List[int]. The Monomorphizer
 /// reads these to know which concrete copies to generate before the type resolver runs.
 /// </summary>
 record GenericUse(string Base, IReadOnlyList<string> Args, TextSpan Span);
@@ -35,7 +35,7 @@ record ImportDecl(string Name, bool IsPath, TextSpan Span) : TopLevel(Span);
 
 /// <summary>
 /// Marks exactly one file in the build as the environment definition.
-/// The environment file provides the intrinsic bindings (I/O, ARC, panic, etc.) for the target.
+/// The environment file provides the intrinsic bindings (I/O, ARC, panic) for the target.
 /// </summary>
 record EnvironmentDecl(TextSpan Span) : TopLevel(Span);
 
@@ -154,7 +154,7 @@ record MethodDecl(IReadOnlyList<string> Modifiers, IReadOnlyList<Annotation> Ann
                   MethodBody Body, TextSpan Span) : ClassMember(Span);
 
 /// <summary>
-/// An operator overload inside a class. Op is the operator symbol string ("+", "==", etc.).
+/// An operator overload inside a class. Op is the operator symbol string ("+", "==").
 /// </summary>
 record OperatorDecl(string Op, IReadOnlyList<Param> Params, string? ReturnType, MethodBody Body, TextSpan Span) : ClassMember(Span);
 
@@ -208,12 +208,12 @@ record Param(string Type, string Name, TextSpan Span, bool IsRef = false);
 #region Expression and statement roots
 
 /// <summary>
-/// Base class for all expression nodes. Subclasses added in a follow-up commit.
+/// Base class for all expression nodes.
 /// </summary>
 abstract record Expr(TextSpan Span);
 
 /// <summary>
-/// Base class for all statement nodes. Subclasses added in a follow-up commit.
+/// Base class for all statement nodes.
 /// </summary>
 abstract record Stmt(TextSpan Span);
 
@@ -221,5 +221,130 @@ abstract record Stmt(TextSpan Span);
 /// A brace-delimited sequence of statements forming a lexical scope.
 /// </summary>
 record Block(IReadOnlyList<Stmt> Stmts, TextSpan Span) : Stmt(Span);
+
+#endregion
+
+#region Expressions
+
+/// <summary>
+/// An integer literal, eg. 42 or 0xFF. Value holds the raw source spelling including
+/// any suffix (u, L) so the backend can emit the right C constant.
+/// </summary>
+record IntLitExpr(string Value, TextSpan Span) : Expr(Span);
+
+/// <summary>
+/// A character literal, eg. 'a' or '\n'. Value is the decoded Unicode codepoint.
+/// </summary>
+record CharLitExpr(int Value, TextSpan Span) : Expr(Span);
+
+/// <summary>
+/// A floating-point literal, eg. 3.14 or 1e9f. Value holds the raw source spelling
+/// including any suffix so the backend can choose float vs double.
+/// </summary>
+record FloatLitExpr(string Value, TextSpan Span) : Expr(Span);
+
+/// <summary>
+/// A boolean literal. Value is "true" or "false".
+/// </summary>
+record BoolLitExpr(string Value, TextSpan Span) : Expr(Span);
+
+/// <summary>
+/// A plain string literal. Value holds the decoded string content without surrounding quotes.
+/// </summary>
+record StrLitExpr(string Value, TextSpan Span) : Expr(Span);
+
+/// <summary>
+/// The null literal. Represents a null pointer or absent reference.
+/// </summary>
+record NullExpr(TextSpan Span) : Expr(Span);
+
+/// <summary>
+/// An interpolated string. Parts alternates between StrLitExpr (literal segments) and
+/// arbitrary Expr (embedded expressions). Built by the parser from the InterpStrStart,
+/// StrLit, brace-delimited expr, and InterpStrEnd token stream the lexer emits.
+/// </summary>
+record InterpStrExpr(IReadOnlyList<Expr> Parts, TextSpan Span) : Expr(Span);
+
+/// <summary>
+/// A bare identifier used as an expression, eg. a variable or function name.
+/// </summary>
+record IdentExpr(string Name, TextSpan Span) : Expr(Span);
+
+/// <summary>
+/// An explicit type cast, eg. (int) x. TargetType is the destination type name.
+/// </summary>
+record CastExpr(string TargetType, Expr Value, TextSpan Span) : Expr(Span);
+
+/// <summary>
+/// A function or method call. Callee may be any expression that resolves to a callable.
+/// </summary>
+record CallExpr(Expr Callee, IReadOnlyList<Expr> Args, TextSpan Span) : Expr(Span);
+
+/// <summary>
+/// Member access via dot, eg. obj.field or obj.method. Member is the field or method name.
+/// </summary>
+record MemberAccessExpr(Expr Object, string Member, TextSpan Span) : Expr(Span);
+
+/// <summary>
+/// Index access, eg. arr[i]. Object is the collection expression, Index is the subscript.
+/// </summary>
+record IndexExpr(Expr Object, Expr Index, TextSpan Span) : Expr(Span);
+
+/// <summary>
+/// A binary expression. Op is the operator string.
+/// </summary>
+record BinExpr(string Op, Expr Left, Expr Right, TextSpan Span) : Expr(Span);
+
+/// <summary>
+/// A ternary conditional: cond ? then : else.
+/// </summary>
+record TernaryExpr(Expr Cond, Expr Then, Expr Else, TextSpan Span) : Expr(Span);
+
+/// <summary>
+/// A prefix unary expression. Op is the operator string.
+/// </summary>
+record UnaryExpr(string Op, Expr Operand, TextSpan Span) : Expr(Span);
+
+/// <summary>
+/// A postfix unary expression, eg. x++ or x--. Op comes after the operand, unlike UnaryExpr.
+/// </summary>
+record PostfixExpr(string Op, Expr Operand, TextSpan Span) : Expr(Span);
+
+/// <summary>
+/// Object construction. Args holds constructor arguments for class instantiation;
+/// CollectionInit holds the bracketed element list for collection construction.
+/// </summary>
+record NewExpr(string Type, IReadOnlyList<Expr> Args, IReadOnlyList<Expr> CollectionInit, TextSpan Span) : Expr(Span);
+
+/// <summary>
+/// A fixed-size array literal, eg. [e1, e2, e3].
+/// </summary>
+record ArrayLitExpr(IReadOnlyList<Expr> Elems, TextSpan Span) : Expr(Span);
+
+/// <summary>
+/// Address-of expression. Takes the address of an lvalue. Only legal inside unsafe blocks.
+/// </summary>
+record AddrOfExpr(Expr Target, TextSpan Span) : Expr(Span);
+
+/// <summary>
+/// A ref argument at a call site, eg. ref x. Passes an lvalue by reference.
+/// Only legal as a direct call argument, not in any other expression position.
+/// </summary>
+record RefArgExpr(Expr Target, TextSpan Span) : Expr(Span);
+
+/// <summary>
+/// Pointer dereference, eg. *ptr. Only legal inside unsafe blocks.
+/// </summary>
+record DerefExpr(Expr Ptr, TextSpan Span) : Expr(Span);
+
+/// <summary>
+/// sizeof(T) expression. Evaluates to the size_t byte count of the named type.
+/// </summary>
+record SizeofExpr(string TypeName, TextSpan Span) : Expr(Span);
+
+/// <summary>
+/// default(T) expression. Evaluates to the zero value of the named type.
+/// </summary>
+record DefaultExpr(string TypeName, TextSpan Span) : Expr(Span);
 
 #endregion
