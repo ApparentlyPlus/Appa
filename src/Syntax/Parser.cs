@@ -123,6 +123,47 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
+    /// Parses a free function declaration. Handles optional modifiers, an optional return type
+    /// using the same single-pass disambiguation as class members, and an optional generic
+    /// parameter list between the name and the opening paren.
+    /// </summary>
+    FuncDecl ParseFreeFuncDecl(Annotation[] anns, int s)
+    {
+        var mods = ParseMods();
+        bool isEntry = Try(TK.Entry);
+        bool isThrow = Try(TK.Throws);
+
+        string? ret;
+        if (At(TK.Func) && Peek().Kind == TK.Ident)
+            ret = null;
+        else
+            ret = (At(TK.Ident) || At(TK.Process) || At(TK.Thread)
+                || IsPrim(Cur.Kind) || At(TK.LBrack) || At(TK.Func))
+                ? ParseTypeSpec()
+                : null;
+
+        Expect(TK.Func);
+        var name = Expect(TK.Ident).Value;
+        var generics = ParseGenericParamList();
+        Expect(TK.LParen); var parms = ParseParamList(); Expect(TK.RParen);
+        return new FuncDecl(mods, anns, ret, name, generics, parms, isEntry, isThrow, ParseMethodBody(), To(s));
+    }
+
+    /// <summary>
+    /// Parses an optional generic parameter list like [T, U]. Returns an empty array if there
+    /// is no leading bracket. Used by both class declarations and free function declarations.
+    /// </summary>
+    string[] ParseGenericParamList()
+    {
+        if (!At(TK.LBrack)) return [];
+        Advance();
+        List<string> gp = [ExpectBareGenericParam()];
+        while (Try(TK.Comma)) gp.Add(ExpectBareGenericParam());
+        Expect(TK.RBrack);
+        return [.. gp];
+    }
+
+    /// <summary>
     /// Dispatches to the correct top-level parser based on the current token.
     /// </summary>
     TopLevel ParseTopLevel()
@@ -620,7 +661,6 @@ sealed class Parser(IReadOnlyList<Token> tokens)
 
     #region Stubs
 
-    FuncDecl ParseFreeFuncDecl(Annotation[] anns, int s) => throw new NotImplementedException();
     EnumDecl ParseEnumDecl(Annotation[] anns, int s) => throw new NotImplementedException();
     UnionDecl ParseUnionDecl(Annotation[] anns, int s) => throw new NotImplementedException();
     public Block ParseBlock() => throw new NotImplementedException();
