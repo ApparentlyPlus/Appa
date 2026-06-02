@@ -530,7 +530,7 @@ sealed class Lexer(string src)
     /// </summary>
     private void ReadInterp()
     {
-        // $" has already been consumed by the caller
+        Advance(2); // consume $"
         Emit(TK.InterpStrStart, "$\"");
 
         while (_pp < src.Length && Cur != '"' && Cur != '\n')

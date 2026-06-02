@@ -587,7 +587,9 @@ sealed class Parser(IReadOnlyList<Token> tokens)
         return "+";
     }
 
-    // Parses a method body. Either a native C block or a Gata statement block.
+    /// <summary>
+    /// Parses a method body. Either a native C block or a Gata statement block.
+    /// </summary>
     MethodBody ParseMethodBody()
     {
         if (At(TK.NativeContent)) return new NativeMethodBody(ParseNativeBody(Advance().Value));
@@ -603,9 +605,9 @@ sealed class Parser(IReadOnlyList<Token> tokens)
         List<string>? mods = null;
         while (true)
         {
-            if (At(TK.Static)) { mods ??= new List<string>(); mods.Add("static"); Advance(); }
-            else if (At(TK.Public)) { mods ??= new List<string>(); mods.Add("public"); Advance(); }
-            else if (At(TK.Private)) { mods ??= new List<string>(); mods.Add("private"); Advance(); }
+            if (At(TK.Static)) { mods ??= []; mods.Add("static"); Advance(); }
+            else if (At(TK.Public)) { mods ??= []; mods.Add("public"); Advance(); }
+            else if (At(TK.Private)) { mods ??= []; mods.Add("private"); Advance(); }
             else break;
         }
         return mods?.ToArray() ?? [];
@@ -710,10 +712,345 @@ sealed class Parser(IReadOnlyList<Token> tokens)
 
     #endregion
 
-    #region Stubs
+    #region Expressions
 
-public Block ParseBlock() => throw new NotImplementedException();
-    public Expr ParseExpr() => throw new NotImplementedException();
+    /// <summary>
+    /// Entry point for all expression parsing.
+    /// </summary>
+    public Expr ParseExpr() => ParseTernary();
+
+    /// <summary>
+    /// Parses a ternary conditional. Right-associative so nested ternaries chain without parens.
+    /// '?' falls through to TK.Punct since it has no dedicated token kind.
+    /// </summary>
+    Expr ParseTernary()
+    {
+        int s = Cur.Span.Start;
+        var left = ParseOr();
+        if (!AtP("?")) return left;
+        Advance();
+        var then = ParseOr();
+        Expect(TK.Colon);
+        return new TernaryExpr(left, then, ParseTernary(), To(s));
+    }
+
+    /// <summary>
+    /// Parses '||' chains.
+    /// </summary>
+    Expr ParseOr()
+    {
+        int s = Cur.Span.Start;
+        var left = ParseAnd();
+        while (At(TK.Or)) { Advance(); left = new BinExpr("||", left, ParseAnd(), To(s)); }
+        return left;
+    }
+
+    /// <summary>
+    /// Parses '&&' chains.
+    /// </summary>
+    Expr ParseAnd()
+    {
+        int s = Cur.Span.Start;
+        var left = ParseBitOr();
+        while (At(TK.And)) { Advance(); left = new BinExpr("&&", left, ParseBitOr(), To(s)); }
+        return left;
+    }
+
+    /// <summary>
+    /// Parses bitwise '|' chains.
+    /// </summary>
+    Expr ParseBitOr()
+    {
+        int s = Cur.Span.Start;
+        var left = ParseBitXor();
+        while (AtP("|")) { Advance(); left = new BinExpr("|", left, ParseBitXor(), To(s)); }
+        return left;
+    }
+
+    /// <summary>
+    /// Parses bitwise '^' chains.
+    /// </summary>
+    Expr ParseBitXor()
+    {
+        int s = Cur.Span.Start;
+        var left = ParseBitAnd();
+        while (AtP("^")) { Advance(); left = new BinExpr("^", left, ParseBitAnd(), To(s)); }
+        return left;
+    }
+
+    /// <summary>
+    /// Parses bitwise '&' chains.
+    /// </summary>
+    Expr ParseBitAnd()
+    {
+        int s = Cur.Span.Start;
+        var left = ParseEquality();
+        while (AtP("&")) { Advance(); left = new BinExpr("&", left, ParseEquality(), To(s)); }
+        return left;
+    }
+
+    /// <summary>
+    /// Parses '==' and '!=' chains.
+    /// </summary>
+    Expr ParseEquality()
+    {
+        int s = Cur.Span.Start;
+        var left = ParseRelational();
+        while (At(TK.EqEq) || At(TK.NotEq))
+        {
+            string op = Cur.Value; Advance();
+            left = new BinExpr(op, left, ParseRelational(), To(s));
+        }
+        return left;
+    }
+
+    /// <summary>
+    /// Parses relational comparisons and 'as' type casts. 'expr as Type' produces a CastExpr
+    /// the same as a C-style cast; the 'as' form is unambiguous for user-defined types.
+    /// </summary>
+    Expr ParseRelational()
+    {
+        int s = Cur.Span.Start;
+        var left = ParseShift();
+        while (true)
+        {
+            if (AtP("<") || AtP(">") || At(TK.LtEq) || At(TK.GtEq))
+            {
+                string op = Cur.Value; Advance();
+                left = new BinExpr(op, left, ParseShift(), To(s));
+            }
+            else if (At(TK.As)) { Advance(); left = new CastExpr(ParseTypeSpec(), left, To(s)); }
+            else break;
+        }
+        return left;
+    }
+
+    /// <summary>
+    /// Parses '<<' and '>>' chains.
+    /// </summary>
+    Expr ParseShift()
+    {
+        int s = Cur.Span.Start;
+        var left = ParseAdditive();
+        while (At(TK.Shl) || At(TK.Shr))
+        {
+            string op = Cur.Value; Advance();
+            left = new BinExpr(op, left, ParseAdditive(), To(s));
+        }
+        return left;
+    }
+
+    /// <summary>
+    /// Parses '+' and '-' chains.
+    /// </summary>
+    Expr ParseAdditive()
+    {
+        int s = Cur.Span.Start;
+        var left = ParseMultiplicative();
+        while (AtP("+") || AtP("-"))
+        {
+            string op = Cur.Value; Advance();
+            left = new BinExpr(op, left, ParseMultiplicative(), To(s));
+        }
+        return left;
+    }
+
+    /// <summary>
+    /// Parses '*', '/', and '%' chains.
+    /// </summary>
+    Expr ParseMultiplicative()
+    {
+        int s = Cur.Span.Start;
+        var left = ParseUnary();
+        while (AtP("*") || AtP("/") || AtP("%"))
+        {
+            string op = Cur.Value; Advance();
+            left = new BinExpr(op, left, ParseUnary(), To(s));
+        }
+        return left;
+    }
+
+    /// <summary>
+    /// Parses prefix unary operators. '&' and '*' are only legal inside unsafe blocks but
+    /// are accepted here; the type checker enforces the restriction.
+    /// </summary>
+    Expr ParseUnary()
+    {
+        int s = Cur.Span.Start;
+        if (AtP("!")) { Advance(); return new UnaryExpr("!", ParseUnary(), To(s)); }
+        if (AtP("~")) { Advance(); return new UnaryExpr("~", ParseUnary(), To(s)); }
+        if (AtP("-")) { Advance(); return new UnaryExpr("-", ParseUnary(), To(s)); }
+        if (At(TK.Inc)) { Advance(); return new UnaryExpr("++", ParseUnary(), To(s)); }
+        if (At(TK.Dec)) { Advance(); return new UnaryExpr("--", ParseUnary(), To(s)); }
+        if (At(TK.Ref)) { Advance(); return new RefArgExpr(ParseUnary(), To(s)); }
+        if (AtP("&")) { Advance(); return new AddrOfExpr(ParseUnary(), To(s)); }
+        if (AtP("*")) { Advance(); return new DerefExpr(ParseUnary(), To(s)); }
+        return ParsePostfix();
+    }
+
+    /// <summary>
+    /// Parses postfix operators: '++', '--', '.member', '[index]', and '(args)' call.
+    /// </summary>
+    Expr ParsePostfix()
+    {
+        int s = Cur.Span.Start;
+        var expr = ParsePrimary();
+        while (true)
+        {
+            if (At(TK.Inc)) { Advance(); expr = new PostfixExpr("++", expr, To(s)); }
+            else if (At(TK.Dec)) { Advance(); expr = new PostfixExpr("--", expr, To(s)); }
+            else if (At(TK.Dot)) { Advance(); expr = new MemberAccessExpr(expr, Expect(TK.Ident).Value, To(s)); }
+            else if (At(TK.LBrack)) { Advance(); var idx = ParseExpr(); Expect(TK.RBrack); expr = new IndexExpr(expr, idx, To(s)); }
+            else if (At(TK.LParen)) { Advance(); var args = ParseArgList(); Expect(TK.RParen); expr = new CallExpr(expr, args, To(s)); }
+            else break;
+        }
+        return expr;
+    }
+
+    /// <summary>
+    /// Parses a comma-separated argument list terminated by ')'. Returns an empty array immediately
+    /// if ')' is already the current token, avoiding an allocation on every empty call.
+    /// </summary>
+    Expr[] ParseArgList()
+    {
+        if (At(TK.RParen)) return [];
+        List<Expr> args = [ParseExpr()];
+        while (Try(TK.Comma)) args.Add(ParseExpr());
+        return [.. args];
+    }
+
+    /// <summary>
+    /// Parses a primary expression. EnterDepth guards against pathological nesting like
+    /// ((((((...)))))) producing a stack overflow instead of a clean diagnostic.
+    /// </summary>
+    Expr ParsePrimary()
+    {
+        EnterDepth();
+        try { return ParsePrimaryInner(); }
+        finally { ExitDepth(); }
+    }
+
+    /// <summary>
+    /// Dispatches to the correct primary form: literal, ident, sizeof, default, new,
+    /// array literal, grouped expression, primitive cast, or interpolated string.
+    /// </summary>
+    Expr ParsePrimaryInner()
+    {
+        int s = Cur.Span.Start;
+
+        // Literals and identifiers are all single-token forms.
+        if (At(TK.IntLit)) { var t = Advance(); return new IntLitExpr(t.Value, t.Span); }
+        if (At(TK.FloatLit)) { var t = Advance(); return new FloatLitExpr(t.Value, t.Span); }
+        if (At(TK.BoolLit)) { var t = Advance(); return new BoolLitExpr(t.Value, t.Span); }
+        if (At(TK.CharLit)) { var t = Advance(); return new CharLitExpr(int.Parse(t.Value), t.Span); }
+        if (At(TK.StrLit)) { var t = Advance(); return new StrLitExpr(t.Value, t.Span); }
+        if (At(TK.Null)) { Advance(); return new NullExpr(To(s)); }
+        if (At(TK.InterpStrStart)) return ParseInterpStr(s);
+
+        // sizeof(Type) and default(Type) are special forms that take a type specifier in parentheses.
+        if (At(TK.Sizeof))
+        {
+            Advance(); Expect(TK.LParen);
+            string t = ParseTypeSpec();
+            Expect(TK.RParen);
+            return new SizeofExpr(t, To(s));
+        }
+        if (At(TK.Default))
+        {
+            Advance(); Expect(TK.LParen);
+            string t = ParseTypeSpec();
+            Expect(TK.RParen);
+            return new DefaultExpr(t, To(s));
+        }
+
+        // 'new Type(...)' or 'new Type[...]' or 'new Type' for fixed-size arrays.
+        if (At(TK.New)) return ParseNewExpr(s);
+
+        //  [elem1, elem2, ...] or [] for an empty array.
+        if (At(TK.LBrack))
+        {
+            Advance();
+            if (At(TK.RBrack)) { Advance(); return new ArrayLitExpr([], To(s)); }
+            List<Expr> elems = [ParseExpr()];
+            while (Try(TK.Comma)) elems.Add(ParseExpr());
+            Expect(TK.RBrack);
+            return new ArrayLitExpr([.. elems], To(s));
+        }
+
+        // Parenthesised expression or primitive cast. The type specifier is unambiguous because
+        // it must be a primitive keyword or identifier, and the cast is unambiguous because
+        // it must be followed by a unary expression. The parser does not allow user-defined
+        // types in parentheses because that would be ambiguous with a grouped expression.
+        if (At(TK.LParen))
+        {
+            Advance();
+            // (PrimType) expr is an unambiguous C-style cast. User-type casts use 'as'.
+            if (IsPrim(Cur.Kind))
+            {
+                string targetType = ParseTypeSpec();
+                Expect(TK.RParen);
+                return new CastExpr(targetType, ParseUnary(), To(s));
+            }
+            var e = ParseExpr();
+            Expect(TK.RParen);
+            return e;
+        }
+
+        if (At(TK.Ident)) { var t = Advance(); return new IdentExpr(t.Value, t.Span); }
+
+        Fail("expected expression");
+        return new NullExpr(To(s)); // unreachable
+    }
+
+    /// <summary>
+    /// Parses an interpolated string. The lexer emits InterpStrStart, then alternating StrLit
+    /// and Punct("{") ... Punct("}") pairs for embedded expressions, then InterpStrEnd.
+    /// </summary>
+    InterpStrExpr ParseInterpStr(int s)
+    {
+        Advance(); // consume InterpStrStart
+        List<Expr> parts = [];
+        while (!At(TK.InterpStrEnd) && !At(TK.EOF))
+        {
+            if (At(TK.StrLit)) { var t = Advance(); parts.Add(new StrLitExpr(t.Value, t.Span)); }
+            else if (AtP("{")) { Advance(); parts.Add(ParseExpr()); if (!AtP("}")) Fail("expected '}'"); Advance(); }
+            else break;
+        }
+        Expect(TK.InterpStrEnd);
+        return new InterpStrExpr([.. parts], To(s));
+    }
+
+    /// <summary>
+    /// Parses a 'new' expression. After the type spec, either '(' for a constructor arg list or
+    /// '[' for a collection initializer may follow. A bare 'new Type' with neither is valid for
+    /// fixed-size array types like '[5]char' that carry their size in the type string.
+    /// </summary>
+    NewExpr ParseNewExpr(int s)
+    {
+        Expect(TK.New);
+        string type = ParseTypeSpec();
+        if (At(TK.LParen))
+        {
+            Advance(); var args = ParseArgList(); Expect(TK.RParen);
+            return new NewExpr(type, args, [], To(s));
+        }
+        if (At(TK.LBrack))
+        {
+            Advance();
+            if (At(TK.RBrack)) { Advance(); return new NewExpr(type, [], [], To(s)); }
+            List<Expr> elems = [ParseExpr()];
+            while (Try(TK.Comma)) elems.Add(ParseExpr());
+            Expect(TK.RBrack);
+            return new NewExpr(type, [], [.. elems], To(s));
+        }
+        return new NewExpr(type, [], [], To(s));
+    }
+
+    #endregion
+
+    #region Stubs
+    
+    public Block ParseBlock() => throw new NotImplementedException();
 
     #endregion
 }
