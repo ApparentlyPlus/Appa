@@ -2,8 +2,6 @@ namespace Appa;
 
 // Every AST node carries a TextSpan by construction. No node exists without a location.
 
-using System.Collections.Generic;
-
 /// <summary>
 /// Root of the AST. Holds all top-level declarations in source order, plus generic instantiation
 /// requests collected during parsing and consumed by the Monomorphizer.

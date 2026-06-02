@@ -712,6 +712,193 @@ sealed class Parser(IReadOnlyList<Token> tokens)
 
     #endregion
 
+    #region Statements
+
+    /// <summary>
+    /// Parses a brace-delimited block of statements.
+    /// </summary>
+    public Block ParseBlock()
+    {
+        int s = Cur.Span.Start;
+        Expect(TK.LBrace);
+        List<Stmt> stmts = [];
+        while (!At(TK.RBrace) && !At(TK.EOF)) stmts.Add(ParseStmt());
+        Expect(TK.RBrace);
+        return new Block([.. stmts], To(s));
+    }
+
+    /// <summary>
+    /// Dispatches to the correct statement parser based on the current token.
+    /// </summary>
+    Stmt ParseStmt()
+    {
+        int s = Cur.Span.Start;
+        if (At(TK.NativeContent)) return new NativeStmt(ParseNativeBody(Advance().Value), To(s));
+        if (At(TK.Let)) return ParseLetStmt(s);
+        if (At(TK.If)) return ParseIfStmt(s);
+        if (At(TK.While)) return ParseWhileStmt(s);
+        if (At(TK.For)) return ParseForStmt(s);
+        if (At(TK.Switch)) return ParseSwitchStmt(s);
+        if (At(TK.Match)) return ParseMatchStmt(s);
+        if (At(TK.Try)) return ParseTryCatchStmt(s);
+        if (At(TK.Unsafe)) return ParseUnsafeBlock(s);
+        if (At(TK.Defer)) return ParseDeferStmt(s);
+        if (At(TK.Return)) { Advance(); Expr? v = At(TK.Semi) ? null : ParseExpr(); Expect(TK.Semi); return new ReturnStmt(v, To(s)); }
+        if (At(TK.Break)) { Advance(); Expect(TK.Semi); return new BreakStmt(To(s)); }
+        if (At(TK.Continue)) { Advance(); Expect(TK.Semi); return new ContinueStmt(To(s)); }
+
+        // Throw and debug statements are not expressions, so they must be handled here instead of in ParseExprOrAssign.
+        if (At(TK.Throw)) { 
+            Advance(); 
+            Expect(TK.Semi); 
+            return new ThrowStmt(To(s)); 
+        }
+        if (At(TK.Debug)) { 
+            Advance(); 
+            if (!At(TK.StrLit)) Fail("expected string literal"); 
+            var raw = Advance().Value;
+            Expect(TK.Semi); 
+            return new DebugStmt(raw, To(s)); 
+        }
+
+        // Panic is a statement, not an expression, so it must be handled here instead of in ParseExprOrAssign.
+        if (At(TK.Panic)) { 
+            Advance(); 
+            if (!At(TK.StrLit)) Fail("expected string literal"); 
+            var raw = Advance().Value; 
+            Expect(TK.Semi); 
+            return new PanicStmt(raw, To(s)); 
+        }
+        return ParseExprOrAssign(s);
+    }
+
+    /// <summary>
+    /// Parses a let declaration. The type is optional; if the next two tokens are both
+    /// valid type-name starts, the first is taken as the declared type.
+    /// </summary>
+    LetStmt ParseLetStmt(int s)
+    {
+        Expect(TK.Let);
+        string? type = null;
+        if (IsPrim(Cur.Kind) || At(TK.LBrack) || At(TK.Func) || At(TK.Process) || At(TK.Thread)
+            || (At(TK.Ident) && Peek().Kind == TK.Ident))
+            type = ParseTypeSpec();
+        string name = Expect(TK.Ident).Value;
+        Expr? init = Try(TK.Eq) ? ParseExpr() : null;
+        Expect(TK.Semi);
+        return new LetStmt(type, name, init, To(s));
+    }
+
+    /// <summary>
+    /// Parses an if/else statement. The else branch may be a block or another if statement.
+    /// </summary>
+    IfStmt ParseIfStmt(int s)
+    {
+        Expect(TK.If); Expect(TK.LParen);
+        var cond = ParseExpr();
+        Expect(TK.RParen);
+        Block then = ParseBlock();
+        Stmt? els = null;
+        if (Try(TK.Else))
+            els = At(TK.If) ? ParseIfStmt(Cur.Span.Start) : ParseBlock();
+        return new IfStmt(cond, then, els, To(s));
+    }
+
+    /// <summary>
+    /// Parses a while loop. The condition is parenthesised; the body must be a block.
+    /// </summary>
+    WhileStmt ParseWhileStmt(int s)
+    {
+        Expect(TK.While); Expect(TK.LParen);
+        var cond = ParseExpr();
+        Expect(TK.RParen);
+        return new WhileStmt(cond, ParseBlock(), To(s));
+    }
+
+    /// <summary>
+    /// Parses a for loop. Disambiguates between 'for (x in col)' (ForInStmt) and the
+    /// C-style 'for (init; cond; step)' (ForStmt) by peeking for the 'in' keyword.
+    /// </summary>
+    Stmt ParseForStmt(int s)
+    {
+        Expect(TK.For); Expect(TK.LParen);
+
+        if (At(TK.Ident) && Peek().Kind == TK.In)
+        {
+            string var = Advance().Value;
+            Advance(); // consume 'in'
+            var col = ParseExpr();
+            Expect(TK.RParen);
+            return new ForInStmt(var, col, ParseBlock(), To(s));
+        }
+
+        Stmt? init = null;
+        if (At(TK.Semi)) Advance();
+        else init = At(TK.Let) ? ParseLetStmt(Cur.Span.Start) : ParseExprOrAssign(Cur.Span.Start);
+
+        Expr? cond = At(TK.Semi) ? null : ParseExpr();
+        Expect(TK.Semi);
+        Expr? step = At(TK.RParen) ? null : ParseExpr();
+        Expect(TK.RParen);
+        return new ForStmt(init, cond, step, ParseBlock(), To(s));
+    }
+
+    /// <summary>
+    /// Parses a try/catch statement. Both the try and catch branches are blocks.
+    /// </summary>
+    TryCatchStmt ParseTryCatchStmt(int s)
+    {
+        Expect(TK.Try);
+        Block tryBlock = ParseBlock();
+        Expect(TK.Catch);
+        return new TryCatchStmt(tryBlock, ParseBlock(), To(s));
+    }
+
+    /// <summary>
+    /// Parses an unsafe block. Pointer operations inside are permitted; the type checker
+    /// rejects them everywhere else.
+    /// </summary>
+    UnsafeBlock ParseUnsafeBlock(int s)
+    {
+        Expect(TK.Unsafe); Expect(TK.LBrace);
+        List<Stmt> stmts = [];
+        while (!At(TK.RBrace) && !At(TK.EOF)) stmts.Add(ParseStmt());
+        Expect(TK.RBrace);
+        return new UnsafeBlock([.. stmts], To(s));
+    }
+
+    /// <summary>
+    /// Parses a defer statement. The deferred action is a single statement that runs on
+    /// every exit from the enclosing block, in LIFO order with other defers.
+    /// </summary>
+    DeferStmt ParseDeferStmt(int s)
+    {
+        Expect(TK.Defer);
+        return new DeferStmt(ParseStmt(), To(s));
+    }
+
+    /// <summary>
+    /// Parses an expression statement or assignment. After parsing the left-hand expression,
+    /// any assignment operator promotes the result to an AssignStmt; otherwise it's an ExprStmt.
+    /// </summary>
+    Stmt ParseExprOrAssign(int s)
+    {
+        var expr = ParseExpr();
+        if (At(TK.Eq) || At(TK.PlusEq) || At(TK.MinusEq) || At(TK.StarEq)
+            || At(TK.SlashEq) || At(TK.PercentEq) || At(TK.AmpEq)
+            || At(TK.PipeEq) || At(TK.CaretEq) || At(TK.ShlEq) || At(TK.ShrEq))
+        {
+            string op = Cur.Value; Advance();
+            var val = ParseExpr();
+            Expect(TK.Semi);
+            return new AssignStmt(expr, op, val, To(s));
+        }
+        Expect(TK.Semi);
+        return new ExprStmt(expr, To(s));
+    }
+
+    #endregion
+
     #region Expressions
 
     /// <summary>
@@ -1049,8 +1236,9 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     #endregion
 
     #region Stubs
-    
-    public Block ParseBlock() => throw new NotImplementedException();
+
+    SwitchStmt ParseSwitchStmt(int s) => throw new NotImplementedException();
+    MatchStmt ParseMatchStmt(int s) => throw new NotImplementedException();
 
     #endregion
 }
