@@ -289,7 +289,7 @@ sealed class Lexer(string src)
                 break;
             case '=':
                 if (Peek() == '=') { Advance(2); Emit(TK.EqEq, "=="); return; }
-                break;
+                Advance(); Emit(TK.Eq, "="); return;
             case '!':
                 if (Peek() == '=') { Advance(2); Emit(TK.NotEq, "!="); return; }
                 break;
@@ -297,7 +297,7 @@ sealed class Lexer(string src)
                 if (Peek() == '<')
                 {
                     if (Peek(2) == '=') { Advance(3); Emit(TK.ShlEq, "<<="); return; }
-                    Advance(2); Emit(TK.Punct, "<<"); return;
+                    Advance(2); Emit(TK.Shl, "<<"); return;
                 }
                 if (Peek() == '=') { Advance(2); Emit(TK.LtEq, "<="); return; }
                 break;
@@ -305,16 +305,28 @@ sealed class Lexer(string src)
                 if (Peek() == '>')
                 {
                     if (Peek(2) == '=') { Advance(3); Emit(TK.ShrEq, ">>="); return; }
-                    Advance(2); Emit(TK.Punct, ">>"); return;
+                    Advance(2); Emit(TK.Shr, ">>"); return;
                 }
                 if (Peek() == '=') { Advance(2); Emit(TK.GtEq, ">="); return; }
                 break;
         }
 
         // Single character punctuation fallthrough
-        char c = Cur;
-        Advance();
-        Emit(TK.Punct, c.ToString());
+        char c = Cur; Advance();
+        Emit(c switch
+        {
+            '(' => TK.LParen,
+            ')' => TK.RParen,
+            '{' => TK.LBrace,
+            '}' => TK.RBrace,
+            '[' => TK.LBrack,
+            ']' => TK.RBrack,
+            ';' => TK.Semi,
+            ',' => TK.Comma,
+            ':' => TK.Colon,
+            '.' => TK.Dot,
+            _ => TK.Punct
+        }, c.ToString());
     }
 
     /// <summary>
@@ -518,7 +530,7 @@ sealed class Lexer(string src)
     /// </summary>
     private void ReadInterp()
     {
-        // $" has already been consumed by the caller
+        Advance(2); // consume $"
         Emit(TK.InterpStrStart, "$\"");
 
         while (_pp < src.Length && Cur != '"' && Cur != '\n')
