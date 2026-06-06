@@ -19,8 +19,14 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     int _depth;
     const int MaxDepth = 200;
 
-    // Increments the recursion depth counter and throws if it exceeds MaxDepth. Call ExitDepth() in a finally block.
+    /// <summary>
+    /// Increments the recursion depth counter and throws if it exceeds MaxDepth. Always call ExitDepth in a finally block.
+    /// </summary>
     void EnterDepth() { if (++_depth > MaxDepth) Fail("nested too deeply"); }
+
+    /// <summary>
+    /// Decrements the recursion depth counter. Always call in a finally block paired with EnterDepth.
+    /// </summary>
     void ExitDepth() => _depth--;
 
     // Generic instantiation sites collected during parsing, consumed by the Monomorphizer.
@@ -28,8 +34,14 @@ sealed class Parser(IReadOnlyList<Token> tokens)
 
     #region Core stream helpers
 
-    // _pp is always clamped to [0, _tokens.Length - 1] by Advance(), so no bounds check needed.
+    /// <summary>
+    /// Returns the token at the current position. Safe without a bounds check because Advance() clamps _pp to [0, Length-1].
+    /// </summary>
     Token Cur => _tokens[_pp];
+
+    /// <summary>
+    /// Returns the token n positions ahead of the current position, or the last token if the offset exceeds the stream length.
+    /// </summary>
     Token Peek(int n = 1) => (_pp + n) < _tokens.Length ? _tokens[_pp + n] : _tokens[^1];
 
     /// <summary>
@@ -43,7 +55,9 @@ sealed class Parser(IReadOnlyList<Token> tokens)
         return t;
     }
 
-    // Builds a TextSpan from a saved start offset to the end of the last consumed token.
+    /// <summary>
+    /// Builds a TextSpan from a saved start offset to the end of the last consumed token.
+    /// </summary>
     TextSpan To(int start) => new(start, Math.Max(0, _pe - start));
 
     /// <summary>
@@ -55,14 +69,24 @@ sealed class Parser(IReadOnlyList<Token> tokens)
         return Advance();
     }
 
-    // Helpers for common token checks.
+    /// <summary>
+    /// Returns true if the current token has the given kind.
+    /// </summary>
     bool At(TK k) => Cur.Kind == k;
+
+    /// <summary>
+    /// Consumes the current token and returns true if it matches the given kind; otherwise returns false without consuming.
+    /// </summary>
     bool Try(TK k) { if (At(k)) { Advance(); return true; } return false; }
 
-    // AtP is only for single char operator tokens that remain as TK.Punct, like + - * / % & | ^ < > ! ~
+    /// <summary>
+    /// Returns true if the current token is TK.Punct with the given value. Only for operator tokens kept as TK.Punct: + - * / % and | ^ less-than greater-than ! ~
+    /// </summary>
     bool AtP(string v) => Cur.Kind == TK.Punct && Cur.Value == v;
 
-    // Throws a ParseException with the given message at the current token's span.
+    /// <summary>
+    /// Throws a ParseException with the given message at the current token's span.
+    /// </summary>
     void Fail(string m) => throw new ParseException(Cur.Span, m);
 
     #endregion
@@ -124,28 +148,20 @@ sealed class Parser(IReadOnlyList<Token> tokens)
 
     /// <summary>
     /// Parses a free function declaration. Handles optional modifiers, an optional return type
-    /// using the same single-pass disambiguation as class members, and an optional generic
-    /// parameter list between the name and the opening paren.
+    /// using ParseOptionalReturnType, and an optional generic parameter list between the name
+    /// and the opening paren.
     /// </summary>
     FuncDecl ParseFreeFuncDecl(Annotation[] anns, int s)
     {
         var mods = ParseMods();
         bool isEntry = Try(TK.Entry);
         bool isThrow = Try(TK.Throws);
-
-        string? ret;
-        if (At(TK.Func) && Peek().Kind == TK.Ident)
-            ret = null;
-        else
-            ret = (At(TK.Ident) || At(TK.Process) || At(TK.Thread)
-                || IsPrim(Cur.Kind) || At(TK.LBrack) || At(TK.Func))
-                ? ParseTypeSpec()
-                : null;
-
+        string? ret = ParseOptionalReturnType();
         Expect(TK.Func);
         var name = Expect(TK.Ident).Value;
         var generics = ParseGenericParamList();
         Expect(TK.LParen); var parms = ParseParamList(); Expect(TK.RParen);
+        if (At(TK.Arrow)) Fail($"'{name}': return type goes before 'func', not after the parameter list");
         return new FuncDecl(mods, anns, ret, name, generics, parms, isEntry, isThrow, ParseMethodBody(), To(s));
     }
 
@@ -209,9 +225,13 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Wraps a raw native block string into a NativeBody.
+    /// Wraps a raw native block string into a NativeBody, splitting on #kernel:/#user: markers.
     /// </summary>
-    static NativeBody ParseNativeBody(string raw) => new(raw, "");
+    static NativeBody ParseNativeBody(string raw)
+    {
+        var (kc, uc) = NativeC.Split(raw);
+        return new NativeBody(kc, uc);
+    }
 
     /// <summary>
     /// Parses a native type declaration. The lexer encodes the type name and body
@@ -338,7 +358,8 @@ sealed class Parser(IReadOnlyList<Token> tokens)
 
     /// <summary>
     /// Parses an enum declaration. Members may carry explicit integer values; if absent the
-    /// C compiler applies the usual increment rule. We accept a trailing comma before the brace.
+    /// C compiler applies the usual increment rule. A trailing comma after the last member
+    /// is a hard error.
     /// </summary>
     EnumDecl ParseEnumDecl(Annotation[] anns, int s)
     {
@@ -346,14 +367,17 @@ sealed class Parser(IReadOnlyList<Token> tokens)
         var name = Expect(TK.Ident).Value;
         Expect(TK.LBrace);
         List<EnumMember>? members = null;
-        while (!At(TK.RBrace) && !At(TK.EOF))
+        if (!At(TK.RBrace) && !At(TK.EOF))
         {
+            members = [];
             int ms = Cur.Span.Start;
-            var mname = Expect(TK.Ident).Value;
-            Expr? value = Try(TK.Eq) ? ParseExpr() : null;
-            members ??= [];
-            members.Add(new EnumMember(mname, value, To(ms)));
-            if (!Try(TK.Comma)) break;
+            members.Add(new EnumMember(Expect(TK.Ident).Value, Try(TK.Eq) ? ParseExpr() : null, To(ms)));
+            while (Try(TK.Comma))
+            {
+                if (At(TK.RBrace)) Fail("trailing comma not allowed after the last enum member; remove it");
+                ms = Cur.Span.Start;
+                members.Add(new EnumMember(Expect(TK.Ident).Value, Try(TK.Eq) ? ParseExpr() : null, To(ms)));
+            }
         }
         Expect(TK.RBrace);
         return new EnumDecl(name, members?.ToArray() ?? [], To(s), anns);
@@ -361,7 +385,8 @@ sealed class Parser(IReadOnlyList<Token> tokens)
 
     /// <summary>
     /// Parses a union declaration. Each variant is a name followed by an optional parenthesised
-    /// field list. A variant with no parens carries no payload.
+    /// field list. A variant with no parens carries no payload. A trailing comma after the last
+    /// variant is a hard error.
     /// </summary>
     UnionDecl ParseUnionDecl(Annotation[] anns, int s)
     {
@@ -369,15 +394,23 @@ sealed class Parser(IReadOnlyList<Token> tokens)
         var name = Expect(TK.Ident).Value;
         Expect(TK.LBrace);
         List<UnionVariant>? variants = null;
-        while (!At(TK.RBrace) && !At(TK.EOF))
+        if (!At(TK.RBrace) && !At(TK.EOF))
         {
+            variants = [];
             int vs = Cur.Span.Start;
             var vname = Expect(TK.Ident).Value;
             Param[] fields = [];
             if (At(TK.LParen)) { Advance(); fields = ParseParamList(); Expect(TK.RParen); }
-            variants ??= [];
             variants.Add(new UnionVariant(vname, fields, To(vs)));
-            if (!Try(TK.Comma)) break;
+            while (Try(TK.Comma))
+            {
+                if (At(TK.RBrace)) Fail("trailing comma not allowed after the last union variant; remove it");
+                vs = Cur.Span.Start;
+                vname = Expect(TK.Ident).Value;
+                fields = [];
+                if (At(TK.LParen)) { Advance(); fields = ParseParamList(); Expect(TK.RParen); }
+                variants.Add(new UnionVariant(vname, fields, To(vs)));
+            }
         }
         Expect(TK.RBrace);
         return new UnionDecl(name, variants?.ToArray() ?? [], To(s), anns);
@@ -394,29 +427,34 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     string ParseTypeNameStr(out string[] generics)
     {
         EnterDepth();
-        try
-        {
-            generics = [];
-            int s = Cur.Span.Start;
-            string name = ParseSimpleTypeName();
-            if (At(TK.LBrack))
-            {
-                Advance();
-                List<string> args = [ParseTypeArg()];
-                while (Try(TK.Comma)) args.Add(ParseTypeArg());
-                if (!At(TK.RBrack)) Fail($"invalid type argument in '{name}[...]'");
-                Expect(TK.RBrack);
-                var argsArray = args.ToArray();
-                generics = argsArray;
-                _gu.Add(new GenericUse(name, argsArray, To(s)));
-                name = name + "_" + string.Join("_", argsArray);
-            }
-            return name;
-        }
-        finally { ExitDepth(); }
+        var name = ParseTypeNameStrInner(out generics);
+        ExitDepth();
+        return name;
     }
 
-    // Parses a single type argument inside a generic argument list. May itself be generic.
+    string ParseTypeNameStrInner(out string[] generics)
+    {
+        generics = [];
+        int s = Cur.Span.Start;
+        string name = ParseSimpleTypeName();
+        if (At(TK.LBrack))
+        {
+            Advance();
+            List<string> args = [ParseTypeArg()];
+            while (Try(TK.Comma)) args.Add(ParseTypeArg());
+            if (!At(TK.RBrack)) Fail($"invalid type argument in '{name}[...]'");
+            Expect(TK.RBrack);
+            var argsArray = args.ToArray();
+            generics = argsArray;
+            _gu.Add(new GenericUse(name, argsArray, To(s)));
+            name = name + "_" + string.Join("_", argsArray);
+        }
+        return name;
+    }
+
+    /// <summary>
+    /// Parses a single type argument inside a generic argument list. May itself be generic.
+    /// </summary>
     string ParseTypeArg() => ParseTypeNameStr(out _);
 
     /// <summary>
@@ -438,22 +476,25 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     string ParseTypeSpec()
     {
         EnterDepth();
-        try
+        var spec = ParseTypeSpecInner();
+        ExitDepth();
+        return spec;
+    }
+
+    string ParseTypeSpecInner()
+    {
+        // [N]elem, brackets come before the element type.
+        if (At(TK.LBrack) && Peek().Kind == TK.IntLit && Peek(2).Kind == TK.RBrack)
         {
-            // [N]elem, brackets come before the element type.
-            if (At(TK.LBrack) && Peek().Kind == TK.IntLit && Peek(2).Kind == TK.RBrack)
-            {
-                Advance();
-                string n = Advance().Value;
-                Expect(TK.RBrack);
-                return $"[{n}]{ParseTypeSpec()}";
-            }
-            if (At(TK.Func)) return ParseFuncTypeSpec();
-            string name = ParseTypeNameStr(out _);
-            while (AtP("*")) { Advance(); name += "*"; }
-            return name;
+            Advance();
+            string n = Advance().Value;
+            Expect(TK.RBrack);
+            return $"[{n}]{ParseTypeSpec()}";
         }
-        finally { ExitDepth(); }
+        if (At(TK.Func)) return ParseFuncTypeSpec();
+        string name = ParseTypeNameStr(out _);
+        while (AtP("*")) { Advance(); name += "*"; }
+        return name;
     }
 
     /// <summary>
@@ -478,7 +519,9 @@ sealed class Parser(IReadOnlyList<Token> tokens)
         return spec;
     }
 
-    // Returns true if the token kind is one of the primitive type keywords.
+    /// <summary>
+    /// Returns true if the token kind is one of the primitive type keywords.
+    /// </summary>
     static bool IsPrim(TK k) => k is TK.TBool or TK.TInt or TK.TChar or TK.TFloat
         or TK.TDouble or TK.TShort or TK.TVoid or TK.TPrim;
 
@@ -529,32 +572,16 @@ sealed class Parser(IReadOnlyList<Token> tokens)
         bool isEntry = Try(TK.Entry);
         bool isThrow = Try(TK.Throws);
 
-        // parse the type spec once, then check what follows
-        // If it's a func keyword, it's a method; otherwise it's a field.
-        bool isMethod;
-        string? typeStr;
-        if (At(TK.Func) && Peek().Kind == TK.Ident)
-        {
-            typeStr = null;
-            isMethod = true;
-        }
-        else
-        {
-            typeStr = (At(TK.Ident) || At(TK.Process) || At(TK.Thread)
-                || IsPrim(Cur.Kind) || At(TK.LBrack) || At(TK.Func))
-                ? ParseTypeSpec()
-                : null;
-            isMethod = At(TK.Func);
-        }
-
-        // Method. Entry, throws, and annotations are all valid here.
-        if (isMethod)
+        // If we reach here, it must be either a method or a field. Fields don't support
+        // entry, throws, or annotations.
+        if (LooksLikeMethod())
         {
             if (isEntry) Fail("'entry' has no meaning on a class method");
+            string? ret = ParseOptionalReturnType();
             Expect(TK.Func);
             var name = Expect(TK.Ident).Value;
             Expect(TK.LParen); var parms = ParseParamList(); Expect(TK.RParen);
-            return new MethodDecl(mods, anns, typeStr, name, parms, isEntry, isThrow, ParseMethodBody(), To(s));
+            return new MethodDecl(mods, anns, ret, name, parms, isEntry, isThrow, ParseMethodBody(), To(s));
         }
 
         // Field. Entry, throws, annotations, and static are all meaningless here.
@@ -566,10 +593,12 @@ sealed class Parser(IReadOnlyList<Token> tokens)
             if (mods[i] == "static") { hasStatic = true; break; }
         if (hasStatic) Fail("'static' has no meaning on a field");
 
+        string? ftype = (At(TK.Ident) || At(TK.Process) || At(TK.Thread)
+            || IsPrim(Cur.Kind) || At(TK.LBrack) || At(TK.Func)) ? ParseTypeSpec() : null;
         var fname = Expect(TK.Ident).Value;
         Expr? init = Try(TK.Eq) ? ParseExpr() : null;
         Expect(TK.Semi);
-        return new FieldDecl(mods, typeStr, fname, To(s), init);
+        return new FieldDecl(mods, ftype, fname, To(s), init);
     }
 
     /// <summary>
@@ -586,6 +615,24 @@ sealed class Parser(IReadOnlyList<Token> tokens)
         Fail("expected operator symbol");
         return "+";
     }
+
+    /// <summary>
+    /// Returns true if the current position looks like the start of a method declaration.
+    /// 'func Name' with no return type is a method; 'func(' starts a func-pointer type (a field).
+    /// Speculatively parses the type spec and checks what follows; restores position either way.
+    /// </summary>
+    bool LooksLikeMethod()
+    {
+        if (At(TK.Func) && Peek().Kind == TK.Ident) return true;
+        int n = SkipTypeSpec(0);
+        return n >= 0 && Peek(n).Kind == TK.Func;
+    }
+
+    /// <summary>
+    /// Parses an optional return type before 'func'. Returns null when 'func' is immediately
+    /// followed by an identifier (no return type). Otherwise parses and returns the type spec.
+    /// </summary>
+    string? ParseOptionalReturnType() => At(TK.Func) && Peek().Kind == TK.Ident ? null : ParseTypeSpec();
 
     /// <summary>
     /// Parses a method body. Either a native C block or a Gata statement block.
@@ -732,8 +779,17 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// </summary>
     Stmt ParseStmt()
     {
+        EnterDepth();
+        var stmt = ParseStmtInner();
+        ExitDepth();
+        return stmt;
+    }
+
+    Stmt ParseStmtInner()
+    {
         int s = Cur.Span.Start;
         if (At(TK.NativeContent)) return new NativeStmt(ParseNativeBody(Advance().Value), To(s));
+        if (At(TK.LBrace)) return ParseBlock();
         if (At(TK.Let)) return ParseLetStmt(s);
         if (At(TK.If)) return ParseIfStmt(s);
         if (At(TK.While)) return ParseWhileStmt(s);
@@ -748,27 +804,31 @@ sealed class Parser(IReadOnlyList<Token> tokens)
         if (At(TK.Continue)) { Advance(); Expect(TK.Semi); return new ContinueStmt(To(s)); }
 
         // Throw and debug statements are not expressions, so they must be handled here instead of in ParseExprOrAssign.
-        if (At(TK.Throw)) { 
-            Advance(); 
-            Expect(TK.Semi); 
-            return new ThrowStmt(To(s)); 
+        if (At(TK.Throw)) {
+            Advance();
+            Expect(TK.Semi);
+            return new ThrowStmt(To(s));
         }
-        if (At(TK.Debug)) { 
-            Advance(); 
-            if (!At(TK.StrLit)) Fail("expected string literal"); 
+        if (At(TK.Debug)) {
+            Advance();
+            if (!At(TK.StrLit)) Fail("'debug' takes a string literal, e.g. debug \"message\";");
             var raw = Advance().Value;
-            Expect(TK.Semi); 
-            return new DebugStmt(raw, To(s)); 
+            Expect(TK.Semi);
+            return new DebugStmt(raw, To(s));
         }
 
         // Panic is a statement, not an expression, so it must be handled here instead of in ParseExprOrAssign.
-        if (At(TK.Panic)) { 
-            Advance(); 
-            if (!At(TK.StrLit)) Fail("expected string literal"); 
-            var raw = Advance().Value; 
-            Expect(TK.Semi); 
-            return new PanicStmt(raw, To(s)); 
+        if (At(TK.Panic)) {
+            Advance();
+            if (!At(TK.StrLit)) Fail("'panic' takes a string literal, e.g. panic \"message\";");
+            var raw = Advance().Value;
+            Expect(TK.Semi);
+            return new PanicStmt(raw, To(s));
         }
+        if (LooksLikeMissingLet())
+            Fail(At(TK.Ident)
+                ? $"expected a statement -- missing 'let'? (e.g. 'let {Cur.Value} ...')"
+                : "expected a statement -- missing 'let'?");
         return ParseExprOrAssign(s);
     }
 
@@ -781,7 +841,8 @@ sealed class Parser(IReadOnlyList<Token> tokens)
         Expect(TK.Let);
         string? type = null;
         if (IsPrim(Cur.Kind) || At(TK.LBrack) || At(TK.Func) || At(TK.Process) || At(TK.Thread)
-            || (At(TK.Ident) && Peek().Kind == TK.Ident))
+            || (At(TK.Ident) && (Peek().Kind == TK.Ident || Peek().Kind == TK.LBrack
+                || (Peek().Kind == TK.Punct && Peek().Value == "*"))))
             type = ParseTypeSpec();
         string name = Expect(TK.Ident).Value;
         Expr? init = Try(TK.Eq) ? ParseExpr() : null;
@@ -790,52 +851,179 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Parses an if/else statement. The else branch may be a block or another if statement.
+    /// Returns the index just past a balanced "[...]" run starting at token offset n, or -1 if
+    /// it never closes before EOF. Used by SkipTypeSpec to jump over generic argument lists.
+    /// </summary>
+    int SkipBrackets(int n)
+    {
+        int depth = 0;
+        do
+        {
+            var t = Peek(n);
+            if (t.Kind == TK.EOF) return -1;
+            if (t.Kind == TK.LBrack) depth++;
+            else if (t.Kind == TK.RBrack) depth--;
+            n++;
+        } while (depth > 0);
+        return n;
+    }
+
+    /// <summary>
+    /// Lookahead mirror of ParseFuncTypeSpec. Returns the index just past the function pointer type
+    /// starting at offset n, or -1 if the token stream does not match.
+    /// </summary>
+    int SkipFuncTypeSpec(int n)
+    {
+        if (Peek(n).Kind != TK.Func) return -1;
+        n++;
+        if (Peek(n).Kind != TK.LParen) return -1;
+        n++;
+        if (Peek(n).Kind != TK.RParen)
+        {
+            n = SkipTypeSpec(n);
+            if (n < 0) return -1;
+            while (Peek(n).Kind == TK.Comma)
+            {
+                n++;
+                n = SkipTypeSpec(n);
+                if (n < 0) return -1;
+            }
+        }
+        if (Peek(n).Kind != TK.RParen) return -1;
+        n++;
+        if (Peek(n).Kind != TK.Arrow) return -1;
+        n++;
+        return SkipTypeSpec(n);
+    }
+
+    /// <summary>
+    /// Lookahead mirror of ParseTypeSpec. Returns the index just past the type starting at
+    /// offset n (Peek(0) = Cur), or -1 if offset n is not the start of a valid type.
+    /// </summary>
+    int SkipTypeSpec(int n)
+    {
+        while (Peek(n).Kind == TK.LBrack && Peek(n + 1).Kind == TK.IntLit && Peek(n + 2).Kind == TK.RBrack)
+            n += 3;
+        if (Peek(n).Kind == TK.Func)
+        {
+            n = SkipFuncTypeSpec(n);
+            if (n < 0) return -1;
+        }
+        else if (IsPrim(Peek(n).Kind))
+        {
+            n++;
+        }
+        else if (Peek(n).Kind == TK.Ident || Peek(n).Kind == TK.Process || Peek(n).Kind == TK.Thread)
+        {
+            n++;
+            if (Peek(n).Kind == TK.LBrack) { n = SkipBrackets(n); if (n < 0) return -1; }
+        }
+        else return -1;
+        while (Peek(n).Kind == TK.Punct && Peek(n).Value == "*") n++;
+        return n;
+    }
+
+    /// <summary>
+    /// Returns true if the current position looks like a type spec immediately followed by
+    /// an identifier, which is always a missing 'let' and never valid expression syntax.
+    /// Pure lookahead; never consumes tokens.
+    /// </summary>
+    bool LooksLikeMissingLet()
+    {
+        if (!At(TK.Ident) && !At(TK.Process) && !At(TK.Thread) && !At(TK.LBrack)) return false;
+        int n = SkipTypeSpec(0);
+        return n >= 0 && Peek(n).Kind == TK.Ident;
+    }
+
+    /// <summary>
+    /// Returns true if the current position looks like a type specifier followed by an
+    /// identifier, meaning the let statement has an explicit type annotation.
+    /// </summary>
+    bool LooksLikeTypeAndIdent()
+    {
+        if (IsPrim(Cur.Kind)) return true;
+        if (At(TK.Func)) return true;
+        if (At(TK.LBrack) && Peek().Kind == TK.IntLit && Peek(2).Kind == TK.RBrack) return true;
+        if (!At(TK.Ident) && !At(TK.Process) && !At(TK.Thread)) return false;
+        return Peek().Kind == TK.Ident
+            || Peek().Kind == TK.LBrack
+            || (Peek().Kind == TK.Punct && Peek().Value == "*");
+    }
+
+    /// <summary>
+    /// Parses a let declaration without consuming its trailing semicolon. Used in for-loop
+    /// init clauses where the semicolon belongs to the for syntax, not the let.
+    /// </summary>
+    LetStmt ParseLetNoSemi()
+    {
+        int s = Cur.Span.Start;
+        Expect(TK.Let);
+        string? type = LooksLikeTypeAndIdent() ? ParseTypeSpec() : null;
+        string name = Expect(TK.Ident).Value;
+        Expr? init = Try(TK.Eq) ? ParseExpr() : null;
+        return new LetStmt(type, name, init, To(s));
+    }
+
+    /// <summary>
+    /// Parses an if/else statement. The then and else branches are full statements, so a
+    /// bare block, a single statement, or a nested if are all valid without extra rules.
     /// </summary>
     IfStmt ParseIfStmt(int s)
     {
-        Expect(TK.If); Expect(TK.LParen);
-        var cond = ParseExpr();
-        Expect(TK.RParen);
-        Block then = ParseBlock();
-        Stmt? els = null;
-        if (Try(TK.Else))
-            els = At(TK.If) ? ParseIfStmt(Cur.Span.Start) : ParseBlock();
+        Expect(TK.If); Expect(TK.LParen); var cond = ParseExpr(); Expect(TK.RParen);
+        var then = ParseStmt();
+        Stmt? els = Try(TK.Else) ? ParseStmt() : null;
         return new IfStmt(cond, then, els, To(s));
     }
 
     /// <summary>
-    /// Parses a while loop. The condition is parenthesised; the body must be a block.
+    /// Parses a while loop. The condition is parenthesised; the body is a full statement.
     /// </summary>
     WhileStmt ParseWhileStmt(int s)
     {
-        Expect(TK.While); Expect(TK.LParen);
-        var cond = ParseExpr();
-        Expect(TK.RParen);
-        return new WhileStmt(cond, ParseBlock(), To(s));
+        Expect(TK.While); Expect(TK.LParen); var cond = ParseExpr(); Expect(TK.RParen);
+        return new WhileStmt(cond, ParseStmt(), To(s));
     }
 
     /// <summary>
-    /// Parses a for loop. Disambiguates between 'for (x in col)' (ForInStmt) and the
-    /// C-style 'for (init; cond; step)' (ForStmt) by peeking for the 'in' keyword.
+    /// Parses a for loop. Disambiguates between 'for x in col { }' (ForInStmt, no parens) and
+    /// the C-style 'for (init; cond; step) { }' (ForStmt) by peeking for the 'in' keyword.
     /// </summary>
     Stmt ParseForStmt(int s)
     {
-        Expect(TK.For); Expect(TK.LParen);
+        Expect(TK.For);
 
+        // for x in col { } -- range loop, no parens
         if (At(TK.Ident) && Peek().Kind == TK.In)
         {
             string var = Advance().Value;
             Advance(); // consume 'in'
-            var col = ParseExpr();
-            Expect(TK.RParen);
-            return new ForInStmt(var, col, ParseBlock(), To(s));
+            return new ForInStmt(var, ParseExpr(), ParseBlock(), To(s));
         }
 
+        // C-style for (init; cond; step) { }
+        Expect(TK.LParen);
         Stmt? init = null;
-        if (At(TK.Semi)) Advance();
-        else init = At(TK.Let) ? ParseLetStmt(Cur.Span.Start) : ParseExprOrAssign(Cur.Span.Start);
-
+        if (!At(TK.Semi))
+        {
+            if (At(TK.Let))
+                init = ParseLetNoSemi();
+            else
+            {
+                int es = Cur.Span.Start;
+                var lhs = ParseExpr();
+                if (At(TK.Eq) || At(TK.PlusEq) || At(TK.MinusEq) || At(TK.StarEq)
+                    || At(TK.SlashEq) || At(TK.PercentEq) || At(TK.AmpEq)
+                    || At(TK.PipeEq) || At(TK.CaretEq) || At(TK.ShlEq) || At(TK.ShrEq))
+                {
+                    string op = Cur.Value; Advance();
+                    init = new AssignStmt(lhs, op, ParseExpr(), To(es));
+                }
+                else
+                    init = new ExprStmt(lhs, To(es));
+            }
+        }
+        Expect(TK.Semi);
         Expr? cond = At(TK.Semi) ? null : ParseExpr();
         Expect(TK.Semi);
         Expr? step = At(TK.RParen) ? null : ParseExpr();
@@ -860,11 +1048,9 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// </summary>
     UnsafeBlock ParseUnsafeBlock(int s)
     {
-        Expect(TK.Unsafe); Expect(TK.LBrace);
-        List<Stmt> stmts = [];
-        while (!At(TK.RBrace) && !At(TK.EOF)) stmts.Add(ParseStmt());
-        Expect(TK.RBrace);
-        return new UnsafeBlock([.. stmts], To(s));
+        Expect(TK.Unsafe);
+        var block = ParseBlock();
+        return new UnsafeBlock(block.Stmts, To(s));
     }
 
     /// <summary>
@@ -912,11 +1098,19 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// </summary>
     Expr ParseTernary()
     {
+        EnterDepth();
+        var result = ParseTernaryInner();
+        ExitDepth();
+        return result;
+    }
+
+    Expr ParseTernaryInner()
+    {
         int s = Cur.Span.Start;
         var left = ParseOr();
         if (!AtP("?")) return left;
         Advance();
-        var then = ParseOr();
+        var then = ParseExpr();
         Expect(TK.Colon);
         return new TernaryExpr(left, then, ParseTernary(), To(s));
     }
@@ -992,22 +1186,16 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Parses relational comparisons and 'as' type casts. 'expr as Type' produces a CastExpr
-    /// the same as a C-style cast; the 'as' form is unambiguous for user-defined types.
+    /// Parses relational comparisons: less-than, greater-than, and their equal variants.
     /// </summary>
     Expr ParseRelational()
     {
         int s = Cur.Span.Start;
         var left = ParseShift();
-        while (true)
+        while (AtP("<") || AtP(">") || At(TK.LtEq) || At(TK.GtEq))
         {
-            if (AtP("<") || AtP(">") || At(TK.LtEq) || At(TK.GtEq))
-            {
-                string op = Cur.Value; Advance();
-                left = new BinExpr(op, left, ParseShift(), To(s));
-            }
-            else if (At(TK.As)) { Advance(); left = new CastExpr(ParseTypeSpec(), left, To(s)); }
-            else break;
+            string op = Cur.Value; Advance();
+            left = new BinExpr(op, left, ParseShift(), To(s));
         }
         return left;
     }
@@ -1048,13 +1236,25 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     Expr ParseMultiplicative()
     {
         int s = Cur.Span.Start;
-        var left = ParseUnary();
+        var left = ParseAs();
         while (AtP("*") || AtP("/") || AtP("%"))
         {
             string op = Cur.Value; Advance();
-            left = new BinExpr(op, left, ParseUnary(), To(s));
+            left = new BinExpr(op, left, ParseAs(), To(s));
         }
         return left;
+    }
+
+    /// <summary>
+    /// Parses 'expr as Type' casts. Tighter than '*' so 'x * y as T' means 'x * (y as T)'.
+    /// User-defined type casts use 'as'; primitive casts use the C-style '(PrimType)' form.
+    /// </summary>
+    Expr ParseAs()
+    {
+        int s = Cur.Span.Start;
+        var expr = ParseUnary();
+        while (At(TK.As)) { Advance(); expr = new CastExpr(ParseTypeSpec(), expr, To(s)); }
+        return expr;
     }
 
     /// <summary>
@@ -1063,13 +1263,18 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// </summary>
     Expr ParseUnary()
     {
+        EnterDepth();
+        var result = ParseUnaryInner();
+        ExitDepth();
+        return result;
+    }
+
+    Expr ParseUnaryInner()
+    {
         int s = Cur.Span.Start;
         if (AtP("!")) { Advance(); return new UnaryExpr("!", ParseUnary(), To(s)); }
         if (AtP("~")) { Advance(); return new UnaryExpr("~", ParseUnary(), To(s)); }
         if (AtP("-")) { Advance(); return new UnaryExpr("-", ParseUnary(), To(s)); }
-        if (At(TK.Inc)) { Advance(); return new UnaryExpr("++", ParseUnary(), To(s)); }
-        if (At(TK.Dec)) { Advance(); return new UnaryExpr("--", ParseUnary(), To(s)); }
-        if (At(TK.Ref)) { Advance(); return new RefArgExpr(ParseUnary(), To(s)); }
         if (AtP("&")) { Advance(); return new AddrOfExpr(ParseUnary(), To(s)); }
         if (AtP("*")) { Advance(); return new DerefExpr(ParseUnary(), To(s)); }
         return ParsePostfix();
@@ -1101,9 +1306,20 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     Expr[] ParseArgList()
     {
         if (At(TK.RParen)) return [];
-        List<Expr> args = [ParseExpr()];
-        while (Try(TK.Comma)) args.Add(ParseExpr());
+        List<Expr> args = [ParseArg()];
+        while (Try(TK.Comma)) args.Add(ParseArg());
         return [.. args];
+    }
+
+    /// <summary>
+    /// Parses a single call argument. 'ref' is only valid at the call-argument level, not as
+    /// a general unary prefix, so it is handled here rather than in ParseUnary.
+    /// </summary>
+    Expr ParseArg()
+    {
+        int s = Cur.Span.Start;
+        if (Try(TK.Ref)) return new RefArgExpr(ParseExpr(), To(s));
+        return ParseExpr();
     }
 
     /// <summary>
@@ -1113,8 +1329,9 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     Expr ParsePrimary()
     {
         EnterDepth();
-        try { return ParsePrimaryInner(); }
-        finally { ExitDepth(); }
+        var result = ParsePrimaryInner();
+        ExitDepth();
+        return result;
     }
 
     /// <summary>
@@ -1235,10 +1452,75 @@ sealed class Parser(IReadOnlyList<Token> tokens)
 
     #endregion
 
-    #region Stubs
+    #region Switch and match
 
-    SwitchStmt ParseSwitchStmt(int s) => throw new NotImplementedException();
-    MatchStmt ParseMatchStmt(int s) => throw new NotImplementedException();
+    /// <summary>
+    /// Parses a switch statement. Each 'case' arm carries one or more comma-separated labels
+    /// and a block body. An optional 'default' arm catches all unmatched values.
+    /// </summary>
+    SwitchStmt ParseSwitchStmt(int s)
+    {
+        Expect(TK.Switch); Expect(TK.LParen); var scrut = ParseExpr(); Expect(TK.RParen);
+        Expect(TK.LBrace);
+        List<SwitchCase> cases = [];
+        Block? def = null;
+        while (!At(TK.RBrace) && !At(TK.EOF))
+        {
+            if (At(TK.Default))
+            {
+                Advance();
+                if (def != null) Fail("'switch' already has a 'default' arm; remove one");
+                def = ParseBlock();
+                continue;
+            }
+            int cs = Cur.Span.Start;
+            Expect(TK.Case);
+            List<Expr> labels = [ParseExpr()];
+            while (Try(TK.Comma)) labels.Add(ParseExpr());
+            cases.Add(new SwitchCase([.. labels], ParseBlock(), To(cs)));
+        }
+        Expect(TK.RBrace);
+        return new SwitchStmt(scrut, [.. cases], def, To(s));
+    }
+
+    /// <summary>
+    /// Parses a match statement. Each 'case' arm names a union variant and optionally binds
+    /// its payload fields. An optional 'default' arm catches unmatched variants.
+    /// </summary>
+    MatchStmt ParseMatchStmt(int s)
+    {
+        Expect(TK.Match); Expect(TK.LParen); var scrut = ParseExpr(); Expect(TK.RParen);
+        Expect(TK.LBrace);
+        List<MatchCase> cases = [];
+        Block? def = null;
+        while (!At(TK.RBrace) && !At(TK.EOF))
+        {
+            if (At(TK.Default))
+            {
+                Advance();
+                if (def != null) Fail("'match' already has a 'default' arm; remove one");
+                def = ParseBlock();
+                continue;
+            }
+            int cs = Cur.Span.Start;
+            Expect(TK.Case);
+            string variant = Expect(TK.Ident).Value;
+            List<string> binds = [];
+            if (At(TK.LParen))
+            {
+                Advance();
+                if (!At(TK.RParen))
+                {
+                    binds.Add(Expect(TK.Ident).Value);
+                    while (Try(TK.Comma)) binds.Add(Expect(TK.Ident).Value);
+                }
+                Expect(TK.RParen);
+            }
+            cases.Add(new MatchCase(variant, [.. binds], ParseBlock(), To(cs)));
+        }
+        Expect(TK.RBrace);
+        return new MatchStmt(scrut, [.. cases], def, To(s));
+    }
 
     #endregion
 }
