@@ -1,5 +1,6 @@
 namespace Appa;
 
+using System.Collections.Concurrent;
 using System.Collections.Frozen;
 
 #region Primitive types
@@ -137,6 +138,8 @@ record IrPrimType(string CName) : IrType
 /// </summary>
 record IrClassRef(string ClassName) : IrType
 {
+    private static readonly ConcurrentDictionary<string, IrClassRef> Cache = new();
+    public static IrClassRef Get(string className) => Cache.GetOrAdd(className, name => new IrClassRef(name));
     private readonly bool _isString = ClassName is "String" or "gata_String";
     public override string ToCType() => throw new NotImplementedException();
     public override string MangledName => ClassName;
@@ -153,6 +156,9 @@ record IrClassRef(string ClassName) : IrType
 /// </summary>
 record IrEnumType(string Name) : IrType
 {
+    private static readonly ConcurrentDictionary<string, IrEnumType> Cache = new();
+    public static IrEnumType Get(string name) => Cache.GetOrAdd(name, n => new IrEnumType(n));
+
     private readonly string _cType = Mangler.Enum(Name);
     public override string ToCType() => _cType;
     public override string MangledName => Name;
@@ -164,6 +170,9 @@ record IrEnumType(string Name) : IrType
 /// </summary>
 record IrPtrType(IrType Inner) : IrType
 {
+    private static readonly ConcurrentDictionary<IrType, IrPtrType> Cache = new();
+    public static IrPtrType Get(IrType inner) => Cache.GetOrAdd(inner, i => new IrPtrType(i));
+
     private readonly string _cType = $"{Inner.ToCType()}*";
     public override string ToCType() => _cType;
     public override string MangledName => Inner.MangledName + "_p";
@@ -193,6 +202,9 @@ record IrArrayType(IrType Elem, int Size) : IrType
 /// </summary>
 record IrResultType(IrType Inner) : IrType
 {
+    private static readonly ConcurrentDictionary<IrType, IrResultType> Cache = new();
+    public static IrResultType Get(IrType inner) => Cache.GetOrAdd(inner, i => new IrResultType(i));
+
     /// <summary>
     /// The C typedef name for this result type, e.g. Result_int or Result_MyClass.
     /// </summary>
@@ -249,5 +261,193 @@ record IrUnionType(string Name) : IrType
     public override string ToCType() => _cType;
     public override string MangledName => Name;
 }
+
+#endregion
+
+#region Expressions
+
+/// <summary>
+/// Base type for all IR expression nodes.
+/// Every expression carries its result type and an optional source span.
+/// </summary>
+abstract record IrExpr(IrType Type) { public TextSpan Span { get; init; } = TextSpan.None; }
+
+// Note for literals:
+// IrLitInt - Value is the literal's 64-bit bit pattern. T is the type selected by
+// suffix or magnitude (int by default). CText, when set, is the exact C
+// text to emit (hex forms, suffixed forms); otherwise Value is printed.
+// IrLitFloat - Raw is emitted verbatim (valid C including exponent and trailing `f`).
+// T is double by default, float for an `f` suffix.
+
+/// <summary>
+/// An integer literal. Value is the 64-bit bit pattern; CText overrides the emitted text when set.
+/// </summary>
+record IrLitInt(long Value, IrType? T = null, string? CText = null) : IrExpr(T ?? IrType.Int);
+
+/// <summary>
+/// A character literal. Codepoint is the Unicode code point of the character.
+/// </summary>
+record IrLitChar(int Codepoint) : IrExpr(IrType.Char);
+
+/// <summary>
+/// A floating-point literal. Raw is emitted verbatim as valid C text.
+/// </summary>
+record IrLitFloat(string Raw, IrType? T = null) : IrExpr(T ?? IrType.Double);
+
+/// <summary>
+/// A boolean literal.
+/// </summary>
+record IrLitBool(bool Value) : IrExpr(IrType.Bool);
+
+/// <summary>
+/// A string literal. Raw includes the surrounding quotes.
+/// </summary>
+record IrLitString(string Raw) : IrExpr(IrType.String);
+
+/// <summary>
+/// A null literal of a specific type.
+/// </summary>
+record IrLitNull(IrType T) : IrExpr(T);
+
+/// <summary>
+/// A reference to a named enum member.
+/// </summary>
+record IrEnumConst(string EnumName, string Member) : IrExpr(IrEnumType.Get(EnumName));
+
+// Identifiers
+// IrVar.IsRef: the variable resolves to a `ref` parameter - emitted as a dereferenced
+// pointer (*name) rather than a bare name, for both reads and writes. Set by the resolver.
+/// <summary>
+/// A local variable or parameter reference.
+/// </summary>
+record IrVar(string Name, IrType T, bool IsRef = false) : IrExpr(T);
+
+/// <summary>
+/// A reference to the implicit self object inside a method body.
+/// </summary>
+record IrSelfExpr(string ClassName) : IrExpr(IrClassRef.Get(ClassName));
+
+/// <summary>
+/// A field load from an object expression.
+/// </summary>
+record IrFieldLoad(IrExpr Obj, string Field, IrType FieldType) : IrExpr(FieldType);
+
+/// <summary>
+/// An index expression into a collection or fixed array.
+/// </summary>
+record IrIndex(IrExpr Obj, IrExpr Idx, IrType ElemType) : IrExpr(ElemType);
+
+// Calls - CName is the fully-qualified C function name
+/// <summary>
+/// A call to a static (free) C function.
+/// </summary>
+record IrStaticCall(string CName, IrType RetType, List<IrExpr> Args) : IrExpr(RetType);
+
+/// <summary>
+/// A call to an instance method, passing the receiver as the first argument.
+/// </summary>
+record IrInstanceCall(IrExpr Recv, string CName, IrType RetType, List<IrExpr> Args) : IrExpr(RetType);
+
+/// <summary>
+/// A call to a throws-annotated static function. The result type wraps the inner type in Result.
+/// </summary>
+record IrThrowsCall(string CName, IrType InnerType, List<IrExpr> Args) : IrExpr(IrResultType.Get(InnerType));
+
+/// <summary>
+/// A call to a throws-annotated instance method. The result type wraps the inner type in Result.
+/// </summary>
+record IrThrowsInstanceCall(IrExpr Recv, string CName, IrType InnerType, List<IrExpr> Args) : IrExpr(IrResultType.Get(InnerType));
+
+/// <summary>
+/// A bare reference to a free function by name, decaying to a function-pointer value.
+/// CName is a valid C function-pointer value with no cast needed.
+/// </summary>
+record IrFuncRef(string CName, IrFuncPtrType T) : IrExpr(T);
+
+/// <summary>
+/// A call through a function-pointer-typed expression.
+/// </summary>
+record IrIndirectCall(IrExpr Target, IrType Ret, List<IrExpr> Args) : IrExpr(Ret);
+
+/// <summary>
+/// Constructs a union variant value. VariantIndex selects the tag.
+/// </summary>
+record IrUnionConstruct(IrUnionType T, int VariantIndex, List<IrExpr> Args) : IrExpr(T);
+
+/// <summary>
+/// Reads one payload field of a union's active variant.
+/// Only emitted after the tag has already been tested.
+/// </summary>
+record IrUnionField(IrExpr Union, int VariantIndex, string Field, IrType FieldType) : IrExpr(FieldType);
+
+// Operators
+/// <summary>
+/// A binary operator expression.
+/// </summary>
+record IrBinOp(string Op, IrExpr Left, IrExpr Right, IrType T) : IrExpr(T);
+
+/// <summary>
+/// A ternary conditional expression.
+/// </summary>
+record IrTernary(IrExpr Cond, IrExpr Then, IrExpr Else, IrType T) : IrExpr(T);
+
+/// <summary>
+/// A prefix unary operator expression.
+/// </summary>
+record IrUnaryOp(string Op, IrExpr Operand, IrType T) : IrExpr(T);
+
+/// <summary>
+/// A postfix operator expression such as i++ or i--.
+/// </summary>
+record IrPostfix(string Op, IrExpr Operand) : IrExpr(Operand.Type);
+
+/// <summary>
+/// An explicit cast to a target type.
+/// </summary>
+record IrCast(IrType To, IrExpr Value) : IrExpr(To);
+
+// Allocation
+/// <summary>
+/// A heap allocation of a named class with constructor arguments.
+/// </summary>
+record IrNew(string ClassName, List<IrExpr> Args) : IrExpr(IrClassRef.Get(ClassName));
+
+/// <summary>
+/// A heap allocation followed by repeated Add calls to populate a collection.
+/// Lowered to a GNU statement expression by the emitter.
+/// </summary>
+record IrNewInit(string ClassName, List<IrExpr> Args, string AddCName, List<IrExpr> Inits)
+    : IrExpr(IrClassRef.Get(ClassName));
+
+/// <summary>
+/// A fixed-array literal [e1, e2, ...] lowered to a C compound literal.
+/// </summary>
+record IrArrayLit(IrArrayType ArrType, List<IrExpr> Elems) : IrExpr(ArrType);
+
+/// <summary>
+/// An interpolated string whose parts are all typed String.
+/// </summary>
+record IrInterp(List<IrExpr> Parts) : IrExpr(IrType.String);
+
+// Unsafe
+/// <summary>
+/// Takes the address of a target expression, producing a pointer.
+/// </summary>
+record IrAddrOf(IrExpr Target) : IrExpr(IrPtrType.Get(Target.Type));
+
+/// <summary>
+/// Dereferences a pointer expression to yield the pointed-to value.
+/// </summary>
+record IrDeref(IrExpr Ptr, IrType T) : IrExpr(T);
+
+/// <summary>
+/// A sizeof expression. Emits as C sizeof(ctype).
+/// </summary>
+record IrSizeof(IrType Of) : IrExpr(IrType.SizeT);
+
+/// <summary>
+/// A default value expression. Emits as a C zero-cast: (ctype)0.
+/// </summary>
+record IrDefault(IrType Of) : IrExpr(Of);
 
 #endregion
