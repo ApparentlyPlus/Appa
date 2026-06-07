@@ -451,3 +451,145 @@ record IrSizeof(IrType Of) : IrExpr(IrType.SizeT);
 record IrDefault(IrType Of) : IrExpr(Of);
 
 #endregion
+
+#region Statements
+
+/// <summary>
+/// Base type for all IR statement nodes.
+/// Every statement carries an optional source span.
+/// </summary>
+abstract record IrStmt { public TextSpan Span { get; init; } = TextSpan.None; }
+
+/// <summary>
+/// A sequential list of statements forming a scope.
+/// </summary>
+record IrBlock(List<IrStmt> Stmts) : IrStmt;
+
+/// <summary>
+/// A native C statement with separate kernel and user variants.
+/// </summary>
+record IrNativeStmt(string KernelC, string UserC) : IrStmt;
+
+// Verbatim C produced by a lowering pass (Result branches, gotos/labels). Printed as-is.
+/// <summary>
+/// Verbatim C code produced by a lowering pass such as Result branches or goto/label pairs.
+/// </summary>
+record IrRaw(string Code) : IrStmt;
+
+/// <summary>
+/// A local variable declaration with an optional initializer.
+/// </summary>
+record IrDeclVar(string Name, IrType Type, IrExpr? Init) : IrStmt;
+
+/// <summary>
+/// An assignment expression statement. Op is the assignment operator, e.g. = += -=.
+/// </summary>
+record IrAssign(IrExpr Target, string Op, IrExpr Value) : IrStmt;
+
+/// <summary>
+/// An expression evaluated for its side effects, result discarded.
+/// </summary>
+record IrExprStmt(IrExpr Expr) : IrStmt;
+
+/// <summary>
+/// A return statement with an optional value.
+/// </summary>
+record IrReturn(IrExpr? Value) : IrStmt;
+
+/// <summary>
+/// A break statement exiting the nearest enclosing loop or switch.
+/// </summary>
+record IrBreak() : IrStmt;
+
+/// <summary>
+/// A continue statement jumping to the next iteration of the nearest enclosing loop.
+/// </summary>
+record IrContinue() : IrStmt;
+
+/// <summary>
+/// An if/else statement. Else is null when there is no else branch.
+/// </summary>
+record IrIf(IrExpr Cond, IrBlock Then, IrBlock? Else) : IrStmt;
+
+/// <summary>
+/// A while loop.
+/// </summary>
+record IrWhile(IrExpr Cond, IrBlock Body) : IrStmt;
+
+/// <summary>
+/// A C-style for loop with optional init, condition, and step.
+/// </summary>
+record IrFor(IrStmt? Init, IrExpr? Cond, IrExpr? Step, IrBlock Body) : IrStmt;
+
+// ArraySize >= 0: iterate a fixed array by value (coll._[i], length known from type).
+// ArraySize < 0:  iterate a collection via its LenCName/GetCName functions.
+/// <summary>
+/// A for-in loop over a collection or fixed array.
+/// </summary>
+record IrForIn(string Var, IrType ElemType, string LenCName, string GetCName,
+               IrExpr Collection, IrBlock Body, int ArraySize = -1) : IrStmt;
+
+/// <summary>
+/// A try/catch block. Seq is a unique sequence number used to name generated labels.
+/// </summary>
+record IrTryCatch(IrBlock Try, IrBlock Catch, int Seq) : IrStmt;
+
+// Lowered to an if/else-if chain in Desugar; never reaches the backend as a switch.
+/// <summary>
+/// A switch statement. Lowered to an if/else-if chain by Desugar; never reaches the backend.
+/// </summary>
+record IrSwitch(IrExpr Scrutinee, List<IrSwitchCase> Cases, IrBlock? Default) : IrStmt;
+
+/// <summary>
+/// One case arm of an IrSwitch, with one or more labels and a body block.
+/// </summary>
+record IrSwitchCase(List<IrExpr> Labels, IrBlock Body);
+
+// Lowered to an if/else-if chain on the union tag in Desugar; never reaches the backend.
+/// <summary>
+/// A match statement over a union type. Lowered to an if/else-if chain by Desugar; never reaches the backend.
+/// </summary>
+record IrMatch(IrExpr Scrutinee, IrUnionType UnionT, List<IrMatchCase> Cases, IrBlock? Default) : IrStmt;
+
+// FieldName is the variant's own field; BindName is the local the pattern introduced.
+// They can differ: `case Circle(r)` binds field `radius` to local `r`.
+/// <summary>
+/// A single binding introduced by a match pattern - maps a variant field to a local name.
+/// </summary>
+record IrMatchBind(string FieldName, string BindName, IrType Type);
+
+/// <summary>
+/// One case arm of an IrMatch, identified by variant index with its pattern bindings.
+/// </summary>
+record IrMatchCase(int VariantIndex, List<IrMatchBind> Binds, IrBlock Body);
+
+/// <summary>
+/// An unsafe block containing statements that may use pointer operations.
+/// </summary>
+record IrUnsafeBlock(IrBlock Body) : IrStmt;
+
+// The Ownership pass lowers defer: Action is spliced into every exit path of the
+// enclosing block in LIFO order, then this node is dropped. Never reaches the backend.
+/// <summary>
+/// A defer statement. Lowered by the Ownership pass; never reaches the backend.
+/// </summary>
+record IrDefer(IrStmt Action) : IrStmt;
+
+// The Ownership pass lowers throw: releases owned values, then emits an error Result or goto catch.
+/// <summary>
+/// A throw statement. Lowered by the Ownership pass; never reaches the backend.
+/// </summary>
+record IrThrow() : IrStmt;
+
+// Raw includes the quotes. No String allocation - calls the env's _env_dbg / _env_panic directly.
+/// <summary>
+/// A debug assertion. Emitted as a direct call to the env debug binding with a raw C string literal.
+/// </summary>
+record IrDebug(string Raw) : IrStmt;
+
+/// <summary>
+/// A panic statement. Emitted as a direct call to the env panic binding with a raw C string literal.
+/// </summary>
+record IrPanic(string Raw) : IrStmt;
+
+#endregion
