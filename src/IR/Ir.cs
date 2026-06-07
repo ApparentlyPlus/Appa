@@ -273,6 +273,7 @@ record IrUnionType(string Name) : IrType
 abstract record IrExpr(IrType Type) { public TextSpan Span { get; init; } = TextSpan.None; }
 
 // Note for literals:
+
 // IrLitInt - Value is the literal's 64-bit bit pattern. T is the type selected by
 // suffix or magnitude (int by default). CText, when set, is the exact C
 // text to emit (hex forms, suffixed forms); otherwise Value is printed.
@@ -314,9 +315,6 @@ record IrLitNull(IrType T) : IrExpr(T);
 /// </summary>
 record IrEnumConst(string EnumName, string Member) : IrExpr(IrEnumType.Get(EnumName));
 
-// Identifiers
-// IrVar.IsRef: the variable resolves to a `ref` parameter - emitted as a dereferenced
-// pointer (*name) rather than a bare name, for both reads and writes. Set by the resolver.
 /// <summary>
 /// A local variable or parameter reference.
 /// </summary>
@@ -380,7 +378,6 @@ record IrUnionConstruct(IrUnionType T, int VariantIndex, List<IrExpr> Args) : Ir
 /// </summary>
 record IrUnionField(IrExpr Union, int VariantIndex, string Field, IrType FieldType) : IrExpr(FieldType);
 
-// Operators
 /// <summary>
 /// A binary operator expression.
 /// </summary>
@@ -429,7 +426,6 @@ record IrArrayLit(IrArrayType ArrType, List<IrExpr> Elems) : IrExpr(ArrType);
 /// </summary>
 record IrInterp(List<IrExpr> Parts) : IrExpr(IrType.String);
 
-// Unsafe
 /// <summary>
 /// Takes the address of a target expression, producing a pointer.
 /// </summary>
@@ -521,8 +517,6 @@ record IrWhile(IrExpr Cond, IrBlock Body) : IrStmt;
 /// </summary>
 record IrFor(IrStmt? Init, IrExpr? Cond, IrExpr? Step, IrBlock Body) : IrStmt;
 
-// ArraySize >= 0: iterate a fixed array by value (coll._[i], length known from type).
-// ArraySize < 0:  iterate a collection via its LenCName/GetCName functions.
 /// <summary>
 /// A for-in loop over a collection or fixed array.
 /// </summary>
@@ -534,7 +528,6 @@ record IrForIn(string Var, IrType ElemType, string LenCName, string GetCName,
 /// </summary>
 record IrTryCatch(IrBlock Try, IrBlock Catch, int Seq) : IrStmt;
 
-// Lowered to an if/else-if chain in Desugar; never reaches the backend as a switch.
 /// <summary>
 /// A switch statement. Lowered to an if/else-if chain by Desugar; never reaches the backend.
 /// </summary>
@@ -545,14 +538,11 @@ record IrSwitch(IrExpr Scrutinee, List<IrSwitchCase> Cases, IrBlock? Default) : 
 /// </summary>
 record IrSwitchCase(List<IrExpr> Labels, IrBlock Body);
 
-// Lowered to an if/else-if chain on the union tag in Desugar; never reaches the backend.
 /// <summary>
 /// A match statement over a union type. Lowered to an if/else-if chain by Desugar; never reaches the backend.
 /// </summary>
 record IrMatch(IrExpr Scrutinee, IrUnionType UnionT, List<IrMatchCase> Cases, IrBlock? Default) : IrStmt;
 
-// FieldName is the variant's own field; BindName is the local the pattern introduced.
-// They can differ: `case Circle(r)` binds field `radius` to local `r`.
 /// <summary>
 /// A single binding introduced by a match pattern - maps a variant field to a local name.
 /// </summary>
@@ -568,20 +558,16 @@ record IrMatchCase(int VariantIndex, List<IrMatchBind> Binds, IrBlock Body);
 /// </summary>
 record IrUnsafeBlock(IrBlock Body) : IrStmt;
 
-// The Ownership pass lowers defer: Action is spliced into every exit path of the
-// enclosing block in LIFO order, then this node is dropped. Never reaches the backend.
 /// <summary>
 /// A defer statement. Lowered by the Ownership pass; never reaches the backend.
 /// </summary>
 record IrDefer(IrStmt Action) : IrStmt;
 
-// The Ownership pass lowers throw: releases owned values, then emits an error Result or goto catch.
 /// <summary>
 /// A throw statement. Lowered by the Ownership pass; never reaches the backend.
 /// </summary>
 record IrThrow() : IrStmt;
 
-// Raw includes the quotes. No String allocation - calls the env's _env_dbg / _env_panic directly.
 /// <summary>
 /// A debug assertion. Emitted as a direct call to the env debug binding with a raw C string literal.
 /// </summary>
@@ -591,5 +577,166 @@ record IrDebug(string Raw) : IrStmt;
 /// A panic statement. Emitted as a direct call to the env panic binding with a raw C string literal.
 /// </summary>
 record IrPanic(string Raw) : IrStmt;
+
+#endregion
+
+#region Functions and classes
+
+enum Visibility { Shared, Kernel, User }
+
+/// <summary>
+/// A single parameter in an IR function signature.
+/// </summary>
+record IrParam(string Name, IrType Type, bool IsRef = false);
+
+/// <summary>
+/// An IR function - either a free function or a class method.
+/// Body is null for native functions; NativeKernel/NativeUser carry the C text instead.
+/// </summary>
+record IrFunction(
+    string Name,
+    string CName,
+    IrType ReturnType,
+    List<IrParam> Params,
+    bool IsStatic,
+    bool IsEntry,
+    bool IsThrows,
+    bool IsLib,
+    Visibility Vis,
+    string? OwnerClass,
+    IrBlock? Body,
+    string? NativeKernel,
+    string? NativeUser,
+    List<Annotation> Annotations
+);
+
+/// <summary>
+/// A field declaration on a class, with an optional default initializer.
+/// </summary>
+record IrField(string Name, IrType Type, IrExpr? Init);
+
+/// <summary>
+/// A raw native struct-field block with separate kernel and user C variants.
+/// </summary>
+record RawFieldBlock(string Kernel, string User);
+
+/// <summary>
+/// An operator overload defined on a class.
+/// Body is null for native operators; NativeKernel/NativeUser carry the C text instead.
+/// </summary>
+record IrOperator(
+    string Op,
+    string CName,
+    IrType ReturnType,
+    List<IrParam> Params,
+    string OwnerClass,
+    bool IsLib,
+    Visibility Vis,
+    IrBlock? Body,
+    string? NativeKernel,
+    string? NativeUser
+);
+
+/// <summary>
+/// An IR class declaration with its fields, methods, and operator overloads.
+/// Keep marks a class as exempt from Dce reachability and Densifier renaming.
+/// </summary>
+record IrClass(
+    string Name,
+    string CName,
+    bool IsLib,
+    Visibility Vis,
+    List<RawFieldBlock> RawFields,
+    List<IrField> Fields,
+    List<IrFunction> Methods,
+    List<IrOperator> Operators,
+    bool HasInit,
+    Dictionary<string, IrExpr> FieldInits,
+    bool IsModule = false,
+    // @keep - exempt from Dce reachability sweep and Densifier dense renaming.
+    bool Keep = false
+);
+
+/// <summary>
+/// A process declaration grouping one or more threads.
+/// </summary>
+record IrProcess(string Name, string Mode, List<IrThread> Threads);
+
+/// <summary>
+/// A single thread within a process, with a fully-qualified name and optional entry function.
+/// </summary>
+record IrThread(string Name, string Mode, string FullName, IrFunction? EntryFunc);
+
+#endregion
+
+#region Module
+
+// Where a native block lands in the output. Types (default) -> the type section,
+// alongside structs. Preamble -> before #include "gata_shared.h". Boot -> after all functions.
+enum NativeSection { Types, Preamble, Boot }
+
+/// <summary>
+/// A native C block with separate kernel and user variants and a target output section.
+/// </summary>
+record IrNativeBlock(string KernelC, string UserC, Visibility Vis,
+                     NativeSection Section = NativeSection.Types);
+
+/// <summary>
+/// A native type declaration - a C struct declared inside Gata source.
+/// </summary>
+record IrNativeType(
+    string Name,
+    string CName,
+    string KernelC,
+    string UserC,
+    Visibility Vis
+);
+
+/// <summary>
+/// An enum declaration. Members carry optional explicit C values.
+/// </summary>
+record IrEnum(string Name, string CName, List<(string Name, string? CValue)> Members);
+
+/// <summary>
+/// One variant of a union type, with a tag name and its payload fields.
+/// </summary>
+record IrUnionVariant(string Name, string TagCName, List<IrParam> Fields);
+
+/// <summary>
+/// A union type declaration with all its variants.
+/// </summary>
+record IrUnion(string Name, string CName, List<IrUnionVariant> Variants);
+
+/// <summary>
+/// The top-level IR module produced by the type resolver.
+/// Carries all classes, functions, native blocks, and supporting type lists.
+/// </summary>
+record IrModule(
+    List<IrNativeBlock> NativeBlocks,
+    List<IrNativeType> NativeTypes,
+    List<IrClass> Classes,
+    List<IrFunction> FreeFunctions,
+    List<IrProcess> Processes,
+    List<IrArrayType> ArrayTypes,
+    List<IrEnum> Enums,
+    SymbolTable Symbols,
+    List<IrFuncPtrType> FuncPtrTypes,
+    List<IrUnion> Unions
+)
+{
+    // The realms a build emits are those the environment declared via @preamble:
+    // (kernel)/(boot) -> kernel realm; (user) -> user realm.
+    /// <summary>
+    /// Returns true if the module emits a kernel realm, determined by the presence of kernel preamble or boot blocks.
+    /// </summary>
+    public bool HasKernelRealm { get; } = NativeBlocks.Any(nb =>
+        nb.Vis == Visibility.Kernel && nb.Section is NativeSection.Preamble or NativeSection.Boot);
+
+    /// <summary>
+    /// Returns true if the module emits a user realm, determined by the presence of user preamble blocks.
+    /// </summary>
+    public bool HasUserRealm { get; } = NativeBlocks.Any(nb =>
+        nb.Vis == Visibility.User && nb.Section == NativeSection.Preamble);
+}
 
 #endregion
