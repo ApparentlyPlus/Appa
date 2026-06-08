@@ -10,8 +10,10 @@ using System.Text.RegularExpressions;
 // in the masked copy, then slicing the ORIGINAL text at the same offsets.
 static partial class NativeC
 {
-    // Same-length copy with C comments and string/char literals blanked to spaces
-    // (newlines preserved). Real code is left untouched.
+    /// <summary>
+    /// Same-length copy with C comments and string/char literals blanked to spaces
+    /// (newlines preserved). Real code is left untouched.
+    /// </summary>
     public static string Mask(string s)
     {
         var a = s.ToCharArray();
@@ -49,8 +51,10 @@ static partial class NativeC
         return new string(a);
     }
 
-    // Split a native body into (kernelC, userC) on #kernel:/#user: markers found in
-    // real code only. With no markers, both variants are the whole body.
+    /// <summary>
+    /// Split a native body into (kernelC, userC) on #kernel:/#user: markers found in
+    /// real code only. With no markers, both variants are the whole body.
+    /// </summary>
     public static (string KernelC, string UserC) Split(string raw)
     {
         string masked = Mask(raw);
@@ -65,8 +69,10 @@ static partial class NativeC
         return (kc, uc);
     }
 
-    // Struct/typedef names declared in a native body (for the opaque-struct registry),
-    // scanned over masked text so names in comments/strings are ignored.
+    /// <summary>
+    /// Struct/typedef names declared in a native body (for the opaque-struct registry),
+    /// scanned over masked text so names in comments/strings are ignored.
+    /// </summary>
     public static IEnumerable<string> ScanStructs(string raw)
     {
         foreach (Match m in TDefRegex().Matches(Mask(raw)))
