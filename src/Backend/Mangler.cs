@@ -15,4 +15,6 @@ static class Mangler
     public static string Operator(string owner, string op) => throw new NotImplementedException();
     public static string PrivateFreeFunc(string fileToken, string name, IReadOnlyList<Param> ps, bool overloaded) => throw new NotImplementedException();
     public static string FileToken(string file) => throw new NotImplementedException();
+    public static string DisplayName(string name) => throw new NotImplementedException();
+    public static string OverloadSuffix(IReadOnlyList<Param> ps) => throw new NotImplementedException();
 }

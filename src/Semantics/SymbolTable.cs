@@ -64,11 +64,11 @@ sealed record Symbol(string Name, SymKind Kind, string Type, string? Owner, Meth
 /// </summary>
 sealed class SymbolTable
 {
-    readonly Dictionary<string, Symbol>          _classes   = new();
-    readonly Dictionary<MemberKey, Symbol>       _fields    = new();
-    readonly Dictionary<MemberKey, List<Symbol>> _methods   = new();
-    readonly Dictionary<string, List<Symbol>>    _funcs     = new();
-    readonly Dictionary<MemberKey, Symbol>       _operators = new();
+    readonly Dictionary<string, Symbol> _classes = [];
+    readonly Dictionary<MemberKey, Symbol> _fields = [];
+    readonly Dictionary<MemberKey, List<Symbol>> _methods = [];
+    readonly Dictionary<string, List<Symbol>> _funcs = [];
+    readonly Dictionary<MemberKey, Symbol> _operators = [];
 
     // Every accepted primitive spelling.
     public static readonly FrozenSet<string> Primitives = PrimTypes.Spellings;
@@ -76,13 +76,13 @@ sealed class SymbolTable
     static readonly FrozenSet<string> KernelPassthrough = FrozenSet.ToFrozenSet(["Process", "Thread"]);
 
     // Result_T typedefs needed by throws functions: name -> inner Gata type.
-    public Dictionary<string, string> ResultTypedefs { get; } = new();
+    public Dictionary<string, string> ResultTypedefs { get; } = [];
 
     // Declaring source files seen during collection.
-    public HashSet<string> Modules { get; } = new();
+    public HashSet<string> Modules { get; } = [];
 
     // role -> bound C symbol name, from @intrinsic annotations.
-    public Dictionary<string, string> Intrinsics { get; } = new();
+    public Dictionary<string, string> Intrinsics { get; } = [];
 
     /// <summary>
     /// Returns the C name bound to the given intrinsic role, or null if unbound.
@@ -177,7 +177,7 @@ sealed class SymbolTable
     #region Enums and unions
 
     // Enum types: name -> member names. Globally visible like primitives.
-    public Dictionary<string, HashSet<string>> Enums { get; } = new();
+    public Dictionary<string, HashSet<string>> Enums { get; } = [];
 
     /// <summary>
     /// Registers an enum type and its member names.
@@ -195,7 +195,7 @@ sealed class SymbolTable
     public bool IsEnumMember(string e, string m) => Enums.TryGetValue(e, out var ms) && ms.Contains(m);
 
     // Union types: name -> variant list. Globally visible and not generic.
-    public Dictionary<string, List<UnionVariant>> Unions { get; } = new();
+    public Dictionary<string, List<UnionVariant>> Unions { get; } = [];
 
     /// <summary>
     /// Registers a union type and its variants.
@@ -282,7 +282,7 @@ sealed class SymbolTable
     #region Visibility
 
     // Class/method members declared private — accessible only from the declaring type.
-    public HashSet<MemberKey> PrivateMembers { get; } = new();
+    public HashSet<MemberKey> PrivateMembers { get; } = [];
 
     /// <summary>
     /// Returns true if the named member on the given owner was declared private.
@@ -292,7 +292,7 @@ sealed class SymbolTable
 
     // File-local free functions — registered per declaring file so unrelated files may
     // reuse a name, and mangled uniquely so they never clash in the C output.
-    readonly Dictionary<(string File, string Name), List<Symbol>> _privateFuncs = new();
+    readonly Dictionary<(string File, string Name), List<Symbol>> _privateFuncs = [];
 
     /// <summary>
     /// Registers a file-local (private) free function from the given source file.
