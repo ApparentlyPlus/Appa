@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using System.Runtime.InteropServices;
 
 namespace Appa;
 
@@ -77,6 +78,9 @@ sealed class SymbolTable
     // Result_T typedefs needed by throws functions: name -> inner Gata type.
     public Dictionary<string, string> ResultTypedefs { get; } = new();
 
+    // Declaring source files seen during collection.
+    public HashSet<string> Modules { get; } = new();
+
     // role -> bound C symbol name, from @intrinsic annotations.
     public Dictionary<string, string> Intrinsics { get; } = new();
 
@@ -131,6 +135,42 @@ sealed class SymbolTable
 
     static List<Symbol> Bucket<K>(Dictionary<K, List<Symbol>> d, K key) where K : notnull =>
         d.TryGetValue(key, out var l) ? l : d[key] = [];
+
+    /// <summary>
+    /// Assigns C names to all methods and free functions once all declarations are collected.
+    /// </summary>
+    public void AssignCNames()
+    {
+        foreach (var (key, list) in _methods)
+        {
+            bool ov = list.Count > 1;
+            var span = CollectionsMarshal.AsSpan(list);
+            for (int i = 0; i < span.Length; i++)
+            {
+                span[i].CName = Mangler.Method(key.Owner, key.Name, span[i].Sig!.Params, ov);
+            }
+        }
+        foreach (var (name, list) in _funcs)
+        {
+            bool ov = list.Count > 1;
+            var span = CollectionsMarshal.AsSpan(list);
+            for (int i = 0; i < span.Length; i++)
+            {
+                var s = span[i];
+                s.CName = Mangler.FreeFunc(name, s.Sig!.Params, ov, s.Sig.IsEntry, s.Sig.IsExtern);
+            }
+        }
+        foreach (var ((file, name), list) in _privateFuncs)
+        {
+            bool ov = list.Count > 1;
+            string token = Mangler.FileToken(file);
+            var span = CollectionsMarshal.AsSpan(list);
+            for (int i = 0; i < span.Length; i++)
+            {
+                span[i].CName = Mangler.PrivateFreeFunc(token, name, span[i].Sig!.Params, ov);
+            }
+        }
+    }
 
     #endregion
 
@@ -236,6 +276,41 @@ sealed class SymbolTable
     /// Returns true if the named field exists on the given class.
     /// </summary>
     public bool IsField(string cls, string field) => _fields.ContainsKey(new(cls, field));
+
+    #endregion
+
+    #region Visibility
+
+    // Class/method members declared private — accessible only from the declaring type.
+    public HashSet<MemberKey> PrivateMembers { get; } = new();
+
+    /// <summary>
+    /// Returns true if the named member on the given owner was declared private.
+    /// </summary>
+    public bool IsPrivateMember(string owner, string member) =>
+        PrivateMembers.Contains(new(owner, member));
+
+    // File-local free functions — registered per declaring file so unrelated files may
+    // reuse a name, and mangled uniquely so they never clash in the C output.
+    readonly Dictionary<(string File, string Name), List<Symbol>> _privateFuncs = new();
+
+    /// <summary>
+    /// Registers a file-local (private) free function from the given source file.
+    /// </summary>
+    public void RegisterPrivateFunc(string file, string name, MethodSig sig) =>
+        Bucket(_privateFuncs, (file, name)).Add(new Symbol(name, SymKind.FreeFunc, sig.ReturnType, null, sig) { Module = file });
+
+    /// <summary>
+    /// Returns the last registered overload of the named file-local function, or null if not found.
+    /// </summary>
+    public Symbol? LookupPrivateFunc(string file, string name) =>
+        _privateFuncs.TryGetValue((file, name), out var l) ? l[^1] : null;
+
+    /// <summary>
+    /// Returns all overloads of the named file-local function.
+    /// </summary>
+    public IReadOnlyList<Symbol> PrivateFuncOverloads(string file, string name) =>
+        _privateFuncs.TryGetValue((file, name), out var l) ? l : [];
 
     #endregion
 
