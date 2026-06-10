@@ -4,7 +4,8 @@ namespace Appa;
 
 // Result of declaration collection: the populated SymbolTable and the auxiliary
 // set the resolver needs.
-record CollectionResult(SymbolTable Sym, HashSet<string> HasInit, DiagnosticBag Diag);
+record CollectionResult(SymbolTable Sym, HashSet<string> HasInit, HashSet<string> PreDefinedStructs,
+                                                    HashSet<string> OpaqueFieldClasses, DiagnosticBag Diag);
 
 // Pass 1 - declaration collection. Populates the SymbolTable with classes, fields,
 // methods, operators, free functions, throws registrations, and @intrinsic bindings.
@@ -12,14 +13,16 @@ sealed class SymbolCollector(DiagnosticBag diag)
 {
     readonly SymbolTable _sym = new();
     readonly HashSet<string> _hasInit = [];
-    readonly HashSet<string>  _declaredClasses = [];
+    readonly HashSet<string> _declaredClasses = [];
     readonly Dictionary<string, HashSet<string>> _declaredFieldNames = [];
     readonly Dictionary<string, HashSet<string>> _declaredMethodNames = [];
     readonly Dictionary<string, HashSet<string>> _declaredMethodSigs = [];
     readonly HashSet<string> _declaredFuncs = [];
     readonly HashSet<string> _declaredFuncSigs = [];
     readonly HashSet<(string File, string Sig)>  _declaredPrivateFuncSigs  = [];
-    readonly HashSet<string> _externFuncs  = [];
+    readonly HashSet<string> _externFuncs = [];
+    readonly HashSet<string> _preDefinedStructs = [];
+    readonly HashSet<string> _opaqueFieldClasses = [];
 
     /// <summary>
     /// Runs pass 1 over all programs and returns the populated symbol table.
@@ -33,7 +36,7 @@ sealed class SymbolCollector(DiagnosticBag diag)
             foreach (var item in prog.Items) P1Top(item, path);
         }
         _sym.AssignCNames();
-        return new CollectionResult(_sym, _hasInit, diag);
+        return new CollectionResult(_sym, _hasInit, _preDefinedStructs, _opaqueFieldClasses, diag);
     }
 
     /// <summary>
@@ -72,13 +75,26 @@ sealed class SymbolCollector(DiagnosticBag diag)
     {
         switch (item)
         {
-            case ClassDecl cd: 
+            case NativeBlock nb:
+                if (nb.Annotations != null)
+                {
+                    foreach (var a in nb.Annotations)
+                        if (a is IntrinsicAnnotation)
+                            diag.Error(Codes.WrongAnnotationKind, file, nb.Span, "only '@preamble' is valid here, not '@intrinsic'");
+                }
+                ScanNativeForStructs(nb.Body.KernelC);
+                ScanNativeForStructs(nb.Body.UserC);
+                break;
+            case NativeTypeDecl nd:
+                P1NativeType(nd, file);
+                break;
+            case ClassDecl cd:
                 P1Class(cd, file);
                 break;
             case ContextDecl ctx:
                 foreach (var i in ctx.Items) P1Top(i, file);
                 break;
-            case FuncDecl fd: 
+            case FuncDecl fd:
                 P1Func(fd, file);
                 break;
             case ExternFuncDecl ed:
@@ -117,6 +133,9 @@ sealed class SymbolCollector(DiagnosticBag diag)
         {
             switch (m)
             {
+                case FieldsBlock:
+                    _opaqueFieldClasses.Add(cd.Name);
+                    break;
                 case FieldDecl fd when fd.Type != "__native__":
                     if (!fieldNames.Add(fd.Name) || methodNames.Contains(fd.Name))
                         diag.Error(Codes.DuplicateName, file, fd.Span,
@@ -203,6 +222,27 @@ sealed class SymbolCollector(DiagnosticBag diag)
         BindIntrinsics(fd.Annotations, Mangler.FreeFunc(fd.Name, fd.Params, overloaded: false, fd.IsEntry, isExtern: false),
             file, fd.Span, allowKeep: true);
         if (fd.Throws) _sym.RegisterThrows(fd.ReturnType ?? "int");
+    }
+
+    /// <summary>
+    /// Registers a native type declaration as a pre-defined C struct.
+    /// </summary>
+    void P1NativeType(NativeTypeDecl nd, string file)
+    {
+        if (!_declaredClasses.Add(nd.Name))
+            diag.Error(Codes.DuplicateName, file, nd.Span, $"type '{nd.Name}' is already declared");
+        _sym.RegisterClass(nd.Name, file);
+        _preDefinedStructs.Add(nd.Name);
+        BindIntrinsics(nd.Annotations, Mangler.Class(nd.Name), file, nd.Span);
+    }
+
+    /// <summary>
+    /// Scans raw C text for struct/typedef names and adds them to _preDefinedStructs.
+    /// </summary>
+    void ScanNativeForStructs(string raw)
+    {
+        foreach (var name in NativeC.ScanStructs(raw))
+            _preDefinedStructs.Add(name);
     }
 
     /// <summary>
