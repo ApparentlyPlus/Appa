@@ -137,6 +137,12 @@ sealed class SymbolCollector(DiagnosticBag diag)
                     _opaqueFieldClasses.Add(cd.Name);
                     break;
                 case FieldDecl fd when fd.Type != "__native__":
+                    if (cd.IsModule)
+                    {
+                        diag.Error(Codes.UndefinedVariable, file, fd.Span,
+                            $"module '{Mangler.DisplayName(cd.Name)}' cannot declare the field '{fd.Name}'");
+                        break;
+                    }
                     if (!fieldNames.Add(fd.Name) || methodNames.Contains(fd.Name))
                         diag.Error(Codes.DuplicateName, file, fd.Span,
                             $"'{Mangler.DisplayName(cd.Name)}' already declares a member '{fd.Name}'");
@@ -195,6 +201,12 @@ sealed class SymbolCollector(DiagnosticBag diag)
     /// </summary>
     void P1Func(FuncDecl fd, string file)
     {
+        // `static` only means anything on a class/module method; it's a category
+        // error on a free function, not a redundant-but-harmless spelling.
+        if (Array.IndexOf(fd.Modifiers, "static") >= 0)
+            diag.Error(Codes.StaticOnFreeFunc, file, fd.Span,
+                $"'static' has no meaning on the free function '{fd.Name}' — it is never an instance member");
+
         if (fd.GenericParams.Length > 0) return;
 
         var sig = new MethodSig(fd.ReturnType ?? "void", [.. fd.Params], true, fd.Throws, fd.IsEntry, [.. fd.Annotations]);
