@@ -232,13 +232,16 @@ sealed class DiagnosticBag(SourceSet sources)
     /// </summary>
     private static int GetDigitCount(int value)
     {
-        return value switch
-        {
-            < 10 => 1,
-            < 100 => 2,
-            < 1000 => 3,
-            < 10000 => 4,
-            _ => value.ToString().Length
-        };
+        if (value < 0) value = value == int.MinValue ? int.MaxValue : -value;
+        if (value < 10) return 1;
+        if (value < 100) return 2;
+        if (value < 1000) return 3;
+        if (value < 10000) return 4;
+        if (value < 100000) return 5;
+        if (value < 1000000) return 6;
+        if (value < 10000000) return 7;
+        if (value < 100000000) return 8;
+        if (value < 1000000000) return 9;
+        return 10;
     }
 }

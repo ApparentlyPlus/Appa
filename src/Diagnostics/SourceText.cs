@@ -30,31 +30,37 @@ sealed class SourceText
         Text = text;
 
         ReadOnlySpan<char> span = text.AsSpan();
-        int count = 1;
-        int offset = 0;
-        int index;
 
-        // Count newlines using vectorized search
-        while ((index = span[offset..].IndexOf('\n')) >= 0)
+        // Rent a buffer from ArrayPool. Most files will have less than 512 lines.
+        int initialCapacity = Math.Max(512, span.Length / 40);
+        int[] rented = System.Buffers.ArrayPool<int>.Shared.Rent(initialCapacity);
+        try
         {
-            count++;
-            offset += index + 1;
+            rented[0] = 0;
+            int count = 1;
+            int offset = 0;
+            int index;
+
+            while ((index = span[offset..].IndexOf('\n')) >= 0)
+            {
+                offset += index + 1;
+                if (count >= rented.Length)
+                {
+                    int[] newRented = System.Buffers.ArrayPool<int>.Shared.Rent(rented.Length * 2);
+                    Array.Copy(rented, newRented, count);
+                    System.Buffers.ArrayPool<int>.Shared.Return(rented);
+                    rented = newRented;
+                }
+                rented[count++] = offset;
+            }
+
+            _ls = new int[count];
+            Array.Copy(rented, _ls, count);
         }
-
-        // Allocate the exact size needed for the line start offsets (avoid allocs)
-        int[] lineStarts = new int[count];
-        lineStarts[0] = 0;
-        int lineIndex = 1;
-        offset = 0;
-
-        // Populate offsets search
-        while ((index = span[offset..].IndexOf('\n')) >= 0)
+        finally
         {
-            offset += index + 1;
-            lineStarts[lineIndex++] = offset;
+            System.Buffers.ArrayPool<int>.Shared.Return(rented);
         }
-
-        _ls = lineStarts;
     }
 
     /// <summary>
