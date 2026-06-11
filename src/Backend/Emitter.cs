@@ -76,6 +76,51 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
 
     #endregion
 
+    #region Enums and unions
+
+    /// <summary>
+    /// Emits a C typedef enum for every declared Gata enum type into the shared header.
+    /// </summary>
+    void EmitEnums()
+    {
+        foreach (var e in module.Enums)
+        {
+            var parts = e.Members.Select(m =>
+                m.CValue is null ? Mangler.EnumMember(e.Name, m.Name)
+                                 : $"{Mangler.EnumMember(e.Name, m.Name)} = {m.CValue}");
+            _sharedH.Line($"typedef enum {{ {string.Join(", ", parts)} }} {e.CName};");
+        }
+        if (module.Enums.Count > 0) _sharedH.Line("");
+    }
+
+    /// <summary>
+    /// Emits a tagged-union struct for every declared Gata union type into the shared header.
+    /// Each union becomes a tag integer plus a C union of per-variant payload structs.
+    /// </summary>
+    void EmitUnions()
+    {
+        foreach (var u in module.Unions)
+        {
+            using (_sharedH.Block("typedef struct {", $"}} {u.CName};"))
+            {
+                _sharedH.Line("int __tag;");
+                var withFields = u.Variants.Where(v => v.Fields.Count > 0).ToList();
+                if (withFields.Count > 0)
+                {
+                    using (_sharedH.Block("union {", "} payload;"))
+                        foreach (var v in withFields)
+                        {
+                            string fields = string.Join(" ", v.Fields.Select(f => $"{f.Type.ToCType()} {f.Name};"));
+                            _sharedH.Line($"struct {{ {fields} }} {v.Name};");
+                        }
+                }
+            }
+        }
+        if (module.Unions.Count > 0) _sharedH.Line("");
+    }
+
+    #endregion
+
     #region Classes
 
     /// <summary>
