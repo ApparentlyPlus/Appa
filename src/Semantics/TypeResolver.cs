@@ -1170,8 +1170,8 @@ sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Core expression resolver. Handles integer, character, float, boolean, string, and null literals,
-    /// and bare identifier expressions. Additional expression forms added in later commits.
+    /// Core expression resolver. Handles literals, identifiers, casts, postfix, unary, and binary expressions.
+    /// Additional expression forms added in later commits.
     /// </summary>
     IrExpr ResolveExprCore(Expr e, ResolveCtx ctx)
     {
@@ -1188,9 +1188,108 @@ sealed class TypeResolver(
             case StrLitExpr sl:   return new IrLitString(sl.Value);
             case NullExpr:        return new IrLitNull(IrType.Void);
             case IdentExpr ie:    return ResolveIdent(ie, ctx);
+            case CastExpr ce:
+            {
+                CheckType(ce.TargetType, ctx, ce.Span, allowVoid: true);
+                var inner = ResolveExpr(ce.Value, ctx);
+                var to = ResolveType(ce.TargetType);
+                CheckCast(inner, to, ctx);
+                return new IrCast(to, inner);
+            }
+            case PostfixExpr pf:  return new IrPostfix(pf.Op, ResolveExpr(pf.Operand, ctx));
+            case UnaryExpr un:    return ResolveUnary(un, ctx);
+            case BinExpr be:      return ResolveBin(be, ctx);
             default:
                 throw new NotImplementedException($"[TypeResolver] unhandled Expr: {e.GetType().Name} -- additional expression forms added in later commits");
         }
+    }
+
+    /// <summary>
+    /// Resolves a unary expression, validating that the operand type is compatible with the operator.
+    /// </summary>
+    IrExpr ResolveUnary(UnaryExpr un, ResolveCtx ctx)
+    {
+        var operand = ResolveExpr(un.Operand, ctx);
+        if (un.Op == "!" && operand.Type is not IrPrimType { CName: "bool" })
+            diag.Error(Codes.TypeMismatch, ctx.File, un.Span,
+                $"operator '!' requires 'bool', got '{Describe(operand.Type)}'");
+        else if (un.Op == "-" && !IsArith(operand.Type))
+            diag.Error(Codes.TypeMismatch, ctx.File, un.Span,
+                $"unary '-' requires a numeric operand, got '{Describe(operand.Type)}'");
+        else if (un.Op == "~" && !IsInteger(operand.Type))
+            diag.Error(Codes.TypeMismatch, ctx.File, un.Span,
+                $"operator '~' requires an integer operand, got '{Describe(operand.Type)}'");
+        var t = un.Op == "!" ? IrType.Bool : operand.Type;
+        return new IrUnaryOp(un.Op, operand, t);
+    }
+
+    /// <summary>
+    /// Resolves a binary expression. Handles string concatenation, operator overloading,
+    /// pointer arithmetic, logical, equality, relational, bitwise, and arithmetic operators.
+    /// </summary>
+    IrExpr ResolveBin(BinExpr be, ResolveCtx ctx)
+    {
+        var left = ResolveExpr(be.Left, ctx);
+        var right = ResolveExpr(be.Right, ctx);
+
+        // String concatenation: '+' with a String operand stringifies the other side.
+        if (be.Op == "+" && (left.Type.IsString || right.Type.IsString))
+        {
+            var sop = sym.LookupOperator("String", "+");
+            string cn = sop?.CName ?? Mangler.Operator("String", "+");
+            return new IrStaticCall(cn, IrType.String, [EnsureString(left, ctx), EnsureString(right, ctx)]);
+        }
+
+        string? lhsClass = ClassNameOf(left.Type);
+        if (lhsClass != null && sym.LookupOperator(lhsClass, be.Op) is { } op)
+            return new IrStaticCall(op.CName, ResolveType(op.Type), [left, right]);
+
+        if (left.Type is IrPtrType && be.Op is "+" or "-" && right.Type.IsNumeric)
+        {
+            if (!ctx.InUnsafe)
+                diag.Error(Codes.UnsafeRequired, ctx.File, be.Span, "pointer arithmetic requires an 'unsafe' block");
+            return new IrBinOp(be.Op, left, right, left.Type);
+        }
+
+        if (be.Op is "&&" or "||")
+        {
+            if (left.Type is not IrPrimType { CName: "bool" } || right.Type is not IrPrimType { CName: "bool" })
+                diag.Error(Codes.TypeMismatch, ctx.File, be.Span,
+                    $"operator '{be.Op}' requires 'bool' operands, got '{Describe(left.Type)}' and '{Describe(right.Type)}'");
+            return new IrBinOp(be.Op, left, right, IrType.Bool);
+        }
+
+        if (be.Op is "==" or "!=")
+        {
+            if (!ComparableEq(left, right))
+                diag.Error(Codes.TypeMismatch, ctx.File, be.Span,
+                    $"'{be.Op}' operands are not comparable: '{Describe(left.Type)}' and '{Describe(right.Type)}'");
+            return new IrBinOp(be.Op, left, right, IrType.Bool);
+        }
+
+        if (be.Op is "<" or ">" or "<=" or ">=")
+        {
+            if (!(IsArith(left.Type) && IsArith(right.Type)))
+                diag.Error(Codes.TypeMismatch, ctx.File, be.Span,
+                    $"operator '{be.Op}' requires numeric operands, got '{Describe(left.Type)}' and '{Describe(right.Type)}'");
+            return new IrBinOp(be.Op, left, right, IrType.Bool);
+        }
+
+        if (be.Op is "&" or "|" or "^" or "<<" or ">>")
+        {
+            if (!(IsInteger(left.Type) && IsInteger(right.Type)))
+                diag.Error(Codes.TypeMismatch, ctx.File, be.Span,
+                    $"operator '{be.Op}' requires integer operands, got '{Describe(left.Type)}' and '{Describe(right.Type)}'");
+            IrType bt = be.Op is "<<" or ">>" ? left.Type
+                      : NumRank(left.Type) >= NumRank(right.Type) ? left.Type : right.Type;
+            return new IrBinOp(be.Op, left, right, bt);
+        }
+
+        if (!(IsArith(left.Type) && IsArith(right.Type)))
+            diag.Error(Codes.TypeMismatch, ctx.File, be.Span,
+                $"operator '{be.Op}' cannot be applied to '{Describe(left.Type)}' and '{Describe(right.Type)}'");
+        IrType t = NumRank(left.Type) >= NumRank(right.Type) ? left.Type : right.Type;
+        return new IrBinOp(be.Op, left, right, t);
     }
 
     // Parse an integer literal lexeme (hex or decimal, with an optional u/U/l/L suffix).
