@@ -184,10 +184,13 @@ sealed class SymbolTable
     /// </summary>
     public void RegisterEnum(string name, IEnumerable<string> members) => Enums[name] = [.. members];
 
+    public bool IsEnum(string name) => Enums.ContainsKey(name);
+
     /// <summary>
     /// Returns true if the name is a declared enum type.
     /// </summary>
-    public bool IsEnum(string name) => Enums.ContainsKey(name);
+    public bool IsEnum(ReadOnlySpan<char> name) =>
+        Enums.GetAlternateLookup<ReadOnlySpan<char>>().ContainsKey(name);
 
     /// <summary>
     /// Returns true if the member belongs to the named enum.
@@ -202,10 +205,13 @@ sealed class SymbolTable
     /// </summary>
     public void RegisterUnion(string name, List<UnionVariant> variants) => Unions[name] = variants;
 
+    public bool IsUnion(string name) => Unions.ContainsKey(name);
+
     /// <summary>
     /// Returns true if the name is a declared union type.
     /// </summary>
-    public bool IsUnion(string name) => Unions.ContainsKey(name);
+    public bool IsUnion(ReadOnlySpan<char> name) =>
+        Unions.GetAlternateLookup<ReadOnlySpan<char>>().ContainsKey(name);
 
     /// <summary>
     /// Returns the variant list for the named union, or null if not declared.
@@ -216,15 +222,24 @@ sealed class SymbolTable
 
     #region Lookup
 
+    public bool IsClass(string name) => _classes.ContainsKey(name);
+
     /// <summary>
     /// Returns true if the name is a declared class.
     /// </summary>
-    public bool IsClass(string name) => _classes.ContainsKey(name);
+    public bool IsClass(ReadOnlySpan<char> name) =>
+        _classes.GetAlternateLookup<ReadOnlySpan<char>>().ContainsKey(name);
 
     /// <summary>
     /// Returns the source file that declared the named class, or null if not found.
     /// </summary>
     public string? ClassModule(string name) => _classes.TryGetValue(name, out var s) ? s.Module : null;
+
+    /// <summary>
+    /// Returns the source file that declared the named class, or null if not found.
+    /// </summary>
+    public string? ClassModule(ReadOnlySpan<char> name) =>
+        _classes.GetAlternateLookup<ReadOnlySpan<char>>().TryGetValue(name, out var s) ? s.Module : null;
 
     /// <summary>
     /// Returns the last registered overload of the named method, or null if not found.
