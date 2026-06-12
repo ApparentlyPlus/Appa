@@ -205,6 +205,39 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
 
     #endregion
 
+    #region Result types
+
+    /// <summary>
+    /// Emits Result_T struct typedefs for every throws function return type, forward-declaring
+    /// any class pointer types they reference so the shared header stays self-contained.
+    /// </summary>
+    void EmitResultTypedefs()
+    {
+        var forwarded = new HashSet<string>();
+        foreach (var (_, innerType) in module.Symbols.ResultTypedefs)
+        {
+            if (module.Symbols.IsClass(innerType))
+            {
+                if (forwarded.Add(innerType) && FirstInto(_sharedH, 'T', innerType))
+                {
+                    string cn = Mangler.Class(innerType);
+                    _sharedH.Line($"typedef struct {cn} {cn};");
+                }
+            }
+        }
+        if (forwarded.Count > 0) _sharedH.Line("");
+
+        foreach (var (resultType, innerType) in module.Symbols.ResultTypedefs)
+        {
+            string ct = module.Symbols.CType(innerType);
+            if (FirstInto(_sharedH, 'S', resultType))
+                _sharedH.Line($"typedef struct {{ {ct} value; bool has_error; }} {resultType};");
+        }
+        if (module.Symbols.ResultTypedefs.Count > 0) _sharedH.Line("");
+    }
+
+    #endregion
+
     #region Function pointer types
 
     /// <summary>
