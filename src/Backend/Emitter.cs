@@ -83,12 +83,25 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// </summary>
     void EmitEnums()
     {
-        foreach (var e in module.Enums)
+        var enums = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(module.Enums);
+        for (int i = 0; i < enums.Length; i++)
         {
-            var parts = e.Members.Select(m =>
-                m.CValue is null ? Mangler.EnumMember(e.Name, m.Name)
-                                 : $"{Mangler.EnumMember(e.Name, m.Name)} = {m.CValue}");
-            _sharedH.Line($"typedef enum {{ {string.Join(", ", parts)} }} {e.CName};");
+            var e = enums[i];
+            var sb = new System.Text.StringBuilder();
+            sb.Append("typedef enum { ");
+            var members = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(e.Members);
+            for (int j = 0; j < members.Length; j++)
+            {
+                if (j > 0) sb.Append(", ");
+                var m = members[j];
+                sb.Append(Mangler.EnumMember(e.Name, m.Name));
+                if (m.CValue != null)
+                {
+                    sb.Append(" = ").Append(m.CValue);
+                }
+            }
+            sb.Append(" } ").Append(e.CName).Append(';');
+            _sharedH.Line(sb.ToString());
         }
         if (module.Enums.Count > 0) _sharedH.Line("");
     }
@@ -99,20 +112,42 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// </summary>
     void EmitUnions()
     {
-        foreach (var u in module.Unions)
+        var unions = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(module.Unions);
+        for (int i = 0; i < unions.Length; i++)
         {
+            var u = unions[i];
             using (_sharedH.Block("typedef struct {", $"}} {u.CName};"))
             {
                 _sharedH.Line("int __tag;");
-                var withFields = u.Variants.Where(v => v.Fields.Count > 0).ToList();
-                if (withFields.Count > 0)
+                
+                bool hasFields = false;
+                var variants = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(u.Variants);
+                for (int j = 0; j < variants.Length; j++)
+                {
+                    if (variants[j].Fields.Count > 0) { hasFields = true; break; }
+                }
+                
+                if (hasFields)
                 {
                     using (_sharedH.Block("union {", "} payload;"))
-                        foreach (var v in withFields)
+                    {
+                        for (int j = 0; j < variants.Length; j++)
                         {
-                            string fields = string.Join(" ", v.Fields.Select(f => $"{f.Type.ToCType()} {f.Name};"));
-                            _sharedH.Line($"struct {{ {fields} }} {v.Name};");
+                            var v = variants[j];
+                            if (v.Fields.Count == 0) continue;
+                            
+                            var sb = new System.Text.StringBuilder();
+                            sb.Append("struct { ");
+                            var fields = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(v.Fields);
+                            for (int k = 0; k < fields.Length; k++)
+                            {
+                                var f = fields[k];
+                                sb.Append(f.Type.ToCType()).Append(' ').Append(f.Name).Append("; ");
+                            }
+                            sb.Append("} ").Append(v.Name).Append(';');
+                            _sharedH.Line(sb.ToString());
                         }
+                    }
                 }
             }
         }
@@ -539,39 +574,331 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
 
     #endregion
 
-    #region Stubs
+    #region Free functions
+
+    /// <summary>
+    /// Emits a free function into the appropriate translation unit sections based on its flags.
+    /// Entry functions go to the kernel; library functions are static-inline into both units;
+    /// all others are forwarded and emitted into the realm they belong to.
+    /// </summary>
+    void EmitFreeFunc(IrFunction fn)
+    {
+        if (fn.IsEntry)
+        {
+            _kFwd.Line($"void {fn.CName}(void);");
+            _kFuncs.Line($"void {fn.CName}(void)");
+            EmitBlock(fn.Body!, _kFuncs);
+            _kFuncs.Line("");
+            return;
+        }
+
+        if (fn.IsLib)
+        {
+            _kFwd.Line($"static inline {FuncSig(fn)};");
+            _uFwd.Line($"static inline {FuncSig(fn)};");
+            if (fn.Body == null)
+            {
+                EmitLibFreeFuncNative(fn, _kFuncs, isKernel: true);
+                EmitLibFreeFuncNative(fn, _uFunc,  isKernel: false);
+            }
+            else
+            {
+                _kFuncs.Line($"static inline {FuncSig(fn)}");
+                EmitBlock(fn.Body, _kFuncs); _kFuncs.Line("");
+                _uFunc.Line($"static inline {FuncSig(fn)}");
+                EmitBlock(fn.Body, _uFunc);  _uFunc.Line("");
+            }
+            return;
+        }
+
+        bool isKernel = fn.Vis == Visibility.Kernel;
+        var fwd   = isKernel ? _kFwd   : _uFwd;
+        var funcs = isKernel ? _kFuncs : _uFunc;
+        fwd.Line($"{FuncSig(fn)};");
+        if (fn.Body == null)
+        {
+            string body = TrimC(isKernel ? fn.NativeKernel ?? "" : fn.NativeUser ?? "");
+            funcs.Line($"{FuncSig(fn)}");
+            using (funcs.Braces()) funcs.Line(body); funcs.Blank();
+        }
+        else
+        {
+            funcs.Line($"{FuncSig(fn)}");
+            EmitBlock(fn.Body, funcs);
+            funcs.Line("");
+        }
+    }
+
+    /// <summary>
+    /// Emits a native library free function into the given writer for the given realm.
+    /// </summary>
+    void EmitLibFreeFuncNative(IrFunction fn, CodeWriter w, bool isKernel)
+    {
+        string body = TrimC(isKernel ? fn.NativeKernel ?? "" : fn.NativeUser ?? "");
+        w.Line($"static inline {FuncSig(fn)}");
+        using (w.Braces()) w.Line(body); w.Blank();
+    }
+
+    /// <summary>
+    /// Emits the entry function for a thread into its realm writer.
+    /// </summary>
+    void EmitThread(IrThread t)
+    {
+        if (t.EntryFunc is not { } entry) return;
+        var w = entry.Vis == Visibility.Kernel ? _kFuncs : _uFunc;
+        w.Line($"void {entry.CName}(void* arg)");
+        EmitBlock(entry.Body!, w);
+        w.Blank();
+    }
+
+    #endregion
+
+    #region Blocks and statements
+
+    /// <summary>
+    /// Emits a function body — native C text or a lowered IR block — into the given writer.
+    /// </summary>
+    void EmitFunctionBody(IrFunction m, CodeWriter w, bool isLib, bool isKernel)
+    {
+        string prefix = isLib ? "static inline " : "";
+        if (m.Body == null)
+        {
+            string body = TrimC(isKernel ? m.NativeKernel ?? "" : m.NativeUser ?? "");
+            w.Line($"{prefix}{MethodSig(m)}");
+            using (w.Braces()) w.Line(body); w.Blank();
+            return;
+        }
+        w.Line($"{prefix}{MethodSig(m)}");
+        EmitBlock(m.Body, w);
+        w.Line("");
+    }
+
+    /// <summary>
+    /// Emits an operator body — native C text or a lowered IR block — into the given writer.
+    /// </summary>
+    void EmitOperatorBody(IrOperator o, CodeWriter w, bool isLib, bool isKernel)
+    {
+        string prefix = isLib ? "static inline " : "";
+        if (o.Body == null)
+        {
+            string body = TrimC(isKernel ? o.NativeKernel ?? "" : o.NativeUser ?? "");
+            w.Line($"{prefix}{OperatorSig(o)}");
+            using (w.Braces()) w.Line(body); w.Blank();
+            return;
+        }
+        w.Line($"{prefix}{OperatorSig(o)}");
+        EmitBlock(o.Body, w);
+        w.Line("");
+    }
+
+    /// <summary>
+    /// Emits every statement in a block inside a C brace pair.
+    /// </summary>
+    void EmitBlock(IrBlock b, CodeWriter w)
+    {
+        using var _ = w.Braces();
+        foreach (var s in b.Stmts) EmitStmt(s, w);
+    }
+
+    /// <summary>
+    /// Dispatches a single IR statement to its C emission handler.
+    /// </summary>
+    void EmitStmt(IrStmt s, CodeWriter w)
+    {
+        switch (s)
+        {
+            case IrRaw r:         w.Line(r.Code); break;
+            case IrNativeStmt ns: w.Line(TrimC(ns.KernelC)); break;
+            case IrBlock b:       EmitBlock(b, w); break;
+            case IrUnsafeBlock u: EmitBlock(u.Body, w); break;
+            case IrDeclVar dv:    EmitDeclVar(dv, w); break;
+            case IrAssign a:      w.Line($"{EmitExpr(a.Target)} {a.Op} {EmitExpr(a.Value)};"); break;
+            case IrExprStmt es:   w.Line($"{EmitExpr(es.Expr)};"); break;
+            case IrReturn rs:     w.Line(rs.Value == null ? "return;" : $"return {EmitExpr(rs.Value)};"); break;
+            case IrBreak:         w.Line("break;"); break;
+            case IrContinue:      w.Line("continue;"); break;
+            case IrDebug d:       w.Line($"_env_dbg({d.Raw});"); break;
+            case IrPanic p:       w.Line($"_env_panic({p.Raw});"); break;
+            case IrIf ifs:        EmitIf(ifs, w); break;
+            case IrWhile ws:      w.Line($"while ({EmitExpr(ws.Cond)})"); EmitBlock(ws.Body, w); break;
+            case IrFor fr:        EmitFor(fr, w); break;
+            default: throw new InvalidOperationException($"[Emitter] unhandled IrStmt: {s.GetType().Name}");
+        }
+    }
+
+    /// <summary>
+    /// Emits a local variable declaration with an appropriate default when no initializer is given.
+    /// </summary>
+    void EmitDeclVar(IrDeclVar dv, CodeWriter w)
+    {
+        if (dv.Init != null) { w.Line($"{dv.Type.ToCType()} {dv.Name} = {EmitExpr(dv.Init)};"); return; }
+        w.Line(dv.Type is IrArrayType or IrUnionType ? $"{dv.Type.ToCType()} {dv.Name} = {{0}};"
+             : IsManaged(dv.Type)                    ? $"{dv.Type.ToCType()} {dv.Name} = NULL;"
+             :                                          $"{dv.Type.ToCType()} {dv.Name};");
+    }
+
+    /// <summary>
+    /// Emits an if/else statement with optional else branch.
+    /// </summary>
+    void EmitIf(IrIf ifs, CodeWriter w)
+    {
+        w.Line($"if ({EmitExpr(ifs.Cond)})");
+        EmitBlock(ifs.Then, w);
+        if (ifs.Else != null) { w.Line("else"); EmitBlock(ifs.Else, w); }
+    }
+
+    /// <summary>
+    /// Emits a C-style for loop from the IR for node.
+    /// </summary>
+    void EmitFor(IrFor fr, CodeWriter w)
+    {
+        string init = fr.Init switch
+        {
+            IrDeclVar dv => dv.Init != null
+                ? $"{dv.Type.ToCType()} {dv.Name} = {EmitExpr(dv.Init)}"
+                : $"{dv.Type.ToCType()} {dv.Name}",
+            IrAssign aa  => $"{EmitExpr(aa.Target)} {aa.Op} {EmitExpr(aa.Value)}",
+            IrExprStmt e => EmitExpr(e.Expr),
+            _            => ""
+        };
+        string cond = fr.Cond != null ? EmitExpr(fr.Cond) : "";
+        string step = fr.Step != null ? EmitExpr(fr.Step) : "";
+        w.Line($"for ({init}; {cond}; {step})");
+        EmitBlock(fr.Body, w);
+    }
+
+    #endregion
+
+    #region Expressions
+
+    /// <summary>
+    /// Emits an IR expression and returns the corresponding C text. Every node kind
+    /// must be fully resolved before reaching this method; unrecognised nodes throw.
+    /// </summary>
+    string EmitExpr(IrExpr e) => e switch
+    {
+        IrLitInt    li => li.CText ?? li.Value.ToString(),
+        IrLitChar   lc => lc.Codepoint.ToString(),
+        IrLitFloat  lf => lf.Raw,
+        IrLitBool   lb => lb.Value ? "true" : "false",
+        IrLitString ls => $"GATA_STRLIT({IrType.String.ToCType().TrimEnd('*')}, {ls.Raw})",
+        IrLitNull      => "NULL",
+        IrEnumConst ec => Mangler.EnumMember(ec.EnumName, ec.Member),
+        IrVar      v   => v.IsRef ? $"(*{v.Name})" : v.Name,
+        IrSelfExpr     => "self",
+        IrFieldLoad fl => fl.Obj.Type is IrUnionType
+                            ? $"{EmitExpr(fl.Obj)}.{fl.Field}"
+                            : $"{EmitExpr(fl.Obj)}->{fl.Field}",
+        IrIndex    ix  => ix.Obj.Type is IrArrayType
+                            ? $"({EmitExpr(ix.Obj)})._[{EmitExpr(ix.Idx)}]"
+                            : $"{EmitExpr(ix.Obj)}[{EmitExpr(ix.Idx)}]",
+        IrStaticCall   sc  => $"{sc.CName}({string.Join(", ", sc.Args.Select(EmitExpr))})",
+        IrInstanceCall ic  => $"{ic.CName}({string.Join(", ", new[] { EmitExpr(ic.Recv) }.Concat(ic.Args.Select(EmitExpr)))})",
+        IrBinOp    bo => $"({EmitExpr(bo.Left)} {bo.Op} {EmitExpr(bo.Right)})",
+        IrTernary  tn => $"({EmitExpr(tn.Cond)} ? {EmitExpr(tn.Then)} : {EmitExpr(tn.Else)})",
+        IrUnaryOp  uo => $"{uo.Op}{EmitExpr(uo.Operand)}",
+        IrPostfix  pf => $"{EmitExpr(pf.Operand)}{pf.Op}",
+        IrCast     c  => $"(({c.To.ToCType()}){EmitExpr(c.Value)})",
+        IrNew      n  => $"{Mangler.Allocator(n.ClassName)}({string.Join(", ", n.Args.Select(EmitExpr))})",
+        IrArrayLit al => $"({al.ArrType.ToCType()}){{ {{ {string.Join(", ", al.Elems.Select(EmitExpr))} }} }}",
+        IrAddrOf   ao => $"(&{EmitExpr(ao.Target)})",
+        IrDeref    dr => $"(*{EmitExpr(dr.Ptr)})",
+        IrSizeof   so => $"sizeof({so.Of.ToCType()})",
+        IrDefault  df => $"(({df.Of.ToCType()})0)",
+        IrFuncRef  fr => fr.CName,
+        IrIndirectCall  ic2 => $"({EmitExpr(ic2.Target)})({string.Join(", ", ic2.Args.Select(EmitExpr))})",
+        IrUnionConstruct uc => EmitUnionConstruct(uc),
+        IrUnionField     uf => $"{EmitExpr(uf.Union)}.payload.{UnionVariantName(uf.Union.Type, uf.VariantIndex)}.{uf.Field}",
+        _ => throw new InvalidOperationException($"[Emitter] Unhandled IrExpr: {e.GetType().Name}")
+    };
+
+    /// <summary>
+    /// Emits a union construction expression, building the tag and payload compound literal.
+    /// </summary>
+    string EmitUnionConstruct(IrUnionConstruct uc)
+    {
+        var u = module.Unions.First(x => x.Name == uc.T.Name);
+        var variant = u.Variants[uc.VariantIndex];
+        if (variant.Fields.Count == 0)
+            return $"({uc.T.ToCType()}){{ .__tag = {uc.VariantIndex} }}";
+        var inits = variant.Fields.Zip(uc.Args, (f, a) => $".{f.Name} = {EmitExpr(a)}");
+        return $"({uc.T.ToCType()}){{ .__tag = {uc.VariantIndex}, .payload.{variant.Name} = {{ {string.Join(", ", inits)} }} }}";
+    }
+
+    /// <summary>
+    /// Returns the struct field name for a union variant at the given index.
+    /// </summary>
+    string UnionVariantName(IrType unionType, int idx) =>
+        unionType is IrUnionType ut ? module.Unions.First(u => u.Name == ut.Name).Variants[idx].Name : "?";
+
+    #endregion
+
+    #region Utilities
+
+    /// <summary>
+    /// Strips uniform leading indentation from raw C text so embedded native bodies
+    /// re-indent correctly at whatever depth the writer is currently at.
+    /// </summary>
+    static string TrimC(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return "";
+        
+        ReadOnlySpan<char> textSpan = raw.AsSpan();
+        int minI = int.MaxValue;
+        
+        // Pass 1: Find minimum indentation
+        int offset = 0;
+        while (offset < textSpan.Length)
+        {
+            int next = textSpan[offset..].IndexOf('\n');
+            ReadOnlySpan<char> line = next >= 0 ? textSpan.Slice(offset, next) : textSpan[offset..];
+            offset += next >= 0 ? next + 1 : textSpan.Length - offset;
+
+            if (line.Length > 0 && line[^1] == '\r') line = line[..^1];
+            if (MemoryExtensions.IsWhiteSpace(line)) continue;
+            
+            int i = 0; 
+            while (i < line.Length && (line[i] == ' ' || line[i] == '\t')) i++;
+            if (i < minI) minI = i;
+        }
+        
+        if (minI == int.MaxValue) minI = 0;
+        
+        // Pass 2: Re-indent lines
+        var sb = new System.Text.StringBuilder();
+        offset = 0;
+        while (offset < textSpan.Length)
+        {
+            int next = textSpan[offset..].IndexOf('\n');
+            ReadOnlySpan<char> line = next >= 0 ? textSpan.Slice(offset, next) : textSpan[offset..];
+            offset += next >= 0 ? next + 1 : textSpan.Length - offset;
+
+            if (line.Length > 0 && line[^1] == '\r') line = line[..^1];
+            
+            if (MemoryExtensions.IsWhiteSpace(line))
+            {
+                sb.AppendLine();
+            }
+            else
+            {
+                ReadOnlySpan<char> sliced = line.Length > minI ? line[minI..] : line;
+                sb.Append(sliced).AppendLine();
+            }
+        }
+        
+        // Trim trailing newlines directly on the StringBuilder
+        while (sb.Length > 0 && char.IsWhiteSpace(sb[sb.Length - 1]))
+        {
+            sb.Length--;
+        }
+        return sb.ToString();
+    }
 
     /// <summary>
     /// Resolves a compiler runtime role to the C symbol bound via an intrinsic annotation.
     /// Implemented in a later commit.
     /// </summary>
     string Intrinsic(string role) => throw new NotImplementedException();
-
-    /// <summary>
-    /// Emits the body of a function or method into the given writer.
-    /// Implemented in a later commit.
-    /// </summary>
-    void EmitFunctionBody(IrFunction m, CodeWriter w, bool isLib, bool isKernel) =>
-        throw new NotImplementedException();
-
-    /// <summary>
-    /// Emits the body of an operator overload into the given writer.
-    /// Implemented in a later commit.
-    /// </summary>
-    void EmitOperatorBody(IrOperator o, CodeWriter w, bool isLib, bool isKernel) =>
-        throw new NotImplementedException();
-
-    /// <summary>
-    /// Emits the statements of a block into the given writer.
-    /// Implemented in a later commit.
-    /// </summary>
-    void EmitBlock(IrBlock b, CodeWriter w) => throw new NotImplementedException();
-
-    /// <summary>
-    /// Emits an expression and returns its C text representation.
-    /// Implemented in a later commit.
-    /// </summary>
-    string EmitExpr(IrExpr e) => throw new NotImplementedException();
 
     #endregion
 }
