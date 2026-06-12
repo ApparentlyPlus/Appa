@@ -156,6 +156,28 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
 
     #endregion
 
+    #region Fixed-array types
+
+    /// <summary>
+    /// Emits a C struct wrapper for each distinct fixed-array type used in the module.
+    /// Ordered by nesting depth so array-of-array element types are defined first.
+    /// </summary>
+    void EmitArrayTypes()
+    {
+        static int Depth(IrType t) => t is IrArrayType a ? 1 + Depth(a.Elem) : 0;
+        bool any = false;
+        foreach (var a in module.ArrayTypes.Where(a => a.Size > 0).OrderBy(Depth))
+        {
+            string cn = a.ToCType();
+            if (!FirstInto(_sharedH, 'S', cn)) continue;
+            _sharedH.Line($"typedef struct {{ {a.Elem.ToCType()} _[{a.Size}]; }} {cn};");
+            any = true;
+        }
+        if (any) _sharedH.Line("");
+    }
+
+    #endregion
+
     #region Classes
 
     /// <summary>
