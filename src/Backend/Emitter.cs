@@ -164,13 +164,80 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// </summary>
     void EmitArrayTypes()
     {
-        static int Depth(IrType t) => t is IrArrayType a ? 1 + Depth(a.Elem) : 0;
-        bool any = false;
-        foreach (var a in module.ArrayTypes.Where(a => a.Size > 0).OrderBy(Depth))
+        var list = new List<IrArrayType>(module.ArrayTypes.Count);
+        for (int i = 0; i < module.ArrayTypes.Count; i++)
         {
+            var a = module.ArrayTypes[i];
+            if (a.Size > 0) list.Add(a);
+        }
+
+        if (list.Count == 0) return;
+
+        list.Sort(new ArrayTypeDepthComparer());
+
+        bool any = false;
+        var span = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(list);
+        for (int i = 0; i < span.Length; i++)
+        {
+            var a = span[i];
             string cn = a.ToCType();
             if (!FirstInto(_sharedH, 'S', cn)) continue;
             _sharedH.Line($"typedef struct {{ {a.Elem.ToCType()} _[{a.Size}]; }} {cn};");
+            any = true;
+        }
+        if (any) _sharedH.Line("");
+    }
+
+    /// <summary>
+    /// Comparer to sort fixed-array types by their nesting depth.
+    /// </summary>
+    struct ArrayTypeDepthComparer : IComparer<IrArrayType>
+    {
+        public readonly int Compare(IrArrayType? x, IrArrayType? y)
+        {
+            if (x == null) return y == null ? 0 : -1;
+            if (y == null) return 1;
+            return Depth(x).CompareTo(Depth(y));
+        }
+
+        static int Depth(IrType t) => t is IrArrayType a ? 1 + Depth(a.Elem) : 0;
+    }
+
+    #endregion
+
+    #region Function pointer types
+
+    /// <summary>
+    /// Emits a C function-pointer typedef for each distinct function-pointer type used in
+    /// the module. Emitted after enums, unions, and array types so any referenced types
+    /// are already visible.
+    /// </summary>
+    void EmitFuncPtrTypedefs()
+    {
+        bool any = false;
+        var funcPtrs = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(module.FuncPtrTypes);
+        for (int i = 0; i < funcPtrs.Length; i++)
+        {
+            var f = funcPtrs[i];
+            string cn = f.ToCType();
+            if (!FirstInto(_sharedH, 'F', cn)) continue;
+
+            var sb = new System.Text.StringBuilder();
+            sb.Append("typedef ").Append(f.Ret.ToCType()).Append(" (*").Append(cn).Append(")(");
+            if (f.Params.Count == 0)
+            {
+                sb.Append("void");
+            }
+            else
+            {
+                for (int j = 0; j < f.Params.Count; j++)
+                {
+                    if (j > 0) sb.Append(", ");
+                    sb.Append(f.Params[j].ToCType());
+                }
+            }
+            sb.Append(");");
+            _sharedH.Line(sb.ToString());
             any = true;
         }
         if (any) _sharedH.Line("");
