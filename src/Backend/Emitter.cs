@@ -349,7 +349,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
             using (types.Block($"struct {cls.CName} {{", "};"))
             {
                 EmitObjHeader(types);
-                foreach (var rf in cls.RawFields) types.Line(rf.Kernel);
+                foreach (var rf in cls.RawFields) types.Line(TrimC(isKernel ? rf.Kernel : rf.User));
                 foreach (var f in cls.Fields)
                     types.Line($"{f.Type.ToCType()} {f.Name}; /* field */");
             }
