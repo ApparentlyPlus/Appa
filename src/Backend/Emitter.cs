@@ -281,6 +281,63 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
 
     #endregion
 
+    #region Native blocks
+
+    /// <summary>
+    /// Emits a native block into the appropriate preamble, types, or boot section based
+    /// on the block's section tag, then routes to the kernel or user writer by visibility.
+    /// </summary>
+    void EmitNativeBlock(IrNativeBlock nb)
+    {
+        string kt = TrimC(nb.KernelC), ut = TrimC(nb.UserC);
+        var (kw, uw) = nb.Section switch
+        {
+            NativeSection.Preamble => (_kPre, _uPre),
+            NativeSection.Boot     => (_kBoot, (CodeWriter?)null),
+            _                      => (_kTypes, _uTypes),
+        };
+        static void Put(CodeWriter? w, string body) { if (w != null) { w.Line(body); w.Line(""); } }
+        switch (nb.Vis)
+        {
+            case Visibility.Kernel: Put(kw, kt); break;
+            case Visibility.User: Put(uw, ut); break;
+            default: Put(kw, kt); Put(uw, ut); break;
+        }
+    }
+
+    /// <summary>
+    /// Emits a native type struct and typedef into the appropriate writer. When kernel and
+    /// user bodies are identical the type goes to the shared header; otherwise each realm
+    /// gets its own copy. Duplicate emission within a writer is suppressed via FirstInto.
+    /// </summary>
+    void EmitNativeType(IrNativeType nt)
+    {
+        void EmitTo(CodeWriter w, string body)
+        {
+            if (!FirstInto(w, 'N', nt.Name)) return;
+            w.Line($"typedef struct {nt.CName} {nt.CName};");
+            using (w.Block($"struct {nt.CName} {{", "};"))
+                w.Line(TrimC(body));
+            w.Blank();
+        }
+        switch (nt.Vis)
+        {
+            case Visibility.Kernel: EmitTo(_kTypes, nt.KernelC); break;
+            case Visibility.User: EmitTo(_uTypes, nt.UserC);   break;
+            default:
+                if (nt.KernelC == nt.UserC)
+                    EmitTo(_sharedH, nt.KernelC);
+                else
+                {
+                    EmitTo(_kTypes, nt.KernelC);
+                    EmitTo(_uTypes, nt.UserC);
+                }
+                break;
+        }
+    }
+
+    #endregion
+
     #region Classes
 
     /// <summary>
