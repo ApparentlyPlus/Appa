@@ -57,7 +57,45 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Emits all sections and returns them for Layout to compose into files.
     /// </summary>
-    public EmitOutput Build() => throw new NotImplementedException();
+    public EmitOutput Build()
+    {
+        EmitForwardTypedefs();
+        EmitEnums();
+        EmitUnions();
+        EmitFuncPtrTypedefs();
+        EmitArrayTypes();
+        EmitIntrinsicProtos();
+        EmitResultTypedefs();
+
+        var nativeBlocks = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(module.NativeBlocks);
+        for (int i = 0; i < nativeBlocks.Length; i++) EmitNativeBlock(nativeBlocks[i]);
+
+        var nativeTypes = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(module.NativeTypes);
+        for (int i = 0; i < nativeTypes.Length; i++) EmitNativeType(nativeTypes[i]);
+
+        var classes = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(module.Classes);
+        for (int i = 0; i < classes.Length; i++) EmitClass(classes[i]);
+
+        var freeFuncs = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(module.FreeFunctions);
+        for (int i = 0; i < freeFuncs.Length; i++) EmitFreeFunc(freeFuncs[i]);
+
+        var processes = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(module.Processes);
+        for (int i = 0; i < processes.Length; i++)
+        {
+            var proc = processes[i];
+            var threads = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(proc.Threads);
+            for (int j = 0; j < threads.Length; j++)
+            {
+                EmitThread(threads[j]);
+            }
+        }
+
+        return new EmitOutput(
+            _sharedH.ToString(),
+            _kPre.ToString(), _kTypes.ToString(), _kFwd.ToString(), _kFuncs.ToString(), _kBoot.ToString(),
+            _uPre.ToString(), _uTypes.ToString(), _uFwd.ToString(), _uFunc.ToString(),
+            module.Processes, module.HasKernelRealm, module.HasUserRealm);
+    }
 
     #region Forward typedefs
 
