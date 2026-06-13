@@ -23,6 +23,9 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     // and a generated destructor.
     readonly HashSet<string> _managed = InitializeManaged(module);
 
+    // Roles for which no @intrinsic binding was found; each role is reported once.
+    readonly HashSet<string> _missingRoles = [];
+
     /// <summary>
     /// Populates and returns the set of ARC-managed class names from the module.
     /// </summary>
@@ -955,6 +958,42 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
 
     #endregion
 
+    #region Intrinsic prototypes
+
+    /// <summary>
+    /// Emits a static-inline prototype into the shared header for every free function
+    /// annotated with an intrinsic role binding. Skips duplicates via FirstInto.
+    /// </summary>
+    void EmitIntrinsicProtos()
+    {
+        bool any = false;
+        var funcs = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(module.FreeFunctions);
+        for (int i = 0; i < funcs.Length; i++)
+        {
+            var fn = funcs[i];
+            
+            bool hasIntrinsic = false;
+            var anns = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(fn.Annotations);
+            for (int j = 0; j < anns.Length; j++)
+            {
+                if (anns[j] is IntrinsicAnnotation)
+                {
+                    hasIntrinsic = true;
+                    break;
+                }
+            }
+            
+            if (hasIntrinsic && FirstInto(_sharedH, 'P', fn.CName))
+            {
+                _sharedH.Line($"static inline {FuncSig(fn)};");
+                any = true;
+            }
+        }
+        if (any) _sharedH.Line("");
+    }
+
+    #endregion
+
     #region Utilities
 
     /// <summary>
@@ -1017,10 +1056,18 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     }
 
     /// <summary>
-    /// Resolves a compiler runtime role to the C symbol bound via an intrinsic annotation.
-    /// Implemented in a later commit.
+    /// Resolves a compiler runtime role to the C symbol name bound via an intrinsic annotation.
+    /// Emits a diagnostic and returns a placeholder comment if no binding exists.
     /// </summary>
-    string Intrinsic(string role) => throw new NotImplementedException();
+    string Intrinsic(string role)
+    {
+        var n = module.Symbols.IntrinsicOrNull(role);
+        if (n != null) return n;
+        if (_missingRoles.Add(role))
+            _diag.Error(Codes.MissingIntrinsic, "<runtime>", TextSpan.None,
+                $"no libgata symbol provides @intrinsic({role})");
+        return $"/*MISSING_INTRINSIC:{role}*/";
+    }
 
     #endregion
 }
