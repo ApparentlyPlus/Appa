@@ -976,24 +976,104 @@ sealed class TypeResolver(
         return new IrClassRef(t.ToString());
     }
 
-    // Declaration resolvers -- class/method/function resolution added in a later commit.
-    /// <summary>
-    /// Resolves a class declaration to its IR form. Implemented when class resolution is added.
-    /// </summary>
-    IrClass ResolveClass(ClassDecl cd, ResolveCtx ctx) =>
-        throw new NotImplementedException($"[TypeResolver] ResolveClass('{cd.Name}') -- class resolution not yet implemented");
+    #region Declaration resolvers
 
     /// <summary>
-    /// Resolves a method declaration to its IR form. Implemented when class resolution is added.
+    /// Resolves a class declaration, including all fields, methods, and operator overloads.
     /// </summary>
-    IrFunction ResolveMethod(string cls, MethodDecl md, ResolveCtx ctx, bool lib, Visibility vis, bool isModule) =>
-        throw new NotImplementedException($"[TypeResolver] ResolveMethod('{cls}.{md.Name}') -- class resolution not yet implemented");
+    IrClass ResolveClass(ClassDecl cd, ResolveCtx ctx)
+    {
+        bool lib = ctx.Context == "none";
+        var vis = VisOf(ctx.Context);
+        var classCtx = ctx.WithClass(cd.Name);
+
+        var rawFields = new List<RawFieldBlock>();
+        var fields = new List<IrField>();
+        var methods = new List<IrFunction>();
+        var operators = new List<IrOperator>();
+        var fieldInits = new Dictionary<string, IrExpr>();
+
+        foreach (var m in cd.Members)
+        {
+            switch (m)
+            {
+                case FieldsBlock fb:
+                    rawFields.Add(new RawFieldBlock(fb.Body.KernelC, fb.Body.UserC));
+                    break;
+                case FieldDecl fd:
+                    CheckType(fd.Type, classCtx, fd.Span);
+                    var ft = ResolveType(fd.Type ?? "void");
+                    IrExpr? init = null;
+                    if (fd.Init != null)
+                    {
+                        init = Coerce(ResolveExpr(fd.Init, classCtx.WithStatic(false)), ft, classCtx);
+                        CheckAssign(init, ft, $"field '{fd.Name}'", classCtx, Codes.TypeMismatch);
+                        fieldInits[fd.Name] = init;
+                    }
+                    fields.Add(new IrField(fd.Name, ft, init));
+                    break;
+                case MethodDecl md:
+                    methods.Add(ResolveMethod(cd.Name, md, classCtx, lib, vis, cd.IsModule));
+                    break;
+                case OperatorDecl od:
+                    operators.Add(ResolveOperator(cd.Name, od, classCtx, lib, vis));
+                    break;
+            }
+        }
+
+        return new IrClass(
+            cd.Name, Mangler.Class(cd.Name), lib, vis,
+            rawFields, fields, methods, operators,
+            hasInit.Contains(cd.Name), fieldInits, cd.IsModule,
+            Keep: cd.Annotations.Any(a => a is KeepAnnotation));
+    }
 
     /// <summary>
-    /// Resolves an operator declaration to its IR form. Implemented when class resolution is added.
+    /// Resolves a method declaration, type-checking its signature and body,
+    /// and declaring parameters and optionally 'self' in the method's scope.
     /// </summary>
-    IrOperator ResolveOperator(string cls, OperatorDecl od, ResolveCtx ctx, bool lib, Visibility vis) =>
-        throw new NotImplementedException($"[TypeResolver] ResolveOperator('{cls}.{od.Op}') -- class resolution not yet implemented");
+    IrFunction ResolveMethod(string cls, MethodDecl md, ResolveCtx ctx, bool lib, Visibility vis, bool isModule)
+    {
+        bool isStatic = md.Modifiers.Contains("static") || isModule;
+        if (!md.Throws) CheckType(md.ReturnType, ctx, md.Span, allowVoid: true);
+        foreach (var p in md.Params) CheckType(p.Type, ctx, p.Span);
+        CheckParams(md.Params, ctx);
+        var ret = md.Throws ? ResolveType(md.ReturnType ?? "int") : ResolveType(md.ReturnType ?? "void");
+        var pars = md.Params.Select(p => new IrParam(p.Name, ResolveType(p.Type), p.IsRef)).ToList();
+        string cname = Mangler.Method(cls, md.Name, md.Params, sym.IsOverloadedMethod(cls, md.Name));
+        var mctx = ctx.WithClass(cls).WithFunc(md.Name).WithStatic(isStatic)
+            .WithThrowsFunc(md.Throws).PushScope();
+        if (!isStatic) mctx.Scope.Declare("self", new IrClassRef(cls));
+        foreach (var p in md.Params) mctx.Scope.Declare(p.Name, ResolveType(p.Type), p.IsRef);
+        var (body, nk, nu) = ResolveBodyOrNative(md.Body, mctx, ret);
+        CheckMissingReturn(body, ret, md.Throws, md.Span, $"{Mangler.DisplayName(cls)}.{md.Name}", ctx);
+        if (body != null) CheckBodyQuality(body, ret, md.Span, ctx);
+        return new IrFunction(md.Name, cname, ret, pars, isStatic, md.IsEntry, md.Throws, lib, vis,
+            cls, body, nk, nu, [..md.Annotations]);
+    }
+
+    /// <summary>
+    /// Resolves an operator declaration, type-checking its signature and body
+    /// and registering 'self' and all parameters in the operator's scope.
+    /// </summary>
+    IrOperator ResolveOperator(string cls, OperatorDecl od, ResolveCtx ctx, bool lib, Visibility vis)
+    {
+        CheckType(od.ReturnType, ctx, od.Span, allowVoid: true);
+        foreach (var p in od.Params) CheckType(p.Type, ctx, p.Span);
+        CheckParams(od.Params, ctx);
+        var ret = ResolveType(od.ReturnType ?? (od.Op == "[]=" ? "void" : cls));
+        var pars = od.Params.Select(p => new IrParam(p.Name, ResolveType(p.Type), p.IsRef)).ToList();
+        string cname = Mangler.Operator(cls, od.Op);
+        var octx = ctx.WithClass(cls).WithFunc($"op_{Mangler.OpSuffix(od.Op)}").WithStatic(false).PushScope();
+        octx.Scope.Declare("self", new IrClassRef(cls));
+        foreach (var p in od.Params) octx.Scope.Declare(p.Name, ResolveType(p.Type), p.IsRef);
+        var (body, nk, nu) = ResolveBodyOrNative(od.Body, octx, ret);
+        CheckMissingReturn(body, ret, false, od.Span, $"operator {od.Op} on {Mangler.DisplayName(cls)}", ctx);
+        if (body != null) CheckBodyQuality(body, ret, od.Span, ctx);
+        return new IrOperator(od.Op, cname, ret, pars, cls, lib, vis, body, nk, nu);
+    }
+
+    #endregion
 
     /// <summary>
     /// Resolves a free function declaration, type-checking its signature and body,
@@ -1291,6 +1371,7 @@ sealed class TypeResolver(
             case UnaryExpr un: return ResolveUnary(un, ctx);
             case BinExpr be: return ResolveBin(be, ctx);
             case CallExpr ce: return ResolveCall(ce, ctx);
+            case MemberAccessExpr ma: return ResolveMemberAccess(ma, ctx);
             default:
                 throw new NotImplementedException($"[TypeResolver] unhandled Expr: {e.GetType().Name} -- additional expression forms added in later commits");
         }
@@ -1466,16 +1547,83 @@ sealed class TypeResolver(
 
         if (ClassInScope(name)) return new IrVar(name, new IrClassRef(name));
 
+        // A bare reference to an unambiguous, non-throws, non-entry free function
+        // decays to a function-pointer value. Ref-parameter functions are excluded
+        // because the func(...)->R type syntax has no position for 'ref'.
+        var fsym = sym.LookupFreeFunc(name);
+        if (fsym != null && FuncInScope(fsym))
+        {
+            if (sym.IsOverloadedFunc(name))
+            {
+                diag.Error(Codes.AmbiguousOverload, ctx.File, ie.Span,
+                    $"cannot take the address of overloaded function '{name}'");
+                return new IrVar(name, IrType.Int);
+            }
+            if (fsym.Sig!.IsEntry)
+            {
+                diag.Error(Codes.CallToEntry, ctx.File, ie.Span,
+                    $"'{name}' is an entry point and cannot be used as a value");
+                return new IrVar(name, IrType.Int);
+            }
+            if (fsym.Sig.IsThrows)
+            {
+                diag.Error(Codes.TypeMismatch, ctx.File, ie.Span,
+                    $"'{name}' is a 'throws' function and cannot be used as a function-pointer value");
+                return new IrVar(name, IrType.Int);
+            }
+            if (fsym.Sig.Params.Any(p => p.IsRef))
+            {
+                diag.Error(Codes.TypeMismatch, ctx.File, ie.Span,
+                    $"'{name}' has a 'ref' parameter and cannot be used as a function-pointer value " +
+                    "(func(...) -> R types cannot express which parameters are 'ref')");
+                return new IrVar(name, IrType.Int);
+            }
+            var ps = fsym.Sig.Params.Select(p => ResolveType(p.Type)).ToList();
+            return new IrFuncRef(fsym.CName, FnPtr(ResolveType(fsym.Sig.ReturnType), ps));
+        }
+
         string msg =
             sym.IsField(ctx.CurClass, name)
                 ? ctx.InStatic
                     ? $"'{name}' is an instance field and cannot be used in a static context"
                     : $"'{name}' is a field; write 'self.{name}'"
-              : sym.IsClass(name)
+                : sym.IsClass(name)
                     ? $"'{Mangler.DisplayName(name)}' is not in scope; import its module"
                     : $"'{name}' is not defined";
         diag.Error(Codes.UndefinedVariable, ctx.File, ie.Span, msg);
         return new IrVar(name, IrType.Int);
+    }
+
+    /// <summary>
+    /// Resolves a member access expression, handling enum constants and class field loads.
+    /// </summary>
+    IrExpr ResolveMemberAccess(MemberAccessExpr ma, ResolveCtx ctx)
+    {
+        // Enum member access: Color.Red.
+        if (ma.Object is IdentExpr eid && sym.IsEnum(eid.Name) && ctx.Scope.Lookup(eid.Name) == null)
+        {
+            if (!sym.IsEnumMember(eid.Name, ma.Member))
+                diag.Error(Codes.UndefinedVariable, ctx.File, ma.Span,
+                    $"enum '{eid.Name}' has no member '{ma.Member}'");
+            return new IrEnumConst(eid.Name, ma.Member) { Span = ma.Span };
+        }
+
+        var obj = ResolveExpr(ma.Object, ctx);
+        string? cls = ClassNameOf(obj.Type);
+        IrType fieldType = IrType.Int;
+        if (cls != null)
+        {
+            var ft = sym.FieldType(cls, ma.Member);
+            if (ft != null)
+            {
+                fieldType = ResolveType(ft);
+                CheckMemberAccess(cls, ma.Member, ctx, ma.Span);
+            }
+            else if (!HasOpaqueFields(cls))
+                diag.Error(Codes.UndefinedVariable, ctx.File, ma.Span,
+                    $"'{Mangler.DisplayName(cls)}' has no field '{ma.Member}'");
+        }
+        return new IrFieldLoad(obj, ma.Member, fieldType);
     }
 
     /// <summary>
@@ -1508,8 +1656,8 @@ sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Resolves a call expression, dispatching to member calls, indirect function-pointer calls,
-    /// or bare free-function calls, with overload resolution in each case.
+    /// Resolves a call expression: member calls, bare free-function calls, sibling method calls,
+    /// indirect function-pointer calls, and ARC intrinsics. Uses overload resolution throughout.
     /// </summary>
     IrExpr ResolveCall(CallExpr ce, ResolveCtx ctx)
     {
@@ -1517,93 +1665,150 @@ sealed class TypeResolver(
         // ref/non-ref matching and address-of wrapping happen in CoerceArgs once the callee is known.
         var args = ce.Args.Select(a => ResolveExpr(a is RefArgExpr ra ? ra.Target : a, ctx)).ToList();
 
-        // member access call: obj.Method(args)
+        // member access call: obj.Method(args) or ClassName.StaticMethod(args)
         if (ce.Callee is MemberAccessExpr ma)
         {
-            // Try to detect a bare type name used as the object.
-            string? objName = ma.Object is IdentExpr idObj ? idObj.Name : null;
+            string objName = ma.Object is IdentExpr oid ? oid.Name : "";
 
-            // Union variant construction: Shape.Circle(3.0).
             if (!string.IsNullOrEmpty(objName) && sym.IsUnion(objName) && ctx.Scope.Lookup(objName) == null)
                 return ResolveUnionConstruct(objName, ma.Member, args, ctx, ce.Span);
 
-            // Static call on a class: ClassName.StaticMethod(args).
             if (!string.IsNullOrEmpty(objName) && ClassInScope(objName.AsSpan()) && ctx.Scope.Lookup(objName) == null)
             {
-                var candidates = sym.MethodOverloads(objName, ma.Member);
-                var chosen = candidates.Count == 1 ? candidates[0]
-                    : candidates.FirstOrDefault(c => c.Sig?.Params.Count == args.Count);
-                if (chosen == null)
+                var msym = sym.LookupMethod(objName, ma.Member);
+                if (msym == null)
                 {
-                    diag.Error(Codes.UndefinedMethod, ctx.File, ce.Span,
-                        $"'{objName}' has no static method '{ma.Member}' matching {args.Count} argument(s)");
-                    return new IrLitInt(0);
+                    if (!IsOpaqueStruct(objName))
+                        diag.Error(Codes.UndefinedMethod, ctx.File, ce.Span,
+                            $"'{Mangler.DisplayName(objName)}' has no method '{ma.Member}'");
                 }
-                if (chosen.Sig?.Params.Count != args.Count)
-                    diag.Error(Codes.WrongArgCount, ctx.File, ce.Span,
-                        $"'{objName}.{ma.Member}' expects {chosen.Sig?.Params.Count} argument(s), got {args.Count}");
-                CoerceArgs(args, chosen.Sig, ctx, ce.Args);
-                var ret = chosen.Sig != null ? ResolveType(chosen.Sig.ReturnType) : IrType.Void;
-                return new IrStaticCall(chosen.CName, ret, args);
+                else if (msym.Sig is { IsStatic: false })
+                    diag.Error(Codes.StaticOnInstance, ctx.File, ce.Span,
+                        $"'{Mangler.DisplayName(objName)}.{ma.Member}' is an instance method; call it on a value");
+                CheckMemberAccess(objName, ma.Member, ctx, ce.Span);
+                var chosen = ChooseOverload(sym.MethodOverloads(objName, ma.Member), msym, args,
+                    $"{Mangler.DisplayName(objName)}.{ma.Member}", ctx, ce.Span);
+                string cn = chosen?.CName ?? Mangler.Method(objName, ma.Member, [], false);
+                var ret = chosen != null ? ResolveType(chosen.Type) : IrType.Void;
+                CoerceArgs(args, chosen?.Sig, ctx, ce.Args);
+                if (chosen?.Sig?.IsThrows == true)
+                    { CheckThrowsHandled(ctx, ce.Span); return new IrThrowsCall(cn, ret, args); }
+                return new IrStaticCall(cn, ret, args);
             }
 
-            // Instance call: recv.Method(args).
             var recv = ResolveExpr(ma.Object, ctx);
             string? cls = ClassNameOf(recv.Type);
-            if (cls == null)
+            if (cls != null)
             {
-                diag.Error(Codes.UndefinedMethod, ctx.File, ce.Span,
-                    $"cannot call method '{ma.Member}' on non-class type '{Describe(recv.Type)}'");
-                return new IrLitInt(0);
+                var msym = sym.LookupMethod(cls, ma.Member);
+                if (msym == null)
+                {
+                    // field holding a function pointer used as a callback
+                    var cbt = sym.FieldType(cls, ma.Member);
+                    if (cbt != null && ResolveType(cbt) is IrFuncPtrType cbfp)
+                    {
+                        CheckMemberAccess(cls, ma.Member, ctx, ce.Span);
+                        return ResolveIndirectCallArgs(new IrFieldLoad(recv, ma.Member, cbfp), cbfp, args, ctx, ce.Span, ce.Args);
+                    }
+                    if (!IsOpaqueStruct(cls))
+                        diag.Error(Codes.UndefinedMethod, ctx.File, ce.Span,
+                            $"'{Mangler.DisplayName(cls)}' has no method '{ma.Member}'");
+                }
+                else if (msym.Sig is { IsStatic: true })
+                    diag.Error(Codes.InstanceOnStatic, ctx.File, ce.Span,
+                        $"'{Mangler.DisplayName(cls)}.{ma.Member}' is static; call it as '{Mangler.DisplayName(cls)}.{ma.Member}(...)'");
+                CheckMemberAccess(cls, ma.Member, ctx, ce.Span);
+                var chosen = ChooseOverload(sym.MethodOverloads(cls, ma.Member), msym, args,
+                    $"{Mangler.DisplayName(cls)}.{ma.Member}", ctx, ce.Span);
+                string cn = chosen?.CName ?? Mangler.Method(cls, ma.Member, [], false);
+                var ret = chosen != null ? ResolveType(chosen.Type) : IrType.Void;
+                CoerceArgs(args, chosen?.Sig, ctx, ce.Args);
+                if (chosen?.Sig?.IsThrows == true)
+                    { CheckThrowsHandled(ctx, ce.Span); return new IrThrowsInstanceCall(recv, cn, ret, args); }
+                return new IrInstanceCall(recv, cn, ret, args);
             }
-            var methods = sym.MethodOverloads(cls, ma.Member);
-            var mchoice = methods.Count == 1 ? methods[0]
-                : methods.FirstOrDefault(c => c.Sig?.Params.Count == args.Count);
-            if (mchoice == null)
+
+            diag.Error(Codes.UndefinedMethod, ctx.File, ce.Span,
+                $"cannot call '{ma.Member}' on '{Describe(recv.Type)}'");
+            return new IrInstanceCall(recv, Mangler.FreeFunc(ma.Member, [], false, false, false), IrType.Void, args);
+        }
+
+        // bare call: name(args)
+        if (ce.Callee is IdentExpr id)
+        {
+            // local variable holding a function pointer shadows any free function of the same name
+            var calleeLocal = ctx.Scope.Lookup(id.Name);
+            if (calleeLocal is IrFuncPtrType localFp)
+                return ResolveIndirectCallArgs(new IrVar(id.Name, localFp, ctx.Scope.IsRef(id.Name)), localFp, args, ctx, ce.Span, ce.Args);
+
+            if (TryResolveArcIntrinsic(id.Name, args, ctx, ce.Span) is { } arc) return arc;
+
+            // file-local private free functions take priority over globals
+            var pfsym = sym.LookupPrivateFunc(ctx.File, id.Name);
+            if (pfsym != null)
             {
-                diag.Error(Codes.UndefinedMethod, ctx.File, ce.Span,
-                    $"'{cls}' has no method '{ma.Member}' matching {args.Count} argument(s)");
-                return new IrLitInt(0);
+                var pchosen = ChooseOverload(sym.PrivateFuncOverloads(ctx.File, id.Name), pfsym, args, id.Name, ctx, ce.Span);
+                string pcn = pchosen?.CName ?? Mangler.PrivateFreeFunc(Mangler.FileToken(ctx.File), id.Name, [], false);
+                var pret = pchosen != null ? ResolveType(pchosen.Type) : IrType.Void;
+                CoerceArgs(args, pchosen?.Sig, ctx, ce.Args);
+                if (pchosen?.Sig?.IsThrows == true)
+                    { CheckThrowsHandled(ctx, ce.Span); return new IrThrowsCall(pcn, pret, args); }
+                return new IrStaticCall(pcn, pret, args);
             }
-            if (mchoice.Sig?.Params.Count != args.Count)
-                diag.Error(Codes.WrongArgCount, ctx.File, ce.Span,
-                    $"'{cls}.{ma.Member}' expects {mchoice.Sig?.Params.Count} argument(s), got {args.Count}");
-            CoerceArgs(args, mchoice.Sig, ctx, ce.Args);
-            var mret = mchoice.Sig != null ? ResolveType(mchoice.Sig.ReturnType) : IrType.Void;
-            return new IrInstanceCall(recv, mchoice.CName, mret, args);
+
+            var fsym = sym.LookupFreeFunc(id.Name);
+            if (fsym != null && FuncInScope(fsym))
+            {
+                if (fsym.Sig?.IsEntry == true)
+                    diag.Error(Codes.CallToEntry, ctx.File, ce.Span,
+                        $"'{id.Name}' is an entry point and cannot be called directly");
+                var chosen = ChooseOverload(sym.FuncOverloads(id.Name), fsym, args, id.Name, ctx, ce.Span);
+                string cn = chosen?.CName ?? Mangler.FreeFunc(id.Name, [], false, false, false);
+                var ret = chosen != null ? ResolveType(chosen.Type) : IrType.Void;
+                CoerceArgs(args, chosen?.Sig, ctx, ce.Args);
+                if (chosen?.Sig?.IsThrows == true)
+                    { CheckThrowsHandled(ctx, ce.Span); return new IrThrowsCall(cn, ret, args); }
+                return new IrStaticCall(cn, ret, args);
+            }
+
+            // sibling method of the current class
+            if (!string.IsNullOrEmpty(ctx.CurClass))
+            {
+                var msym = sym.LookupMethod(ctx.CurClass, id.Name);
+                if (msym != null)
+                {
+                    bool isStatic = msym.Sig?.IsStatic ?? false;
+                    var chosen = ChooseOverload(sym.MethodOverloads(ctx.CurClass, id.Name), msym, args,
+                        $"{Mangler.DisplayName(ctx.CurClass)}.{id.Name}", ctx, ce.Span);
+                    string cn = chosen?.CName ?? Mangler.Method(ctx.CurClass, id.Name, [], false);
+                    var ret = chosen != null ? ResolveType(chosen.Type) : IrType.Void;
+                    if (!isStatic)
+                    {
+                        diag.Error(Codes.UndefinedMethod, ctx.File, ce.Span,
+                            $"'{id.Name}' is an instance method; call it as 'self.{id.Name}(...)'");
+                        CoerceArgs(args, chosen?.Sig, ctx, ce.Args);
+                        return new IrInstanceCall(new IrSelfExpr(ctx.CurClass), cn, ret, args);
+                    }
+                    CoerceArgs(args, chosen?.Sig, ctx, ce.Args);
+                    if (chosen?.Sig?.IsThrows == true)
+                        { CheckThrowsHandled(ctx, ce.Span); return new IrThrowsCall(cn, ret, args); }
+                    return new IrStaticCall(cn, ret, args);
+                }
+            }
+
+            diag.Error(Codes.UndefinedMethod, ctx.File, ce.Span,
+                sym.LookupFreeFunc(id.Name) != null
+                    ? $"'{id.Name}' is not in scope; import its module"
+                    : $"call to undefined function '{id.Name}'");
+            return new IrStaticCall(Mangler.FreeFunc(id.Name, [], false, false, false), IrType.Void, args);
         }
 
-        // indirect call through a function pointer: fptr(args)
-        if (ce.Callee is IdentExpr fid)
-        {
-            var fptrType = ctx.Scope.Lookup(fid.Name);
-            if (fptrType is IrFuncPtrType fpt)
-                return ResolveIndirectCallArgs(new IrVar(fid.Name, fpt), fpt, args, ctx, ce.Span, ce.Args);
-        }
-
-        // bare free-function call: Name(args)
-        if (ce.Callee is not IdentExpr id)
-        {
-            diag.Error(Codes.TypeMismatch, ctx.File, ce.Span, "callee expression is not callable");
-            return new IrLitInt(0);
-        }
-
-        // ARC intrinsic (retain/release/etc.).
-        if (TryResolveArcIntrinsic(id.Name, args, ctx, ce.Span) is { } arc)
-            return arc;
-
-        var fsym = sym.LookupFreeFunc(id.Name) ?? sym.LookupPrivateFunc(ctx.File, id.Name);
-        if (fsym == null)
-        {
-            diag.Error(Codes.UndefinedVariable, ctx.File, ce.Span, $"call to undefined function '{id.Name}'");
-            return new IrLitInt(0);
-        }
-        if (fsym.Sig?.Params.Count != args.Count)
-            diag.Error(Codes.WrongArgCount, ctx.File, ce.Span,
-                $"'{id.Name}' expects {fsym.Sig?.Params.Count} argument(s), got {args.Count}");
-        CoerceArgs(args, fsym.Sig, ctx, ce.Args);
-        var fret = fsym.Sig != null ? ResolveType(fsym.Sig.ReturnType) : IrType.Void;
-        return new IrStaticCall(fsym.CName, fret, args);
+        // indirect call through any other expression
+        var calleeExpr = ResolveExpr(ce.Callee, ctx);
+        if (calleeExpr.Type is IrFuncPtrType gfp)
+            return ResolveIndirectCallArgs(calleeExpr, gfp, args, ctx, ce.Span, ce.Args);
+        diag.Error(Codes.TypeMismatch, ctx.File, ce.Span, "callee expression is not callable");
+        return new IrLitInt(0);
     }
 
     /// <summary>
