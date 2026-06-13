@@ -1265,6 +1265,41 @@ sealed class TypeResolver(
                 return new IrReturn(v);
             }
 
+            case IfStmt ifs:
+            {
+                var cond = ResolveExpr(ifs.Cond, ctx);
+                ForbidNestedThrows(cond, ctx, allowRoot: false);
+                CheckCondition(cond, ctx);
+                var then = WrapBlock(ifs.Then, ctx, retType);
+                var els = ifs.Else != null ? WrapBlock(ifs.Else, ctx, retType) : null;
+                WarnIfEmpty(then, "if", ctx, ifs.Span);
+                if (els != null) WarnIfEmpty(els, "else", ctx, ifs.Span);
+                return new IrIf(cond, then, els);
+            }
+
+            case WhileStmt ws:
+            {
+                var cond = ResolveExpr(ws.Cond, ctx);
+                ForbidNestedThrows(cond, ctx, allowRoot: false);
+                CheckCondition(cond, ctx);
+                var body = WrapBlock(ws.Body, ctx with { LoopDepth = ctx.LoopDepth + 1 }, retType);
+                WarnIfEmpty(body, "while", ctx, ws.Span);
+                return new IrWhile(cond, body);
+            }
+
+            case ForStmt fs:
+                return ResolveFor(fs, ctx, retType);
+
+            case ForInStmt fi:
+                return ResolveForIn(fi, ctx, retType);
+
+            case UnsafeBlock ub:
+            {
+                var uctx = ctx.WithUnsafe(true).PushScope();
+                var stmts = ub.Stmts.Select(st => ResolveStmt(st, uctx, retType)).ToList();
+                return new IrUnsafeBlock(new IrBlock(stmts) { Span = ub.Span });
+            }
+
             case BreakStmt:
                 if (ctx.LoopDepth == 0)
                     diag.Error(Codes.BreakOutsideLoop, ctx.File, s.Span, "'break' is only valid inside a loop");
@@ -1293,6 +1328,81 @@ sealed class TypeResolver(
         if (s is Block b) return ResolveBlock(b, ctx, retType);
         var inner = ctx.PushScope();
         return new IrBlock([ResolveStmt(s, inner, retType)]) { Span = s.Span };
+    }
+
+    /// <summary>
+    /// Resolves a for statement, handling let, assignment, and expression init clauses
+    /// in a new scope with the loop depth incremented.
+    /// </summary>
+    IrStmt ResolveFor(ForStmt fs, ResolveCtx ctx, IrType retType)
+    {
+        var fctx = ctx.PushScope() with { LoopDepth = ctx.LoopDepth + 1 };
+        IrStmt? init = null;
+        if (fs.Init is LetStmt ls) init = ResolveLet(ls, fctx);
+        else if (fs.Init is AssignStmt asgn)
+        {
+            var t = ResolveExpr(asgn.Target, fctx);
+            var v = ResolveExpr(asgn.Value, fctx);
+            CheckLValue(t, fctx);
+            if (asgn.Op == "=") { v = Coerce(v, t.Type, fctx); CheckAssign(v, t.Type, "the assignment target", fctx, Codes.TypeMismatch); }
+            else CheckCompound(asgn.Op, t, v, fctx);
+            init = new IrAssign(t, asgn.Op, v) { Span = asgn.Span };
+        }
+        else if (fs.Init is ExprStmt es) init = new IrExprStmt(ResolveExpr(es.E, fctx)) { Span = es.Span };
+        IrExpr? cond = fs.Cond != null ? ResolveExpr(fs.Cond, fctx) : null;
+        IrExpr? step = fs.Step != null ? ResolveExpr(fs.Step, fctx) : null;
+        ForbidNestedThrows(cond, fctx, allowRoot: false);
+        if (cond != null) CheckCondition(cond, fctx);
+        ForbidNestedThrows(step, fctx, allowRoot: false);
+        var body = ResolveBlock(fs.Body, fctx, retType);
+        WarnIfEmpty(body, "for", fctx, fs.Span);
+        return new IrFor(init, cond, step, body);
+    }
+
+    /// <summary>
+    /// Resolves a for-in statement over a fixed array or any class with Length and Get methods.
+    /// </summary>
+    IrStmt ResolveForIn(ForInStmt fi, ResolveCtx ctx, IrType retType)
+    {
+        var collection = ResolveExpr(fi.Collection, ctx);
+        ForbidNestedThrows(collection, ctx, allowRoot: false);
+
+        if (collection.Type is IrArrayType at)
+        {
+            var ainner = ctx.PushScope() with { LoopDepth = ctx.LoopDepth + 1 };
+            ainner.Scope.Declare(fi.Var, at.Elem);
+            var abody = ResolveBlock(fi.Body, ainner, retType);
+            return new IrForIn(fi.Var, at.Elem, "", "", collection, abody, at.Size);
+        }
+
+        // Structural for..in: any class with zero-arg Length() -> int and single-int-arg Get(int) -> T.
+        string? collClass = ClassNameOf(collection.Type);
+        string lenCName = "", getCName = "";
+        IrType elemType;
+        var lenSym = collClass != null ? sym.LookupMethod(collClass, "Length") : null;
+        var getSym = collClass != null ? sym.LookupMethod(collClass, "Get") : null;
+        bool lengthOk = lenSym is { Sig.Params.Count: 0 } && IsInteger(ResolveType(lenSym.Type));
+        bool getOk = getSym is { Sig.Params: [{ Type: var gpType }] } && IsInteger(ResolveType(gpType));
+        if (lengthOk && getOk)
+        {
+            lenCName = lenSym!.CName;
+            getCName = getSym!.CName;
+            elemType = ResolveType(getSym.Type);
+        }
+        else
+        {
+            string why = collClass == null ? "" :
+                !lengthOk && !getOk ? " (no 'Length() -> int' or 'Get(int)' method)" :
+                !lengthOk ? " (no 'Length() -> int' method)" : " (no 'Get(int)' method)";
+            diag.Error(Codes.NotIterable, ctx.File, fi.Collection.Span,
+                $"'{Describe(collection.Type)}' is not iterable with 'for..in'{why}");
+            elemType = IrType.Int;
+        }
+
+        var inner = ctx.PushScope() with { LoopDepth = ctx.LoopDepth + 1 };
+        inner.Scope.Declare(fi.Var, elemType);
+        var body = ResolveBlock(fi.Body, inner, retType);
+        return new IrForIn(fi.Var, elemType, lenCName, getCName, collection, body);
     }
 
     /// <summary>
