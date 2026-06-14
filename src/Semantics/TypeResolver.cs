@@ -1510,6 +1510,27 @@ sealed class TypeResolver(
             case BinExpr be: return ResolveBin(be, ctx);
             case CallExpr ce: return ResolveCall(ce, ctx);
             case MemberAccessExpr ma: return ResolveMemberAccess(ma, ctx);
+            case NewExpr ne: return ResolveNew(ne, ctx);
+            case ArrayLitExpr al: return ResolveArrayLit(al, ctx);
+            case IndexExpr ix: return ResolveIndex(ix, ctx);
+            case SizeofExpr so:
+                CheckType(so.TypeName, ctx, so.Span);
+                return new IrSizeof(ResolveType(so.TypeName));
+            case DefaultExpr de:
+                CheckType(de.TypeName, ctx, de.Span);
+                return new IrDefault(ResolveType(de.TypeName));
+            case AddrOfExpr ao:
+                if (!ctx.InUnsafe)
+                    diag.Error(Codes.UnsafeRequired, ctx.File, ao.Span, "address-of '&' requires an 'unsafe' block");
+                return new IrAddrOf(ResolveExpr(ao.Target, ctx));
+            case DerefExpr dr:
+            {
+                if (!ctx.InUnsafe)
+                    diag.Error(Codes.UnsafeRequired, ctx.File, dr.Span, "pointer dereference '*' requires an 'unsafe' block");
+                var ptr = ResolveExpr(dr.Ptr, ctx);
+                var inner = ptr.Type is IrPtrType pt ? pt.Inner : IrType.Void;
+                return new IrDeref(ptr, inner);
+            }
             default:
                 throw new NotImplementedException($"[TypeResolver] unhandled Expr: {e.GetType().Name} -- additional expression forms added in later commits");
         }
@@ -1973,10 +1994,222 @@ sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Resolves index assignment. Implemented when index expression resolution is added.
+    /// Resolves an index expression, dispatching to the class operator [] overload,
+    /// fixed-array element access, or unsafe pointer indexing.
     /// </summary>
-    IrStmt ResolveIndexAssign(IndexExpr ixt, AssignStmt asgn, ResolveCtx ctx) =>
-        throw new NotImplementedException("[TypeResolver] ResolveIndexAssign -- index expression resolution not yet implemented");
+    IrExpr ResolveIndex(IndexExpr ix, ResolveCtx ctx)
+    {
+        var obj = ResolveExpr(ix.Object, ctx);
+        var idx = ResolveExpr(ix.Index, ctx);
+        if (obj.Type is IrClassRef icr && sym.LookupOperator(icr.ClassName, "[]") is { } getOp)
+        {
+            var idxType = ResolveType(getOp.Sig!.Params[0].Type);
+            idx = Coerce(idx, idxType, ctx);
+            CheckAssign(idx, idxType, "the index", ctx, Codes.TypeMismatch);
+            return new IrInstanceCall(obj, getOp.CName, ResolveType(getOp.Type), [idx]) { Span = ix.Span };
+        }
+        IrType elem;
+        if (obj.Type is IrArrayType at) elem = at.Elem;
+        else if (obj.Type is IrPtrType pt)
+        {
+            if (!ctx.InUnsafe)
+                diag.Error(Codes.UnsafeRequired, ctx.File, ix.Span, "pointer indexing requires an 'unsafe' block");
+            elem = pt.Inner;
+        }
+        else
+        {
+            diag.Error(Codes.IndexOnNonCollection, ctx.File, ix.Span, $"'{Describe(obj.Type)}' cannot be indexed");
+            elem = IrType.Int;
+        }
+        return new IrIndex(obj, idx, elem);
+    }
+
+    /// <summary>
+    /// Resolves an indexed assignment, handling operator []= overloads with compound
+    /// assignment hoisting, and plain fixed-array or pointer index targets.
+    /// </summary>
+    IrStmt ResolveIndexAssign(IndexExpr ixt, AssignStmt asgn, ResolveCtx ctx)
+    {
+        var obj = ResolveExpr(ixt.Object, ctx);
+        var idx = ResolveExpr(ixt.Index, ctx);
+
+        if (obj.Type is IrClassRef cr && sym.LookupOperator(cr.ClassName, "[]=") is { } setOp)
+        {
+            var idxType = ResolveType(setOp.Sig!.Params[0].Type);
+            var valType = ResolveType(setOp.Sig!.Params[1].Type);
+            idx = Coerce(idx, idxType, ctx);
+            CheckAssign(idx, idxType, "the index", ctx, Codes.TypeMismatch);
+            if (asgn.Op == "=")
+            {
+                var value = Coerce(ResolveExpr(asgn.Value, ctx), valType, ctx);
+                CheckAssign(value, valType, "the assignment target", ctx, Codes.TypeMismatch);
+                ForbidNestedThrows(value, ctx, allowRoot: false);
+                return new IrExprStmt(new IrInstanceCall(obj, setOp.CName, IrType.Void, [idx, value])) { Span = asgn.Span };
+            }
+            // compound: obj/idx used twice — hoist to avoid double evaluation
+            var stmts = new List<IrStmt>();
+            var objRef = HoistIfImpure(obj, "_ixo", stmts);
+            var idxRef = HoistIfImpure(idx, "_ixi", stmts);
+            var getOp = sym.LookupOperator(cr.ClassName, "[]");
+            IrExpr current;
+            if (getOp != null)
+                current = new IrInstanceCall(objRef, getOp.CName, ResolveType(getOp.Type), [idxRef]) { Span = ixt.Span };
+            else
+            {
+                diag.Error(Codes.NoIndexSetter, ctx.File, asgn.Span,
+                    $"'{Describe(obj.Type)}' has '[]=' but no '[]' getter; cannot use a compound assignment");
+                current = new IrLitInt(0);
+            }
+            var rhs = ResolveExpr(asgn.Value, ctx);
+            string baseOp = asgn.Op[..^1];
+            string? elemClass = ClassNameOf(current.Type);
+            IrExpr combined;
+            if (elemClass != null && sym.LookupOperator(elemClass, baseOp) is { } elemOp)
+                combined = new IrStaticCall(elemOp.CName, ResolveType(elemOp.Type), [current, rhs]);
+            else
+            {
+                CheckCompound(asgn.Op, current, rhs, ctx);
+                combined = new IrBinOp(baseOp, current, rhs, current.Type);
+            }
+            var value2 = Coerce(combined, valType, ctx);
+            ForbidNestedThrows(value2, ctx, allowRoot: false);
+            stmts.Add(new IrExprStmt(new IrInstanceCall(objRef, setOp.CName, IrType.Void, [idxRef, value2])));
+            return Seq(stmts, asgn.Span);
+        }
+
+        if (obj.Type is IrClassRef cr2 && sym.LookupOperator(cr2.ClassName, "[]") != null)
+        {
+            diag.Error(Codes.NoIndexSetter, ctx.File, asgn.Span,
+                $"'{Describe(obj.Type)}' has a '[]' getter but no '[]=' setter; cannot assign to it");
+            return new IrExprStmt(new IrLitInt(0));
+        }
+
+        IrType elem;
+        if (obj.Type is IrArrayType at) elem = at.Elem;
+        else if (obj.Type is IrPtrType pt)
+        {
+            if (!ctx.InUnsafe)
+                diag.Error(Codes.UnsafeRequired, ctx.File, ixt.Span, "pointer indexing requires an 'unsafe' block");
+            elem = pt.Inner;
+        }
+        else
+        {
+            diag.Error(Codes.IndexOnNonCollection, ctx.File, ixt.Span, $"'{Describe(obj.Type)}' cannot be indexed");
+            elem = IrType.Int;
+        }
+        var val = ResolveExpr(asgn.Value, ctx);
+        if (asgn.Op == "=")
+        {
+            var target = new IrIndex(obj, idx, elem) { Span = ixt.Span };
+            val = Coerce(val, target.Type, ctx);
+            CheckAssign(val, target.Type, "the assignment target", ctx, Codes.TypeMismatch);
+            ForbidNestedThrows(val, ctx, allowRoot: false);
+            return new IrAssign(target, "=", val);
+        }
+        string elemBaseOp = asgn.Op[..^1];
+        if (ClassNameOf(elem) is { } elemClass2 && sym.LookupOperator(elemClass2, elemBaseOp) is { } elemOp2)
+        {
+            var stmts = new List<IrStmt>();
+            var objRef = HoistIfImpure(obj, "_ixo", stmts);
+            var idxRef = HoistIfImpure(idx, "_ixi", stmts);
+            var readTarget = new IrIndex(objRef, idxRef, elem) { Span = ixt.Span };
+            var writeTarget = new IrIndex(objRef, idxRef, elem) { Span = ixt.Span };
+            var composed = new IrStaticCall(elemOp2.CName, ResolveType(elemOp2.Type), [readTarget, val]);
+            CheckAssign(composed, elem, "the assignment target", ctx, Codes.TypeMismatch);
+            ForbidNestedThrows(composed, ctx, allowRoot: false);
+            stmts.Add(new IrAssign(writeTarget, "=", composed));
+            return Seq(stmts, asgn.Span);
+        }
+        var plainTarget = new IrIndex(obj, idx, elem) { Span = ixt.Span };
+        CheckCompound(asgn.Op, plainTarget, val, ctx);
+        ForbidNestedThrows(val, ctx, allowRoot: false);
+        return new IrAssign(plainTarget, asgn.Op, val);
+    }
+
+    /// <summary>
+    /// Resolves a new expression, validating the type is a class in scope and checking
+    /// the constructor argument count. Handles collection initializers via ResolveCollectionInit.
+    /// </summary>
+    IrExpr ResolveNew(NewExpr ne, ResolveCtx ctx)
+    {
+        var args = ne.Args.Select(a => ResolveExpr(a is RefArgExpr ra ? ra.Target : a, ctx)).ToList();
+        if (sym.Modules.Contains(ne.Type))
+        {
+            diag.Error(Codes.NewOnNonClass, ctx.File, ne.Span,
+                $"'{Mangler.DisplayName(ne.Type)}' is a module and cannot be instantiated");
+            return new IrNew(ne.Type, args);
+        }
+        if (!ClassInScope(ne.Type))
+        {
+            diag.Error(Codes.NewOnNonClass, ctx.File, ne.Span,
+                sym.IsClass(ne.Type) ? $"'{Mangler.DisplayName(ne.Type)}' is not in scope; import its module"
+                : SymbolTable.Primitives.Contains(ne.Type) ? $"'{Mangler.DisplayName(ne.Type)}' is a primitive; use 'let', not 'new'"
+                : $"'{Mangler.DisplayName(ne.Type)}' is not a class");
+            return new IrNew(ne.Type, args);
+        }
+        var init = sym.LookupMethod(ne.Type, "_init");
+        if (init?.Sig is { } isig && isig.Params.Count > 0)
+        {
+            CheckArgCount(isig, args.Count, $"{Mangler.DisplayName(ne.Type)} constructor", ctx, ne.Span);
+            CoerceArgs(args, isig, ctx, ne.Args);
+        }
+        else if (args.Count > 0)
+            diag.Error(Codes.WrongArgCount, ctx.File, ne.Span,
+                $"'{Mangler.DisplayName(ne.Type)}' has no constructor taking arguments");
+        if (ne.CollectionInit.Length > 0)
+            return ResolveCollectionInit(ne, args, ctx);
+        return new IrNew(ne.Type, args);
+    }
+
+    /// <summary>
+    /// Resolves a collection initializer by looking up an Add method and coercing each element.
+    /// </summary>
+    IrExpr ResolveCollectionInit(NewExpr ne, List<IrExpr> ctorArgs, ResolveCtx ctx)
+    {
+        var add = sym.LookupMethod(ne.Type, "Add");
+        if (add?.Sig == null)
+        {
+            diag.Error(Codes.UndefinedMethod, ctx.File, ne.Span,
+                $"'{Mangler.DisplayName(ne.Type)}' has no 'Add' method for a collection initializer");
+            return new IrNew(ne.Type, ctorArgs);
+        }
+        if (add.Sig.Params.Count != 1)
+        {
+            diag.Error(Codes.WrongArgCount, ctx.File, ne.Span,
+                $"'{Mangler.DisplayName(ne.Type)}.Add' must take exactly one argument to be used in a collection initializer");
+            return new IrNew(ne.Type, ctorArgs);
+        }
+        var elemType = ResolveType(add.Sig.Params[0].Type);
+        var inits = new List<IrExpr>();
+        foreach (var el in ne.CollectionInit)
+        {
+            var r = Coerce(ResolveExpr(el, ctx), elemType, ctx);
+            CheckAssign(r, elemType, $"a '{Mangler.DisplayName(ne.Type)}' element", ctx, Codes.ArgTypeMismatch);
+            ForbidNestedThrows(r, ctx, allowRoot: false);
+            inits.Add(r);
+        }
+        return new IrNewInit(ne.Type, ctorArgs, add.CName, inits);
+    }
+
+    /// <summary>
+    /// Resolves a fixed-size array literal, checking that all elements share a common type.
+    /// </summary>
+    IrExpr ResolveArrayLit(ArrayLitExpr al, ResolveCtx ctx)
+    {
+        if (al.Elems.Length == 0)
+        {
+            diag.Error(Codes.TypeMismatch, ctx.File, al.Span, "empty array literal '[]' has no element type");
+            return new IrArrayLit(Arr(IrType.Int, 0), []);
+        }
+        var elems = al.Elems.Select(e => ResolveExpr(e, ctx)).ToList();
+        var elemType = elems[0].Type;
+        for (int i = 1; i < elems.Count; i++)
+        {
+            elems[i] = Coerce(elems[i], elemType, ctx);
+            CheckAssign(elems[i], elemType, "an array element", ctx, Codes.TypeMismatch);
+        }
+        return new IrArrayLit(Arr(elemType, elems.Count), elems);
+    }
 
     /// <summary>
     /// Resolves a union variant construction expression. Implemented when union types are added.
