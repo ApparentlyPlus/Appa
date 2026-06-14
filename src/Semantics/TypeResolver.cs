@@ -1125,9 +1125,30 @@ sealed class TypeResolver(
 
     /// <summary>
     /// Checks whether a bare call is a retain/release ARC intrinsic and returns the appropriate
-    /// IR node. Returns null for all other names. Fully implemented alongside ARC support.
+    /// IR node. Returns null for all other names.
     /// </summary>
-    IrExpr? TryResolveArcIntrinsic(string name, List<IrExpr> args, ResolveCtx ctx, TextSpan span) => null;
+    IrExpr? TryResolveArcIntrinsic(string name, List<IrExpr> args, ResolveCtx ctx, TextSpan span)
+    {
+        var fsym = sym.LookupFreeFunc(name);
+        if (fsym == null || !FuncInScope(fsym)) return null;
+        bool isRetain = fsym.CName == sym.IntrinsicOrNull(Roles.Retain);
+        bool isRelease = fsym.CName == sym.IntrinsicOrNull(Roles.Release);
+        if (!isRetain && !isRelease) return null;
+        if (!ctx.InUnsafe)
+            diag.Error(Codes.UnsafeRequired, ctx.File, span, $"'{name}' requires an 'unsafe' block");
+        if (args.Count != 1)
+        {
+            diag.Error(Codes.WrongArgCount, ctx.File, span, $"'{name}' expects 1 argument, got {args.Count}");
+            return new IrLitInt(0);
+        }
+        var a = args[0];
+        if (isRetain)
+            return IsManagedRef(a.Type) ? new IrStaticCall(fsym.CName, a.Type, [a]) : a;
+        return IsManagedRef(a.Type) ? new IrStaticCall(fsym.CName, IrType.Void, [a]) : new IrCast(IrType.Void, a);
+    }
+
+    // Returns true for class-type values that participate in ARC reference counting.
+    bool IsManagedRef(IrType t) => t is IrClassRef cr && sym.IsClass(cr.ClassName) && !sym.Modules.Contains(cr.ClassName);
 
     /// <summary>
     /// Resolves an enum declaration to its IR form.
@@ -1316,6 +1337,27 @@ sealed class TypeResolver(
                 if (ctx.InDefer)
                     diag.Error(Codes.TypeMismatch, ctx.File, s.Span, "a 'defer' body cannot 'continue'");
                 return new IrContinue();
+
+            case ThrowStmt:
+                if (ctx.InDefer)
+                    diag.Error(Codes.TypeMismatch, ctx.File, s.Span, "a 'defer' body cannot 'throw'");
+                CheckThrowsHandled(ctx, s.Span);
+                return new IrThrow();
+
+            case DebugStmt d:
+                if (releaseMode)
+                    diag.Error(Codes.DiagInRelease, ctx.File, s.Span,
+                        "'debug' is not allowed in a release build -- remove it before shipping");
+                return new IrDebug(d.Raw) { Span = s.Span };
+
+            case PanicStmt p:
+                if (releaseMode)
+                    diag.Error(Codes.DiagInRelease, ctx.File, s.Span,
+                        "'panic' is not allowed in a release build -- remove it before shipping");
+                if (ctx.Context != "kernel")
+                    diag.Error(Codes.PanicOutsideKernel, ctx.File, s.Span,
+                        "'panic' is only valid in the kernel realm");
+                return new IrPanic(p.Raw) { Span = s.Span };
 
             default:
                 throw new NotImplementedException($"[TypeResolver] unhandled Stmt: {s.GetType().Name} -- additional statement forms added in later commits");
