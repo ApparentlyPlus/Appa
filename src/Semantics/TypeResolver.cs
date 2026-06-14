@@ -1300,6 +1300,9 @@ sealed class TypeResolver(
                 return new IrUnsafeBlock(new IrBlock(stmts) { Span = ub.Span });
             }
 
+            case SwitchStmt sw:
+                return ResolveSwitch(sw, ctx, retType);
+
             case BreakStmt:
                 if (ctx.LoopDepth == 0)
                     diag.Error(Codes.BreakOutsideLoop, ctx.File, s.Span, "'break' is only valid inside a loop");
@@ -1403,6 +1406,31 @@ sealed class TypeResolver(
         inner.Scope.Declare(fi.Var, elemType);
         var body = ResolveBlock(fi.Body, inner, retType);
         return new IrForIn(fi.Var, elemType, lenCName, getCName, collection, body);
+    }
+
+    /// <summary>
+    /// Resolves a switch statement on an integer or enum scrutinee,
+    /// validating that each case label is comparable to the scrutinee type.
+    /// </summary>
+    IrStmt ResolveSwitch(SwitchStmt sw, ResolveCtx ctx, IrType retType)
+    {
+        var scrut = ResolveExpr(sw.Scrutinee, ctx);
+        ForbidNestedThrows(scrut, ctx, allowRoot: false);
+        if (!(IsInteger(scrut.Type) || scrut.Type is IrEnumType))
+            diag.Error(Codes.TypeMismatch, ctx.File, sw.Scrutinee.Span,
+                $"switch requires an integer or enum value, got '{Describe(scrut.Type)}'");
+        var cases = new List<IrSwitchCase>();
+        foreach (var c in sw.Cases)
+        {
+            var labels = c.Labels.Select(l => ResolveExpr(l, ctx)).ToList();
+            foreach (var lbl in labels)
+                if (!ComparableEq(scrut, lbl))
+                    diag.Error(Codes.TypeMismatch, ctx.File, lbl.Span,
+                        $"case label of type '{Describe(lbl.Type)}' is not comparable to the switch value '{Describe(scrut.Type)}'");
+            cases.Add(new IrSwitchCase(labels, ResolveBlock(c.Body, ctx, retType)));
+        }
+        var def = sw.Default == null ? null : ResolveBlock(sw.Default, ctx, retType);
+        return new IrSwitch(scrut, cases, def);
     }
 
     /// <summary>
