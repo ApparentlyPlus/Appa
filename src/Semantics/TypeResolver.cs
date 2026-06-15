@@ -667,8 +667,37 @@ sealed class TypeResolver(
     /// Wraps or converts an expression to a String value. Requires ARC intrinsic bindings;
     /// fully implemented when string interpolation support is added.
     /// </summary>
-    IrExpr EnsureString(IrExpr e, ResolveCtx ctx) =>
-        throw new NotImplementedException("EnsureString not yet implemented -- string interpolation added in a later commit");
+    /// <summary>
+    /// Resolves an intrinsic role to its bound C name, emitting a diagnostic if no binding exists.
+    /// </summary>
+    string Intrinsic(string role, ResolveCtx ctx, TextSpan span)
+    {
+        var n = sym.IntrinsicOrNull(role);
+        if (n != null) return n;
+        diag.Error(Codes.MissingIntrinsic, ctx.File, span, $"no libappa symbol provides @intrinsic({role})");
+        return $"appa_MISSING_{role}";
+    }
+
+    /// <summary>
+    /// Coerces an expression to string by dispatching to the appropriate stringify intrinsic
+    /// or the class's ToString method. Reports a diagnostic when no conversion is available.
+    /// </summary>
+    IrExpr EnsureString(IrExpr e, ResolveCtx ctx)
+    {
+        if (e.Type.IsString) return e;
+        if (e.Type.IsFloat)
+            return new IrStaticCall(Intrinsic(Roles.StringifyFloat, ctx, e.Span), IrType.String, [e]) { Span = e.Span };
+        if (e.Type.IsNumeric)
+            return new IrStaticCall(Intrinsic(Roles.StringifyInt, ctx, e.Span), IrType.String, [e]) { Span = e.Span };
+        var cls = ClassNameOf(e.Type);
+        if (cls != null && sym.LookupMethod(cls, "ToString") is { } ts)
+            return new IrInstanceCall(e, ts.CName, IrType.String, []) { Span = e.Span };
+        diag.Error(Codes.TypeMismatch, ctx.File, e.Span,
+            cls != null
+                ? $"'{Mangler.DisplayName(cls)}' has no 'String func ToString()' to convert it to a String"
+                : $"'{Describe(e.Type)}' cannot be converted to a String");
+        return new IrLitString("\"\"") { Span = e.Span };
+    }
 
     /// <summary>
     /// Extracts the class name from a class-reference type, or null for non-class types.
@@ -1629,6 +1658,11 @@ sealed class TypeResolver(
                 var ptr = ResolveExpr(dr.Ptr, ctx);
                 var inner = ptr.Type is IrPtrType pt ? pt.Inner : IrType.Void;
                 return new IrDeref(ptr, inner);
+            }
+            case InterpStrExpr istr:
+            {
+                var parts = istr.Parts.Select(p => EnsureString(ResolveExpr(p, ctx), ctx)).ToList();
+                return parts.Count == 0 ? new IrLitString("\"\"") { Span = istr.Span } : new IrInterp(parts);
             }
             default:
                 throw new NotImplementedException($"[TypeResolver] unhandled Expr: {e.GetType().Name} -- additional expression forms added in later commits");
