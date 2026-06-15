@@ -1324,6 +1324,9 @@ sealed class TypeResolver(
             case SwitchStmt sw:
                 return ResolveSwitch(sw, ctx, retType);
 
+            case MatchStmt ms:
+                return ResolveMatch(ms, ctx, retType);
+
             case BreakStmt:
                 if (ctx.LoopDepth == 0)
                     diag.Error(Codes.BreakOutsideLoop, ctx.File, s.Span, "'break' is only valid inside a loop");
@@ -1473,6 +1476,60 @@ sealed class TypeResolver(
         }
         var def = sw.Default == null ? null : ResolveBlock(sw.Default, ctx, retType);
         return new IrSwitch(scrut, cases, def);
+    }
+
+    /// <summary>
+    /// Resolves a match statement on a union scrutinee, binding each variant's fields
+    /// into scope and checking exhaustiveness unless a default case is present.
+    /// </summary>
+    IrStmt ResolveMatch(MatchStmt ms, ResolveCtx ctx, IrType retType)
+    {
+        var scrut = ResolveExpr(ms.Scrutinee, ctx);
+        ForbidNestedThrows(scrut, ctx, allowRoot: false);
+        if (scrut.Type is not IrUnionType ut)
+        {
+            diag.Error(Codes.TypeMismatch, ctx.File, ms.Scrutinee.Span,
+                $"'match' requires a union value, got '{Describe(scrut.Type)}'");
+            var fallbackCases = ms.Cases.Select(c => new IrMatchCase(0, [], ResolveBlock(c.Body, ctx, retType))).ToList();
+            return new IrMatch(scrut, new IrUnionType("?"), fallbackCases,
+                ms.Default == null ? null : ResolveBlock(ms.Default, ctx, retType));
+        }
+        var variants = sym.UnionDef(ut.Name)!;
+        var cases = new List<IrMatchCase>();
+        var covered = new HashSet<int>();
+        foreach (var c in ms.Cases)
+        {
+            int idx = variants.FindIndex(v => v.Name == c.Variant);
+            if (idx < 0)
+            {
+                diag.Error(Codes.UndefinedVariable, ctx.File, ms.Span, $"union '{ut.Name}' has no variant '{c.Variant}'");
+                cases.Add(new IrMatchCase(0, [], ResolveBlock(c.Body, ctx, retType)));
+                continue;
+            }
+            if (!covered.Add(idx))
+                diag.Error(Codes.DuplicateName, ctx.File, ms.Span, $"variant '{c.Variant}' is already matched in this 'match'");
+            var fields = variants[idx].Fields;
+            if (c.Bindings.Length != fields.Length)
+                diag.Error(Codes.WrongArgCount, ctx.File, ms.Span,
+                    $"'{c.Variant}' has {fields.Length} field(s), but {c.Bindings.Length} binding(s) were given");
+            var caseCtx = ctx.PushScope();
+            var binds = new List<IrMatchBind>();
+            for (int i = 0; i < c.Bindings.Length && i < fields.Length; i++)
+            {
+                var ft = ResolveType(fields[i].Type);
+                caseCtx.Scope.Declare(c.Bindings[i], ft);
+                binds.Add(new IrMatchBind(fields[i].Name, c.Bindings[i], ft));
+            }
+            cases.Add(new IrMatchCase(idx, binds, ResolveBlock(c.Body, caseCtx, retType)));
+        }
+        var def = ms.Default == null ? null : ResolveBlock(ms.Default, ctx, retType);
+        if (def == null && covered.Count < variants.Count)
+        {
+            var missing = variants.Where((_, i) => !covered.Contains(i)).Select(v => v.Name);
+            diag.Error(Codes.NonExhaustiveMatch, ctx.File, ms.Span,
+                $"'match' on '{ut.Name}' is not exhaustive; missing variant(s): {string.Join(", ", missing)} (add a 'default' case or handle them all)");
+        }
+        return new IrMatch(scrut, ut, cases, def);
     }
 
     /// <summary>
@@ -2254,10 +2311,32 @@ sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Resolves a union variant construction expression. Implemented when union types are added.
+    /// Resolves a union variant construction call, validating the variant name and
+    /// coercing each argument to its declared field type.
     /// </summary>
-    IrExpr ResolveUnionConstruct(string union, string variant, List<IrExpr> args, ResolveCtx ctx, TextSpan span) =>
-        throw new NotImplementedException("[TypeResolver] ResolveUnionConstruct -- union type resolution not yet implemented");
+    IrExpr ResolveUnionConstruct(string unionName, string variant, List<IrExpr> args, ResolveCtx ctx, TextSpan span)
+    {
+        var variants = sym.UnionDef(unionName)!;
+        int idx = variants.FindIndex(v => v.Name == variant);
+        if (idx < 0)
+        {
+            diag.Error(Codes.UndefinedVariable, ctx.File, span, $"union '{unionName}' has no variant '{variant}'");
+            return new IrUnionConstruct(new IrUnionType(unionName), 0, args);
+        }
+        var fields = variants[idx].Fields;
+        if (fields.Length != args.Count)
+            diag.Error(Codes.WrongArgCount, ctx.File, span,
+                $"'{unionName}.{variant}' expects {fields.Length} argument(s), got {args.Count}");
+        for (int i = 0; i < args.Count && i < fields.Length; i++)
+        {
+            var ft = ResolveType(fields[i].Type);
+            args[i] = Coerce(args[i], ft, ctx);
+            if (!Assignable(args[i], ft))
+                diag.Error(Codes.ArgTypeMismatch, ctx.File, args[i].Span,
+                    $"argument {i + 1} ('{Describe(args[i].Type)}') is not assignable to '{Describe(ft)}'");
+        }
+        return new IrUnionConstruct(new IrUnionType(unionName), idx, args);
+    }
 
     private readonly struct FuncPtrKey(IrType ret, List<IrType> ps) : IEquatable<FuncPtrKey>
     {
