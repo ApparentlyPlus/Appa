@@ -1684,6 +1684,24 @@ sealed class TypeResolver(
                 var inner = ptr.Type is IrPtrType pt ? pt.Inner : IrType.Void;
                 return new IrDeref(ptr, inner);
             }
+            case TernaryExpr te:
+            {
+                var cond = ResolveExpr(te.Cond, ctx);
+                ForbidNestedThrows(cond, ctx, allowRoot: false);
+                CheckCondition(cond, ctx);
+                var then = ResolveExpr(te.Then, ctx);
+                var els = ResolveExpr(te.Else, ctx);
+                ForbidNestedThrows(then, ctx, allowRoot: false);
+                ForbidNestedThrows(els, ctx, allowRoot: false);
+                IrType? unified = UnifyTernary(then, els);
+                if (unified == null)
+                {
+                    diag.Error(Codes.TypeMismatch, ctx.File, te.Span,
+                        $"ternary branches have incompatible types '{Describe(then.Type)}' and '{Describe(els.Type)}'");
+                    return new IrTernary(cond, then, els, then.Type);
+                }
+                return new IrTernary(cond, CoerceTo(then, unified), CoerceTo(els, unified), unified);
+            }
             case InterpStrExpr istr:
             {
                 var parts = istr.Parts.Select(p => EnsureString(ResolveExpr(p, ctx), ctx)).ToList();
