@@ -1143,8 +1143,33 @@ sealed class TypeResolver(
     /// <summary>
     /// Resolves a process declaration to its IR form. Implemented when process resolution is added.
     /// </summary>
-    IrProcess ResolveProcess(ProcessDecl pd, ResolveCtx ctx) =>
-        throw new NotImplementedException($"[TypeResolver] ResolveProcess('{pd.Name}') -- process resolution not yet implemented");
+    /// <summary>
+    /// Resolves a process declaration to its IR form, resolving each thread's entry function.
+    /// </summary>
+    IrProcess ResolveProcess(ProcessDecl pd, ResolveCtx ctx)
+    {
+        var threads = pd.Threads.Select(td =>
+        {
+            string tFull = $"{pd.Name}_{td.Name}";
+            return new IrThread(td.Name, "foreground", tFull, ResolveThreadEntry(tFull, td.Entry, ctx));
+        }).ToList();
+        return new IrProcess(pd.Name, pd.Mode, threads);
+    }
+
+    /// <summary>
+    /// Resolves a thread entry function declaration, checking parameter types and building the IR body.
+    /// </summary>
+    IrFunction ResolveThreadEntry(string fullName, EntryFuncDecl ef, ResolveCtx ctx)
+    {
+        foreach (var p in ef.Params) CheckType(p.Type, ctx, p.Span);
+        CheckParams(ef.Params, ctx);
+        var pars = ef.Params.Select(p => new IrParam(p.Name, ResolveType(p.Type))).ToList();
+        var fctx = ctx.WithStatic(true).PushScope();
+        foreach (var p in ef.Params) fctx.Scope.Declare(p.Name, ResolveType(p.Type));
+        var body = ResolveBlock(ef.Body, fctx, IrType.Void);
+        return new IrFunction(fullName, Mangler.ThreadEntry(fullName), IrType.Void, pars, true, true, false,
+            false, VisOf(ctx.Context), null, body, null, null, []);
+    }
 
     /// <summary>
     /// Stamps and resolves each generic function instantiation discovered during the main pass.
