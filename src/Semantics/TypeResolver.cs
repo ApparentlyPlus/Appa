@@ -1141,9 +1141,6 @@ sealed class TypeResolver(
     };
 
     /// <summary>
-    /// Resolves a process declaration to its IR form. Implemented when process resolution is added.
-    /// </summary>
-    /// <summary>
     /// Resolves a process declaration to its IR form, resolving each thread's entry function.
     /// </summary>
     IrProcess ResolveProcess(ProcessDecl pd, ResolveCtx ctx)
@@ -1276,8 +1273,8 @@ sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Core statement resolver. Handles native blocks, blocks, let declarations, assignments,
-    /// expression statements, return, break, and continue. Additional forms added in later commits.
+    /// Core statement resolver. Handles all statement forms: native blocks, let declarations,
+    /// assignments, control flow, loops, try/catch, defer, match, switch, and panic/debug/throw.
     /// </summary>
     IrStmt ResolveStmtCore(Stmt s, ResolveCtx ctx, IrType retType)
     {
@@ -1485,6 +1482,7 @@ sealed class TypeResolver(
             var ainner = ctx.PushScope() with { LoopDepth = ctx.LoopDepth + 1 };
             ainner.Scope.Declare(fi.Var, at.Elem);
             var abody = ResolveBlock(fi.Body, ainner, retType);
+            WarnIfEmpty(abody, "for..in", ctx, fi.Span);
             return new IrForIn(fi.Var, at.Elem, "", "", collection, abody, at.Size);
         }
 
@@ -1515,6 +1513,7 @@ sealed class TypeResolver(
         var inner = ctx.PushScope() with { LoopDepth = ctx.LoopDepth + 1 };
         inner.Scope.Declare(fi.Var, elemType);
         var body = ResolveBlock(fi.Body, inner, retType);
+        WarnIfEmpty(body, "for..in", ctx, fi.Span);
         return new IrForIn(fi.Var, elemType, lenCName, getCName, collection, body);
     }
 
