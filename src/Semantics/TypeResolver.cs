@@ -1395,6 +1395,17 @@ sealed class TypeResolver(
                     diag.Error(Codes.TypeMismatch, ctx.File, s.Span, "a 'defer' body cannot 'continue'");
                 return new IrContinue();
 
+            case TryCatchStmt tc:
+                return ResolveTryCatch(tc, ctx, retType);
+
+            case DeferStmt ds:
+            {
+                if (ds.Action is DeferStmt)
+                    diag.Error(Codes.TypeMismatch, ctx.File, ds.Span, "a 'defer' body cannot itself 'defer'");
+                var dctx = ctx.WithDefer().PushScope();
+                return new IrDefer(ResolveStmt(ds.Action, dctx, retType));
+            }
+
             case ThrowStmt:
                 if (ctx.InDefer)
                     diag.Error(Codes.TypeMismatch, ctx.File, s.Span, "a 'defer' body cannot 'throw'");
@@ -1584,6 +1595,19 @@ sealed class TypeResolver(
                 $"'match' on '{ut.Name}' is not exhaustive; missing variant(s): {string.Join(", ", missing)} (add a 'default' case or handle them all)");
         }
         return new IrMatch(scrut, ut, cases, def);
+    }
+
+    /// <summary>
+    /// Resolves a try/catch statement, giving the try block a catch label so
+    /// throwing calls inside it know where to jump on failure.
+    /// </summary>
+    IrStmt ResolveTryCatch(TryCatchStmt tc, ResolveCtx ctx, IrType retType)
+    {
+        int seq = _labelSeq++;
+        var tctx = ctx.WithTry($"_catch_{seq}");
+        var tryBlock = ResolveBlock(tc.Try, tctx, retType);
+        var catchBlock = ResolveBlock(tc.Catch, ctx, retType);
+        return new IrTryCatch(tryBlock, catchBlock, seq);
     }
 
     /// <summary>
