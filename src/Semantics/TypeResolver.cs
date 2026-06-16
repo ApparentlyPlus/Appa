@@ -1145,18 +1145,20 @@ sealed class TypeResolver(
     /// </summary>
     IrProcess ResolveProcess(ProcessDecl pd, ResolveCtx ctx)
     {
+        var vis = VisOf(ctx.Context);
         var threads = pd.Threads.Select(td =>
         {
             string tFull = $"{pd.Name}_{td.Name}";
-            return new IrThread(td.Name, "foreground", tFull, ResolveThreadEntry(tFull, td.Entry, ctx));
+            return new IrThread(td.Name, "foreground", tFull, ResolveThreadEntry(tFull, td.Entry, ctx, vis));
         }).ToList();
         return new IrProcess(pd.Name, pd.Mode, threads);
     }
 
     /// <summary>
     /// Resolves a thread entry function declaration, checking parameter types and building the IR body.
+    /// Applies CheckBodyQuality so unused-variable warnings are emitted for entry code.
     /// </summary>
-    IrFunction ResolveThreadEntry(string fullName, EntryFuncDecl ef, ResolveCtx ctx)
+    IrFunction ResolveThreadEntry(string fullName, EntryFuncDecl ef, ResolveCtx ctx, Visibility vis)
     {
         foreach (var p in ef.Params) CheckType(p.Type, ctx, p.Span);
         CheckParams(ef.Params, ctx);
@@ -1164,8 +1166,9 @@ sealed class TypeResolver(
         var fctx = ctx.WithStatic(true).PushScope();
         foreach (var p in ef.Params) fctx.Scope.Declare(p.Name, ResolveType(p.Type));
         var body = ResolveBlock(ef.Body, fctx, IrType.Void);
+        CheckBodyQuality(body, IrType.Void, ef.Span, ctx);
         return new IrFunction(fullName, Mangler.ThreadEntry(fullName), IrType.Void, pars, true, true, false,
-            false, VisOf(ctx.Context), null, body, null, null, []);
+            false, vis, null, body, null, null, []);
     }
 
     /// <summary>
