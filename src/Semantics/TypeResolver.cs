@@ -904,11 +904,18 @@ sealed class TypeResolver(
         switch (item)
         {
             case ImportDecl:
-            case EnvironmentDecl:
             case ExternFuncDecl:
+                break;
+            case EnvironmentDecl ed:
+                if (ctx.Context != "none")
+                    diag.Error(Codes.TypeMismatch, ctx.File, ed.Span,
+                        "an 'environment' declaration is only valid at the top level of a file, not inside a context block");
                 break;
             case NativeBlock nb:
             {
+                if (nb.Annotations?.Any(a => a is KeepAnnotation) == true)
+                    diag.Error(Codes.WrongAnnotationKind, ctx.File, nb.Span,
+                        "'@keep' is not valid on a native block; use it on a free function");
                 var preambles = nb.Annotations?.OfType<PreambleAnnotation>().ToList() ?? [];
                 if (preambles.Count > 1)
                     diag.Error(Codes.WrongAnnotationKind, ctx.File, nb.Span,
