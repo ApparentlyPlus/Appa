@@ -186,7 +186,7 @@ sealed class TypeResolver(
                 $"'{display}' expects {sig.Params.Count} argument(s), got {argCount}");
     }
 
-    // Overload resolution -- picks the cheapest match from a candidate set.
+    #region Overload resolution
     /// <summary>
     /// Picks the best-matching overload from the candidates for the given argument list.
     /// Reports a diagnostic when no overload matches or multiple overloads tie.
@@ -271,11 +271,18 @@ sealed class TypeResolver(
     } : 4;
 
     /// <summary>
-    /// Returns a comma-separated list of argument types for use in diagnostic messages.
+    /// Formats the argument type list as a comma-separated string for use in diagnostic messages.
     /// </summary>
-    static string DescribeArgs(List<IrExpr> args) => string.Join(", ", args.Select(a => Describe(a.Type)));
+    static string DescribeArgs(List<IrExpr> args)
+    {
+        var names = new string[args.Count];
+        for (int i = 0; i < args.Count; i++) names[i] = Describe(args[i].Type);
+        return string.Join(", ", names);
+    }
 
-    // Type compatibility helpers.
+    #endregion
+
+    #region Type compatibility
     /// <summary>
     /// Returns true when both IR types are structurally identical.
     /// </summary>
@@ -316,7 +323,7 @@ sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Returns a human-readable display name for the type, used in diagnostic messages.
+    /// Returns a human-readable type name for use in diagnostic messages.
     /// </summary>
     static string Describe(IrType t) => t switch
     {
@@ -326,10 +333,20 @@ sealed class TypeResolver(
         IrPtrType p => Describe(p.Inner) + "*",
         IrArrayType a => $"[{a.Size}]{Describe(a.Elem)}",
         IrResultType r => "throws " + Describe(r.Inner),
-        IrFuncPtrType f => $"func({string.Join(", ", f.Params.Select(Describe))}) -> {Describe(f.Ret)}",
+        IrFuncPtrType f => DescribeFuncPtr(f),
         IrUnionType u => u.Name,
         _ => t.ToCType()
     };
+
+    /// <summary>
+    /// Returns the human-readable signature string for a function pointer type.
+    /// </summary>
+    static string DescribeFuncPtr(IrFuncPtrType f)
+    {
+        var pnames = new string[f.Params.Count];
+        for (int i = 0; i < f.Params.Count; i++) pnames[i] = Describe(f.Params[i]);
+        return $"func({string.Join(", ", pnames)}) -> {Describe(f.Ret)}";
+    }
 
     /// <summary>
     /// Reports a type-mismatch diagnostic when value cannot be assigned to the target type.
@@ -431,7 +448,9 @@ sealed class TypeResolver(
         return false;
     }
 
-    // Definite-return analysis.
+    #endregion
+
+    #region Control-flow analysis
     /// <summary>
     /// Returns true when at least one statement in the list definitely returns on every path.
     /// </summary>
@@ -475,20 +494,94 @@ sealed class TypeResolver(
         if (ret is IrVoidType && body.Stmts.Count > 0 && body.Stmts[^1] is IrReturn { Value: null })
             diag.Warn(Codes.RedundantReturn, ctx.File, span, "redundant trailing 'return;'");
 
-        var decls = new List<(string Name, TextSpan Span)>();
-        var used = new HashSet<string>();
-        bool native = false;
-        void Ex(IrExpr? e)
+        var visitor = new BodyQualityVisitor();
+        visitor.St(body);
+        if (visitor.Native) return;
+        var seen = new HashSet<string>();
+        for (int i = 0; i < visitor.Decls.Count; i++)
+        {
+            var (name, sp) = visitor.Decls[i];
+            if (seen.Add(name) && !visitor.Used.Contains(name))
+                diag.Warn(Codes.UnusedVariable, ctx.File, sp, $"unused variable '{name}'");
+        }
+    }
+
+    /// <summary>
+    /// Stack-allocated visitor that collects variable declarations and usages in a function body,
+    /// used by CheckBodyQuality to detect unused local variables without heap allocation.
+    /// </summary>
+    private struct BodyQualityVisitor
+    {
+        public readonly List<(string Name, TextSpan Span)> Decls = [];
+        public readonly HashSet<string> Used = [];
+        public bool Native = false;
+
+        public BodyQualityVisitor() {}
+
+        /// <summary>
+        /// Records variable usages in the expression and recurses into sub-expressions.
+        /// </summary>
+        public void Ex(IrExpr? e)
         {
             if (e == null) return;
-            if (e is IrVar v) used.Add(v.Name);
-            foreach (var c in ChildrenOf(e)) Ex(c);
+            if (e is IrVar v) Used.Add(v.Name);
+            switch (e)
+            {
+                case IrFieldLoad fl: Ex(fl.Obj); break;
+                case IrIndex ix: Ex(ix.Obj); Ex(ix.Idx); break;
+                case IrStaticCall sc:
+                    for (int i = 0; i < sc.Args.Count; i++) Ex(sc.Args[i]);
+                    break;
+                case IrInstanceCall ic:
+                    Ex(ic.Recv);
+                    for (int i = 0; i < ic.Args.Count; i++) Ex(ic.Args[i]);
+                    break;
+                case IrThrowsCall tc:
+                    for (int i = 0; i < tc.Args.Count; i++) Ex(tc.Args[i]);
+                    break;
+                case IrThrowsInstanceCall ti:
+                    Ex(ti.Recv);
+                    for (int i = 0; i < ti.Args.Count; i++) Ex(ti.Args[i]);
+                    break;
+                case IrBinOp b: Ex(b.Left); Ex(b.Right); break;
+                case IrTernary t: Ex(t.Cond); Ex(t.Then); Ex(t.Else); break;
+                case IrUnaryOp u: Ex(u.Operand); break;
+                case IrPostfix p: Ex(p.Operand); break;
+                case IrCast c: Ex(c.Value); break;
+                case IrNew n:
+                    for (int i = 0; i < n.Args.Count; i++) Ex(n.Args[i]);
+                    break;
+                case IrNewInit ni:
+                    for (int i = 0; i < ni.Args.Count; i++) Ex(ni.Args[i]);
+                    for (int i = 0; i < ni.Inits.Count; i++) Ex(ni.Inits[i]);
+                    break;
+                case IrArrayLit al:
+                    for (int i = 0; i < al.Elems.Count; i++) Ex(al.Elems[i]);
+                    break;
+                case IrInterp ip:
+                    for (int i = 0; i < ip.Parts.Count; i++) Ex(ip.Parts[i]);
+                    break;
+                case IrAddrOf a: Ex(a.Target); break;
+                case IrDeref d: Ex(d.Ptr); break;
+                case IrIndirectCall ic:
+                    Ex(ic.Target);
+                    for (int i = 0; i < ic.Args.Count; i++) Ex(ic.Args[i]);
+                    break;
+                case IrUnionConstruct uc:
+                    for (int i = 0; i < uc.Args.Count; i++) Ex(uc.Args[i]);
+                    break;
+                case IrUnionField uf: Ex(uf.Union); break;
+            }
         }
-        void St(IrStmt s)
+
+        /// <summary>
+        /// Records variable declarations and usages in the statement, recursing into nested statements.
+        /// </summary>
+        public void St(IrStmt s)
         {
             switch (s)
             {
-                case IrDeclVar d: decls.Add((d.Name, d.Span)); Ex(d.Init); break;
+                case IrDeclVar d: Decls.Add((d.Name, d.Span)); Ex(d.Init); break;
                 case IrAssign a: Ex(a.Target); Ex(a.Value); break;
                 case IrExprStmt es: Ex(es.Expr); break;
                 case IrReturn r: Ex(r.Value); break;
@@ -499,28 +592,32 @@ sealed class TypeResolver(
                 case IrTryCatch t: St(t.Try); St(t.Catch); break;
                 case IrSwitch sw:
                     Ex(sw.Scrutinee);
-                    foreach (var c in sw.Cases) { foreach (var l in c.Labels) Ex(l); St(c.Body); }
+                    for (int i = 0; i < sw.Cases.Count; i++)
+                    {
+                        var c = sw.Cases[i];
+                        for (int j = 0; j < c.Labels.Count; j++) Ex(c.Labels[j]);
+                        St(c.Body);
+                    }
                     if (sw.Default != null) St(sw.Default);
                     break;
                 case IrMatch ms:
                     Ex(ms.Scrutinee);
-                    foreach (var c in ms.Cases) St(c.Body);
+                    for (int i = 0; i < ms.Cases.Count; i++) St(ms.Cases[i].Body);
                     if (ms.Default != null) St(ms.Default);
                     break;
                 case IrUnsafeBlock u: St(u.Body); break;
                 case IrDefer dfr: St(dfr.Action); break;
-                case IrBlock b: foreach (var x in b.Stmts) St(x); break;
-                case IrNativeStmt: native = true; break;
+                case IrBlock b:
+                    for (int i = 0; i < b.Stmts.Count; i++) St(b.Stmts[i]);
+                    break;
+                case IrNativeStmt: Native = true; break;
             }
         }
-        St(body);
-        if (native) return;
-        var seen = new HashSet<string>();
-        foreach (var (name, sp) in decls)
-            if (seen.Add(name) && !used.Contains(name))
-                diag.Warn(Codes.UnusedVariable, ctx.File, sp, $"unused variable '{name}'");
     }
 
+    #endregion
+
+    #region Access and throws validation
     /// <summary>
     /// Reports PrivateMember when a private member is accessed from outside its declaring class.
     /// </summary>
@@ -542,34 +639,6 @@ sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Returns the direct child expressions of the given IR expression node.
-    /// </summary>
-    static List<IrExpr> ChildrenOf(IrExpr e) => e switch
-    {
-        IrFieldLoad fl => [fl.Obj],
-        IrIndex ix => [ix.Obj, ix.Idx],
-        IrStaticCall sc => sc.Args,
-        IrInstanceCall ic => [ic.Recv, .. ic.Args],
-        IrThrowsCall tc => tc.Args,
-        IrThrowsInstanceCall ti => [ti.Recv, .. ti.Args],
-        IrBinOp b => [b.Left, b.Right],
-        IrTernary t => [t.Cond, t.Then, t.Else],
-        IrUnaryOp u => [u.Operand],
-        IrPostfix p => [p.Operand],
-        IrCast c => [c.Value],
-        IrNew n => n.Args,
-        IrNewInit ni => [.. ni.Args, .. ni.Inits],
-        IrArrayLit al => al.Elems,
-        IrInterp ip => ip.Parts,
-        IrAddrOf a => [a.Target],
-        IrDeref d => [d.Ptr],
-        IrIndirectCall ic => [ic.Target, .. ic.Args],
-        IrUnionConstruct uc => uc.Args,
-        IrUnionField uf => [uf.Union],
-        _ => []
-    };
-
-    /// <summary>
     /// Reports ThrowsOutsideTry when a throwing call is nested inside a non-statement expression.
     /// The allowRoot flag permits the call itself at the top of the expression tree.
     /// </summary>
@@ -579,10 +648,59 @@ sealed class TypeResolver(
         if (!allowRoot && e is IrThrowsCall or IrThrowsInstanceCall)
             diag.Error(Codes.ThrowsOutsideTry, ctx.File, e.Span,
                 "throwing call cannot appear inside a larger expression");
-        foreach (var c in ChildrenOf(e))
-            ForbidNestedThrows(c, ctx, allowRoot: false);
+
+        switch (e)
+        {
+            case IrFieldLoad fl: ForbidNestedThrows(fl.Obj, ctx, false); break;
+            case IrIndex ix: ForbidNestedThrows(ix.Obj, ctx, false); ForbidNestedThrows(ix.Idx, ctx, false); break;
+            case IrStaticCall sc:
+                for (int i = 0; i < sc.Args.Count; i++) ForbidNestedThrows(sc.Args[i], ctx, false);
+                break;
+            case IrInstanceCall ic:
+                ForbidNestedThrows(ic.Recv, ctx, false);
+                for (int i = 0; i < ic.Args.Count; i++) ForbidNestedThrows(ic.Args[i], ctx, false);
+                break;
+            case IrThrowsCall tc:
+                for (int i = 0; i < tc.Args.Count; i++) ForbidNestedThrows(tc.Args[i], ctx, false);
+                break;
+            case IrThrowsInstanceCall ti:
+                ForbidNestedThrows(ti.Recv, ctx, false);
+                for (int i = 0; i < ti.Args.Count; i++) ForbidNestedThrows(ti.Args[i], ctx, false);
+                break;
+            case IrBinOp b: ForbidNestedThrows(b.Left, ctx, false); ForbidNestedThrows(b.Right, ctx, false); break;
+            case IrTernary t: ForbidNestedThrows(t.Cond, ctx, false); ForbidNestedThrows(t.Then, ctx, false); ForbidNestedThrows(t.Else, ctx, false); break;
+            case IrUnaryOp u: ForbidNestedThrows(u.Operand, ctx, false); break;
+            case IrPostfix p: ForbidNestedThrows(p.Operand, ctx, false); break;
+            case IrCast c: ForbidNestedThrows(c.Value, ctx, false); break;
+            case IrNew n:
+                for (int i = 0; i < n.Args.Count; i++) ForbidNestedThrows(n.Args[i], ctx, false);
+                break;
+            case IrNewInit ni:
+                for (int i = 0; i < ni.Args.Count; i++) ForbidNestedThrows(ni.Args[i], ctx, false);
+                for (int i = 0; i < ni.Inits.Count; i++) ForbidNestedThrows(ni.Inits[i], ctx, false);
+                break;
+            case IrArrayLit al:
+                for (int i = 0; i < al.Elems.Count; i++) ForbidNestedThrows(al.Elems[i], ctx, false);
+                break;
+            case IrInterp ip:
+                for (int i = 0; i < ip.Parts.Count; i++) ForbidNestedThrows(ip.Parts[i], ctx, false);
+                break;
+            case IrAddrOf a: ForbidNestedThrows(a.Target, ctx, false); break;
+            case IrDeref d: ForbidNestedThrows(d.Ptr, ctx, false); break;
+            case IrIndirectCall ic:
+                ForbidNestedThrows(ic.Target, ctx, false);
+                for (int i = 0; i < ic.Args.Count; i++) ForbidNestedThrows(ic.Args[i], ctx, false);
+                break;
+            case IrUnionConstruct uc:
+                for (int i = 0; i < uc.Args.Count; i++) ForbidNestedThrows(uc.Args[i], ctx, false);
+                break;
+            case IrUnionField uf: ForbidNestedThrows(uf.Union, ctx, false); break;
+        }
     }
 
+    #endregion
+
+    #region IR utilities
     /// <summary>
     /// Returns true when the expression is side-effect-free and safe to re-emit multiple times.
     /// </summary>
@@ -657,16 +775,16 @@ sealed class TypeResolver(
     {
         if (expected is IrArrayType at && e is IrArrayLit lit && lit.Elems.Count == at.Size)
         {
-            var coerced = lit.Elems.Select(x => Coerce(x, at.Elem, ctx)).ToList();
+            var coerced = new List<IrExpr>(lit.Elems.Count);
+            for (int i = 0; i < lit.Elems.Count; i++)
+            {
+                coerced.Add(Coerce(lit.Elems[i], at.Elem, ctx));
+            }
             return new IrArrayLit(Arr(at.Elem, at.Size), coerced) { Span = e.Span };
         }
         return e;
     }
 
-    /// <summary>
-    /// Wraps or converts an expression to a String value. Requires ARC intrinsic bindings;
-    /// fully implemented when string interpolation support is added.
-    /// </summary>
     /// <summary>
     /// Resolves an intrinsic role to its bound C name, emitting a diagnostic if no binding exists.
     /// </summary>
@@ -710,7 +828,9 @@ sealed class TypeResolver(
         _ => null
     };
 
-    // Scope stack -- lexical variable scoping with ref tracking.
+    #endregion
+
+    #region Scope stack
     /// <summary>
     /// Maintains the chain of lexical scopes for variable declarations, tracking ref parameters.
     /// </summary>
@@ -769,6 +889,9 @@ sealed class TypeResolver(
         }
     }
 
+    #endregion
+
+    #region Resolve context
     /// <summary>
     /// Immutable resolution context that flows through the AST walk, carrying the current file,
     /// realm, class, function, and loop/unsafe/try depth information.
@@ -833,6 +956,9 @@ sealed class TypeResolver(
         public ResolveCtx PushScope() => this with { Scope = Scope.Push() };
     }
 
+    #endregion
+
+    #region Type predicates
     /// <summary>
     /// Returns true when the type is any numeric type (integer or float).
     /// </summary>
@@ -848,7 +974,9 @@ sealed class TypeResolver(
     /// </summary>
     static bool IsInteger(IrType t) => t.IsNumeric && t is not IrPrimType { CName: "bool" };
 
-    // Entry point.
+    #endregion
+
+    #region Module resolution
     /// <summary>
     /// Resolves all programs in the compilation unit and returns the fully typed IrModule.
     /// Generic template instances discovered during resolution are stamped after the main pass.
@@ -970,7 +1098,9 @@ sealed class TypeResolver(
         _ => Visibility.Shared
     };
 
-    // Type conversion.
+    #endregion
+
+    #region Type conversion
     /// <summary>
     /// Converts a Gata type string to its IR type. Returns IrVoidType for null or "void".
     /// Handles function types, fixed-array types, pointer types, primitives, enums, unions, and classes.
@@ -1011,6 +1141,8 @@ sealed class TypeResolver(
         if (sym.IsUnion(t)) return new IrUnionType(t.ToString());
         return new IrClassRef(t.ToString());
     }
+
+    #endregion
 
     #region Declaration resolvers
 
@@ -1075,7 +1207,14 @@ sealed class TypeResolver(
         foreach (var p in md.Params) CheckType(p.Type, ctx, p.Span);
         CheckParams(md.Params, ctx);
         var ret = md.Throws ? ResolveType(md.ReturnType ?? "int") : ResolveType(md.ReturnType ?? "void");
-        var pars = md.Params.Select(p => new IrParam(p.Name, ResolveType(p.Type), p.IsRef)).ToList();
+        
+        var pars = new List<IrParam>(md.Params.Length);
+        for (int i = 0; i < md.Params.Length; i++)
+        {
+            var p = md.Params[i];
+            pars.Add(new IrParam(p.Name, ResolveType(p.Type), p.IsRef));
+        }
+
         string cname = Mangler.Method(cls, md.Name, md.Params, sym.IsOverloadedMethod(cls, md.Name));
         var mctx = ctx.WithClass(cls).WithFunc(md.Name).WithStatic(isStatic)
             .WithThrowsFunc(md.Throws).PushScope();
@@ -1098,7 +1237,14 @@ sealed class TypeResolver(
         foreach (var p in od.Params) CheckType(p.Type, ctx, p.Span);
         CheckParams(od.Params, ctx);
         var ret = ResolveType(od.ReturnType ?? (od.Op == "[]=" ? "void" : cls));
-        var pars = od.Params.Select(p => new IrParam(p.Name, ResolveType(p.Type), p.IsRef)).ToList();
+        
+        var pars = new List<IrParam>(od.Params.Length);
+        for (int i = 0; i < od.Params.Length; i++)
+        {
+            var p = od.Params[i];
+            pars.Add(new IrParam(p.Name, ResolveType(p.Type), p.IsRef));
+        }
+
         string cname = Mangler.Operator(cls, od.Op);
         var octx = ctx.WithClass(cls).WithFunc($"op_{Mangler.OpSuffix(od.Op)}").WithStatic(false).PushScope();
         octx.Scope.Declare("self", new IrClassRef(cls));
@@ -1108,8 +1254,6 @@ sealed class TypeResolver(
         if (body != null) CheckBodyQuality(body, ret, od.Span, ctx);
         return new IrOperator(od.Op, cname, ret, pars, cls, lib, vis, body, nk, nu);
     }
-
-    #endregion
 
     /// <summary>
     /// Resolves a free function declaration, type-checking its signature and body,
@@ -1123,7 +1267,14 @@ sealed class TypeResolver(
         foreach (var p in fd.Params) CheckType(p.Type, ctx, p.Span);
         CheckParams(fd.Params, ctx);
         var ret = fd.Throws ? ResolveType(fd.ReturnType ?? "int") : ResolveType(fd.ReturnType ?? "void");
-        var pars = fd.Params.Select(p => new IrParam(p.Name, ResolveType(p.Type), p.IsRef)).ToList();
+        
+        var pars = new List<IrParam>(fd.Params.Length);
+        for (int i = 0; i < fd.Params.Length; i++)
+        {
+            var p = fd.Params[i];
+            pars.Add(new IrParam(p.Name, ResolveType(p.Type), p.IsRef));
+        }
+
         string cname = fd.Modifiers.Contains("private")
             ? Mangler.PrivateFreeFunc(Mangler.FileToken(ctx.File), fd.Name, fd.Params,
                 sym.PrivateFuncOverloads(ctx.File, fd.Name).Count > 1)
@@ -1153,11 +1304,13 @@ sealed class TypeResolver(
     IrProcess ResolveProcess(ProcessDecl pd, ResolveCtx ctx)
     {
         var vis = VisOf(ctx.Context);
-        var threads = pd.Threads.Select(td =>
+        var threads = new List<IrThread>(pd.Threads.Length);
+        for (int i = 0; i < pd.Threads.Length; i++)
         {
+            var td = pd.Threads[i];
             string tFull = $"{pd.Name}_{td.Name}";
-            return new IrThread(td.Name, "foreground", tFull, ResolveThreadEntry(tFull, td.Entry, ctx, vis));
-        }).ToList();
+            threads.Add(new IrThread(td.Name, "foreground", tFull, ResolveThreadEntry(tFull, td.Entry, ctx, vis)));
+        }
         return new IrProcess(pd.Name, pd.Mode, threads);
     }
 
@@ -1169,7 +1322,14 @@ sealed class TypeResolver(
     {
         foreach (var p in ef.Params) CheckType(p.Type, ctx, p.Span);
         CheckParams(ef.Params, ctx);
-        var pars = ef.Params.Select(p => new IrParam(p.Name, ResolveType(p.Type))).ToList();
+        
+        var pars = new List<IrParam>(ef.Params.Length);
+        for (int i = 0; i < ef.Params.Length; i++)
+        {
+            var p = ef.Params[i];
+            pars.Add(new IrParam(p.Name, ResolveType(p.Type)));
+        }
+
         var fctx = ctx.WithStatic(true).PushScope();
         foreach (var p in ef.Params) fctx.Scope.Declare(p.Name, ResolveType(p.Type));
         var body = ResolveBlock(ef.Body, fctx, IrType.Void);
@@ -1208,7 +1368,9 @@ sealed class TypeResolver(
         return IsManagedRef(a.Type) ? new IrStaticCall(fsym.CName, IrType.Void, [a]) : new IrCast(IrType.Void, a);
     }
 
-    // Returns true for class-type values that participate in ARC reference counting.
+    /// <summary>
+    /// Returns true for class-type values that participate in ARC reference counting.
+    /// </summary>
     bool IsManagedRef(IrType t) => t is IrClassRef cr && sym.IsClass(cr.ClassName) && !sym.Modules.Contains(cr.ClassName);
 
     /// <summary>
@@ -1255,7 +1417,9 @@ sealed class TypeResolver(
         return new IrUnion(ud.Name, Mangler.Union(ud.Name), variants);
     }
 
-    // Blocks and statements.
+    #endregion
+
+    #region Statement resolvers
     /// <summary>
     /// Resolves a block by pushing a new scope, resolving all statements, and warning on unreachable code.
     /// </summary>
@@ -1378,7 +1542,11 @@ sealed class TypeResolver(
             case UnsafeBlock ub:
             {
                 var uctx = ctx.WithUnsafe(true).PushScope();
-                var stmts = ub.Stmts.Select(st => ResolveStmt(st, uctx, retType)).ToList();
+                var stmts = new List<IrStmt>(ub.Stmts.Length);
+                for (int i = 0; i < ub.Stmts.Length; i++)
+                {
+                    stmts.Add(ResolveStmt(ub.Stmts[i], uctx, retType));
+                }
                 return new IrUnsafeBlock(new IrBlock(stmts) { Span = ub.Span });
             }
 
@@ -1541,11 +1709,18 @@ sealed class TypeResolver(
         var cases = new List<IrSwitchCase>();
         foreach (var c in sw.Cases)
         {
-            var labels = c.Labels.Select(l => ResolveExpr(l, ctx)).ToList();
-            foreach (var lbl in labels)
+            var labels = new List<IrExpr>(c.Labels.Length);
+            for (int i = 0; i < c.Labels.Length; i++)
+            {
+                labels.Add(ResolveExpr(c.Labels[i], ctx));
+            }
+            for (int i = 0; i < labels.Count; i++)
+            {
+                var lbl = labels[i];
                 if (!ComparableEq(scrut, lbl))
                     diag.Error(Codes.TypeMismatch, ctx.File, lbl.Span,
                         $"case label of type '{Describe(lbl.Type)}' is not comparable to the switch value '{Describe(scrut.Type)}'");
+            }
             cases.Add(new IrSwitchCase(labels, ResolveBlock(c.Body, ctx, retType)));
         }
         var def = sw.Default == null ? null : ResolveBlock(sw.Default, ctx, retType);
@@ -1564,7 +1739,11 @@ sealed class TypeResolver(
         {
             diag.Error(Codes.TypeMismatch, ctx.File, ms.Scrutinee.Span,
                 $"'match' requires a union value, got '{Describe(scrut.Type)}'");
-            var fallbackCases = ms.Cases.Select(c => new IrMatchCase(0, [], ResolveBlock(c.Body, ctx, retType))).ToList();
+            var fallbackCases = new List<IrMatchCase>(ms.Cases.Length);
+            for (int i = 0; i < ms.Cases.Length; i++)
+            {
+                fallbackCases.Add(new IrMatchCase(0, [], ResolveBlock(ms.Cases[i].Body, ctx, retType)));
+            }
             return new IrMatch(scrut, new IrUnionType("?"), fallbackCases,
                 ms.Default == null ? null : ResolveBlock(ms.Default, ctx, retType));
         }
@@ -1599,9 +1778,13 @@ sealed class TypeResolver(
         var def = ms.Default == null ? null : ResolveBlock(ms.Default, ctx, retType);
         if (def == null && covered.Count < variants.Count)
         {
-            var missing = variants.Where((_, i) => !covered.Contains(i)).Select(v => v.Name);
+            var missingList = new List<string>();
+            for (int i = 0; i < variants.Count; i++)
+            {
+                if (!covered.Contains(i)) missingList.Add(variants[i].Name);
+            }
             diag.Error(Codes.NonExhaustiveMatch, ctx.File, ms.Span,
-                $"'match' on '{ut.Name}' is not exhaustive; missing variant(s): {string.Join(", ", missing)} (add a 'default' case or handle them all)");
+                $"'match' on '{ut.Name}' is not exhaustive; missing variant(s): {string.Join(", ", missingList)} (add a 'default' case or handle them all)");
         }
         return new IrMatch(scrut, ut, cases, def);
     }
@@ -1654,7 +1837,9 @@ sealed class TypeResolver(
         return new IrDeclVar(ls.Name, type, init);
     }
 
-    // Expressions.
+    #endregion
+
+    #region Expression resolvers
     /// <summary>
     /// Resolves an expression and propagates the source span when the resolver did not set one.
     /// </summary>
@@ -1737,7 +1922,11 @@ sealed class TypeResolver(
             }
             case InterpStrExpr istr:
             {
-                var parts = istr.Parts.Select(p => EnsureString(ResolveExpr(p, ctx), ctx)).ToList();
+                var parts = new List<IrExpr>(istr.Parts.Length);
+                for (int i = 0; i < istr.Parts.Length; i++)
+                {
+                    parts.Add(EnsureString(ResolveExpr(istr.Parts[i], ctx), ctx));
+                }
                 return parts.Count == 0 ? new IrLitString("\"\"") { Span = istr.Span } : new IrInterp(parts);
             }
             default:
@@ -1833,8 +2022,6 @@ sealed class TypeResolver(
         return new IrBinOp(be.Op, left, right, t);
     }
 
-    // Parse an integer literal lexeme (hex or decimal, with an optional u/U/l/L suffix).
-    // On success: v = 64-bit bit pattern, type = selected C type, ctext = verbatim C text or null.
     /// <summary>
     /// Parses an integer literal lexeme into its bit pattern, IR type, and optional verbatim C text.
     /// Returns false when the magnitude does not fit in 64 bits.
@@ -1946,7 +2133,11 @@ sealed class TypeResolver(
                     "(func(...) -> R types cannot express which parameters are 'ref')");
                 return new IrVar(name, IrType.Int);
             }
-            var ps = fsym.Sig.Params.Select(p => ResolveType(p.Type)).ToList();
+            var ps = new List<IrType>(fsym.Sig.Params.Count);
+            for (int i = 0; i < fsym.Sig.Params.Count; i++)
+            {
+                ps.Add(ResolveType(fsym.Sig.Params[i].Type));
+            }
             return new IrFuncRef(fsym.CName, FnPtr(ResolveType(fsym.Sig.ReturnType), ps));
         }
 
@@ -2031,7 +2222,12 @@ sealed class TypeResolver(
     {
         // ref arguments are resolved as their plain target so type inference sees the real type;
         // ref/non-ref matching and address-of wrapping happen in CoerceArgs once the callee is known.
-        var args = ce.Args.Select(a => ResolveExpr(a is RefArgExpr ra ? ra.Target : a, ctx)).ToList();
+        var args = new List<IrExpr>(ce.Args.Length);
+        for (int i = 0; i < ce.Args.Length; i++)
+        {
+            var a = ce.Args[i];
+            args.Add(ResolveExpr(a is RefArgExpr ra ? ra.Target : a, ctx));
+        }
 
         // member access call: obj.Method(args) or ClassName.StaticMethod(args)
         if (ce.Callee is MemberAccessExpr ma)
@@ -2341,7 +2537,12 @@ sealed class TypeResolver(
     /// </summary>
     IrExpr ResolveNew(NewExpr ne, ResolveCtx ctx)
     {
-        var args = ne.Args.Select(a => ResolveExpr(a is RefArgExpr ra ? ra.Target : a, ctx)).ToList();
+        var args = new List<IrExpr>(ne.Args.Length);
+        for (int i = 0; i < ne.Args.Length; i++)
+        {
+            var a = ne.Args[i];
+            args.Add(ResolveExpr(a is RefArgExpr ra ? ra.Target : a, ctx));
+        }
         if (sym.Modules.Contains(ne.Type))
         {
             diag.Error(Codes.NewOnNonClass, ctx.File, ne.Span,
@@ -2389,7 +2590,7 @@ sealed class TypeResolver(
             return new IrNew(ne.Type, ctorArgs);
         }
         var elemType = ResolveType(add.Sig.Params[0].Type);
-        var inits = new List<IrExpr>();
+        var inits = new List<IrExpr>(ne.CollectionInit.Length);
         foreach (var el in ne.CollectionInit)
         {
             var r = Coerce(ResolveExpr(el, ctx), elemType, ctx);
@@ -2410,7 +2611,11 @@ sealed class TypeResolver(
             diag.Error(Codes.TypeMismatch, ctx.File, al.Span, "empty array literal '[]' has no element type");
             return new IrArrayLit(Arr(IrType.Int, 0), []);
         }
-        var elems = al.Elems.Select(e => ResolveExpr(e, ctx)).ToList();
+        var elems = new List<IrExpr>(al.Elems.Length);
+        for (int i = 0; i < al.Elems.Length; i++)
+        {
+            elems.Add(ResolveExpr(al.Elems[i], ctx));
+        }
         var elemType = elems[0].Type;
         for (int i = 1; i < elems.Count; i++)
         {
@@ -2447,6 +2652,8 @@ sealed class TypeResolver(
         }
         return new IrUnionConstruct(new IrUnionType(unionName), idx, args);
     }
+
+    #endregion
 
     private readonly struct FuncPtrKey(IrType ret, List<IrType> ps) : IEquatable<FuncPtrKey>
     {
