@@ -1,7 +1,5 @@
 namespace Appa;
 
-using System.Text.RegularExpressions;
-
 // Pre-resolution pass that stamps out concrete class bodies for each generic
 // instantiation used in the source. A `class List[T] { ... }` is a template;
 // this pass produces List_int, List_String, etc. from the recorded GenericUses.
@@ -14,9 +12,124 @@ sealed class Monomorphizer(DiagnosticBag diag)
 {
     sealed record Template(ClassDecl Decl, string[] Params, string BaseName);
 
+    internal sealed class SubstitutionContext(Dictionary<string, string> g, Dictionary<string, string>? c)
+    {
+        public readonly Dictionary<string, string> GataMap = g;
+        public readonly Dictionary<string, string> CMap = c ?? [];
+        public readonly string[] Params = g.Keys.ToArray();
+
+        /// <summary>
+        /// Substitutes type parameters in a string, replacing whole words that match type parameters with their concrete types. 
+        /// If `isCMap` is true, uses the C-type mapping; otherwise, uses the Gata-type mapping.
+        /// </summary>
+        public string SubWords(string text, bool isCMap)
+        {
+            var map = isCMap ? CMap : GataMap;
+            bool containsParam = false;
+            for (int i = 0; i < Params.Length; i++)
+            {
+                if (text.Contains(Params[i], StringComparison.Ordinal))
+                {
+                    containsParam = true;
+                    break;
+                }
+            }
+            if (!containsParam) return text;
+
+            var sb = new System.Text.StringBuilder(text.Length);
+            int idx = 0;
+            while (idx < text.Length)
+            {
+                char c = text[idx];
+                if (char.IsLetterOrDigit(c) || c == '_')
+                {
+                    int start = idx;
+                    while (idx < text.Length && (char.IsLetterOrDigit(text[idx]) || text[idx] == '_'))
+                    {
+                        idx++;
+                    }
+                    string word = text[start..idx];
+                    if (map.TryGetValue(word, out var replacement))
+                    {
+                        sb.Append(replacement);
+                    }
+                    else
+                    {
+                        sb.Append(word);
+                    }
+                }
+                else
+                {
+                    sb.Append(c);
+                    idx++;
+                }
+            }
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Substitutes type parameters in a Gata type string, handling both word-boundary and non-word-boundary occurrences.
+        /// </summary>
+        public string? SubType(string? t)
+        {
+            if (t is null) return null;
+            bool containsParam = false;
+            for (int i = 0; i < Params.Length; i++)
+            {
+                if (t.Contains(Params[i], StringComparison.Ordinal))
+                {
+                    containsParam = true;
+                    break;
+                }
+            }
+            if (!containsParam) return t;
+
+            string text = SubWords(t, false);
+            
+            var sb = new System.Text.StringBuilder(text.Length);
+            int idx = 0;
+            while (idx < text.Length)
+            {
+                if (text[idx] == '_')
+                {
+                    bool matched = false;
+                    foreach (var (from, to) in GataMap)
+                    {
+                        int len = from.Length;
+                        if (idx + 1 + len <= text.Length && text.AsSpan(idx + 1, len).Equals(from, StringComparison.Ordinal))
+                        {
+                            int nextIdx = idx + 1 + len;
+                            if (nextIdx == text.Length || text[nextIdx] == '_')
+                            {
+                                sb.Append('_');
+                                sb.Append(to);
+                                idx = nextIdx;
+                                matched = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!matched)
+                    {
+                        sb.Append('_');
+                        idx++;
+                    }
+                }
+                else
+                {
+                    sb.Append(text[idx]);
+                    idx++;
+                }
+            }
+            return sb.ToString();
+        }
+    }
+
     /// <summary>
     /// Scans GenericUses in all programs, stamps a concrete class for each distinct
-    /// instantiation, and rewrites each program's Items to replace templates with instances.
+    /// instantiation breadth-first, and rewrites each program's Items to replace templates
+    /// with instances. Deferred inner uses (template bodies that reference other templates
+    /// via their own type parameters) are replayed once their owning instantiation is done.
     /// </summary>
     public void Process(List<(Program prog, string file)> programs)
     {
@@ -33,19 +146,45 @@ sealed class Monomorphizer(DiagnosticBag diag)
 
         if (templates.Count == 0) return;
 
-        var requests = new Dictionary<string, (string Base, string[] Args, TextSpan Span, string File)>();
+        var directUses = new List<(GenericUse Use, string File)>();
+        var deferredByOwner = new Dictionary<string, List<(GenericUse Use, string File)>>();
         foreach (var (prog, path) in programs)
+        {
+            var ownersInFile = templates.Values.Where(t => prog.Items.Contains(t.Decl)).ToList();
             foreach (var use in prog.GenericUses)
             {
-                if (!templates.ContainsKey(use.Base)) continue;
-                string mangled = use.Base + "_" + string.Join("_", use.Args);
-                if (!tmplNames.Contains(mangled))
-                    requests.TryAdd(mangled, (use.Base, use.Args, use.Span, path));
+                var owner = ownersInFile.FirstOrDefault(t =>
+                    t.BaseName != use.Base &&
+                    use.Span.Start >= t.Decl.Span.Start && use.Span.End <= t.Decl.Span.End &&
+                    use.Args.All(a => Array.IndexOf(t.Params, a) >= 0));
+                if (owner != null)
+                {
+                    if (!deferredByOwner.TryGetValue(owner.BaseName, out var l))
+                        deferredByOwner[owner.BaseName] = l = [];
+                    l.Add((use, path));
+                }
+                else directUses.Add((use, path));
             }
+        }
+
+        var requests = new Dictionary<string, (string Base, string[] Args, TextSpan Span, string File)>();
+        bool AddRequest(string b, string[] a, TextSpan sp, string file)
+        {
+            if (!templates.ContainsKey(b)) return false;
+            string mangled = b + "_" + string.Join("_", a);
+            if (tmplNames.Contains(mangled)) return false;
+            return requests.TryAdd(mangled, (b, a, sp, file));
+        }
+        foreach (var (use, file) in directUses) AddRequest(use.Base, use.Args, use.Span, file);
 
         var instancesByBase = new Dictionary<string, List<ClassDecl>>();
-        foreach (var (mangled, (baseName, args, span, file)) in requests)
+        var pending = new Queue<string>(requests.Keys);
+        var done = new HashSet<string>();
+        while (pending.Count > 0)
         {
+            string mangled = pending.Dequeue();
+            if (!done.Add(mangled)) continue;
+            var (baseName, args, span, file) = requests[mangled];
             var tmpl = templates[baseName];
             if (tmpl.Params.Length != args.Length)
             {
@@ -62,11 +201,19 @@ sealed class Monomorphizer(DiagnosticBag diag)
                 Mangler.RegisterGenericInstance(mangled, baseName, [..args]);
                 continue;
             }
-            var (concrete, _) = Instantiate(tmpl, args, mangled);
+            var (concrete, binds) = Instantiate(tmpl, args, mangled);
             Mangler.RegisterGenericInstance(mangled, baseName, [..args]);
             if (!instancesByBase.TryGetValue(baseName, out var list))
                 instancesByBase[baseName] = list = [];
             list.Add(concrete);
+
+            if (deferredByOwner.TryGetValue(baseName, out var deferred))
+                foreach (var (du, dfile) in deferred)
+                {
+                    var concreteArgs = du.Args.Select(a => binds.GetValueOrDefault(a, a)).ToArray();
+                    if (AddRequest(du.Base, concreteArgs, du.Span, dfile))
+                        pending.Enqueue(du.Base + "_" + string.Join("_", concreteArgs));
+                }
         }
 
         for (int i = 0; i < programs.Count; i++)
@@ -104,40 +251,84 @@ sealed class Monomorphizer(DiagnosticBag diag)
     (ClassDecl Concrete, Dictionary<string, string> Binds) Instantiate(
         Template tmpl, string[] args, string mangled)
     {
-        var gataMap = new Dictionary<string, string>();
-        var cMap = new Dictionary<string, string>();
+        var gataMap = new Dictionary<string, string>(tmpl.Params.Length);
+        var cMap = new Dictionary<string, string>(tmpl.Params.Length);
         for (int i = 0; i < tmpl.Params.Length; i++)
         {
             string p = tmpl.Params[i];
             gataMap[p] = args[i];
             cMap[p] = CTypeOf(args[i]);
         }
+        var ctx = new SubstitutionContext(gataMap, cMap);
 
         var members = new ClassMember[tmpl.Decl.Members.Length];
+        bool changed = false;
         for (int i = 0; i < members.Length; i++)
-            members[i] = SubMember(tmpl.Decl.Members[i], gataMap, cMap);
-        var concrete = new ClassDecl(mangled, [], tmpl.Decl.Annotations, members, tmpl.Decl.Span);
+        {
+            var m = tmpl.Decl.Members[i];
+            var sm = SubMember(m, ctx);
+            members[i] = sm;
+            if (!ReferenceEquals(m, sm)) changed = true;
+        }
+
+        var concrete = changed
+            ? new ClassDecl(mangled, [], tmpl.Decl.Annotations, members, tmpl.Decl.Span)
+            : tmpl.Decl with { Name = mangled };
         return (concrete, gataMap);
     }
 
     /// <summary>
     /// Substitutes type parameters in a single class member (field, method, or operator).
     /// </summary>
-    ClassMember SubMember(ClassMember m, Dictionary<string, string> g, Dictionary<string, string> c)
+    ClassMember SubMember(ClassMember m, SubstitutionContext ctx)
     {
         ClassMember r = m switch
         {
-            FieldsBlock fb => new FieldsBlock(SubNative(fb.Body, c), fb.Span),
-            FieldDecl fd => new FieldDecl(fd.Modifiers, SubType(fd.Type, g), fd.Name, fd.Span,
-                fd.Init is null ? null : SubExpr(fd.Init, g)),
-            MethodDecl md => new MethodDecl(md.Modifiers, md.Annotations, SubType(md.ReturnType, g),
-                md.Name, [..SubParams(md.Params, g)], md.IsEntry, md.Throws,
-                SubBody(md.Body, g, c), md.Span),
-            OperatorDecl od => new OperatorDecl(od.Op, [..SubParams(od.Params, g)],
-                SubType(od.ReturnType, g), SubBody(od.Body, g, c), od.Span),
+            FieldsBlock fb => new FieldsBlock(SubNative(fb.Body, ctx), fb.Span),
+            FieldDecl fd => SubFieldDecl(fd, ctx),
+            MethodDecl md => SubMethodDecl(md, ctx),
+            OperatorDecl od => SubOperatorDecl(od, ctx),
             _ => m
         };
         return r with { Span = m.Span };
+    }
+
+    /// <summary>
+    /// Substitutes type parameters in a field declaration, including its type and initializer expression.
+    /// </summary>
+    static FieldDecl SubFieldDecl(FieldDecl fd, SubstitutionContext ctx)
+    {
+        var newType = ctx.SubType(fd.Type);
+        var newInit = fd.Init is null ? null : SubExpr(fd.Init, ctx);
+        if (ReferenceEquals(newType, fd.Type) && ReferenceEquals(newInit, fd.Init))
+            return fd;
+        return new FieldDecl(fd.Modifiers, newType, fd.Name, fd.Span, newInit);
+    }
+
+    /// <summary>
+    /// Substitutes type parameters in a method declaration, including its return type, parameters, and body.
+    /// </summary>
+    static MethodDecl SubMethodDecl(MethodDecl md, SubstitutionContext ctx)
+    {
+        var newRet = ctx.SubType(md.ReturnType);
+        var newParams = SubParams(md.Params, ctx);
+        var newBody = SubBody(md.Body, ctx);
+        if (ReferenceEquals(newRet, md.ReturnType) && ReferenceEquals(newParams, md.Params) && ReferenceEquals(newBody, md.Body))
+            return md;
+        return new MethodDecl(md.Modifiers, md.Annotations, newRet, md.Name, newParams, md.IsEntry, md.Throws, newBody, md.Span);
+    }
+
+    /// <summary>
+    /// Substitutes type parameters in an operator declaration, including its return type, parameters, and body.
+    /// </summary>
+    static OperatorDecl SubOperatorDecl(OperatorDecl od, SubstitutionContext ctx)
+    {
+        var newParams = SubParams(od.Params, ctx);
+        var newRet = ctx.SubType(od.ReturnType);
+        var newBody = SubBody(od.Body, ctx);
+        if (ReferenceEquals(newParams, od.Params) && ReferenceEquals(newRet, od.ReturnType) && ReferenceEquals(newBody, od.Body))
+            return od;
+        return new OperatorDecl(od.Op, newParams, newRet, newBody, od.Span);
     }
 
     /// <summary>
@@ -145,25 +336,61 @@ sealed class Monomorphizer(DiagnosticBag diag)
     /// </summary>
     internal static Param[] SubParams(Param[] ps, Dictionary<string, string> g)
     {
-        var result = new Param[ps.Length];
+        var ctx = new SubstitutionContext(g, null);
+        return SubParams(ps, ctx);
+    }
+
+    internal static Param[] SubParams(Param[] ps, SubstitutionContext ctx)
+    {
+        Param[]? newParams = null;
         for (int i = 0; i < ps.Length; i++)
-            result[i] = new Param(SubType(ps[i].Type, g)!, ps[i].Name, ps[i].Span, ps[i].IsRef);
-        return result;
+        {
+            var p = ps[i];
+            var newType = ctx.SubType(p.Type);
+            if (!ReferenceEquals(newType, p.Type))
+            {
+                if (newParams == null)
+                {
+                    newParams = new Param[ps.Length];
+                    Array.Copy(ps, newParams, i);
+                }
+            }
+            newParams?[i] = new Param(newType!, p.Name, p.Span, p.IsRef);
+        }
+        return newParams ?? ps;
     }
 
     /// <summary>
     /// Substitutes type parameters in a method body, dispatching to the native or block form.
     /// </summary>
     internal static MethodBody SubBody(
-        MethodBody b, Dictionary<string, string> g, Dictionary<string, string> c) => b switch
+        MethodBody b, Dictionary<string, string> g, Dictionary<string, string> c)
     {
-        NativeMethodBody nmb => new NativeMethodBody(SubNative(nmb.Native, c)),
-        BlockBody bb => new BlockBody(SubBlock(bb.Block, g)),
+        var ctx = new SubstitutionContext(g, c);
+        return SubBody(b, ctx);
+    }
+
+    /// <summary>
+    /// Substitutes type parameters in a method body, dispatching to the native or block form.
+    /// </summary>
+    internal static MethodBody SubBody(MethodBody b, SubstitutionContext ctx) => b switch
+    {
+        NativeMethodBody nmb => new NativeMethodBody(SubNative(nmb.Native, ctx)),
+        BlockBody bb => new BlockBody(SubBlock(bb.Block, ctx)),
         _ => b
     };
 
-    static NativeBody SubNative(NativeBody nb, Dictionary<string, string> c) =>
-        new(SubWords(nb.KernelC, c), SubWords(nb.UserC, c));
+    /// <summary>
+    /// Substitutes type parameters in a native method body, replacing type parameters in the kernel and user code strings.
+    /// </summary>
+    static NativeBody SubNative(NativeBody nb, SubstitutionContext ctx)
+    {
+        var newKernel = ctx.SubWords(nb.KernelC, true);
+        var newUser = ctx.SubWords(nb.UserC, true);
+        if (ReferenceEquals(newKernel, nb.KernelC) && ReferenceEquals(newUser, nb.UserC))
+            return nb;
+        return new NativeBody(newKernel, newUser);
+    }
 
     /// <summary>
     /// Substitutes type parameters in a Gata type string, handling both word-boundary
@@ -171,18 +398,8 @@ sealed class Monomorphizer(DiagnosticBag diag)
     /// </summary>
     internal static string? SubType(string? t, Dictionary<string, string> g)
     {
-        if (t is null) return null;
-        string text = SubWords(t, g);
-        foreach (var (from, to) in g)
-            text = Regex.Replace(text, $@"_{Regex.Escape(from)}(?=_|$)", "_" + to.Replace("$", "$$"));
-        return text;
-    }
-
-    static string SubWords(string text, Dictionary<string, string> map)
-    {
-        foreach (var (from, to) in map)
-            text = Regex.Replace(text, $@"\b{Regex.Escape(from)}\b", to.Replace("$", "$$"));
-        return text;
+        var ctx = new SubstitutionContext(g, null);
+        return ctx.SubType(t);
     }
 
     /// <summary>
@@ -198,72 +415,375 @@ sealed class Monomorphizer(DiagnosticBag diag)
         return $"{Mangler.Class(t)}*";
     }
 
-    static Block SubBlock(Block b, Dictionary<string, string> g) =>
-        new([..b.Stmts.Select(s => SubStmt(s, g))], b.Span);
-
-    static Stmt SubStmt(Stmt s, Dictionary<string, string> g)
+    /// <summary>
+    /// Substitutes type parameters in a block of statements, returning a new block if any substitutions occurred.
+    /// </summary>
+    static Block SubBlock(Block b, SubstitutionContext ctx)
     {
-        Stmt r = s switch
+        Stmt[]? newStmts = null;
+        for (int i = 0; i < b.Stmts.Length; i++)
         {
-            Block b => SubBlock(b, g),
-            LetStmt ls => new LetStmt(SubType(ls.Type, g), ls.Name,
-                ls.Init is null ? null : SubExpr(ls.Init, g), ls.Span),
-            AssignStmt a => new AssignStmt(SubExpr(a.Target, g), a.Op, SubExpr(a.Value, g), a.Span),
-            ExprStmt es => new ExprStmt(SubExpr(es.E, g), es.Span),
-            IfStmt ifs => new IfStmt(SubExpr(ifs.Cond, g), SubStmt(ifs.Then, g),
-                ifs.Else is null ? null : SubStmt(ifs.Else, g), ifs.Span),
-            WhileStmt ws => new WhileStmt(SubExpr(ws.Cond, g), SubStmt(ws.Body, g), ws.Span),
-            ForStmt fs => new ForStmt(
-                fs.Init is null ? null : SubStmt(fs.Init, g),
-                fs.Cond is null ? null : SubExpr(fs.Cond, g),
-                fs.Step is null ? null : SubExpr(fs.Step, g),
-                SubBlock(fs.Body, g), fs.Span),
-            ForInStmt fi => new ForInStmt(fi.Var, SubExpr(fi.Collection, g),
-                SubBlock(fi.Body, g), fi.Span),
-            ReturnStmt rs => new ReturnStmt(rs.Value is null ? null : SubExpr(rs.Value, g), rs.Span),
-            TryCatchStmt tc => new TryCatchStmt(SubBlock(tc.Try, g), SubBlock(tc.Catch, g), tc.Span),
-            UnsafeBlock ub => new UnsafeBlock([..ub.Stmts.Select(x => SubStmt(x, g))], ub.Span),
-            DeferStmt dfr => new DeferStmt(SubStmt(dfr.Action, g), dfr.Span),
-            SwitchStmt sw => new SwitchStmt(SubExpr(sw.Scrutinee, g),
-                [..sw.Cases.Select(c => new SwitchCase(
-                    [..c.Labels.Select(l => SubExpr(l, g))],
-                    SubBlock(c.Body, g), c.Span))],
-                sw.Default is null ? null : SubBlock(sw.Default, g), sw.Span),
-            MatchStmt ms => new MatchStmt(SubExpr(ms.Scrutinee, g),
-                [..ms.Cases.Select(c => c with { Body = SubBlock(c.Body, g) })],
-                ms.Default is null ? null : SubBlock(ms.Default, g), ms.Span),
-            _ => s   // NativeStmt, BreakStmt, ContinueStmt, ThrowStmt, DebugStmt, PanicStmt
-        };
-        return r with { Span = s.Span };
+            var s = b.Stmts[i];
+            var ns = SubStmt(s, ctx);
+            if (!ReferenceEquals(s, ns))
+            {
+                if (newStmts == null)
+                {
+                    newStmts = new Stmt[b.Stmts.Length];
+                    Array.Copy(b.Stmts, newStmts, i);
+                }
+            }
+            newStmts?[i] = ns;
+        }
+        if (newStmts == null) return b;
+        return new Block(newStmts, b.Span);
     }
 
-    static Expr SubExpr(Expr e, Dictionary<string, string> g)
+    /// <summary>
+    /// Substitutes type parameters in a single statement, recursively processing any nested statements or expressions.
+    /// </summary>
+    static Stmt SubStmt(Stmt s, SubstitutionContext ctx)
     {
-        Expr r = e switch
+        switch (s)
         {
-            CastExpr ce => new CastExpr(SubType(ce.TargetType, g)!, SubExpr(ce.Value, g), ce.Span),
-            TernaryExpr te => new TernaryExpr(SubExpr(te.Cond, g), SubExpr(te.Then, g),
-                SubExpr(te.Else, g), te.Span),
-            NewExpr ne => new NewExpr(SubType(ne.Type, g)!,
-                [..ne.Args.Select(a => SubExpr(a, g))],
-                [..ne.CollectionInit.Select(a => SubExpr(a, g))], ne.Span),
-            ArrayLitExpr al => new ArrayLitExpr([..al.Elems.Select(a => SubExpr(a, g))], al.Span),
-            CallExpr cx => new CallExpr(SubExpr(cx.Callee, g),
-                [..cx.Args.Select(a => SubExpr(a, g))], cx.Span),
-            MemberAccessExpr ma => new MemberAccessExpr(SubExpr(ma.Object, g), ma.Member, ma.Span),
-            IndexExpr ix => new IndexExpr(SubExpr(ix.Object, g), SubExpr(ix.Index, g), ix.Span),
-            BinExpr be => new BinExpr(be.Op, SubExpr(be.Left, g), SubExpr(be.Right, g), be.Span),
-            UnaryExpr un => new UnaryExpr(un.Op, SubExpr(un.Operand, g), un.Span),
-            PostfixExpr pf => new PostfixExpr(pf.Op, SubExpr(pf.Operand, g), pf.Span),
-            AddrOfExpr ao => new AddrOfExpr(SubExpr(ao.Target, g), ao.Span),
-            DerefExpr dr => new DerefExpr(SubExpr(dr.Ptr, g), dr.Span),
-            RefArgExpr ra => new RefArgExpr(SubExpr(ra.Target, g), ra.Span),
-            InterpStrExpr ip => new InterpStrExpr([..ip.Parts.Select(p => SubExpr(p, g))], ip.Span),
-            SizeofExpr so => new SizeofExpr(SubType(so.TypeName, g)!, so.Span),
-            DefaultExpr de => new DefaultExpr(SubType(de.TypeName, g)!, de.Span),
-            _ => e   // literals, IdentExpr, NullExpr
-        };
-        return r with { Span = e.Span };
+            case Block b:
+                var nb = SubBlock(b, ctx);
+                if (ReferenceEquals(b, nb)) return s;
+                return nb with { Span = s.Span };
+
+            case LetStmt ls:
+                var newType = ctx.SubType(ls.Type);
+                var newInit = ls.Init is null ? null : SubExpr(ls.Init, ctx);
+                if (ReferenceEquals(newType, ls.Type) && ReferenceEquals(newInit, ls.Init))
+                    return s;
+                return new LetStmt(newType, ls.Name, newInit, ls.Span) { Span = s.Span };
+
+            case AssignStmt a:
+                var newTarget = SubExpr(a.Target, ctx);
+                var newValue = SubExpr(a.Value, ctx);
+                if (ReferenceEquals(newTarget, a.Target) && ReferenceEquals(newValue, a.Value))
+                    return s;
+                return new AssignStmt(newTarget, a.Op, newValue, a.Span) { Span = s.Span };
+
+            case ExprStmt es:
+                var newE = SubExpr(es.E, ctx);
+                if (ReferenceEquals(newE, es.E)) return s;
+                return new ExprStmt(newE, es.Span) { Span = s.Span };
+
+            case IfStmt ifs:
+                var newCond = SubExpr(ifs.Cond, ctx);
+                var newThen = SubStmt(ifs.Then, ctx);
+                var newElse = ifs.Else is null ? null : SubStmt(ifs.Else, ctx);
+                if (ReferenceEquals(newCond, ifs.Cond) && ReferenceEquals(newThen, ifs.Then) && ReferenceEquals(newElse, ifs.Else))
+                    return s;
+                return new IfStmt(newCond, newThen, newElse, ifs.Span) { Span = s.Span };
+
+            case WhileStmt ws:
+                var newWCond = SubExpr(ws.Cond, ctx);
+                var newWBody = SubStmt(ws.Body, ctx);
+                if (ReferenceEquals(newWCond, ws.Cond) && ReferenceEquals(newWBody, ws.Body))
+                    return s;
+                return new WhileStmt(newWCond, newWBody, ws.Span) { Span = s.Span };
+
+            case ForStmt fs:
+                var newFInit = fs.Init is null ? null : SubStmt(fs.Init, ctx);
+                var newFCond = fs.Cond is null ? null : SubExpr(fs.Cond, ctx);
+                var newFStep = fs.Step is null ? null : SubExpr(fs.Step, ctx);
+                var newFBody = SubBlock(fs.Body, ctx);
+                if (ReferenceEquals(newFInit, fs.Init) && ReferenceEquals(newFCond, fs.Cond) &&
+                    ReferenceEquals(newFStep, fs.Step) && ReferenceEquals(newFBody, fs.Body))
+                    return s;
+                return new ForStmt(newFInit, newFCond, newFStep, newFBody, fs.Span) { Span = s.Span };
+
+            case ForInStmt fi:
+                var newFiColl = SubExpr(fi.Collection, ctx);
+                var newFiBody = SubBlock(fi.Body, ctx);
+                if (ReferenceEquals(newFiColl, fi.Collection) && ReferenceEquals(newFiBody, fi.Body))
+                    return s;
+                return new ForInStmt(fi.Var, newFiColl, newFiBody, fi.Span) { Span = s.Span };
+
+            case ReturnStmt rs:
+                var newRv = rs.Value is null ? null : SubExpr(rs.Value, ctx);
+                if (ReferenceEquals(newRv, rs.Value)) return s;
+                return new ReturnStmt(newRv, rs.Span) { Span = s.Span };
+
+            case TryCatchStmt tc:
+                var newTry = SubBlock(tc.Try, ctx);
+                var newCatch = SubBlock(tc.Catch, ctx);
+                if (ReferenceEquals(newTry, tc.Try) && ReferenceEquals(newCatch, tc.Catch))
+                    return s;
+                return new TryCatchStmt(newTry, newCatch, tc.Span) { Span = s.Span };
+
+            case DeferStmt dfr:
+                var newDAction = SubStmt(dfr.Action, ctx);
+                if (ReferenceEquals(newDAction, dfr.Action)) return s;
+                return new DeferStmt(newDAction, dfr.Span) { Span = s.Span };
+
+            case UnsafeBlock ub:
+                Stmt[]? newUbStmts = null;
+                for (int i = 0; i < ub.Stmts.Length; i++)
+                {
+                    var x = ub.Stmts[i];
+                    var nx = SubStmt(x, ctx);
+                    if (!ReferenceEquals(x, nx))
+                    {
+                        if (newUbStmts == null)
+                        {
+                            newUbStmts = new Stmt[ub.Stmts.Length];
+                            Array.Copy(ub.Stmts, newUbStmts, i);
+                        }
+                    }
+                    newUbStmts?[i] = nx;
+                }
+                if (newUbStmts == null) return s;
+                return new UnsafeBlock(newUbStmts, ub.Span) { Span = s.Span };
+
+            case SwitchStmt sw:
+                var newSwScrut = SubExpr(sw.Scrutinee, ctx);
+                SwitchCase[]? newSwCases = null;
+                for (int i = 0; i < sw.Cases.Length; i++)
+                {
+                    var c = sw.Cases[i];
+                    Expr[]? newSwLabels = null;
+                    for (int j = 0; j < c.Labels.Length; j++)
+                    {
+                        var l = c.Labels[j];
+                        var nl = SubExpr(l, ctx);
+                        if (!ReferenceEquals(l, nl))
+                        {
+                            if (newSwLabels == null)
+                            {
+                                newSwLabels = new Expr[c.Labels.Length];
+                                Array.Copy(c.Labels, newSwLabels, j);
+                            }
+                        }
+                        newSwLabels?[j] = nl;
+                    }
+                    var newSwBody = SubBlock(c.Body, ctx);
+                    if (newSwLabels != null || !ReferenceEquals(newSwBody, c.Body))
+                    {
+                        if (newSwCases == null)
+                        {
+                            newSwCases = new SwitchCase[sw.Cases.Length];
+                            Array.Copy(sw.Cases, newSwCases, i);
+                        }
+                        newSwCases[i] = new SwitchCase(newSwLabels ?? c.Labels, newSwBody, c.Span);
+                    }
+                    else
+                    {
+                        newSwCases?[i] = c;
+                    }
+                }
+                var newSwDefault = sw.Default is null ? null : SubBlock(sw.Default, ctx);
+                if (ReferenceEquals(newSwScrut, sw.Scrutinee) && newSwCases == null && ReferenceEquals(newSwDefault, sw.Default))
+                    return s;
+                return new SwitchStmt(newSwScrut, newSwCases ?? sw.Cases, newSwDefault, sw.Span) { Span = s.Span };
+
+            case MatchStmt ms:
+                var newMsScrut = SubExpr(ms.Scrutinee, ctx);
+                MatchCase[]? newMsCases = null;
+                for (int i = 0; i < ms.Cases.Length; i++)
+                {
+                    var c = ms.Cases[i];
+                    var newMsBody = SubBlock(c.Body, ctx);
+                    if (!ReferenceEquals(newMsBody, c.Body))
+                    {
+                        if (newMsCases == null)
+                        {
+                            newMsCases = new MatchCase[ms.Cases.Length];
+                            Array.Copy(ms.Cases, newMsCases, i);
+                        }
+                        newMsCases[i] = c with { Body = newMsBody };
+                    }
+                    else
+                    {
+                        newMsCases?[i] = c;
+                    }
+                }
+                var newMsDefault = ms.Default is null ? null : SubBlock(ms.Default, ctx);
+                if (ReferenceEquals(newMsScrut, ms.Scrutinee) && newMsCases == null && ReferenceEquals(newMsDefault, ms.Default))
+                    return s;
+                return new MatchStmt(newMsScrut, newMsCases ?? ms.Cases, newMsDefault, ms.Span) { Span = s.Span };
+
+            default:
+                return s;   // NativeStmt, BreakStmt, ContinueStmt, ThrowStmt, DebugStmt, PanicStmt
+        }
+    }
+
+    /// <summary>
+    /// Substitutes type parameters in an expression, recursively processing any sub-expressions and types.
+    /// </summary>
+    static Expr SubExpr(Expr e, SubstitutionContext ctx)
+    {
+        switch (e)
+        {
+            case CastExpr ce:
+                var newType = ctx.SubType(ce.TargetType);
+                var newVal = SubExpr(ce.Value, ctx);
+                if (ReferenceEquals(newType, ce.TargetType) && ReferenceEquals(newVal, ce.Value))
+                    return e;
+                return new CastExpr(newType!, newVal, ce.Span) { Span = e.Span };
+
+            case TernaryExpr te:
+                var newCond = SubExpr(te.Cond, ctx);
+                var newThen = SubExpr(te.Then, ctx);
+                var newElse = SubExpr(te.Else, ctx);
+                if (ReferenceEquals(newCond, te.Cond) && ReferenceEquals(newThen, te.Then) && ReferenceEquals(newElse, te.Else))
+                    return e;
+                return new TernaryExpr(newCond, newThen, newElse, te.Span) { Span = e.Span };
+
+            case NewExpr ne:
+                var newNeType = ctx.SubType(ne.Type);
+                Expr[]? newNeArgs = null;
+                for (int i = 0; i < ne.Args.Length; i++)
+                {
+                    var a = ne.Args[i];
+                    var na = SubExpr(a, ctx);
+                    if (!ReferenceEquals(a, na))
+                    {
+                        if (newNeArgs == null)
+                        {
+                            newNeArgs = new Expr[ne.Args.Length];
+                            Array.Copy(ne.Args, newNeArgs, i);
+                        }
+                    }
+                    newNeArgs?[i] = na;
+                }
+                Expr[]? newNeColl = null;
+                for (int i = 0; i < ne.CollectionInit.Length; i++)
+                {
+                    var a = ne.CollectionInit[i];
+                    var na = SubExpr(a, ctx);
+                    if (!ReferenceEquals(a, na))
+                    {
+                        if (newNeColl == null)
+                        {
+                            newNeColl = new Expr[ne.CollectionInit.Length];
+                            Array.Copy(ne.CollectionInit, newNeColl, i);
+                        }
+                    }
+                    newNeColl?[i] = na;
+                }
+                if (ReferenceEquals(newNeType, ne.Type) && newNeArgs == null && newNeColl == null)
+                    return e;
+                return new NewExpr(newNeType!, newNeArgs ?? ne.Args, newNeColl ?? ne.CollectionInit, ne.Span) { Span = e.Span };
+
+            case ArrayLitExpr al:
+                Expr[]? newAlElems = null;
+                for (int i = 0; i < al.Elems.Length; i++)
+                {
+                    var a = al.Elems[i];
+                    var na = SubExpr(a, ctx);
+                    if (!ReferenceEquals(a, na))
+                    {
+                        if (newAlElems == null)
+                        {
+                            newAlElems = new Expr[al.Elems.Length];
+                            Array.Copy(al.Elems, newAlElems, i);
+                        }
+                    }
+                    newAlElems?[i] = na;
+                }
+                if (newAlElems == null) return e;
+                return new ArrayLitExpr(newAlElems, al.Span) { Span = e.Span };
+
+            case CallExpr cx:
+                var newCallee = SubExpr(cx.Callee, ctx);
+                Expr[]? newCxArgs = null;
+                for (int i = 0; i < cx.Args.Length; i++)
+                {
+                    var a = cx.Args[i];
+                    var na = SubExpr(a, ctx);
+                    if (!ReferenceEquals(a, na))
+                    {
+                        if (newCxArgs == null)
+                        {
+                            newCxArgs = new Expr[cx.Args.Length];
+                            Array.Copy(cx.Args, newCxArgs, i);
+                        }
+                    }
+                    newCxArgs?[i] = na;
+                }
+                if (ReferenceEquals(newCallee, cx.Callee) && newCxArgs == null)
+                    return e;
+                return new CallExpr(newCallee, newCxArgs ?? cx.Args, cx.Span) { Span = e.Span };
+
+            case MemberAccessExpr ma:
+                var newMaObj = SubExpr(ma.Object, ctx);
+                if (ReferenceEquals(newMaObj, ma.Object)) return e;
+                return new MemberAccessExpr(newMaObj, ma.Member, ma.Span) { Span = e.Span };
+
+            case IndexExpr ix:
+                var newIxObj = SubExpr(ix.Object, ctx);
+                var newIxIdx = SubExpr(ix.Index, ctx);
+                if (ReferenceEquals(newIxObj, ix.Object) && ReferenceEquals(newIxIdx, ix.Index))
+                    return e;
+                return new IndexExpr(newIxObj, newIxIdx, ix.Span) { Span = e.Span };
+
+            case BinExpr be:
+                var newBeLeft = SubExpr(be.Left, ctx);
+                var newBeRight = SubExpr(be.Right, ctx);
+                if (ReferenceEquals(newBeLeft, be.Left) && ReferenceEquals(newBeRight, be.Right))
+                    return e;
+                return new BinExpr(be.Op, newBeLeft, newBeRight, be.Span) { Span = e.Span };
+
+            case UnaryExpr un:
+                var newUnOp = SubExpr(un.Operand, ctx);
+                if (ReferenceEquals(newUnOp, un.Operand)) return e;
+                return new UnaryExpr(un.Op, newUnOp, un.Span) { Span = e.Span };
+
+            case PostfixExpr pf:
+                var newPfOp = SubExpr(pf.Operand, ctx);
+                if (ReferenceEquals(newPfOp, pf.Operand)) return e;
+                return new PostfixExpr(pf.Op, newPfOp, pf.Span) { Span = e.Span };
+
+            case AddrOfExpr ao:
+                var newAoTarget = SubExpr(ao.Target, ctx);
+                if (ReferenceEquals(newAoTarget, ao.Target)) return e;
+                return new AddrOfExpr(newAoTarget, ao.Span) { Span = e.Span };
+
+            case DerefExpr dr:
+                var newDrPtr = SubExpr(dr.Ptr, ctx);
+                if (ReferenceEquals(newDrPtr, dr.Ptr)) return e;
+                return new DerefExpr(newDrPtr, dr.Span) { Span = e.Span };
+
+            case RefArgExpr ra:
+                var newRaTarget = SubExpr(ra.Target, ctx);
+                if (ReferenceEquals(newRaTarget, ra.Target)) return e;
+                return new RefArgExpr(newRaTarget, ra.Span) { Span = e.Span };
+
+            case InterpStrExpr ip:
+                Expr[]? newIpParts = null;
+                for (int i = 0; i < ip.Parts.Length; i++)
+                {
+                    var a = ip.Parts[i];
+                    var na = SubExpr(a, ctx);
+                    if (!ReferenceEquals(a, na))
+                    {
+                        if (newIpParts == null)
+                        {
+                            newIpParts = new Expr[ip.Parts.Length];
+                            Array.Copy(ip.Parts, newIpParts, i);
+                        }
+                    }
+                    newIpParts?[i] = na;
+                }
+                if (newIpParts == null) return e;
+                return new InterpStrExpr(newIpParts, ip.Span) { Span = e.Span };
+
+            case SizeofExpr so:
+                var newSoType = ctx.SubType(so.TypeName);
+                if (ReferenceEquals(newSoType, so.TypeName)) return e;
+                return new SizeofExpr(newSoType!, so.Span) { Span = e.Span };
+
+            case DefaultExpr de:
+                var newDeType = ctx.SubType(de.TypeName);
+                if (ReferenceEquals(newDeType, de.TypeName)) return e;
+                return new DefaultExpr(newDeType!, de.Span) { Span = e.Span };
+
+            default:
+                return e;   // literals, IdentExpr, NullExpr
+        }
     }
 
     #region Generic function helpers
@@ -283,9 +803,6 @@ sealed class Monomorphizer(DiagnosticBag diag)
             if (Array.IndexOf(gparams, inner) >= 0 && argType is IrPtrType ptr)
                 return Bind(inner, GataNameOf(ptr.Inner), binds);
         }
-        // Single-type-argument generic container: declared param `List_T` against a
-        // concrete `List_int` argument - bind T=int. Lets generic free functions take
-        // List[T]/Stack[T]/etc. parameters and have T inferred from the caller's type.
         if (argType is IrClassRef cr)
             foreach (var g in gparams)
             {
