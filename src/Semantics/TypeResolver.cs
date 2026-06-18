@@ -1339,10 +1339,69 @@ sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Stamps and resolves each generic function instantiation discovered during the main pass.
-    /// Fully implemented when generic call resolution is added.
+    /// Resolves a call to a generic free function by inferring type arguments from the
+    /// supplied argument types, mangling the name, and queuing the instantiation for
+    /// resolution after the main pass completes.
     /// </summary>
-    void DrainGenericInstances(IrModule module) { }
+    IrExpr ResolveGenericCall(
+        (FuncDecl Decl, string File, string Context) t,
+        List<IrExpr> args, ResolveCtx ctx, TextSpan span, Expr[]? astArgs = null)
+    {
+        var fd = t.Decl;
+        string fallback = Mangler.FreeFunc(fd.Name, [], false, false, false);
+        if (fd.Params.Length != args.Count)
+        {
+            diag.Error(Codes.WrongArgCount, ctx.File, span,
+                $"generic '{fd.Name}' expects {fd.Params.Length} argument(s), got {args.Count}");
+            return new IrStaticCall(fallback, IrType.Void, args);
+        }
+
+        var binds = new Dictionary<string, string>();
+        for (int i = 0; i < fd.Params.Length; i++)
+            if (!Monomorphizer.UnifyParam(fd.Params[i].Type, args[i].Type, fd.GenericParams, binds))
+                diag.Error(Codes.ArgTypeMismatch, ctx.File, span,
+                    $"in call to generic '{fd.Name}', argument {i + 1} ('{Describe(args[i].Type)}') conflicts with an earlier binding of the same type parameter");
+
+        var missing = fd.GenericParams.Where(p => !binds.ContainsKey(p)).ToList();
+        if (missing.Count > 0)
+        {
+            diag.Error(Codes.UndefinedType, ctx.File, span,
+                $"cannot infer type argument {string.Join(", ", missing.Select(m => $"'{m}'"))} for generic '{fd.Name}' from its arguments");
+            return new IrStaticCall(fallback, IrType.Void, args);
+        }
+
+        string mangled = fd.Name + "_" + string.Join("_", fd.GenericParams.Select(p => Monomorphizer.SanitizeTypeName(binds[p])));
+        if (_genericSeen.Add(mangled))
+            _genericQueue.Enqueue((fd, t.File, t.Context, binds, mangled));
+
+        var concreteParams = Monomorphizer.SubParams(fd.Params, binds);
+        string cname = Mangler.FreeFunc(mangled, concreteParams, overloaded: false, isEntry: false, isExtern: false);
+        var ret = ResolveType(Monomorphizer.SubType(fd.ReturnType ?? (fd.Throws ? "int" : "void"), binds));
+        CoerceArgs(args, new MethodSig(fd.ReturnType ?? "void", [..concreteParams], true, fd.Throws, false, [..fd.Annotations]), ctx, astArgs);
+
+        if (fd.Throws) { CheckThrowsHandled(ctx, span); return new IrThrowsCall(cname, ret, args); }
+        return new IrStaticCall(cname, ret, args);
+    }
+
+    /// <summary>
+    /// Resolves every generic free-function instantiation queued during the main pass,
+    /// substituting concrete type bindings and registering the result in the module.
+    /// </summary>
+    void DrainGenericInstances(IrModule module)
+    {
+        while (_genericQueue.Count > 0)
+        {
+            var (fd, file, context, binds, mangled) = _genericQueue.Dequeue();
+            var cMap = binds.ToDictionary(kv => kv.Key, kv => Monomorphizer.CTypeOf(kv.Value));
+            var inst = new FuncDecl(fd.Modifiers, fd.Annotations,
+                Monomorphizer.SubType(fd.ReturnType, binds), mangled, [],
+                [..Monomorphizer.SubParams(fd.Params, binds)], fd.IsEntry, fd.Throws,
+                Monomorphizer.SubBody(fd.Body, binds, cMap), fd.Span);
+            _scope = visible.GetValueOrDefault(file, [file]);
+            var ctx = new ResolveCtx(file, context, "", null, false, false, false, false, "", 0, new ScopeStack());
+            module.FreeFunctions.Add(ResolveFreeFunc(inst, ctx));
+        }
+    }
 
     /// <summary>
     /// Checks whether a bare call is a retain/release ARC intrinsic and returns the appropriate
@@ -2306,6 +2365,9 @@ sealed class TypeResolver(
                 return ResolveIndirectCallArgs(new IrVar(id.Name, localFp, ctx.Scope.IsRef(id.Name)), localFp, args, ctx, ce.Span, ce.Args);
 
             if (TryResolveArcIntrinsic(id.Name, args, ctx, ce.Span) is { } arc) return arc;
+
+            if (_funcTemplates.TryGetValue(id.Name, out var tmpl))
+                return ResolveGenericCall(tmpl, args, ctx, ce.Span, ce.Args);
 
             // file-local private free functions take priority over globals
             var pfsym = sym.LookupPrivateFunc(ctx.File, id.Name);
