@@ -236,6 +236,74 @@ sealed class Monomorphizer(DiagnosticBag diag)
         return r with { Span = s.Span };
     }
 
+    #region Generic function helpers
+
+    /// <summary>
+    /// Tries to bind a type parameter inferred from one argument position.
+    /// Returns false only on a conflicting re-bind; a concrete (non-parameter) type returns true.
+    /// </summary>
+    internal static bool UnifyParam(string paramType, IrType argType,
+                                    string[] gparams, Dictionary<string, string> binds)
+    {
+        string pt = paramType.Trim();
+        if (Array.IndexOf(gparams, pt) >= 0) return Bind(pt, GataNameOf(argType), binds);
+        if (pt.EndsWith('*'))
+        {
+            string inner = pt[..^1];
+            if (Array.IndexOf(gparams, inner) >= 0 && argType is IrPtrType ptr)
+                return Bind(inner, GataNameOf(ptr.Inner), binds);
+        }
+        // Single-type-argument generic container: declared param `List_T` against a
+        // concrete `List_int` argument — bind T=int. Lets generic free functions take
+        // List[T]/Stack[T]/etc. parameters and have T inferred from the caller's type.
+        if (argType is IrClassRef cr)
+            foreach (var g in gparams)
+            {
+                string suffix = "_" + g;
+                if (!pt.EndsWith(suffix)) continue;
+                string ptBase = pt[..^suffix.Length];
+                int us = cr.ClassName.IndexOf('_');
+                if (us < 0) continue;
+                if (cr.ClassName[..us] == ptBase) return Bind(g, cr.ClassName[(us + 1)..], binds);
+            }
+        return true;
+    }
+
+    static bool Bind(string param, string name, Dictionary<string, string> binds)
+    {
+        if (binds.TryGetValue(param, out var prev)) return prev == name;
+        binds[param] = name;
+        return true;
+    }
+
+    /// <summary>
+    /// Returns the Gata type spelling for a resolved IR type, used as the binding value
+    /// when inferring type arguments from call-site argument types.
+    /// </summary>
+    internal static string GataNameOf(IrType t) => t switch
+    {
+        IrPrimType p => p.CName,
+        IrClassRef c => c.ClassName,
+        IrPtrType pt => GataNameOf(pt.Inner) + "*",
+        IrVoidType   => "void",
+        _            => t.ToCType()
+    };
+
+    /// <summary>
+    /// Reduces a type name to a valid C-identifier fragment for use in mangled generic names.
+    /// Pointer stars become "_p"; all other non-identifier characters are dropped.
+    /// </summary>
+    internal static string SanitizeTypeName(string t)
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (char ch in t.Trim())
+            if (char.IsLetterOrDigit(ch) || ch == '_') sb.Append(ch);
+            else if (ch == '*') sb.Append("_p");
+        return sb.Length == 0 ? "x" : sb.ToString();
+    }
+
+    #endregion
+
     static Expr SubExpr(Expr e, Dictionary<string, string> g)
     {
         Expr r = e switch

@@ -1339,10 +1339,24 @@ sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Stamps and resolves each generic function instantiation discovered during the main pass.
-    /// Fully implemented when generic call resolution is added.
+    /// Resolves every generic free-function instantiation queued during the main pass,
+    /// substituting concrete type bindings and registering the result in the module.
     /// </summary>
-    void DrainGenericInstances(IrModule module) { }
+    void DrainGenericInstances(IrModule module)
+    {
+        while (_genericQueue.Count > 0)
+        {
+            var (fd, file, context, binds, mangled) = _genericQueue.Dequeue();
+            var cMap = binds.ToDictionary(kv => kv.Key, kv => Monomorphizer.CTypeOf(kv.Value));
+            var inst = new FuncDecl(fd.Modifiers, fd.Annotations,
+                Monomorphizer.SubType(fd.ReturnType, binds), mangled, [],
+                [..Monomorphizer.SubParams(fd.Params, binds)], fd.IsEntry, fd.Throws,
+                Monomorphizer.SubBody(fd.Body, binds, cMap), fd.Span);
+            _scope = visible.GetValueOrDefault(file, [file]);
+            var ctx = new ResolveCtx(file, context, "", null, false, false, false, false, "", 0, new ScopeStack());
+            module.FreeFunctions.Add(ResolveFreeFunc(inst, ctx));
+        }
+    }
 
     /// <summary>
     /// Checks whether a bare call is a retain/release ARC intrinsic and returns the appropriate
