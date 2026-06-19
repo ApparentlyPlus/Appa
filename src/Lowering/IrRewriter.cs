@@ -11,7 +11,7 @@ using System.Runtime.InteropServices;
 /// Default implementation is an identity transform; subclasses override RewriteExpr or RewriteStmt
 /// to transform specific node kinds.
 /// </summary>
-abstract class IrRewriter
+internal abstract class IrRewriter
 {
     /// <summary>
     /// Runs the rewriter over an entire module, rewriting all classes, free functions, and processes.
@@ -32,7 +32,7 @@ abstract class IrRewriter
     /// <summary>
     /// Rewrites all fields, methods, operators, and field initializers of a class.
     /// </summary>
-    IrClass RewriteClass(IrClass c)
+    private IrClass RewriteClass(IrClass c)
     {
         var fields = MapFields(c.Fields);
         var methods = MapFunctions(c.Methods);
@@ -50,7 +50,7 @@ abstract class IrRewriter
     /// <summary>
     /// Rewrites a function body; returns the function unchanged if it is native.
     /// </summary>
-    IrFunction RewriteFunction(IrFunction f)
+    private IrFunction RewriteFunction(IrFunction f)
     {
         if (f.Body == null) return f;
         var body = RewriteBlock(f.Body);
@@ -60,7 +60,7 @@ abstract class IrRewriter
     /// <summary>
     /// Rewrites an operator body; returns the operator unchanged if it is native.
     /// </summary>
-    IrOperator RewriteOperator(IrOperator o)
+    private IrOperator RewriteOperator(IrOperator o)
     {
         if (o.Body == null) return o;
         var body = RewriteBlock(o.Body);
@@ -70,7 +70,7 @@ abstract class IrRewriter
     /// <summary>
     /// Rewrites the entry function of each thread within a process.
     /// </summary>
-    IrProcess RewriteProcess(IrProcess p)
+    private IrProcess RewriteProcess(IrProcess p)
     {
         var threads = MapThreads(p.Threads);
         return ReferenceEquals(threads, p.Threads) ? p : p with { Threads = threads };
@@ -79,47 +79,59 @@ abstract class IrRewriter
     /// <summary>
     /// Rewrites a block by delegating to RewriteStmt and casting the result.
     /// </summary>
-    IrBlock RewriteBlock(IrBlock b) => (IrBlock)RewriteStmt(b);
+    private IrBlock RewriteBlock(IrBlock b)
+    {
+        return (IrBlock)RewriteStmt(b);
+    }
 
     // Override points
     /// <summary>
     /// Override to transform specific expression kinds. Default delegates to MapExpr.
     /// </summary>
-    protected virtual IrExpr RewriteExpr(IrExpr e) => MapExpr(e);
+    protected virtual IrExpr RewriteExpr(IrExpr e)
+    {
+        return MapExpr(e);
+    }
 
     /// <summary>
     /// Override to transform specific statement kinds. Default delegates to MapStmt.
     /// </summary>
-    protected virtual IrStmt RewriteStmt(IrStmt s) => MapStmt(s);
+    protected virtual IrStmt RewriteStmt(IrStmt s)
+    {
+        return MapStmt(s);
+    }
 
     // Default structural recursion
     /// <summary>
     /// Structurally recurses into an expression, rewriting all child expressions.
     /// </summary>
-    protected IrExpr MapExpr(IrExpr e) => e switch
+    protected IrExpr MapExpr(IrExpr e)
     {
-        IrFieldLoad fl          => UpdateFieldLoad(fl),
-        IrIndex ix              => UpdateIndex(ix),
-        IrStaticCall sc         => UpdateStaticCall(sc),
-        IrInstanceCall ic       => UpdateInstanceCall(ic),
-        IrThrowsCall tc         => UpdateThrowsCall(tc),
-        IrThrowsInstanceCall ti => UpdateThrowsInstanceCall(ti),
-        IrBinOp b               => UpdateBinOp(b),
-        IrTernary t             => UpdateTernary(t),
-        IrUnaryOp u             => UpdateUnaryOp(u),
-        IrPostfix p             => UpdatePostfix(p),
-        IrCast c                => UpdateCast(c),
-        IrNew n                 => UpdateNew(n),
-        IrNewInit ni            => UpdateNewInit(ni),
-        IrArrayLit al           => UpdateArrayLit(al),
-        IrInterp ip             => UpdateInterp(ip),
-        IrAddrOf a              => UpdateAddrOf(a),
-        IrDeref d               => UpdateDeref(d),
-        IrIndirectCall ic2      => UpdateIndirectCall(ic2),
-        IrUnionConstruct uc     => UpdateUnionConstruct(uc),
-        IrUnionField uf         => UpdateUnionField(uf),
-        _                       => e   // literals, IrVar, IrSelfExpr, IrFuncRef
-    };
+        return e switch
+        {
+            IrFieldLoad fl => UpdateFieldLoad(fl),
+            IrIndex ix => UpdateIndex(ix),
+            IrStaticCall sc => UpdateStaticCall(sc),
+            IrInstanceCall ic => UpdateInstanceCall(ic),
+            IrThrowsCall tc => UpdateThrowsCall(tc),
+            IrThrowsInstanceCall ti => UpdateThrowsInstanceCall(ti),
+            IrBinOp b => UpdateBinOp(b),
+            IrTernary t => UpdateTernary(t),
+            IrUnaryOp u => UpdateUnaryOp(u),
+            IrPostfix p => UpdatePostfix(p),
+            IrCast c => UpdateCast(c),
+            IrNew n => UpdateNew(n),
+            IrNewInit ni => UpdateNewInit(ni),
+            IrArrayLit al => UpdateArrayLit(al),
+            IrInterp ip => UpdateInterp(ip),
+            IrAddrOf a => UpdateAddrOf(a),
+            IrDeref d => UpdateDeref(d),
+            IrIndirectCall ic2 => UpdateIndirectCall(ic2),
+            IrUnionConstruct uc => UpdateUnionConstruct(uc),
+            IrUnionField uf => UpdateUnionField(uf),
+            _ => e   // literals, IrVar, IrSelfExpr, IrFuncRef
+        };
+    }
 
     /// <summary>
     /// Rewrites the object child of an IrFieldLoad; returns the original if unchanged.
@@ -312,24 +324,27 @@ abstract class IrRewriter
     /// <summary>
     /// Structurally recurses into a statement, rewriting all child expressions and statements.
     /// </summary>
-    protected IrStmt MapStmt(IrStmt s) => s switch
+    protected IrStmt MapStmt(IrStmt s)
     {
-        IrBlock b       => UpdateBlock(b),
-        IrDeclVar d     => UpdateDeclVar(d),
-        IrAssign a      => UpdateAssign(a),
-        IrExprStmt es   => UpdateExprStmt(es),
-        IrReturn r      => UpdateReturn(r),
-        IrIf i          => UpdateIf(i),
-        IrWhile w       => UpdateWhile(w),
-        IrFor f         => UpdateFor(f),
-        IrForIn fi      => UpdateForIn(fi),
-        IrTryCatch t    => UpdateTryCatch(t),
-        IrSwitch sw     => UpdateSwitch(sw),
-        IrUnsafeBlock u => UpdateUnsafeBlock(u),
-        IrMatch m       => UpdateMatch(m),
-        IrDefer d       => UpdateDefer(d),
-        _               => s   // IrNativeStmt, IrRaw, IrBreak, IrContinue, IrThrow, IrDebug, IrPanic
-    };
+        return s switch
+        {
+            IrBlock b => UpdateBlock(b),
+            IrDeclVar d => UpdateDeclVar(d),
+            IrAssign a => UpdateAssign(a),
+            IrExprStmt es => UpdateExprStmt(es),
+            IrReturn r => UpdateReturn(r),
+            IrIf i => UpdateIf(i),
+            IrWhile w => UpdateWhile(w),
+            IrFor f => UpdateFor(f),
+            IrForIn fi => UpdateForIn(fi),
+            IrTryCatch t => UpdateTryCatch(t),
+            IrSwitch sw => UpdateSwitch(sw),
+            IrUnsafeBlock u => UpdateUnsafeBlock(u),
+            IrMatch m => UpdateMatch(m),
+            IrDefer d => UpdateDefer(d),
+            _ => s   // IrNativeStmt, IrRaw, IrBreak, IrContinue, IrThrow, IrDebug, IrPanic
+        };
+    }
 
     /// <summary>
     /// Rewrites the statement list of an IrBlock; returns the original if unchanged.
@@ -479,7 +494,7 @@ abstract class IrRewriter
     /// <summary>
     /// Maps a list of expressions, returning the original list if no element was rewritten.
     /// </summary>
-    List<IrExpr> Map(List<IrExpr> xs)
+    private List<IrExpr> Map(List<IrExpr> xs)
     {
         if (xs.Count == 0) return xs;
 
@@ -509,7 +524,7 @@ abstract class IrRewriter
     /// <summary>
     /// Maps a list of statements, returning the original list if no element was rewritten.
     /// </summary>
-    List<IrStmt> MapStmts(List<IrStmt> xs)
+    private List<IrStmt> MapStmts(List<IrStmt> xs)
     {
         if (xs.Count == 0) return xs;
 
@@ -539,7 +554,7 @@ abstract class IrRewriter
     /// <summary>
     /// Maps a list of switch cases, returning the original list if no case was rewritten.
     /// </summary>
-    List<IrSwitchCase> MapCases(List<IrSwitchCase> xs)
+    private List<IrSwitchCase> MapCases(List<IrSwitchCase> xs)
     {
         if (xs.Count == 0) return xs;
 
@@ -572,7 +587,7 @@ abstract class IrRewriter
     /// <summary>
     /// Maps a list of match cases, returning the original list if no case was rewritten.
     /// </summary>
-    List<IrMatchCase> MapMatchCases(List<IrMatchCase> xs)
+    private List<IrMatchCase> MapMatchCases(List<IrMatchCase> xs)
     {
         if (xs.Count == 0) return xs;
 
@@ -604,7 +619,7 @@ abstract class IrRewriter
     /// <summary>
     /// Maps a list of classes, returning the original list if no class was rewritten.
     /// </summary>
-    List<IrClass> MapClasses(List<IrClass> xs)
+    private List<IrClass> MapClasses(List<IrClass> xs)
     {
         if (xs.Count == 0) return xs;
         List<IrClass>? result = null;
@@ -633,7 +648,7 @@ abstract class IrRewriter
     /// <summary>
     /// Maps a list of functions, returning the original list if no function was rewritten.
     /// </summary>
-    List<IrFunction> MapFunctions(List<IrFunction> xs)
+    private List<IrFunction> MapFunctions(List<IrFunction> xs)
     {
         if (xs.Count == 0) return xs;
         List<IrFunction>? result = null;
@@ -662,7 +677,7 @@ abstract class IrRewriter
     /// <summary>
     /// Maps a list of operators, returning the original list if no operator was rewritten.
     /// </summary>
-    List<IrOperator> MapOperators(List<IrOperator> xs)
+    private List<IrOperator> MapOperators(List<IrOperator> xs)
     {
         if (xs.Count == 0) return xs;
         List<IrOperator>? result = null;
@@ -691,7 +706,7 @@ abstract class IrRewriter
     /// <summary>
     /// Maps a list of processes, returning the original list if no process was rewritten.
     /// </summary>
-    List<IrProcess> MapProcesses(List<IrProcess> xs)
+    private List<IrProcess> MapProcesses(List<IrProcess> xs)
     {
         if (xs.Count == 0) return xs;
         List<IrProcess>? result = null;
@@ -720,7 +735,7 @@ abstract class IrRewriter
     /// <summary>
     /// Maps a list of threads, returning the original list if no thread's entry function was rewritten.
     /// </summary>
-    List<IrThread> MapThreads(List<IrThread> xs)
+    private List<IrThread> MapThreads(List<IrThread> xs)
     {
         if (xs.Count == 0) return xs;
         List<IrThread>? result = null;
@@ -758,7 +773,7 @@ abstract class IrRewriter
     /// <summary>
     /// Maps a list of fields, returning the original list if no field initializer was rewritten.
     /// </summary>
-    List<IrField> MapFields(List<IrField> xs)
+    private List<IrField> MapFields(List<IrField> xs)
     {
         if (xs.Count == 0) return xs;
         List<IrField>? result = null;
@@ -796,7 +811,7 @@ abstract class IrRewriter
     /// <summary>
     /// Maps a dictionary of field initializers, returning the original if no value was rewritten.
     /// </summary>
-    Dictionary<string, IrExpr> MapFieldInits(Dictionary<string, IrExpr> dict)
+    private Dictionary<string, IrExpr> MapFieldInits(Dictionary<string, IrExpr> dict)
     {
         if (dict.Count == 0) return dict;
         Dictionary<string, IrExpr>? result = null;

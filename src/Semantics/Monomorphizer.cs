@@ -8,15 +8,15 @@ namespace Appa;
 /// Rewrites generic class templates into concrete instantiated classes before
 /// symbol collection and type resolution run.
 /// </summary>
-sealed class Monomorphizer(DiagnosticBag diag)
+internal sealed class Monomorphizer(DiagnosticBag diag)
 {
-    sealed record Template(ClassDecl Decl, string[] Params, string BaseName);
+    private sealed record Template(ClassDecl Decl, string[] Params, string BaseName);
 
     internal sealed class SubstitutionContext(Dictionary<string, string> g, Dictionary<string, string>? c)
     {
         public readonly Dictionary<string, string> GataMap = g;
         public readonly Dictionary<string, string> CMap = c ?? [];
-        public readonly string[] Params = g.Keys.ToArray();
+        public readonly string[] Params = [.. g.Keys];
 
         /// <summary>
         /// Substitutes type parameters in a string, replacing whole words that match type parameters with their concrete types. 
@@ -238,7 +238,7 @@ sealed class Monomorphizer(DiagnosticBag diag)
     /// <summary>
     /// Returns the base name of a generic class by stripping the trailing type-parameter suffix.
     /// </summary>
-    static string BaseNameOf(ClassDecl cd)
+    private static string BaseNameOf(ClassDecl cd)
     {
         string suffix = "_" + string.Join("_", cd.GenericParams);
         return cd.Name.EndsWith(suffix) ? cd.Name[..^suffix.Length] : cd.Name;
@@ -248,7 +248,7 @@ sealed class Monomorphizer(DiagnosticBag diag)
     /// Clones a generic class template with concrete type arguments, substituting type
     /// parameters throughout signatures, native fields, and statement bodies.
     /// </summary>
-    (ClassDecl Concrete, Dictionary<string, string> Binds) Instantiate(
+    private (ClassDecl Concrete, Dictionary<string, string> Binds) Instantiate(
         Template tmpl, string[] args, string mangled)
     {
         var gataMap = new Dictionary<string, string>(tmpl.Params.Length);
@@ -280,7 +280,7 @@ sealed class Monomorphizer(DiagnosticBag diag)
     /// <summary>
     /// Substitutes type parameters in a single class member (field, method, or operator).
     /// </summary>
-    ClassMember SubMember(ClassMember m, SubstitutionContext ctx)
+    private ClassMember SubMember(ClassMember m, SubstitutionContext ctx)
     {
         ClassMember r = m switch
         {
@@ -296,7 +296,7 @@ sealed class Monomorphizer(DiagnosticBag diag)
     /// <summary>
     /// Substitutes type parameters in a field declaration, including its type and initializer expression.
     /// </summary>
-    static FieldDecl SubFieldDecl(FieldDecl fd, SubstitutionContext ctx)
+    private static FieldDecl SubFieldDecl(FieldDecl fd, SubstitutionContext ctx)
     {
         var newType = ctx.SubType(fd.Type);
         var newInit = fd.Init is null ? null : SubExpr(fd.Init, ctx);
@@ -308,7 +308,7 @@ sealed class Monomorphizer(DiagnosticBag diag)
     /// <summary>
     /// Substitutes type parameters in a method declaration, including its return type, parameters, and body.
     /// </summary>
-    static MethodDecl SubMethodDecl(MethodDecl md, SubstitutionContext ctx)
+    private static MethodDecl SubMethodDecl(MethodDecl md, SubstitutionContext ctx)
     {
         var newRet = ctx.SubType(md.ReturnType);
         var newParams = SubParams(md.Params, ctx);
@@ -321,7 +321,7 @@ sealed class Monomorphizer(DiagnosticBag diag)
     /// <summary>
     /// Substitutes type parameters in an operator declaration, including its return type, parameters, and body.
     /// </summary>
-    static OperatorDecl SubOperatorDecl(OperatorDecl od, SubstitutionContext ctx)
+    private static OperatorDecl SubOperatorDecl(OperatorDecl od, SubstitutionContext ctx)
     {
         var newParams = SubParams(od.Params, ctx);
         var newRet = ctx.SubType(od.ReturnType);
@@ -373,17 +373,20 @@ sealed class Monomorphizer(DiagnosticBag diag)
     /// <summary>
     /// Substitutes type parameters in a method body, dispatching to the native or block form.
     /// </summary>
-    internal static MethodBody SubBody(MethodBody b, SubstitutionContext ctx) => b switch
+    internal static MethodBody SubBody(MethodBody b, SubstitutionContext ctx)
     {
-        NativeMethodBody nmb => new NativeMethodBody(SubNative(nmb.Native, ctx)),
-        BlockBody bb => new BlockBody(SubBlock(bb.Block, ctx)),
-        _ => b
-    };
+        return b switch
+        {
+            NativeMethodBody nmb => new NativeMethodBody(SubNative(nmb.Native, ctx)),
+            BlockBody bb => new BlockBody(SubBlock(bb.Block, ctx)),
+            _ => b
+        };
+    }
 
     /// <summary>
     /// Substitutes type parameters in a native method body, replacing type parameters in the kernel and user code strings.
     /// </summary>
-    static NativeBody SubNative(NativeBody nb, SubstitutionContext ctx)
+    private static NativeBody SubNative(NativeBody nb, SubstitutionContext ctx)
     {
         var newKernel = ctx.SubWords(nb.KernelC, true);
         var newUser = ctx.SubWords(nb.UserC, true);
@@ -418,7 +421,7 @@ sealed class Monomorphizer(DiagnosticBag diag)
     /// <summary>
     /// Substitutes type parameters in a block of statements, returning a new block if any substitutions occurred.
     /// </summary>
-    static Block SubBlock(Block b, SubstitutionContext ctx)
+    private static Block SubBlock(Block b, SubstitutionContext ctx)
     {
         Stmt[]? newStmts = null;
         for (int i = 0; i < b.Stmts.Length; i++)
@@ -442,7 +445,7 @@ sealed class Monomorphizer(DiagnosticBag diag)
     /// <summary>
     /// Substitutes type parameters in a single statement, recursively processing any nested statements or expressions.
     /// </summary>
-    static Stmt SubStmt(Stmt s, SubstitutionContext ctx)
+    private static Stmt SubStmt(Stmt s, SubstitutionContext ctx)
     {
         switch (s)
         {
@@ -613,7 +616,7 @@ sealed class Monomorphizer(DiagnosticBag diag)
     /// <summary>
     /// Substitutes type parameters in an expression, recursively processing any sub-expressions and types.
     /// </summary>
-    static Expr SubExpr(Expr e, SubstitutionContext ctx)
+    private static Expr SubExpr(Expr e, SubstitutionContext ctx)
     {
         switch (e)
         {
@@ -816,7 +819,7 @@ sealed class Monomorphizer(DiagnosticBag diag)
         return true;
     }
 
-    static bool Bind(string param, string name, Dictionary<string, string> binds)
+    private static bool Bind(string param, string name, Dictionary<string, string> binds)
     {
         if (binds.TryGetValue(param, out var prev)) return prev == name;
         binds[param] = name;
@@ -827,14 +830,17 @@ sealed class Monomorphizer(DiagnosticBag diag)
     /// Returns the Gata type spelling for a resolved IR type, used as the binding value
     /// when inferring type arguments from call-site argument types.
     /// </summary>
-    internal static string GataNameOf(IrType t) => t switch
+    internal static string GataNameOf(IrType t)
     {
-        IrPrimType p => p.CName,
-        IrClassRef c => c.ClassName,
-        IrPtrType pt => GataNameOf(pt.Inner) + "*",
-        IrVoidType => "void",
-        _ => t.ToCType()
-    };
+        return t switch
+        {
+            IrPrimType p => p.CName,
+            IrClassRef c => c.ClassName,
+            IrPtrType pt => GataNameOf(pt.Inner) + "*",
+            IrVoidType => "void",
+            _ => t.ToCType()
+        };
+    }
 
     /// <summary>
     /// Reduces a type name to a valid C-identifier fragment for use in mangled generic names.

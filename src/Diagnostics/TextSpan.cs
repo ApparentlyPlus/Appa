@@ -4,7 +4,7 @@ namespace Appa;
 /// A TextSpan is a byte range [Start, Start+Length) that represents a location in the source (.g) text.
 /// It will be used to report errors and warnings, and to highlight the relevant text in the source.
 /// </summary>
-readonly record struct TextSpan(int Start, int Length)
+internal readonly record struct TextSpan(int Start, int Length)
 {
     public static readonly TextSpan None = new(-1, 0);
     public bool IsNone => Start < 0;

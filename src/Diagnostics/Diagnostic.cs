@@ -4,7 +4,7 @@ using System.Text;
 /// <summary>
 /// ANSI escape codes for terminal output.
 /// </summary>
-static class EscapeCodes
+internal static class EscapeCodes
 {
     public const string NC      = "\x1b[0m";
     public const string GREEN   = "\x1b[1;32m";
@@ -20,25 +20,25 @@ static class EscapeCodes
 /// <summary>
 /// Severity of a diagnostic, either warning or error. Warnings do not prevent compilation, but errors do.
 /// </summary>
-enum Severity { Warning, Error }
+internal enum Severity { Warning, Error }
 
 /// <summary>
 /// Where a diagnostic points. A file and the TextSpan to underline.
 /// </summary>
-readonly record struct Loc(string File, TextSpan Span);
+internal readonly record struct Loc(string File, TextSpan Span);
 
 /// <summary>
 /// A diagnostic is data. It consists of a stable code, a severity, a concise message, and a
 /// location. The message states the problem outright.
 /// </summary>
 // 
-sealed record Diagnostic(Severity Severity, string Code, string Message, Loc Loc);
+internal sealed record Diagnostic(Severity Severity, string Code, string Message, Loc Loc);
 
 /// <summary>
 /// This class contains all the diagnostic codes used in the compiler. 
 /// Each code is a string that starts with "G" followed by a three digit number.
 /// </summary>
-static class Codes
+internal static class Codes
 {
     public const string File                  = "G000";
     public const string DuplicateContext      = "G001";
@@ -90,7 +90,7 @@ static class Codes
 /// Collects diagnostics during compilation. It can render them in a human readable format,
 /// with source code context and ANSI colors.
 /// </summary>
-sealed class DiagnosticBag(SourceSet sources)
+internal sealed class DiagnosticBag(SourceSet sources)
 {
     private readonly List<Diagnostic> _d = [];
     private int _errCount;
@@ -128,8 +128,10 @@ sealed class DiagnosticBag(SourceSet sources)
     /// <summary>
     /// Gets the line number of the specified diagnostic.
     /// </summary>
-    public int LineOf(Diagnostic d) =>
-        sources.Get(d.Loc.File) is { } s && !d.Loc.Span.IsNone ? s.LineCol(d.Loc.Span.Start).Line : 0;
+    public int LineOf(Diagnostic d)
+    {
+        return sources.Get(d.Loc.File) is { } s && !d.Loc.Span.IsNone ? s.LineCol(d.Loc.Span.Start).Line : 0;
+    }
 
     /// <summary>
     /// Renders a diagnostic as a string, with source code context and ANSI colors. 

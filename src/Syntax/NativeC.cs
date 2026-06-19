@@ -8,7 +8,7 @@ using System.Text.RegularExpressions;
 // matched. We do this by computing a same-length "masked" copy of the text with
 // every comment and string/char-literal body blanked to spaces, locating things
 // in the masked copy, then slicing the ORIGINAL text at the same offsets.
-static partial class NativeC
+internal static partial class NativeC
 {
     /// <summary>
     /// Same-length copy with C comments and string/char literals blanked to spaces

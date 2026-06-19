@@ -18,7 +18,7 @@ using System.Runtime.InteropServices;
 /// Abstract base for read-only IR traversal passes.
 /// Override WalkStmt or WalkExpr to react to specific node kinds; call base to continue recursing.
 /// </summary>
-abstract class IrWalker
+internal abstract class IrWalker
 {
     /// <summary>
     /// Dispatches a statement node to its children.

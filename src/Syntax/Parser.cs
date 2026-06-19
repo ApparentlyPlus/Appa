@@ -4,50 +4,56 @@ namespace Appa;
 /// Recursive-descent parser that converts a flat token stream into an untyped AST.
 /// One instance per file. Call ParseProgram() once and discard.
 /// </summary>
-sealed class Parser(IReadOnlyList<Token> tokens)
+internal sealed class Parser(IReadOnlyList<Token> tokens)
 {
     // Materialize to an array upfront so every indexed access is O(1) with no virtual dispatch.
     private readonly Token[] _tokens = tokens as Token[] ?? Enumerable.ToArray(tokens);
-    
+
     // current position in the token array
-    int _pp;
+    private int _pp;
 
     // end offset of the last consumed token, used by To()  
-    int _pe;
+    private int _pe;
 
     // Recursion depth guard. Without it, (((((...))))) stack-overflows instead of failing cleanly.
-    int _depth;
-    const int MaxDepth = 200;
+    private int _depth;
+    private const int MaxDepth = 200;
 
     /// <summary>
     /// Increments the recursion depth counter and throws if it exceeds MaxDepth. Always call ExitDepth in a finally block.
     /// </summary>
-    void EnterDepth() { if (++_depth > MaxDepth) Fail("nested too deeply"); }
+    private void EnterDepth() { if (++_depth > MaxDepth) Fail("nested too deeply"); }
 
     /// <summary>
     /// Decrements the recursion depth counter. Always call in a finally block paired with EnterDepth.
     /// </summary>
-    void ExitDepth() => _depth--;
+    private void ExitDepth()
+    {
+        _depth--;
+    }
 
     // Generic instantiation sites collected during parsing, consumed by the Monomorphizer.
-    readonly List<GenericUse> _gu = [];
+    private readonly List<GenericUse> _gu = [];
 
     #region Core stream helpers
 
     /// <summary>
     /// Returns the token at the current position. Safe without a bounds check because Advance() clamps _pp to [0, Length-1].
     /// </summary>
-    Token Cur => _tokens[_pp];
+    private Token Cur => _tokens[_pp];
 
     /// <summary>
     /// Returns the token n positions ahead of the current position, or the last token if the offset exceeds the stream length.
     /// </summary>
-    Token Peek(int n = 1) => (_pp + n) < _tokens.Length ? _tokens[_pp + n] : _tokens[^1];
+    private Token Peek(int n = 1)
+    {
+        return (_pp + n) < _tokens.Length ? _tokens[_pp + n] : _tokens[^1];
+    }
 
     /// <summary>
     /// Consumes the current token, updates _pe for span construction, and advances _pp.
     /// </summary>
-    Token Advance()
+    private Token Advance()
     {
         var t = Cur;
         _pe = t.Span.End;
@@ -58,12 +64,15 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Builds a TextSpan from a saved start offset to the end of the last consumed token.
     /// </summary>
-    TextSpan To(int start) => new(start, Math.Max(0, _pe - start));
+    private TextSpan To(int start)
+    {
+        return new(start, Math.Max(0, _pe - start));
+    }
 
     /// <summary>
     /// Consumes a token of the expected kind, or throws if the current token doesn't match.
     /// </summary>
-    Token Expect(TK k)
+    private Token Expect(TK k)
     {
         if (Cur.Kind != k) Fail($"expected {k}");
         return Advance();
@@ -72,22 +81,31 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Returns true if the current token has the given kind.
     /// </summary>
-    bool At(TK k) => Cur.Kind == k;
+    private bool At(TK k)
+    {
+        return Cur.Kind == k;
+    }
 
     /// <summary>
     /// Consumes the current token and returns true if it matches the given kind; otherwise returns false without consuming.
     /// </summary>
-    bool Try(TK k) { if (At(k)) { Advance(); return true; } return false; }
+    private bool Try(TK k) { if (At(k)) { Advance(); return true; } return false; }
 
     /// <summary>
     /// Returns true if the current token is TK.Punct with the given value. Only for operator tokens kept as TK.Punct: + - * / % and | ^ less-than greater-than ! ~
     /// </summary>
-    bool AtP(string v) => Cur.Kind == TK.Punct && Cur.Value == v;
+    private bool AtP(string v)
+    {
+        return Cur.Kind == TK.Punct && Cur.Value == v;
+    }
 
     /// <summary>
     /// Throws a ParseException with the given message at the current token's span.
     /// </summary>
-    void Fail(string m) => throw new ParseException(Cur.Span, m);
+    private void Fail(string m)
+    {
+        throw new ParseException(Cur.Span, m);
+    }
 
     #endregion
 
@@ -97,7 +115,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Parses zero or more leading annotations. Uses null-lazy allocation so the common
     /// path (no annotations) returns a static empty array without any heap allocation.
     /// </summary>
-    Annotation[] ParseAnnotations()
+    private Annotation[] ParseAnnotations()
     {
         List<Annotation>? anns = null;
         while (true)
@@ -115,7 +133,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// @intrinsic and @preamble only bind to native blocks, native types, and functions.
     /// @keep is the one annotation a class or module can carry; everything else rejects all of them.
     /// </summary>
-    void RejectAnns(Annotation[] anns, string what, bool allowKeep = false)
+    private void RejectAnns(Annotation[] anns, string what, bool allowKeep = false)
     {
         if (anns.Length == 0) return;
         if (allowKeep)
@@ -151,7 +169,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// using ParseOptionalReturnType, and an optional generic parameter list between the name
     /// and the opening paren.
     /// </summary>
-    FuncDecl ParseFreeFuncDecl(Annotation[] anns, int s)
+    private FuncDecl ParseFreeFuncDecl(Annotation[] anns, int s)
     {
         var mods = ParseMods();
         bool isEntry = Try(TK.Entry);
@@ -169,7 +187,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Parses an optional generic parameter list like [T, U]. Returns an empty array if there
     /// is no leading bracket. Used by both class declarations and free function declarations.
     /// </summary>
-    string[] ParseGenericParamList()
+    private string[] ParseGenericParamList()
     {
         if (!At(TK.LBrack)) return [];
         Advance();
@@ -182,7 +200,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Dispatches to the correct top-level parser based on the current token.
     /// </summary>
-    TopLevel ParseTopLevel()
+    private TopLevel ParseTopLevel()
     {
         if (At(TK.Import)) return ParseImport();
         if (At(TK.AtEnvironment)) { int es = Cur.Span.Start; Advance(); return new EnvironmentDecl(To(es)); }
@@ -209,7 +227,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Parses an import declaration. A string literal import is a filesystem path;
     /// a bare identifier is a module name.
     /// </summary>
-    ImportDecl ParseImport()
+    private ImportDecl ParseImport()
     {
         int s = Cur.Span.Start;
         Expect(TK.Import);
@@ -227,7 +245,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Wraps a raw native block string into a NativeBody, splitting on #kernel:/#user: markers.
     /// </summary>
-    static NativeBody ParseNativeBody(string raw)
+    private static NativeBody ParseNativeBody(string raw)
     {
         var (kc, uc) = NativeC.Split(raw);
         return new NativeBody(kc, uc);
@@ -237,7 +255,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Parses a native type declaration. The lexer encodes the type name and body
     /// separated by \x1F in a single NativeTypeDecl token value.
     /// </summary>
-    NativeTypeDecl ParseNativeType(Annotation[] anns, int s)
+    private NativeTypeDecl ParseNativeType(Annotation[] anns, int s)
     {
         string raw = Advance().Value;
         int sep = raw.IndexOf('\x1F');
@@ -248,7 +266,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Parses an @extern function pre-declaration. Tells the compiler a C function exists
     /// so it can be called from Gata without a Gata body.
     /// </summary>
-    ExternFuncDecl ParseExternDecl(Annotation[] anns, int s)
+    private ExternFuncDecl ParseExternDecl(Annotation[] anns, int s)
     {
         Advance(); // @extern
         Expect(TK.Func);
@@ -263,7 +281,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Parses a kernel or user block. The kind string is the keyword that opened it.
     /// </summary>
-    ContextDecl ParseContextDecl(string kind)
+    private ContextDecl ParseContextDecl(string kind)
     {
         int s = Cur.Span.Start; Advance(); Expect(TK.LBrace);
         List<TopLevel> items = [];
@@ -276,7 +294,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Dispatches to the correct parser for a single item inside a kernel or user block.
     /// Context blocks cannot be nested, so kernel and user keywords are hard errors here.
     /// </summary>
-    TopLevel ParseContextItem()
+    private TopLevel ParseContextItem()
     {
         if (At(TK.Kernel) || At(TK.User)) Fail("contexts cannot be nested");
         int s = Cur.Span.Start;
@@ -301,7 +319,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Parses a class declaration. The name is mangled with the generic parameter list
     /// so the Monomorphizer can match self-references. "class List[T]" becomes "List_T" in the AST.
     /// </summary>
-    ClassDecl ParseClassDecl(Annotation[] anns, int s)
+    private ClassDecl ParseClassDecl(Annotation[] anns, int s)
     {
         Expect(TK.Class);
         int ns = Cur.Span.Start;
@@ -330,7 +348,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Reads a single bare identifier as a generic parameter name. Type arguments at use sites
     /// may nest (List[Map[K,V]]); class parameter declarations may not (class Foo[Bar[Baz]] is rejected).
     /// </summary>
-    string ExpectBareGenericParam()
+    private string ExpectBareGenericParam()
     {
         if (!At(TK.Ident)) Fail("generic parameter must be a plain name");
         var tok = Advance().Value;
@@ -341,7 +359,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Parses a module declaration. Modules are classes where all members are implicitly static.
     /// </summary>
-    ClassDecl ParseModuleDecl(Annotation[] anns, int s)
+    private ClassDecl ParseModuleDecl(Annotation[] anns, int s)
     {
         Expect(TK.Module);
         var name = ParseSimpleTypeName();
@@ -361,7 +379,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// C compiler applies the usual increment rule. A trailing comma after the last member
     /// is a hard error.
     /// </summary>
-    EnumDecl ParseEnumDecl(Annotation[] anns, int s)
+    private EnumDecl ParseEnumDecl(Annotation[] anns, int s)
     {
         Expect(TK.Enum);
         var name = Expect(TK.Ident).Value;
@@ -388,7 +406,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// field list. A variant with no parens carries no payload. A trailing comma after the last
     /// variant is a hard error.
     /// </summary>
-    UnionDecl ParseUnionDecl(Annotation[] anns, int s)
+    private UnionDecl ParseUnionDecl(Annotation[] anns, int s)
     {
         Expect(TK.Union);
         var name = Expect(TK.Ident).Value;
@@ -424,7 +442,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Parses a type name, collecting any generic arguments into the out parameter.
     /// Generic uses are registered in _gu for the Monomorphizer to consume.
     /// </summary>
-    string ParseTypeNameStr(out string[] generics)
+    private string ParseTypeNameStr(out string[] generics)
     {
         EnterDepth();
         var name = ParseTypeNameStrInner(out generics);
@@ -432,7 +450,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
         return name;
     }
 
-    string ParseTypeNameStrInner(out string[] generics)
+    private string ParseTypeNameStrInner(out string[] generics)
     {
         generics = [];
         int s = Cur.Span.Start;
@@ -455,13 +473,16 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Parses a single type argument inside a generic argument list. May itself be generic.
     /// </summary>
-    string ParseTypeArg() => ParseTypeNameStr(out _);
+    private string ParseTypeArg()
+    {
+        return ParseTypeNameStr(out _);
+    }
 
     /// <summary>
     /// Parses the base name of a type, like an identifier, the Process or Thread keywords
     /// (which are valid type names), or a primitive keyword.
     /// </summary>
-    string ParseSimpleTypeName()
+    private string ParseSimpleTypeName()
     {
         if (At(TK.Ident) || At(TK.Process) || At(TK.Thread)) return Advance().Value;
         if (IsPrim(Cur.Kind)) return PrimName(Advance());
@@ -473,7 +494,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Parses a full type specifier. Fixed-array prefix [N], function pointer type, plain type name,
     /// and optional pointer suffixes.
     /// </summary>
-    string ParseTypeSpec()
+    private string ParseTypeSpec()
     {
         EnterDepth();
         var spec = ParseTypeSpecInner();
@@ -481,7 +502,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
         return spec;
     }
 
-    string ParseTypeSpecInner()
+    private string ParseTypeSpecInner()
     {
         // [N]elem, brackets come before the element type.
         if (At(TK.LBrack) && Peek().Kind == TK.IntLit && Peek(2).Kind == TK.RBrack)
@@ -501,7 +522,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Parses a function pointer type specifier. Encoded as the string "func(T1,T2)->R"
     /// so TypeResolver can re-parse it later without needing a dedicated AST node.
     /// </summary>
-    string ParseFuncTypeSpec()
+    private string ParseFuncTypeSpec()
     {
         Expect(TK.Func);
         Expect(TK.LParen);
@@ -522,24 +543,30 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Returns true if the token kind is one of the primitive type keywords.
     /// </summary>
-    static bool IsPrim(TK k) => k is TK.TBool or TK.TInt or TK.TChar or TK.TFloat
+    private static bool IsPrim(TK k)
+    {
+        return k is TK.TBool or TK.TInt or TK.TChar or TK.TFloat
         or TK.TDouble or TK.TShort or TK.TVoid or TK.TPrim;
+    }
 
     /// <summary>
     /// Maps a primitive token to its canonical type name string.
     /// TPrim tokens carry their own value (eg. "uint64"), so those fall through to the default.
     /// </summary>
-    static string PrimName(Token t) => t.Kind switch
+    private static string PrimName(Token t)
     {
-        TK.TBool => "bool",
-        TK.TInt => "int",
-        TK.TChar => "char",
-        TK.TFloat => "float",
-        TK.TDouble => "double",
-        TK.TShort => "short",
-        TK.TVoid => "void",
-        _ => t.Value
-    };
+        return t.Kind switch
+        {
+            TK.TBool => "bool",
+            TK.TInt => "int",
+            TK.TChar => "char",
+            TK.TFloat => "float",
+            TK.TDouble => "double",
+            TK.TShort => "short",
+            TK.TVoid => "void",
+            _ => t.Value
+        };
+    }
 
     #endregion
 
@@ -548,7 +575,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Parses a single class member: a fields block, operator overload, method, or field declaration.
     /// </summary>
-    ClassMember ParseClassMember()
+    private ClassMember ParseClassMember()
     {
         int s = Cur.Span.Start;
         if (At(TK.Class) || At(TK.Module)) Fail("classes and modules cannot be nested");
@@ -605,7 +632,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Parses an operator symbol for an operator overload declaration.
     /// Handles arithmetic, comparison, bitwise, and indexer operators.
     /// </summary>
-    string ParseOperatorSymbol()
+    private string ParseOperatorSymbol()
     {
         if (AtP("+") || AtP("-") || AtP("*") || AtP("/") || AtP("<") || AtP(">")) return Advance().Value;
         if (At(TK.EqEq) || At(TK.NotEq) || At(TK.LtEq) || At(TK.GtEq)) return Advance().Value;
@@ -621,7 +648,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// 'func Name' with no return type is a method; 'func(' starts a func-pointer type (a field).
     /// Speculatively parses the type spec and checks what follows; restores position either way.
     /// </summary>
-    bool LooksLikeMethod()
+    private bool LooksLikeMethod()
     {
         if (At(TK.Func) && Peek().Kind == TK.Ident) return true;
         int n = SkipTypeSpec(0);
@@ -632,12 +659,15 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Parses an optional return type before 'func'. Returns null when 'func' is immediately
     /// followed by an identifier (no return type). Otherwise parses and returns the type spec.
     /// </summary>
-    string? ParseOptionalReturnType() => At(TK.Func) && Peek().Kind == TK.Ident ? null : ParseTypeSpec();
+    private string? ParseOptionalReturnType()
+    {
+        return At(TK.Func) && Peek().Kind == TK.Ident ? null : ParseTypeSpec();
+    }
 
     /// <summary>
     /// Parses a method body. Either a native C block or a Gata statement block.
     /// </summary>
-    MethodBody ParseMethodBody()
+    private MethodBody ParseMethodBody()
     {
         if (At(TK.NativeContent)) return new NativeMethodBody(ParseNativeBody(Advance().Value));
         return new BlockBody(ParseBlock());
@@ -647,7 +677,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Parses zero or more access/storage modifiers. Uses null-lazy allocation so the common
     /// path (no modifiers) returns a static empty array without any heap allocation.
     /// </summary>
-    string[] ParseMods()
+    private string[] ParseMods()
     {
         List<string>? mods = null;
         while (true)
@@ -668,7 +698,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Parses a process declaration. Accepts an optional leading foreground/background keyword
     /// and an optional trailing colon-prefixed mode, but rejects both at once.
     /// </summary>
-    ProcessDecl ParseProcessDeclTop()
+    private ProcessDecl ParseProcessDeclTop()
     {
         int s = Cur.Span.Start;
         string mode = "foreground";
@@ -688,14 +718,14 @@ sealed class Parser(IReadOnlyList<Token> tokens)
         List<ThreadDecl> threads = [];
         while (!At(TK.RBrace) && !At(TK.EOF)) threads.Add(ParseThreadDecl());
         Expect(TK.RBrace);
-        return new ProcessDecl(name, mode, threads.ToArray(), To(s));
+        return new ProcessDecl(name, mode, [.. threads], To(s));
     }
 
     /// <summary>
     /// Parses a thread declaration inside a process body. A foreground or background keyword
     /// before 'thread' is G043. Threads don't have their own deployment mode, only the process does.
     /// </summary>
-    ThreadDecl ParseThreadDecl()
+    private ThreadDecl ParseThreadDecl()
     {
         int s = Cur.Span.Start;
         if (At(TK.Foreground) || At(TK.Background)) Fail("thread mode is set by the process, not the thread (G043)");
@@ -714,7 +744,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// threads and helper functions defined inside the body are hard errors. A thread entry is
     /// invoked through a fixed void(*)(void*) ABI so return types and access modifiers are rejected.
     /// </summary>
-    EntryFuncDecl ParseThreadEntry()
+    private EntryFuncDecl ParseThreadEntry()
     {
         int s = Cur.Span.Start;
         if (At(TK.Thread)) Fail("threads cannot be nested");
@@ -737,7 +767,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Parses a comma-separated parameter list between the surrounding parens (already consumed).
     /// Returns a static empty array for an empty parameter list to avoid an allocation.
     /// </summary>
-    Param[] ParseParamList()
+    private Param[] ParseParamList()
     {
         if (At(TK.RParen)) return [];
         List<Param> ps = [ParseParam()];
@@ -748,7 +778,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Parses a single parameter: an optional ref keyword, a type specifier, and a name.
     /// </summary>
-    Param ParseParam()
+    private Param ParseParam()
     {
         int s = Cur.Span.Start;
         bool isRef = Try(TK.Ref);
@@ -777,7 +807,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Dispatches to the correct statement parser based on the current token.
     /// </summary>
-    Stmt ParseStmt()
+    private Stmt ParseStmt()
     {
         EnterDepth();
         var stmt = ParseStmtInner();
@@ -785,7 +815,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
         return stmt;
     }
 
-    Stmt ParseStmtInner()
+    private Stmt ParseStmtInner()
     {
         int s = Cur.Span.Start;
         if (At(TK.NativeContent)) return new NativeStmt(ParseNativeBody(Advance().Value), To(s));
@@ -836,7 +866,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Parses a let declaration. The type is optional; if the next two tokens are both
     /// valid type-name starts, the first is taken as the declared type.
     /// </summary>
-    LetStmt ParseLetStmt(int s)
+    private LetStmt ParseLetStmt(int s)
     {
         Expect(TK.Let);
         string? type = null;
@@ -854,7 +884,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Returns the index just past a balanced "[...]" run starting at token offset n, or -1 if
     /// it never closes before EOF. Used by SkipTypeSpec to jump over generic argument lists.
     /// </summary>
-    int SkipBrackets(int n)
+    private int SkipBrackets(int n)
     {
         int depth = 0;
         do
@@ -872,7 +902,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Lookahead mirror of ParseFuncTypeSpec. Returns the index just past the function pointer type
     /// starting at offset n, or -1 if the token stream does not match.
     /// </summary>
-    int SkipFuncTypeSpec(int n)
+    private int SkipFuncTypeSpec(int n)
     {
         if (Peek(n).Kind != TK.Func) return -1;
         n++;
@@ -900,7 +930,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Lookahead mirror of ParseTypeSpec. Returns the index just past the type starting at
     /// offset n (Peek(0) = Cur), or -1 if offset n is not the start of a valid type.
     /// </summary>
-    int SkipTypeSpec(int n)
+    private int SkipTypeSpec(int n)
     {
         while (Peek(n).Kind == TK.LBrack && Peek(n + 1).Kind == TK.IntLit && Peek(n + 2).Kind == TK.RBrack)
             n += 3;
@@ -928,7 +958,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// an identifier, which is always a missing 'let' and never valid expression syntax.
     /// Pure lookahead; never consumes tokens.
     /// </summary>
-    bool LooksLikeMissingLet()
+    private bool LooksLikeMissingLet()
     {
         if (!At(TK.Ident) && !At(TK.Process) && !At(TK.Thread) && !At(TK.LBrack)) return false;
         int n = SkipTypeSpec(0);
@@ -939,7 +969,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Returns true if the current position looks like a type specifier followed by an
     /// identifier, meaning the let statement has an explicit type annotation.
     /// </summary>
-    bool LooksLikeTypeAndIdent()
+    private bool LooksLikeTypeAndIdent()
     {
         if (IsPrim(Cur.Kind)) return true;
         if (At(TK.Func)) return true;
@@ -954,7 +984,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Parses a let declaration without consuming its trailing semicolon. Used in for-loop
     /// init clauses where the semicolon belongs to the for syntax, not the let.
     /// </summary>
-    LetStmt ParseLetNoSemi()
+    private LetStmt ParseLetNoSemi()
     {
         int s = Cur.Span.Start;
         Expect(TK.Let);
@@ -968,7 +998,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Parses an if/else statement. The then and else branches are full statements, so a
     /// bare block, a single statement, or a nested if are all valid without extra rules.
     /// </summary>
-    IfStmt ParseIfStmt(int s)
+    private IfStmt ParseIfStmt(int s)
     {
         Expect(TK.If); Expect(TK.LParen); var cond = ParseExpr(); Expect(TK.RParen);
         var then = ParseStmt();
@@ -979,7 +1009,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Parses a while loop. The condition is parenthesised; the body is a full statement.
     /// </summary>
-    WhileStmt ParseWhileStmt(int s)
+    private WhileStmt ParseWhileStmt(int s)
     {
         Expect(TK.While); Expect(TK.LParen); var cond = ParseExpr(); Expect(TK.RParen);
         return new WhileStmt(cond, ParseStmt(), To(s));
@@ -989,7 +1019,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Parses a for loop. Disambiguates between 'for x in col { }' (ForInStmt, no parens) and
     /// the C-style 'for (init; cond; step) { }' (ForStmt) by peeking for the 'in' keyword.
     /// </summary>
-    Stmt ParseForStmt(int s)
+    private Stmt ParseForStmt(int s)
     {
         Expect(TK.For);
 
@@ -1034,7 +1064,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Parses a try/catch statement. Both the try and catch branches are blocks.
     /// </summary>
-    TryCatchStmt ParseTryCatchStmt(int s)
+    private TryCatchStmt ParseTryCatchStmt(int s)
     {
         Expect(TK.Try);
         Block tryBlock = ParseBlock();
@@ -1046,7 +1076,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Parses an unsafe block. Pointer operations inside are permitted; the type checker
     /// rejects them everywhere else.
     /// </summary>
-    UnsafeBlock ParseUnsafeBlock(int s)
+    private UnsafeBlock ParseUnsafeBlock(int s)
     {
         Expect(TK.Unsafe);
         var block = ParseBlock();
@@ -1057,7 +1087,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Parses a defer statement. The deferred action is a single statement that runs on
     /// every exit from the enclosing block, in LIFO order with other defers.
     /// </summary>
-    DeferStmt ParseDeferStmt(int s)
+    private DeferStmt ParseDeferStmt(int s)
     {
         Expect(TK.Defer);
         return new DeferStmt(ParseStmt(), To(s));
@@ -1067,7 +1097,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Parses an expression statement or assignment. After parsing the left-hand expression,
     /// any assignment operator promotes the result to an AssignStmt; otherwise it's an ExprStmt.
     /// </summary>
-    Stmt ParseExprOrAssign(int s)
+    private Stmt ParseExprOrAssign(int s)
     {
         var expr = ParseExpr();
         if (At(TK.Eq) || At(TK.PlusEq) || At(TK.MinusEq) || At(TK.StarEq)
@@ -1090,13 +1120,16 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Entry point for all expression parsing.
     /// </summary>
-    public Expr ParseExpr() => ParseTernary();
+    public Expr ParseExpr()
+    {
+        return ParseTernary();
+    }
 
     /// <summary>
     /// Parses a ternary conditional. Right-associative so nested ternaries chain without parens.
     /// '?' falls through to TK.Punct since it has no dedicated token kind.
     /// </summary>
-    Expr ParseTernary()
+    private Expr ParseTernary()
     {
         EnterDepth();
         var result = ParseTernaryInner();
@@ -1104,7 +1137,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
         return result;
     }
 
-    Expr ParseTernaryInner()
+    private Expr ParseTernaryInner()
     {
         int s = Cur.Span.Start;
         var left = ParseOr();
@@ -1118,7 +1151,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Parses '||' chains.
     /// </summary>
-    Expr ParseOr()
+    private Expr ParseOr()
     {
         int s = Cur.Span.Start;
         var left = ParseAnd();
@@ -1129,7 +1162,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Parses '&&' chains.
     /// </summary>
-    Expr ParseAnd()
+    private Expr ParseAnd()
     {
         int s = Cur.Span.Start;
         var left = ParseBitOr();
@@ -1140,7 +1173,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Parses bitwise '|' chains.
     /// </summary>
-    Expr ParseBitOr()
+    private Expr ParseBitOr()
     {
         int s = Cur.Span.Start;
         var left = ParseBitXor();
@@ -1151,7 +1184,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Parses bitwise '^' chains.
     /// </summary>
-    Expr ParseBitXor()
+    private Expr ParseBitXor()
     {
         int s = Cur.Span.Start;
         var left = ParseBitAnd();
@@ -1162,7 +1195,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Parses bitwise '&' chains.
     /// </summary>
-    Expr ParseBitAnd()
+    private Expr ParseBitAnd()
     {
         int s = Cur.Span.Start;
         var left = ParseEquality();
@@ -1173,7 +1206,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Parses '==' and '!=' chains.
     /// </summary>
-    Expr ParseEquality()
+    private Expr ParseEquality()
     {
         int s = Cur.Span.Start;
         var left = ParseRelational();
@@ -1188,7 +1221,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Parses relational comparisons: less-than, greater-than, and their equal variants.
     /// </summary>
-    Expr ParseRelational()
+    private Expr ParseRelational()
     {
         int s = Cur.Span.Start;
         var left = ParseShift();
@@ -1203,7 +1236,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Parses '<<' and '>>' chains.
     /// </summary>
-    Expr ParseShift()
+    private Expr ParseShift()
     {
         int s = Cur.Span.Start;
         var left = ParseAdditive();
@@ -1218,7 +1251,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Parses '+' and '-' chains.
     /// </summary>
-    Expr ParseAdditive()
+    private Expr ParseAdditive()
     {
         int s = Cur.Span.Start;
         var left = ParseMultiplicative();
@@ -1233,7 +1266,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Parses '*', '/', and '%' chains.
     /// </summary>
-    Expr ParseMultiplicative()
+    private Expr ParseMultiplicative()
     {
         int s = Cur.Span.Start;
         var left = ParseAs();
@@ -1249,7 +1282,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Parses 'expr as Type' casts. Tighter than '*' so 'x * y as T' means 'x * (y as T)'.
     /// User-defined type casts use 'as'; primitive casts use the C-style '(PrimType)' form.
     /// </summary>
-    Expr ParseAs()
+    private Expr ParseAs()
     {
         int s = Cur.Span.Start;
         var expr = ParseUnary();
@@ -1261,7 +1294,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Parses prefix unary operators. '&' and '*' are only legal inside unsafe blocks but
     /// are accepted here; the type checker enforces the restriction.
     /// </summary>
-    Expr ParseUnary()
+    private Expr ParseUnary()
     {
         EnterDepth();
         var result = ParseUnaryInner();
@@ -1269,7 +1302,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
         return result;
     }
 
-    Expr ParseUnaryInner()
+    private Expr ParseUnaryInner()
     {
         int s = Cur.Span.Start;
         if (AtP("!")) { Advance(); return new UnaryExpr("!", ParseUnary(), To(s)); }
@@ -1283,7 +1316,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Parses postfix operators: '++', '--', '.member', '[index]', and '(args)' call.
     /// </summary>
-    Expr ParsePostfix()
+    private Expr ParsePostfix()
     {
         int s = Cur.Span.Start;
         var expr = ParsePrimary();
@@ -1303,7 +1336,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Parses a comma-separated argument list terminated by ')'. Returns an empty array immediately
     /// if ')' is already the current token, avoiding an allocation on every empty call.
     /// </summary>
-    Expr[] ParseArgList()
+    private Expr[] ParseArgList()
     {
         if (At(TK.RParen)) return [];
         List<Expr> args = [ParseArg()];
@@ -1315,7 +1348,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Parses a single call argument. 'ref' is only valid at the call-argument level, not as
     /// a general unary prefix, so it is handled here rather than in ParseUnary.
     /// </summary>
-    Expr ParseArg()
+    private Expr ParseArg()
     {
         int s = Cur.Span.Start;
         if (Try(TK.Ref)) return new RefArgExpr(ParseExpr(), To(s));
@@ -1326,7 +1359,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Parses a primary expression. EnterDepth guards against pathological nesting like
     /// ((((((...)))))) producing a stack overflow instead of a clean diagnostic.
     /// </summary>
-    Expr ParsePrimary()
+    private Expr ParsePrimary()
     {
         EnterDepth();
         var result = ParsePrimaryInner();
@@ -1338,7 +1371,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Dispatches to the correct primary form: literal, ident, sizeof, default, new,
     /// array literal, grouped expression, primitive cast, or interpolated string.
     /// </summary>
-    Expr ParsePrimaryInner()
+    private Expr ParsePrimaryInner()
     {
         int s = Cur.Span.Start;
 
@@ -1410,7 +1443,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Parses an interpolated string. The lexer emits InterpStrStart, then alternating StrLit
     /// and Punct("{") ... Punct("}") pairs for embedded expressions, then InterpStrEnd.
     /// </summary>
-    InterpStrExpr ParseInterpStr(int s)
+    private InterpStrExpr ParseInterpStr(int s)
     {
         Advance(); // consume InterpStrStart
         List<Expr> parts = [];
@@ -1429,7 +1462,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// '[' for a collection initializer may follow. A bare 'new Type' with neither is valid for
     /// fixed-size array types like '[5]char' that carry their size in the type string.
     /// </summary>
-    NewExpr ParseNewExpr(int s)
+    private NewExpr ParseNewExpr(int s)
     {
         Expect(TK.New);
         string type = ParseTypeSpec();
@@ -1458,7 +1491,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Parses a switch statement. Each 'case' arm carries one or more comma-separated labels
     /// and a block body. An optional 'default' arm catches all unmatched values.
     /// </summary>
-    SwitchStmt ParseSwitchStmt(int s)
+    private SwitchStmt ParseSwitchStmt(int s)
     {
         Expect(TK.Switch); Expect(TK.LParen); var scrut = ParseExpr(); Expect(TK.RParen);
         Expect(TK.LBrace);
@@ -1487,7 +1520,7 @@ sealed class Parser(IReadOnlyList<Token> tokens)
     /// Parses a match statement. Each 'case' arm names a union variant and optionally binds
     /// its payload fields. An optional 'default' arm catches unmatched variants.
     /// </summary>
-    MatchStmt ParseMatchStmt(int s)
+    private MatchStmt ParseMatchStmt(int s)
     {
         Expect(TK.Match); Expect(TK.LParen); var scrut = ParseExpr(); Expect(TK.RParen);
         Expect(TK.LBrace);

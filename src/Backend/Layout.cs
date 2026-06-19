@@ -1,6 +1,6 @@
 namespace Appa;
 
-sealed record EmitOutput(string SharedHeader, string KernelPreamble, string KernelTypes,
+internal sealed record EmitOutput(string SharedHeader, string KernelPreamble, string KernelTypes,
     string KernelFwd, string KernelFuncs, string KernelBoot, string UserPreamble,
     string UserTypes, string UserFwd, string UserFuncs, IReadOnlyList<IrProcess> Processes,
     bool HasKernelRealm, bool HasUserRealm);
@@ -8,13 +8,13 @@ sealed record EmitOutput(string SharedHeader, string KernelPreamble, string Kern
 /// <summary>
 /// A named output file produced by the compiler for a single translation unit.
 /// </summary>
-record OutputFile(string Name, string Content);
+internal record OutputFile(string Name, string Content);
 
 /// <summary>
 /// Composes emitted sections into translation units. The realms a build emits
 /// come from the environment, never a command-line switch.
 /// </summary>
-static class Layout
+internal static class Layout
 {
     /// <summary>
     /// Composes the emitter output into the set of translation-unit files for the build.
@@ -46,7 +46,7 @@ static class Layout
     /// <summary>
     /// Builds the shared header file content with the pragma-once guard and emitted shared types.
     /// </summary>
-    static string SharedHeader(EmitOutput o)
+    private static string SharedHeader(EmitOutput o)
     {
         var w = new CodeWriter();
         w.Lines(Finesse.GenerateKewlHeader("gata_shared.h"), "#pragma once", "");
@@ -57,7 +57,7 @@ static class Layout
     /// <summary>
     /// Concatenates non-empty sections into a single translation unit string with a file header comment.
     /// </summary>
-    static string Concat(string name, string s1, string s2, string s3, string s4, string s5 = "")
+    private static string Concat(string name, string s1, string s2, string s3, string s4, string s5 = "")
     {
         var sb = new System.Text.StringBuilder();
         sb.Append(Finesse.GenerateKewlHeader(name))
@@ -75,7 +75,7 @@ static class Layout
     /// <summary>
     /// Builds the uproc.h header that forward-declares every thread entry function.
     /// </summary>
-    static string UprocHeader(IReadOnlyList<IrProcess> procs)
+    private static string UprocHeader(IReadOnlyList<IrProcess> procs)
     {
         var w = new CodeWriter();
         w.Lines(Finesse.GenerateKewlHeader("uproc.h"), "#pragma once", "");
@@ -99,7 +99,7 @@ static class Layout
     /// Process and thread spawning use environment bindings, so porting the OS is an
     /// edit to env.*.g, never to this file.
     /// </summary>
-    static string Launcher(IReadOnlyList<IrProcess> procs)
+    private static string Launcher(IReadOnlyList<IrProcess> procs)
     {
         var w = new CodeWriter();
         w.Lines(

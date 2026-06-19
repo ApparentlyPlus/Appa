@@ -4,7 +4,7 @@ namespace Appa;
 /// SourceText is a class representing one source file. It stores the text, the path, 
 /// and a precomputed array of line start offsets for fast line/column lookups.
 /// </summary>
-sealed class SourceText
+internal sealed class SourceText
 {
     /// <summary>
     /// The absolute path of the source file
@@ -107,9 +107,16 @@ sealed class SourceText
 /// Every source file read during a build, keyed by absolute path, so the renderer
 /// can resolve a diagnostic's Span back to its text.
 /// </summary>
-sealed class SourceSet
+internal sealed class SourceSet
 {
     private readonly Dictionary<string, SourceText> _ff = new(StringComparer.OrdinalIgnoreCase);
-    public SourceText Add(string path, string text) => _ff[path] = new SourceText(path, text);
-    public SourceText? Get(string? path) => path != null ? _ff.GetValueOrDefault(path) : null;
+    public SourceText Add(string path, string text)
+    {
+        return _ff[path] = new SourceText(path, text);
+    }
+
+    public SourceText? Get(string? path)
+    {
+        return path != null ? _ff.GetValueOrDefault(path) : null;
+    }
 }

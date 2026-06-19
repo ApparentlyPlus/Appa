@@ -8,4 +8,8 @@
     <DefaultItemExcludes>$(DefaultItemExcludes);scratch\**</DefaultItemExcludes>
   </PropertyGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Benchmarks" />
+  </ItemGroup>
+
 </Project>

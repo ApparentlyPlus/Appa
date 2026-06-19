@@ -1,30 +1,30 @@
 namespace Appa;
 
-sealed class Emitter(IrModule module, DiagnosticBag diag)
+internal sealed class Emitter(IrModule module, DiagnosticBag diag)
 {
-    readonly DiagnosticBag _diag = diag;
-    readonly CodeWriter _sharedH = new();
-    readonly CodeWriter _kPre = new();
-    readonly CodeWriter _kTypes = new();
-    readonly CodeWriter _kFwd = new();
-    readonly CodeWriter _kFuncs = new();
-    readonly CodeWriter _kBoot = new();
-    readonly CodeWriter _uPre = new();
-    readonly CodeWriter _uTypes = new();
-    readonly CodeWriter _uFwd = new();
-    readonly CodeWriter _uFunc = new();
+    private readonly DiagnosticBag _diag = diag;
+    private readonly CodeWriter _sharedH = new();
+    private readonly CodeWriter _kPre = new();
+    private readonly CodeWriter _kTypes = new();
+    private readonly CodeWriter _kFwd = new();
+    private readonly CodeWriter _kFuncs = new();
+    private readonly CodeWriter _kBoot = new();
+    private readonly CodeWriter _uPre = new();
+    private readonly CodeWriter _uTypes = new();
+    private readonly CodeWriter _uFwd = new();
+    private readonly CodeWriter _uFunc = new();
 
     // Per-writer type dedup. Each distinct (writer, key) is emitted exactly once
     // into that translation unit. Keys are namespaced T: (forward typedef),
     // S: (struct or aggregate def), FP: (function-pointer typedef).
-    readonly Dictionary<CodeWriter, HashSet<(char Kind, string Name)>> _emitted = [];
+    private readonly Dictionary<CodeWriter, HashSet<(char Kind, string Name)>> _emitted = [];
 
     // ARC-managed classes: every non-module Gata class carries a refcount header
     // and a generated destructor.
-    readonly HashSet<string> _managed = InitializeManaged(module);
+    private readonly HashSet<string> _managed = InitializeManaged(module);
 
     // Roles for which no @intrinsic binding was found; each role is reported once.
-    readonly HashSet<string> _missingRoles = [];
+    private readonly HashSet<string> _missingRoles = [];
 
     /// <summary>
     /// Populates and returns the set of ARC-managed class names from the module.
@@ -43,7 +43,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// Returns true the first time the given key is seen for the given writer,
     /// suppressing duplicate emission within a single translation unit.
     /// </summary>
-    bool FirstInto(CodeWriter w, char kind, string name)
+    private bool FirstInto(CodeWriter w, char kind, string name)
     {
         if (!_emitted.TryGetValue(w, out var s)) _emitted[w] = s = [];
         return s.Add((kind, name));
@@ -52,7 +52,10 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Returns true if the IR type is a reference to an ARC-managed class.
     /// </summary>
-    bool IsManaged(IrType t) => t is IrClassRef cr && _managed.Contains(cr.ClassName);
+    private bool IsManaged(IrType t)
+    {
+        return t is IrClassRef cr && _managed.Contains(cr.ClassName);
+    }
 
     /// <summary>
     /// Emits all sections and returns them for Layout to compose into files.
@@ -103,7 +106,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// Forward-declares every Gata class struct in the shared header so any file
     /// can use a class pointer before its full struct is defined.
     /// </summary>
-    void EmitForwardTypedefs()
+    private void EmitForwardTypedefs()
     {
         bool any = false;
         foreach (var cls in module.Classes)
@@ -122,7 +125,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Emits a C typedef enum for every declared Gata enum type into the shared header.
     /// </summary>
-    void EmitEnums()
+    private void EmitEnums()
     {
         var enums = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(module.Enums);
         for (int i = 0; i < enums.Length; i++)
@@ -151,7 +154,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// Emits a tagged-union struct for every declared Gata union type into the shared header.
     /// Each union becomes a tag integer plus a C union of per-variant payload structs.
     /// </summary>
-    void EmitUnions()
+    private void EmitUnions()
     {
         var unions = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(module.Unions);
         for (int i = 0; i < unions.Length; i++)
@@ -203,7 +206,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// Emits a C struct wrapper for each distinct fixed-array type used in the module.
     /// Ordered by nesting depth so array-of-array element types are defined first.
     /// </summary>
-    void EmitArrayTypes()
+    private void EmitArrayTypes()
     {
         var list = new List<IrArrayType>(module.ArrayTypes.Count);
         for (int i = 0; i < module.ArrayTypes.Count; i++)
@@ -232,7 +235,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Comparer to sort fixed-array types by their nesting depth.
     /// </summary>
-    struct ArrayTypeDepthComparer : IComparer<IrArrayType>
+    private struct ArrayTypeDepthComparer : IComparer<IrArrayType>
     {
         public readonly int Compare(IrArrayType? x, IrArrayType? y)
         {
@@ -241,7 +244,10 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
             return Depth(x).CompareTo(Depth(y));
         }
 
-        static int Depth(IrType t) => t is IrArrayType a ? 1 + Depth(a.Elem) : 0;
+        private static int Depth(IrType t)
+        {
+            return t is IrArrayType a ? 1 + Depth(a.Elem) : 0;
+        }
     }
 
     #endregion
@@ -252,7 +258,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// Emits Result_T struct typedefs for every throws function return type, forward-declaring
     /// any class pointer types they reference so the shared header stays self-contained.
     /// </summary>
-    void EmitResultTypedefs()
+    private void EmitResultTypedefs()
     {
         var forwarded = new HashSet<string>();
         foreach (var (_, innerType) in module.Symbols.ResultTypedefs)
@@ -286,7 +292,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// the module. Emitted after enums, unions, and array types so any referenced types
     /// are already visible.
     /// </summary>
-    void EmitFuncPtrTypedefs()
+    private void EmitFuncPtrTypedefs()
     {
         bool any = false;
         var funcPtrs = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(module.FuncPtrTypes);
@@ -325,7 +331,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// Emits a native block into the appropriate preamble, types, or boot section based
     /// on the block's section tag, then routes to the kernel or user writer by visibility.
     /// </summary>
-    void EmitNativeBlock(IrNativeBlock nb)
+    private void EmitNativeBlock(IrNativeBlock nb)
     {
         string kt = TrimC(nb.KernelC), ut = TrimC(nb.UserC);
         var (kw, uw) = nb.Section switch
@@ -348,7 +354,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// user bodies are identical the type goes to the shared header; otherwise each realm
     /// gets its own copy. Duplicate emission within a writer is suppressed via FirstInto.
     /// </summary>
-    void EmitNativeType(IrNativeType nt)
+    private void EmitNativeType(IrNativeType nt)
     {
         void EmitTo(CodeWriter w, string body)
         {
@@ -381,7 +387,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Dispatches a class to the appropriate emitter: module, library class, or concrete class.
     /// </summary>
-    void EmitClass(IrClass cls)
+    private void EmitClass(IrClass cls)
     {
         if (cls.IsModule) { EmitModule(cls); return; }
 
@@ -409,7 +415,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Emits a module class as per-file static-inline functions with no struct or allocator.
     /// </summary>
-    void EmitModule(IrClass cls)
+    private void EmitModule(IrClass cls)
     {
         bool toKernel = cls.Vis != Visibility.User;
         bool toUser   = cls.Vis != Visibility.Kernel;
@@ -420,7 +426,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Emits forward declarations and method bodies for a module into the given writers.
     /// </summary>
-    void EmitModuleInto(IrClass cls, CodeWriter types, CodeWriter funcs, bool isKernel)
+    private void EmitModuleInto(IrClass cls, CodeWriter types, CodeWriter funcs, bool isKernel)
     {
         foreach (var m in cls.Methods) types.Line($"static inline {MethodSig(m)};");
         types.Line("");
@@ -431,7 +437,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// Emits a concrete class into the given writers. Library classes use static-inline
     /// functions; context classes use regular linkage with separate forward declarations.
     /// </summary>
-    void EmitConcreteClass(IrClass cls, CodeWriter types, CodeWriter fwd,
+    private void EmitConcreteClass(IrClass cls, CodeWriter types, CodeWriter fwd,
                            CodeWriter funcs, bool isKernel, bool isLib)
     {
         string prefix = isLib ? "static inline " : "";
@@ -488,7 +494,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Emits a fully self-contained library class into the shared header.
     /// </summary>
-    void EmitLibClass(IrClass cls)
+    private void EmitLibClass(IrClass cls)
     {
         var w = _sharedH;
 
@@ -528,7 +534,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Returns true if a library class is fully self-contained and can live in the shared header.
     /// </summary>
-    bool CanLiveInSharedHeader(IrClass cls)
+    private bool CanLiveInSharedHeader(IrClass cls)
     {
         var methods = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(cls.Methods);
         for (int i = 0; i < methods.Length; i++)
@@ -579,18 +585,23 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Returns true if the type references any ARC-managed class or pointer to one.
     /// </summary>
-    static bool ReferencesRuntime(IrType t) => t switch
+    private static bool ReferencesRuntime(IrType t)
     {
-        IrClassRef    => true,
-        IrPtrType p   => ReferencesRuntime(p.Inner),
-        _             => false
-    };
+        return t switch
+        {
+            IrClassRef => true,
+            IrPtrType p => ReferencesRuntime(p.Inner),
+            _ => false
+        };
+    }
 
     /// <summary>
     /// Returns true if the raw C text mentions the gata_String type or string runtime helpers.
     /// </summary>
-    static bool MentionsString(string? c) =>
-        c != null && (c.Contains("gata_String") || c.Contains("gata_str_"));
+    private static bool MentionsString(string? c)
+    {
+        return c != null && (c.Contains("gata_String") || c.Contains("gata_str_"));
+    }
 
     #endregion
 
@@ -599,7 +610,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Emits the allocator function for the given class into the target writer.
     /// </summary>
-    void EmitAllocator(IrClass cls, CodeWriter w, bool isLib)
+    private void EmitAllocator(IrClass cls, CodeWriter w, bool isLib)
     {
         string prefix = isLib ? "static inline " : "";
         string dtorArg = NeedsDtor(cls) ? Mangler.Dtor(cls.Name) : "0";
@@ -626,7 +637,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Emits the destructor for the given class if it owns managed references or declares a finalizer.
     /// </summary>
-    void EmitDtor(IrClass cls, CodeWriter w, bool isLib)
+    private void EmitDtor(IrClass cls, CodeWriter w, bool isLib)
     {
         if (!NeedsDtor(cls)) return;
         string prefix = isLib ? "static inline " : "";
@@ -643,7 +654,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Returns true if the class requires a destructor due to managed fields or a user finalizer.
     /// </summary>
-    bool NeedsDtor(IrClass cls)
+    private bool NeedsDtor(IrClass cls)
     {
         if (DeinitOf(cls) != null) return true;
         var span = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(cls.Fields);
@@ -657,7 +668,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Returns the _deinit method of the class, or null if none is declared.
     /// </summary>
-    static IrFunction? DeinitOf(IrClass cls)
+    private static IrFunction? DeinitOf(IrClass cls)
     {
         var span = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(cls.Methods);
         for (int i = 0; i < span.Length; i++)
@@ -670,7 +681,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Returns the _init method of the class, or null if none is declared.
     /// </summary>
-    static IrFunction? InitOf(IrClass cls)
+    private static IrFunction? InitOf(IrClass cls)
     {
         var span = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(cls.Methods);
         for (int i = 0; i < span.Length; i++)
@@ -683,8 +694,10 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Emits the ARC object header field as the first struct member.
     /// </summary>
-    void EmitObjHeader(CodeWriter w) =>
+    private void EmitObjHeader(CodeWriter w)
+    {
         w.Line($"{Intrinsic(Roles.ObjHeader)} __gata_obj; /* arc header */");
+    }
 
     #endregion
 
@@ -693,8 +706,10 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Returns the C type for a parameter, adding one level of pointer indirection for ref parameters.
     /// </summary>
-    static string ParamCType(IrParam p) =>
-        p.IsRef ? $"{p.Type.ToCType()}*" : p.Type.ToCType();
+    private static string ParamCType(IrParam p)
+    {
+        return p.IsRef ? $"{p.Type.ToCType()}*" : p.Type.ToCType();
+    }
 
     /// <summary>
     /// Returns the full C function signature for a method, including the implicit self parameter.
@@ -702,7 +717,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Returns the full C function signature for a method, including the implicit self parameter.
     /// </summary>
-    string MethodSig(IrFunction m)
+    private string MethodSig(IrFunction m)
     {
         string ret = m.IsThrows ? new IrResultType(m.ReturnType).ToCType() : m.ReturnType.ToCType();
         var sb = new System.Text.StringBuilder();
@@ -730,7 +745,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Returns the full C function signature for an operator overload, including the self parameter.
     /// </summary>
-    string OperatorSig(IrOperator o)
+    private string OperatorSig(IrOperator o)
     {
         var sb = new System.Text.StringBuilder();
         sb.Append(o.ReturnType.ToCType()).Append(' ').Append(o.CName).Append('(');
@@ -747,7 +762,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Returns the C allocator signature, threading through any constructor parameters.
     /// </summary>
-    string AllocatorSig(IrClass cls)
+    private string AllocatorSig(IrClass cls)
     {
         var init = InitOf(cls);
         var sb = new System.Text.StringBuilder();
@@ -772,12 +787,15 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Returns the C signature for the destructor of a class.
     /// </summary>
-    string DtorSig(IrClass cls) => $"void {Mangler.Dtor(cls.Name)}(void* _vp)";
+    private string DtorSig(IrClass cls)
+    {
+        return $"void {Mangler.Dtor(cls.Name)}(void* _vp)";
+    }
 
     /// <summary>
     /// Returns the full C function signature for a free function.
     /// </summary>
-    string FuncSig(IrFunction fn)
+    private string FuncSig(IrFunction fn)
     {
         string ret = fn.IsThrows ? new IrResultType(fn.ReturnType).ToCType() : fn.ReturnType.ToCType();
         var sb = new System.Text.StringBuilder();
@@ -801,7 +819,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// Entry functions go to the kernel; library functions are static-inline into both units;
     /// all others are forwarded and emitted into the realm they belong to.
     /// </summary>
-    void EmitFreeFunc(IrFunction fn)
+    private void EmitFreeFunc(IrFunction fn)
     {
         if (fn.IsEntry)
         {
@@ -852,7 +870,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Emits a native library free function into the given writer for the given realm.
     /// </summary>
-    void EmitLibFreeFuncNative(IrFunction fn, CodeWriter w, bool isKernel)
+    private void EmitLibFreeFuncNative(IrFunction fn, CodeWriter w, bool isKernel)
     {
         string body = TrimC(isKernel ? fn.NativeKernel ?? "" : fn.NativeUser ?? "");
         w.Line($"static inline {FuncSig(fn)}");
@@ -862,7 +880,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Emits the entry function for a thread into its realm writer.
     /// </summary>
-    void EmitThread(IrThread t)
+    private void EmitThread(IrThread t)
     {
         if (t.EntryFunc is not { } entry) return;
         var w = entry.Vis == Visibility.Kernel ? _kFuncs : _uFunc;
@@ -878,7 +896,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Emits a function body — native C text or a lowered IR block — into the given writer.
     /// </summary>
-    void EmitFunctionBody(IrFunction m, CodeWriter w, bool isLib, bool isKernel)
+    private void EmitFunctionBody(IrFunction m, CodeWriter w, bool isLib, bool isKernel)
     {
         string prefix = isLib ? "static inline " : "";
         if (m.Body == null)
@@ -896,7 +914,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Emits an operator body — native C text or a lowered IR block — into the given writer.
     /// </summary>
-    void EmitOperatorBody(IrOperator o, CodeWriter w, bool isLib, bool isKernel)
+    private void EmitOperatorBody(IrOperator o, CodeWriter w, bool isLib, bool isKernel)
     {
         string prefix = isLib ? "static inline " : "";
         if (o.Body == null)
@@ -914,7 +932,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Emits every statement in a block inside a C brace pair.
     /// </summary>
-    void EmitBlock(IrBlock b, CodeWriter w)
+    private void EmitBlock(IrBlock b, CodeWriter w)
     {
         using var _ = w.Braces();
         foreach (var s in b.Stmts) EmitStmt(s, w);
@@ -923,7 +941,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Dispatches a single IR statement to its C emission handler.
     /// </summary>
-    void EmitStmt(IrStmt s, CodeWriter w)
+    private void EmitStmt(IrStmt s, CodeWriter w)
     {
         switch (s)
         {
@@ -949,7 +967,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Emits a local variable declaration with an appropriate default when no initializer is given.
     /// </summary>
-    void EmitDeclVar(IrDeclVar dv, CodeWriter w)
+    private void EmitDeclVar(IrDeclVar dv, CodeWriter w)
     {
         if (dv.Init != null) { w.Line($"{dv.Type.ToCType()} {dv.Name} = {EmitExpr(dv.Init)};"); return; }
         w.Line(dv.Type is IrArrayType or IrUnionType ? $"{dv.Type.ToCType()} {dv.Name} = {{0}};"
@@ -960,7 +978,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Emits an if/else statement with optional else branch.
     /// </summary>
-    void EmitIf(IrIf ifs, CodeWriter w)
+    private void EmitIf(IrIf ifs, CodeWriter w)
     {
         w.Line($"if ({EmitExpr(ifs.Cond)})");
         EmitBlock(ifs.Then, w);
@@ -970,7 +988,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Emits a C-style for loop from the IR for node.
     /// </summary>
-    void EmitFor(IrFor fr, CodeWriter w)
+    private void EmitFor(IrFor fr, CodeWriter w)
     {
         string init = fr.Init switch
         {
@@ -995,47 +1013,50 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// Emits an IR expression and returns the corresponding C text. Every node kind
     /// must be fully resolved before reaching this method; unrecognised nodes throw.
     /// </summary>
-    string EmitExpr(IrExpr e) => e switch
+    private string EmitExpr(IrExpr e)
     {
-        IrLitInt    li => li.CText ?? li.Value.ToString(),
-        IrLitChar   lc => lc.Codepoint.ToString(),
-        IrLitFloat  lf => lf.Raw,
-        IrLitBool   lb => lb.Value ? "true" : "false",
-        IrLitString ls => $"GATA_STRLIT({IrType.String.ToCType().TrimEnd('*')}, {ls.Raw})",
-        IrLitNull      => "NULL",
-        IrEnumConst ec => Mangler.EnumMember(ec.EnumName, ec.Member),
-        IrVar      v   => v.IsRef ? $"(*{v.Name})" : v.Name,
-        IrSelfExpr     => "self",
-        IrFieldLoad fl => fl.Obj.Type is IrUnionType
-                            ? $"{EmitExpr(fl.Obj)}.{fl.Field}"
-                            : $"{EmitExpr(fl.Obj)}->{fl.Field}",
-        IrIndex    ix  => ix.Obj.Type is IrArrayType
-                            ? $"({EmitExpr(ix.Obj)})._[{EmitExpr(ix.Idx)}]"
-                            : $"{EmitExpr(ix.Obj)}[{EmitExpr(ix.Idx)}]",
-        IrStaticCall   sc  => $"{sc.CName}({string.Join(", ", sc.Args.Select(EmitExpr))})",
-        IrInstanceCall ic  => $"{ic.CName}({string.Join(", ", new[] { EmitExpr(ic.Recv) }.Concat(ic.Args.Select(EmitExpr)))})",
-        IrBinOp    bo => $"({EmitExpr(bo.Left)} {bo.Op} {EmitExpr(bo.Right)})",
-        IrTernary  tn => $"({EmitExpr(tn.Cond)} ? {EmitExpr(tn.Then)} : {EmitExpr(tn.Else)})",
-        IrUnaryOp  uo => $"{uo.Op}{EmitExpr(uo.Operand)}",
-        IrPostfix  pf => $"{EmitExpr(pf.Operand)}{pf.Op}",
-        IrCast     c  => $"(({c.To.ToCType()}){EmitExpr(c.Value)})",
-        IrNew      n  => $"{Mangler.Allocator(n.ClassName)}({string.Join(", ", n.Args.Select(EmitExpr))})",
-        IrArrayLit al => $"({al.ArrType.ToCType()}){{ {{ {string.Join(", ", al.Elems.Select(EmitExpr))} }} }}",
-        IrAddrOf   ao => $"(&{EmitExpr(ao.Target)})",
-        IrDeref    dr => $"(*{EmitExpr(dr.Ptr)})",
-        IrSizeof   so => $"sizeof({so.Of.ToCType()})",
-        IrDefault  df => $"(({df.Of.ToCType()})0)",
-        IrFuncRef  fr => fr.CName,
-        IrIndirectCall  ic2 => $"({EmitExpr(ic2.Target)})({string.Join(", ", ic2.Args.Select(EmitExpr))})",
-        IrUnionConstruct uc => EmitUnionConstruct(uc),
-        IrUnionField     uf => $"{EmitExpr(uf.Union)}.payload.{UnionVariantName(uf.Union.Type, uf.VariantIndex)}.{uf.Field}",
-        _ => throw new InvalidOperationException($"[Emitter] Unhandled IrExpr: {e.GetType().Name}")
-    };
+        return e switch
+        {
+            IrLitInt li => li.CText ?? li.Value.ToString(),
+            IrLitChar lc => lc.Codepoint.ToString(),
+            IrLitFloat lf => lf.Raw,
+            IrLitBool lb => lb.Value ? "true" : "false",
+            IrLitString ls => $"GATA_STRLIT({IrType.String.ToCType().TrimEnd('*')}, {ls.Raw})",
+            IrLitNull => "NULL",
+            IrEnumConst ec => Mangler.EnumMember(ec.EnumName, ec.Member),
+            IrVar v => v.IsRef ? $"(*{v.Name})" : v.Name,
+            IrSelfExpr => "self",
+            IrFieldLoad fl => fl.Obj.Type is IrUnionType
+                                ? $"{EmitExpr(fl.Obj)}.{fl.Field}"
+                                : $"{EmitExpr(fl.Obj)}->{fl.Field}",
+            IrIndex ix => ix.Obj.Type is IrArrayType
+                                ? $"({EmitExpr(ix.Obj)})._[{EmitExpr(ix.Idx)}]"
+                                : $"{EmitExpr(ix.Obj)}[{EmitExpr(ix.Idx)}]",
+            IrStaticCall sc => $"{sc.CName}({string.Join(", ", sc.Args.Select(EmitExpr))})",
+            IrInstanceCall ic => $"{ic.CName}({string.Join(", ", new[] { EmitExpr(ic.Recv) }.Concat(ic.Args.Select(EmitExpr)))})",
+            IrBinOp bo => $"({EmitExpr(bo.Left)} {bo.Op} {EmitExpr(bo.Right)})",
+            IrTernary tn => $"({EmitExpr(tn.Cond)} ? {EmitExpr(tn.Then)} : {EmitExpr(tn.Else)})",
+            IrUnaryOp uo => $"{uo.Op}{EmitExpr(uo.Operand)}",
+            IrPostfix pf => $"{EmitExpr(pf.Operand)}{pf.Op}",
+            IrCast c => $"(({c.To.ToCType()}){EmitExpr(c.Value)})",
+            IrNew n => $"{Mangler.Allocator(n.ClassName)}({string.Join(", ", n.Args.Select(EmitExpr))})",
+            IrArrayLit al => $"({al.ArrType.ToCType()}){{ {{ {string.Join(", ", al.Elems.Select(EmitExpr))} }} }}",
+            IrAddrOf ao => $"(&{EmitExpr(ao.Target)})",
+            IrDeref dr => $"(*{EmitExpr(dr.Ptr)})",
+            IrSizeof so => $"sizeof({so.Of.ToCType()})",
+            IrDefault df => $"(({df.Of.ToCType()})0)",
+            IrFuncRef fr => fr.CName,
+            IrIndirectCall ic2 => $"({EmitExpr(ic2.Target)})({string.Join(", ", ic2.Args.Select(EmitExpr))})",
+            IrUnionConstruct uc => EmitUnionConstruct(uc),
+            IrUnionField uf => $"{EmitExpr(uf.Union)}.payload.{UnionVariantName(uf.Union.Type, uf.VariantIndex)}.{uf.Field}",
+            _ => throw new InvalidOperationException($"[Emitter] Unhandled IrExpr: {e.GetType().Name}")
+        };
+    }
 
     /// <summary>
     /// Emits a union construction expression, building the tag and payload compound literal.
     /// </summary>
-    string EmitUnionConstruct(IrUnionConstruct uc)
+    private string EmitUnionConstruct(IrUnionConstruct uc)
     {
         var u = module.Unions.First(x => x.Name == uc.T.Name);
         var variant = u.Variants[uc.VariantIndex];
@@ -1048,8 +1069,10 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Returns the struct field name for a union variant at the given index.
     /// </summary>
-    string UnionVariantName(IrType unionType, int idx) =>
-        unionType is IrUnionType ut ? module.Unions.First(u => u.Name == ut.Name).Variants[idx].Name : "?";
+    private string UnionVariantName(IrType unionType, int idx)
+    {
+        return unionType is IrUnionType ut ? module.Unions.First(u => u.Name == ut.Name).Variants[idx].Name : "?";
+    }
 
     #endregion
 
@@ -1059,7 +1082,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// Emits a static-inline prototype into the shared header for every free function
     /// annotated with an intrinsic role binding. Skips duplicates via FirstInto.
     /// </summary>
-    void EmitIntrinsicProtos()
+    private void EmitIntrinsicProtos()
     {
         bool any = false;
         var funcs = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(module.FreeFunctions);
@@ -1095,7 +1118,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// Strips uniform leading indentation from raw C text so embedded native bodies
     /// re-indent correctly at whatever depth the writer is currently at.
     /// </summary>
-    static string TrimC(string raw)
+    private static string TrimC(string raw)
     {
         if (string.IsNullOrWhiteSpace(raw)) return "";
         
@@ -1154,7 +1177,7 @@ sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// Resolves a compiler runtime role to the C symbol name bound via an intrinsic annotation.
     /// Emits a diagnostic and returns a placeholder comment if no binding exists.
     /// </summary>
-    string Intrinsic(string role)
+    private string Intrinsic(string role)
     {
         var n = module.Symbols.IntrinsicOrNull(role);
         if (n != null) return n;
