@@ -6,41 +6,52 @@ namespace Appa;
 /// sites read the same Symbol.CName assigned via this class once declarations are
 /// collected, so a definition and its callers can never disagree on a name.
 /// </summary>
-static class Mangler
+internal static class Mangler
 {
     public const string KernelEntry = "gata_kernelspace_main";
 
     // Step 7 dense naming. When populated by the Densifier after reachability, a
     // class's readable C name collapses to a short machine token. Empty during
     // resolution. Reset per build.
-    static Dictionary<string, string> _dense = [];
+    private static Dictionary<string, string> _dense = [];
 
     // Every generic instantiation the Monomorphizer stamps is recorded here so
     // diagnostics can show the user-written form instead of the mangled name.
     // Reset per build; populated as each instantiation is processed.
-    static readonly Dictionary<string, (string Base, List<string> Args)> _genericInfo = [];
+    private static readonly Dictionary<string, (string Base, List<string> Args)> _genericInfo = [];
 
     /// <summary>
     /// Replaces the dense name map with the given mapping produced by the Densifier.
     /// </summary>
-    public static void SetDense(Dictionary<string, string> map) => _dense = map;
+    public static void SetDense(Dictionary<string, string> map)
+    {
+        _dense = map;
+    }
 
     /// <summary>
     /// Clears the dense name map, restoring readable names for the next build.
     /// </summary>
-    public static void ResetDense() => _dense = [];
+    public static void ResetDense()
+    {
+        _dense = [];
+    }
 
     /// <summary>
     /// Clears the generic instance display registry for the next build.
     /// </summary>
-    public static void ResetGenericDisplay() => _genericInfo.Clear();
+    public static void ResetGenericDisplay()
+    {
+        _genericInfo.Clear();
+    }
 
     /// <summary>
     /// Records the base name and type arguments for a generic instantiation so
     /// diagnostics can display it in user-readable form.
     /// </summary>
-    public static void RegisterGenericInstance(string mangled, string baseName, List<string> args) =>
+    public static void RegisterGenericInstance(string mangled, string baseName, List<string> args)
+    {
         _genericInfo[mangled] = (baseName, args);
+    }
 
     /// <summary>
     /// Returns the user-readable display name for a type, expanding generic
@@ -81,48 +92,74 @@ static class Mangler
     /// <summary>
     /// Returns the C struct typedef name for a Gata class, using the dense token if available.
     /// </summary>
-    public static string Class(string name) => _dense.GetValueOrDefault(name, $"gata_{name}");
+    public static string Class(string name)
+    {
+        return _dense.GetValueOrDefault(name, $"gata_{name}");
+    }
 
     /// <summary>
     /// Returns the C allocator function name for a class, using the dense token if available.
     /// </summary>
-    public static string Allocator(string cls) => _dense.TryGetValue(cls, out var d) ? d + "_n" : $"new_{cls}";
+    public static string Allocator(string cls)
+    {
+        return _dense.TryGetValue(cls, out var d) ? d + "_n" : $"new_{cls}";
+    }
 
     /// <summary>
     /// Returns the C destructor function name for a class, using the dense token if available.
     /// </summary>
-    public static string Dtor(string cls) => _dense.TryGetValue(cls, out var d) ? d + "_d" : $"gata_{cls}__dtor";
+    public static string Dtor(string cls)
+    {
+        return _dense.TryGetValue(cls, out var d) ? d + "_d" : $"gata_{cls}__dtor";
+    }
 
     /// <summary>
     /// Returns the C thread entry function name for a fully-qualified thread path.
     /// </summary>
-    public static string ThreadEntry(string full) => $"gata_{full}_main";
+    public static string ThreadEntry(string full)
+    {
+        return $"gata_{full}_main";
+    }
 
     /// <summary>
     /// Returns the C typedef name for a Gata enum type.
     /// </summary>
-    public static string Enum(string name) => $"gata_{name}";
+    public static string Enum(string name)
+    {
+        return $"gata_{name}";
+    }
 
     /// <summary>
     /// Returns the C enumerator name for a member of a Gata enum type.
     /// </summary>
-    public static string EnumMember(string enumName, string member) => $"gata_{enumName}_{member}";
+    public static string EnumMember(string enumName, string member)
+    {
+        return $"gata_{enumName}_{member}";
+    }
 
     /// <summary>
     /// Returns the C typedef name for a Gata union type.
     /// </summary>
-    public static string Union(string name) => $"gata_{name}";
+    public static string Union(string name)
+    {
+        return $"gata_{name}";
+    }
 
     /// <summary>
     /// Returns the C tag enumerator name for a variant of a Gata union type.
     /// </summary>
-    public static string UnionTag(string unionName, string variant) => $"gata_{unionName}_{variant}";
+    public static string UnionTag(string unionName, string variant)
+    {
+        return $"gata_{unionName}_{variant}";
+    }
 
     /// <summary>
     /// Returns the C function name for a method, appending the overload suffix when overloaded.
     /// </summary>
-    public static string Method(string owner, string name, IReadOnlyList<Param> ps, bool overloaded) =>
-        $"gata_{owner}_{name}" + (overloaded ? "_" + OverloadSuffix(ps) : "");
+    public static string Method(string owner, string name, IReadOnlyList<Param> ps, bool overloaded)
+    {
+        return $"gata_{owner}_{name}" + (overloaded ? "_" + OverloadSuffix(ps) : "");
+    }
 
     /// <summary>
     /// Returns the C function name for a free function. Entry functions use the kernel entry
@@ -140,8 +177,10 @@ static class Mangler
     /// Returns the C function name for a file-local private free function, prefixed by a
     /// stable per-file token so two files may reuse the same name without clashing.
     /// </summary>
-    public static string PrivateFreeFunc(string fileToken, string name, IReadOnlyList<Param> ps, bool overloaded) =>
-        $"gata_f{fileToken}_{name}" + (overloaded ? "_" + OverloadSuffix(ps) : "");
+    public static string PrivateFreeFunc(string fileToken, string name, IReadOnlyList<Param> ps, bool overloaded)
+    {
+        return $"gata_f{fileToken}_{name}" + (overloaded ? "_" + OverloadSuffix(ps) : "");
+    }
 
     /// <summary>
     /// Returns a stable 8-hex C-identifier fragment derived from the declaring file path
@@ -157,32 +196,38 @@ static class Mangler
     /// <summary>
     /// Returns the C operator function name for an operator overload on the given class.
     /// </summary>
-    public static string Operator(string owner, string op) => $"gata_{owner}_{OpSuffix(op)}";
+    public static string Operator(string owner, string op)
+    {
+        return $"gata_{owner}_{OpSuffix(op)}";
+    }
 
     /// <summary>
     /// Returns the stable C identifier suffix for a Gata operator token.
     /// </summary>
-    public static string OpSuffix(string op) => op switch
+    public static string OpSuffix(string op)
     {
-        "+" => "add",
-        "-" => "sub",
-        "*" => "mul",
-        "/" => "div",
-        "==" => "eq",
-        "!=" => "neq",
-        "<" => "lt",
-        ">" => "gt",
-        "<=" => "lte",
-        ">=" => "gte",
-        "&" => "band",
-        "|" => "bor",
-        "^" => "bxor",
-        "<<" => "shl",
-        ">>" => "shr",
-        "[]" => "index_get",
-        "[]=" => "index_set",
-        _ => "op"
-    };
+        return op switch
+        {
+            "+" => "add",
+            "-" => "sub",
+            "*" => "mul",
+            "/" => "div",
+            "==" => "eq",
+            "!=" => "neq",
+            "<" => "lt",
+            ">" => "gt",
+            "<=" => "lte",
+            ">=" => "gte",
+            "&" => "band",
+            "|" => "bor",
+            "^" => "bxor",
+            "<<" => "shl",
+            ">>" => "shr",
+            "[]" => "index_get",
+            "[]=" => "index_set",
+            _ => "op"
+        };
+    }
 
     /// <summary>
     /// Returns the overload suffix that distinguishes parameter-type combinations,
@@ -208,7 +253,7 @@ static class Mangler
     /// character becomes a separating underscore (collapsed to prevent runs); pointer
     /// stars become _p markers so distinct pointer types never collapse to the same suffix.
     /// </summary>
-    static string MangleTypeName(string t)
+    private static string MangleTypeName(string t)
     {
         ReadOnlySpan<char> span = t.AsSpan().Trim();
         if (span.IsEmpty) return "x";

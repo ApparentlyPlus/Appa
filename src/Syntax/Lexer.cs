@@ -6,7 +6,7 @@ using System.Runtime.CompilerServices;
 /// Thrown by the lexer or parser when source text cannot be tokenized or parsed.
 /// Caught at every call site so it never escapes as an unhandled exception.
 /// </summary>
-sealed class ParseException(TextSpan span, string message) : Exception(message)
+internal sealed class ParseException(TextSpan span, string message) : Exception(message)
 {
     public TextSpan Span { get; } = span;
 }
@@ -16,7 +16,7 @@ sealed class ParseException(TextSpan span, string message) : Exception(message)
 /// One instance per file. Call Tokenize() once and discard.
 /// Man, .NET 10 is rad. I love records and primary constructors.
 /// </summary>
-sealed class Lexer(string src)
+internal sealed class Lexer(string src)
 {
     // Position pointer into the source string. _pp points to the index of the next character to read.
     private int _pp;
@@ -27,7 +27,7 @@ sealed class Lexer(string src)
     private readonly List<Token> _tokens = [];
 
     // Keyword lookup table. Maps keyword strings to their corresponding token kinds.
-    static readonly Dictionary<string, TK> kw = new()
+    private static readonly Dictionary<string, TK> kw = new()
     {
         ["import"]      = TK.Import,
         ["kernel"]      = TK.Kernel,
@@ -132,15 +132,28 @@ sealed class Lexer(string src)
     }
 
     // Helper methods for character inspection and token emission
-    char Cur => _pp < src.Length ? src[_pp] : '\0';
-    char Peek(int n=1) => (_pp + n) < src.Length ? src[_pp + n] : '\0';
-    void Advance(int n=1) => _pp += n;
+    private char Cur => _pp < src.Length ? src[_pp] : '\0';
+    private char Peek(int n = 1)
+    {
+        return (_pp + n) < src.Length ? src[_pp + n] : '\0';
+    }
+
+    private void Advance(int n = 1)
+    {
+        _pp += n;
+    }
 
     // Emits a token of the specified kind with the given value, using the current token start and position pointers to create a TextSpan.
-    void Emit(TK kind, string value) => _tokens.Add(new Token(kind, value, new TextSpan(_ts, _pp - _ts)));
+    private void Emit(TK kind, string value)
+    {
+        _tokens.Add(new Token(kind, value, new TextSpan(_ts, _pp - _ts)));
+    }
 
     // Throws a ParseException with the given message and a TextSpan covering the current token being read.
-    void Fail(string m) => throw new ParseException(new TextSpan(_ts, Math.Max(1, _pp - _ts)), m);
+    private void Fail(string m)
+    {
+        throw new ParseException(new TextSpan(_ts, Math.Max(1, _pp - _ts)), m);
+    }
 
     /// <summary>
     /// Reads the next token from the source string and adds it to the token list.
@@ -333,7 +346,7 @@ sealed class Lexer(string src)
     /// True when the next characters in src spell exactly kw and are not followed
     /// by a letter, digit, or underscore (ie. it is a complete word boundary).
     /// </summary>
-    bool MatchKw(string kw)
+    private bool MatchKw(string kw)
     {
         // Check if the next characters in src match kw and are not followed by an identifier part
         if (_pp + kw.Length > src.Length) return false;
@@ -349,12 +362,12 @@ sealed class Lexer(string src)
     /// <summary>
     /// Consumes whitespace characters starting from the current position in the source string.
     /// </summary>
-    void SkipWS() { while (_pp < src.Length && IsWhiteSpace(Cur)) Advance(); }
+    private void SkipWS() { while (_pp < src.Length && IsWhiteSpace(Cur)) Advance(); }
 
     /// <summary>
     /// Reads an optional (identifier) argument after an annotation keyword, like @intrinsic(retain). Returns "" when absent.
     /// </summary>
-    string ReadParenArg()
+    private string ReadParenArg()
     {
         SkipWS();
         if (Cur != '(') return "";
@@ -375,7 +388,7 @@ sealed class Lexer(string src)
     /// Understands C style line comments, block comments, and string/char literals
     /// so a brace inside any of those does not alter the nesting depth.
     /// </summary>
-    string ReadBalanced()
+    private string ReadBalanced()
     {
         Advance(); // opening {
         int start = _pp;
@@ -423,7 +436,7 @@ sealed class Lexer(string src)
     /// <summary>
     /// Reads an identifier or keyword from the source string starting at the current position.
     /// </summary>
-    void ReadID()
+    private void ReadID()
     {
         // Save the starting position of the identifier
         int start = _pp;
@@ -649,14 +662,26 @@ sealed class Lexer(string src)
     // Helper methods for character classification
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool IsWhiteSpace(char c) => c == ' ' || (c >= '\t' && c <= '\r');
+    private static bool IsWhiteSpace(char c)
+    {
+        return c == ' ' || (c >= '\t' && c <= '\r');
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool IsIDStart(char c) => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
+    private static bool IsIDStart(char c)
+    {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool IsIdentPart(char c) => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
-    
+    private static bool IsIdentPart(char c)
+    {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool IsHexDigit(char c) => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+    private static bool IsHexDigit(char c)
+    {
+        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+    }
 }

@@ -8,11 +8,11 @@ using System.Text;
 /// multi-line text is indented at the current depth so output cannot be
 /// misindented by hand.
 /// </summary>
-sealed class CodeWriter
+internal sealed class CodeWriter
 {
-    readonly StringBuilder _sb = new();
-    int _depth;
-    const string Unit = "    ";
+    private readonly StringBuilder _sb = new();
+    private int _depth;
+    private const string Unit = "    ";
 
     /// <summary>
     /// Appends a line of text at the current indentation depth.
@@ -40,12 +40,15 @@ sealed class CodeWriter
     /// <summary>
     /// Appends a completely blank line with no indentation.
     /// </summary>
-    public void Blank() => _sb.Append('\n');
+    public void Blank()
+    {
+        _sb.Append('\n');
+    }
 
     /// <summary>
     /// Appends a line with the current indentation prefix, or a bare newline for empty input.
     /// </summary>
-    void Indented(ReadOnlySpan<char> s)
+    private void Indented(ReadOnlySpan<char> s)
     {
         if (s.Length == 0) { _sb.Append('\n'); return; }
         if (_depth > 0) _sb.Append(' ', _depth * 4);
@@ -61,12 +64,18 @@ sealed class CodeWriter
     /// <summary>
     /// Opens a bare brace block, increasing indentation until the returned scope is disposed.
     /// </summary>
-    public Scope Braces(string closer = "}") => Block("{", closer);
+    public Scope Braces(string closer = "}")
+    {
+        return Block("{", closer);
+    }
 
     /// <summary>
     /// Returns the accumulated C text.
     /// </summary>
-    public override string ToString() => _sb.ToString();
+    public override string ToString()
+    {
+        return _sb.ToString();
+    }
 
     /// <summary>
     /// Disposable scope that restores indentation and writes the closing token on disposal.

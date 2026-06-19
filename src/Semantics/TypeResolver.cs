@@ -1,6 +1,6 @@
 namespace Appa;
 
-sealed class TypeResolver(
+internal sealed class TypeResolver(
     SymbolTable sym,
     HashSet<string> hasInit,
     HashSet<string> nativeStructs,
@@ -10,36 +10,48 @@ sealed class TypeResolver(
     DiagnosticBag diag)
 {
     // Modules visible to the file currently being resolved (set per file).
-    HashSet<string> _scope = [];
+    private HashSet<string> _scope = [];
 
     /// <summary>
     /// Returns true when a class name is declared in a module the current file imports.
     /// </summary>
-    bool ClassInScope(string name) => sym.ClassModule(name) is { } m && _scope.Contains(m);
+    private bool ClassInScope(string name)
+    {
+        return sym.ClassModule(name) is { } m && _scope.Contains(m);
+    }
 
     /// <summary>
     /// Returns true when a class name is declared in a module the current file imports.
     /// </summary>
-    bool ClassInScope(ReadOnlySpan<char> name) => sym.ClassModule(name) is { } m && _scope.Contains(m);
+    private bool ClassInScope(ReadOnlySpan<char> name)
+    {
+        return sym.ClassModule(name) is { } m && _scope.Contains(m);
+    }
 
     /// <summary>
     /// Returns true when a free-function symbol is in scope for the current file.
     /// </summary>
-    bool FuncInScope(Symbol? f) => f != null && _scope.Contains(f.Module);
+    private bool FuncInScope(Symbol? f)
+    {
+        return f != null && _scope.Contains(f.Module);
+    }
 
     // Every fixed-array (T, N) pair used; the emitter stamps one struct per pair.
-    readonly List<IrArrayType> _arrays = [];
-    int _tmpSeq;
+    private readonly List<IrArrayType> _arrays = [];
+    private int _tmpSeq;
 
     /// <summary>
     /// Allocates a unique temporary variable name with the given prefix.
     /// </summary>
-    string Tmp(string prefix) => $"{prefix}{_tmpSeq++}";
+    private string Tmp(string prefix)
+    {
+        return $"{prefix}{_tmpSeq++}";
+    }
 
     /// <summary>
     /// Records a fixed-array type usage and returns the IrArrayType node.
     /// </summary>
-    IrArrayType Arr(IrType elem, int size)
+    private IrArrayType Arr(IrType elem, int size)
     {
         var a = new IrArrayType(elem, size);
         _arrays.Add(a);
@@ -47,13 +59,13 @@ sealed class TypeResolver(
     }
 
     // Every distinct function-pointer signature used; the emitter stamps one typedef per signature.
-    readonly List<IrFuncPtrType> _funcPtrTypes = [];
-    readonly Dictionary<FuncPtrKey, IrFuncPtrType> _funcPtrSeen = new();
+    private readonly List<IrFuncPtrType> _funcPtrTypes = [];
+    private readonly Dictionary<FuncPtrKey, IrFuncPtrType> _funcPtrSeen = new();
 
     /// <summary>
     /// Returns or creates a function-pointer type for the given return type and parameter list.
     /// </summary>
-    IrFuncPtrType FnPtr(IrType ret, List<IrType> ps)
+    private IrFuncPtrType FnPtr(IrType ret, List<IrType> ps)
     {
         var key = new FuncPtrKey(ret, ps);
         if (_funcPtrSeen.TryGetValue(key, out var existing)) return existing;
@@ -64,17 +76,17 @@ sealed class TypeResolver(
     }
 
     // Generic free-function templates; each distinct instantiation is stamped once.
-    readonly Dictionary<string, (FuncDecl Decl, string File, string Context)> _funcTemplates = new();
-    readonly Queue<(FuncDecl Decl, string File, string Context, Dictionary<string, string> Binds, string Mangled)> _genericQueue = new();
-    readonly HashSet<string> _genericSeen = [];
-    int _labelSeq;
+    private readonly Dictionary<string, (FuncDecl Decl, string File, string Context)> _funcTemplates = new();
+    private readonly Queue<(FuncDecl Decl, string File, string Context, Dictionary<string, string> Binds, string Mangled)> _genericQueue = new();
+    private readonly HashSet<string> _genericSeen = [];
+    private int _labelSeq;
 
     // Splits "func(T1,T2)->R" into its parameter type-strings and return type-string,
     // tracking paren/bracket depth so nested types don't split at the wrong comma.
     /// <summary>
     /// Splits an encoded function-type string into parameter types and return type.
     /// </summary>
-    static bool TrySplitFuncType(ReadOnlySpan<char> t, out List<Range> ps, out ReadOnlySpan<char> rs)
+    private static bool TrySplitFuncType(ReadOnlySpan<char> t, out List<Range> ps, out ReadOnlySpan<char> rs)
     {
         ps = [];
         rs = default;
@@ -101,25 +113,33 @@ sealed class TypeResolver(
     /// <summary>
     /// Returns true when the class was declared as a native type with no Gata-visible fields.
     /// </summary>
-    bool IsOpaqueStruct(string cls) => nativeStructs.Contains(cls);
+    private bool IsOpaqueStruct(string cls)
+    {
+        return nativeStructs.Contains(cls);
+    }
 
     /// <summary>
     /// Returns true when the class has either a native struct body or raw C field blocks.
     /// </summary>
-    bool HasOpaqueFields(string cls) => nativeStructs.Contains(cls) || opaqueFieldClasses.Contains(cls);
+    private bool HasOpaqueFields(string cls)
+    {
+        return nativeStructs.Contains(cls) || opaqueFieldClasses.Contains(cls);
+    }
 
     /// <summary>
     /// Validates that the given Gata type name refers to a real, in-scope type.
     /// Reports a diagnostic on any unknown or out-of-scope name.
     /// </summary>
-    void CheckType(string? gataType, ResolveCtx ctx, TextSpan span, bool allowVoid = false) =>
+    private void CheckType(string? gataType, ResolveCtx ctx, TextSpan span, bool allowVoid = false)
+    {
         CheckType(gataType.AsSpan(), ctx, span, allowVoid);
+    }
 
     /// <summary>
     /// Validates that the given Gata type name refers to a real, in-scope type.
     /// Reports a diagnostic on any unknown or out-of-scope name.
     /// </summary>
-    void CheckType(ReadOnlySpan<char> gataType, ResolveCtx ctx, TextSpan span, bool allowVoid = false)
+    private void CheckType(ReadOnlySpan<char> gataType, ResolveCtx ctx, TextSpan span, bool allowVoid = false)
     {
         if (gataType.IsEmpty) return;
         if (gataType.StartsWith("func("))
@@ -168,7 +188,7 @@ sealed class TypeResolver(
     /// <summary>
     /// Validates that no two parameters in the list share the same name.
     /// </summary>
-    void CheckParams(Param[] ps, ResolveCtx ctx)
+    private void CheckParams(Param[] ps, ResolveCtx ctx)
     {
         var seen = new HashSet<string>();
         foreach (var p in ps)
@@ -179,7 +199,7 @@ sealed class TypeResolver(
     /// <summary>
     /// Reports a diagnostic when the argument count does not match the expected parameter count.
     /// </summary>
-    void CheckArgCount(MethodSig? sig, int argCount, string display, ResolveCtx ctx, TextSpan span)
+    private void CheckArgCount(MethodSig? sig, int argCount, string display, ResolveCtx ctx, TextSpan span)
     {
         if (sig != null && sig.Params.Count != argCount)
             diag.Error(Codes.WrongArgCount, ctx.File, span,
@@ -191,7 +211,7 @@ sealed class TypeResolver(
     /// Picks the best-matching overload from the candidates for the given argument list.
     /// Reports a diagnostic when no overload matches or multiple overloads tie.
     /// </summary>
-    Symbol? ChooseOverload(IReadOnlyList<Symbol> cands, Symbol? primary,
+    private Symbol? ChooseOverload(IReadOnlyList<Symbol> cands, Symbol? primary,
                            List<IrExpr> args, string display, ResolveCtx ctx, TextSpan span)
     {
         if (cands.Count <= 1)
@@ -223,7 +243,7 @@ sealed class TypeResolver(
     /// Computes the total conversion cost for matching the given argument list to the signature.
     /// Returns null when the argument count or any individual argument type is incompatible.
     /// </summary>
-    int? MatchCost(MethodSig sig, List<IrExpr> args)
+    private int? MatchCost(MethodSig sig, List<IrExpr> args)
     {
         if (sig.Params.Count != args.Count) return null;
         int total = 0;
@@ -241,7 +261,7 @@ sealed class TypeResolver(
     /// Returns the conversion cost from the argument's type to the target type,
     /// or null when the types are incompatible.
     /// </summary>
-    static int? ArgConvCost(IrExpr arg, IrType to)
+    private static int? ArgConvCost(IrExpr arg, IrType to)
     {
         var from = arg.Type;
         if (arg is IrLitNull) return to is IrClassRef or IrPtrType ? 0 : null;
@@ -258,22 +278,25 @@ sealed class TypeResolver(
     /// <summary>
     /// Returns the numeric promotion rank of the type, used to resolve binary operator widening.
     /// </summary>
-    static int NumRank(IrType t) => t is IrPrimType p ? p.CName switch
+    private static int NumRank(IrType t)
     {
-        "bool" => 1,
-        "char" or "sbyte" or "byte" => 2,
-        "short" or "ushort" => 3,
-        "int" or "uint" => 4,
-        "int64" or "uint64" or "usize" or "uintptr" => 5,
-        "float" => 6,
-        "double" => 7,
-        _ => 4
-    } : 4;
+        return t is IrPrimType p ? p.CName switch
+        {
+            "bool" => 1,
+            "char" or "sbyte" or "byte" => 2,
+            "short" or "ushort" => 3,
+            "int" or "uint" => 4,
+            "int64" or "uint64" or "usize" or "uintptr" => 5,
+            "float" => 6,
+            "double" => 7,
+            _ => 4
+        } : 4;
+    }
 
     /// <summary>
     /// Formats the argument type list as a comma-separated string for use in diagnostic messages.
     /// </summary>
-    static string DescribeArgs(List<IrExpr> args)
+    private static string DescribeArgs(List<IrExpr> args)
     {
         var names = new string[args.Count];
         for (int i = 0; i < args.Count; i++) names[i] = Describe(args[i].Type);
@@ -286,27 +309,30 @@ sealed class TypeResolver(
     /// <summary>
     /// Returns true when both IR types are structurally identical.
     /// </summary>
-    static bool SameType(IrType a, IrType b) => (a, b) switch
+    private static bool SameType(IrType a, IrType b)
     {
-        (IrVoidType, IrVoidType) => true,
-        (IrPrimType x, IrPrimType y) => x.CName == y.CName,
-        (IrClassRef x, IrClassRef y) => x.ClassName == y.ClassName,
-        (IrEnumType x, IrEnumType y) => x.Name == y.Name,
-        (IrPtrType x, IrPtrType y) => SameType(x.Inner, y.Inner),
-        (IrArrayType x, IrArrayType y) => x.Size == y.Size && SameType(x.Elem, y.Elem),
-        (IrResultType x, IrResultType y) => SameType(x.Inner, y.Inner),
-        (IrFuncPtrType x, IrFuncPtrType y) =>
-            SameType(x.Ret, y.Ret) && x.Params.Count == y.Params.Count
-            && x.Params.Zip(y.Params, SameType).All(v => v),
-        (IrUnionType x, IrUnionType y) => x.Name == y.Name,
-        _ => false
-    };
+        return (a, b) switch
+        {
+            (IrVoidType, IrVoidType) => true,
+            (IrPrimType x, IrPrimType y) => x.CName == y.CName,
+            (IrClassRef x, IrClassRef y) => x.ClassName == y.ClassName,
+            (IrEnumType x, IrEnumType y) => x.Name == y.Name,
+            (IrPtrType x, IrPtrType y) => SameType(x.Inner, y.Inner),
+            (IrArrayType x, IrArrayType y) => x.Size == y.Size && SameType(x.Elem, y.Elem),
+            (IrResultType x, IrResultType y) => SameType(x.Inner, y.Inner),
+            (IrFuncPtrType x, IrFuncPtrType y) =>
+                SameType(x.Ret, y.Ret) && x.Params.Count == y.Params.Count
+                && x.Params.Zip(y.Params, SameType).All(v => v),
+            (IrUnionType x, IrUnionType y) => x.Name == y.Name,
+            _ => false
+        };
+    }
 
     /// <summary>
     /// Returns true when value's type is assignment-compatible with the target type,
     /// accounting for implicit numeric widening, null-to-reference, and pointer covariance.
     /// </summary>
-    static bool Assignable(IrExpr value, IrType to)
+    private static bool Assignable(IrExpr value, IrType to)
     {
         var from = value.Type;
         if (value is IrLitNull) return to is IrClassRef or IrPtrType or IrFuncPtrType;
@@ -325,23 +351,26 @@ sealed class TypeResolver(
     /// <summary>
     /// Returns a human-readable type name for use in diagnostic messages.
     /// </summary>
-    static string Describe(IrType t) => t switch
+    private static string Describe(IrType t)
     {
-        IrVoidType => "void",
-        IrPrimType p => p.CName,
-        IrClassRef c => Mangler.DisplayName(c.ClassName),
-        IrPtrType p => Describe(p.Inner) + "*",
-        IrArrayType a => $"[{a.Size}]{Describe(a.Elem)}",
-        IrResultType r => "throws " + Describe(r.Inner),
-        IrFuncPtrType f => DescribeFuncPtr(f),
-        IrUnionType u => u.Name,
-        _ => t.ToCType()
-    };
+        return t switch
+        {
+            IrVoidType => "void",
+            IrPrimType p => p.CName,
+            IrClassRef c => Mangler.DisplayName(c.ClassName),
+            IrPtrType p => Describe(p.Inner) + "*",
+            IrArrayType a => $"[{a.Size}]{Describe(a.Elem)}",
+            IrResultType r => "throws " + Describe(r.Inner),
+            IrFuncPtrType f => DescribeFuncPtr(f),
+            IrUnionType u => u.Name,
+            _ => t.ToCType()
+        };
+    }
 
     /// <summary>
     /// Returns the human-readable signature string for a function pointer type.
     /// </summary>
-    static string DescribeFuncPtr(IrFuncPtrType f)
+    private static string DescribeFuncPtr(IrFuncPtrType f)
     {
         var pnames = new string[f.Params.Count];
         for (int i = 0; i < f.Params.Count; i++) pnames[i] = Describe(f.Params[i]);
@@ -351,7 +380,7 @@ sealed class TypeResolver(
     /// <summary>
     /// Reports a type-mismatch diagnostic when value cannot be assigned to the target type.
     /// </summary>
-    void CheckAssign(IrExpr value, IrType target, string what, ResolveCtx ctx, string code)
+    private void CheckAssign(IrExpr value, IrType target, string what, ResolveCtx ctx, string code)
     {
         if (value.Type is IrResultType || target is IrResultType) return;
         if (!Assignable(value, target))
@@ -362,7 +391,7 @@ sealed class TypeResolver(
     /// <summary>
     /// Emits an EmptyBlock warning when the resolved block has no statements.
     /// </summary>
-    void WarnIfEmpty(IrBlock blk, string what, ResolveCtx ctx, TextSpan span)
+    private void WarnIfEmpty(IrBlock blk, string what, ResolveCtx ctx, TextSpan span)
     {
         if (blk.Stmts.Count == 0)
             diag.Warn(Codes.EmptyBlock, ctx.File, span, $"empty '{what}' body");
@@ -371,7 +400,7 @@ sealed class TypeResolver(
     /// <summary>
     /// Validates that the expression is bool-typed for use as a branch condition.
     /// </summary>
-    void CheckCondition(IrExpr c, ResolveCtx ctx)
+    private void CheckCondition(IrExpr c, ResolveCtx ctx)
     {
         if (c.Type is IrResultType) return;
         if (c.Type is not IrPrimType { CName: "bool" })
@@ -382,7 +411,7 @@ sealed class TypeResolver(
     /// <summary>
     /// Validates that the expression is a legal assignment target (variable, field, element, or deref).
     /// </summary>
-    void CheckLValue(IrExpr target, ResolveCtx ctx)
+    private void CheckLValue(IrExpr target, ResolveCtx ctx)
     {
         if (target is IrVar or IrFieldLoad or IrIndex or IrDeref) return;
         diag.Error(Codes.NotAnLvalue, ctx.File, target.Span,
@@ -392,7 +421,7 @@ sealed class TypeResolver(
     /// <summary>
     /// Validates both operands of a compound assignment operator for type correctness.
     /// </summary>
-    void CheckCompound(string op, IrExpr target, IrExpr value, ResolveCtx ctx)
+    private void CheckCompound(string op, IrExpr target, IrExpr value, ResolveCtx ctx)
     {
         bool bitwise = op is "&=" or "|=" or "^=" or "<<=" or ">>=";
         bool okTarget = bitwise ? IsInteger(target.Type) : IsArith(target.Type);
@@ -409,7 +438,7 @@ sealed class TypeResolver(
     /// Validates that an explicit cast is valid: numeric, enum-to-int, or pointer (unsafe only).
     /// Reports an error for void, String, or class casts.
     /// </summary>
-    void CheckCast(IrExpr value, IrType to, ResolveCtx ctx)
+    private void CheckCast(IrExpr value, IrType to, ResolveCtx ctx)
     {
         var from = value.Type;
         if (SameType(from, to)) return;
@@ -434,7 +463,7 @@ sealed class TypeResolver(
     /// <summary>
     /// Returns true when both expressions are comparable with == or !=.
     /// </summary>
-    static bool ComparableEq(IrExpr l, IrExpr r)
+    private static bool ComparableEq(IrExpr l, IrExpr r)
     {
         var a = l.Type; var b = r.Type;
         if (l is IrLitNull || r is IrLitNull)
@@ -454,31 +483,37 @@ sealed class TypeResolver(
     /// <summary>
     /// Returns true when at least one statement in the list definitely returns on every path.
     /// </summary>
-    static bool ReturnsList(IReadOnlyList<IrStmt> stmts) => stmts.Any(DefinitelyReturns);
+    private static bool ReturnsList(IReadOnlyList<IrStmt> stmts)
+    {
+        return stmts.Any(DefinitelyReturns);
+    }
 
     /// <summary>
     /// Returns true when the statement definitely returns or throws on every execution path.
     /// </summary>
-    static bool DefinitelyReturns(IrStmt s) => s switch
+    private static bool DefinitelyReturns(IrStmt s)
     {
-        IrReturn => true,
-        IrThrow => true,
-        IrBlock b => ReturnsList(b.Stmts),
-        IrUnsafeBlock u => ReturnsList(u.Body.Stmts),
-        IrIf i => i.Else != null && DefinitelyReturns(i.Then) && DefinitelyReturns(i.Else),
-        IrWhile w => w.Cond is IrLitBool { Value: true },
-        IrTryCatch t => DefinitelyReturns(t.Try) && DefinitelyReturns(t.Catch),
-        IrSwitch sw => sw.Default != null && sw.Cases.All(c => DefinitelyReturns(c.Body))
-                       && DefinitelyReturns(sw.Default),
-        IrMatch ms => ms.Cases.All(c => DefinitelyReturns(c.Body))
-                      && (ms.Default == null || DefinitelyReturns(ms.Default)),
-        _ => false
-    };
+        return s switch
+        {
+            IrReturn => true,
+            IrThrow => true,
+            IrBlock b => ReturnsList(b.Stmts),
+            IrUnsafeBlock u => ReturnsList(u.Body.Stmts),
+            IrIf i => i.Else != null && DefinitelyReturns(i.Then) && DefinitelyReturns(i.Else),
+            IrWhile w => w.Cond is IrLitBool { Value: true },
+            IrTryCatch t => DefinitelyReturns(t.Try) && DefinitelyReturns(t.Catch),
+            IrSwitch sw => sw.Default != null && sw.Cases.All(c => DefinitelyReturns(c.Body))
+                           && DefinitelyReturns(sw.Default),
+            IrMatch ms => ms.Cases.All(c => DefinitelyReturns(c.Body))
+                          && (ms.Default == null || DefinitelyReturns(ms.Default)),
+            _ => false
+        };
+    }
 
     /// <summary>
     /// Reports MissingReturn when a non-void function body does not definitely return on every path.
     /// </summary>
-    void CheckMissingReturn(IrBlock? body, IrType ret, bool isThrows, TextSpan span, string display, ResolveCtx ctx)
+    private void CheckMissingReturn(IrBlock? body, IrType ret, bool isThrows, TextSpan span, string display, ResolveCtx ctx)
     {
         if (body == null || isThrows || ret is IrVoidType || ret is IrResultType) return;
         if (!ReturnsList(body.Stmts))
@@ -489,7 +524,7 @@ sealed class TypeResolver(
     /// Checks for a redundant trailing 'return;' in a void function, and warns about
     /// unused local variables by walking the body.
     /// </summary>
-    void CheckBodyQuality(IrBlock body, IrType ret, TextSpan span, ResolveCtx ctx)
+    private void CheckBodyQuality(IrBlock body, IrType ret, TextSpan span, ResolveCtx ctx)
     {
         if (ret is IrVoidType && body.Stmts.Count > 0 && body.Stmts[^1] is IrReturn { Value: null })
             diag.Warn(Codes.RedundantReturn, ctx.File, span, "redundant trailing 'return;'");
@@ -621,7 +656,7 @@ sealed class TypeResolver(
     /// <summary>
     /// Reports PrivateMember when a private member is accessed from outside its declaring class.
     /// </summary>
-    void CheckMemberAccess(string owner, string member, ResolveCtx ctx, TextSpan span)
+    private void CheckMemberAccess(string owner, string member, ResolveCtx ctx, TextSpan span)
     {
         if (sym.IsPrivateMember(owner, member) && ctx.CurClass != owner)
             diag.Error(Codes.PrivateMember, ctx.File, span,
@@ -631,7 +666,7 @@ sealed class TypeResolver(
     /// <summary>
     /// Reports ThrowsOutsideTry when a throwing call appears outside a try block or throws function.
     /// </summary>
-    void CheckThrowsHandled(ResolveCtx ctx, TextSpan span)
+    private void CheckThrowsHandled(ResolveCtx ctx, TextSpan span)
     {
         if (!ctx.InTry && !ctx.InThrowsFunc)
             diag.Error(Codes.ThrowsOutsideTry, ctx.File, span,
@@ -642,7 +677,7 @@ sealed class TypeResolver(
     /// Reports ThrowsOutsideTry when a throwing call is nested inside a non-statement expression.
     /// The allowRoot flag permits the call itself at the top of the expression tree.
     /// </summary>
-    void ForbidNestedThrows(IrExpr? e, ResolveCtx ctx, bool allowRoot)
+    private void ForbidNestedThrows(IrExpr? e, ResolveCtx ctx, bool allowRoot)
     {
         if (e == null) return;
         if (!allowRoot && e is IrThrowsCall or IrThrowsInstanceCall)
@@ -704,26 +739,29 @@ sealed class TypeResolver(
     /// <summary>
     /// Returns true when the expression is side-effect-free and safe to re-emit multiple times.
     /// </summary>
-    static bool IsPure(IrExpr e) => e switch
+    private static bool IsPure(IrExpr e)
     {
-        IrLitInt or IrLitChar or IrLitFloat or IrLitBool or IrLitString or IrLitNull
-            or IrEnumConst or IrVar or IrSelfExpr or IrFuncRef or IrSizeof or IrDefault => true,
-        IrFieldLoad fl => IsPure(fl.Obj),
-        IrIndex ix => IsPure(ix.Obj) && IsPure(ix.Idx),
-        IrUnionField uf => IsPure(uf.Union),
-        IrUnaryOp u => IsPure(u.Operand),
-        IrBinOp b => IsPure(b.Left) && IsPure(b.Right),
-        IrCast c => IsPure(c.Value),
-        IrAddrOf a => IsPure(a.Target),
-        IrDeref d => IsPure(d.Ptr),
-        _ => false
-    };
+        return e switch
+        {
+            IrLitInt or IrLitChar or IrLitFloat or IrLitBool or IrLitString or IrLitNull
+                or IrEnumConst or IrVar or IrSelfExpr or IrFuncRef or IrSizeof or IrDefault => true,
+            IrFieldLoad fl => IsPure(fl.Obj),
+            IrIndex ix => IsPure(ix.Obj) && IsPure(ix.Idx),
+            IrUnionField uf => IsPure(uf.Union),
+            IrUnaryOp u => IsPure(u.Operand),
+            IrBinOp b => IsPure(b.Left) && IsPure(b.Right),
+            IrCast c => IsPure(c.Value),
+            IrAddrOf a => IsPure(a.Target),
+            IrDeref d => IsPure(d.Ptr),
+            _ => false
+        };
+    }
 
     /// <summary>
     /// Returns the expression unchanged when it is pure, or hoists it into a fresh
     /// declared temporary and returns a reference to that temp.
     /// </summary>
-    IrExpr HoistIfImpure(IrExpr e, string prefix, List<IrStmt> stmts)
+    private IrExpr HoistIfImpure(IrExpr e, string prefix, List<IrStmt> stmts)
     {
         if (IsPure(e)) return e;
         string name = Tmp(prefix);
@@ -735,13 +773,15 @@ sealed class TypeResolver(
     /// Collapses a statement list to a single statement when the list has exactly one entry,
     /// avoiding an unnecessary nested block in the common case.
     /// </summary>
-    static IrStmt Seq(List<IrStmt> stmts, TextSpan span) =>
-        stmts.Count == 1 ? stmts[0] with { Span = span } : new IrBlock(stmts) { Span = span };
+    private static IrStmt Seq(List<IrStmt> stmts, TextSpan span)
+    {
+        return stmts.Count == 1 ? stmts[0] with { Span = span } : new IrBlock(stmts) { Span = span };
+    }
 
     /// <summary>
     /// Computes the common type for two ternary arms, or null when they cannot be unified.
     /// </summary>
-    static IrType? UnifyTernary(IrExpr a, IrExpr b)
+    private static IrType? UnifyTernary(IrExpr a, IrExpr b)
     {
         if (a is IrLitNull && b is IrLitNull) return null;
         if (a is IrLitNull) return b.Type is IrClassRef or IrPtrType ? b.Type : null;
@@ -759,7 +799,7 @@ sealed class TypeResolver(
     /// <summary>
     /// Adapts an expression to a unified type: retypes a null literal, casts a narrower numeric up.
     /// </summary>
-    static IrExpr CoerceTo(IrExpr e, IrType t)
+    private static IrExpr CoerceTo(IrExpr e, IrType t)
     {
         if (e is IrLitNull) return new IrLitNull(t) { Span = e.Span };
         if (SameType(e.Type, t)) return e;
@@ -771,7 +811,7 @@ sealed class TypeResolver(
     /// Coerces an expression to the expected type, currently narrowing fixed-array literal
     /// element types when the destination declares a specific element type.
     /// </summary>
-    IrExpr Coerce(IrExpr e, IrType expected, ResolveCtx ctx)
+    private IrExpr Coerce(IrExpr e, IrType expected, ResolveCtx ctx)
     {
         if (expected is IrArrayType at && e is IrArrayLit lit && lit.Elems.Count == at.Size)
         {
@@ -788,7 +828,7 @@ sealed class TypeResolver(
     /// <summary>
     /// Resolves an intrinsic role to its bound C name, emitting a diagnostic if no binding exists.
     /// </summary>
-    string Intrinsic(string role, ResolveCtx ctx, TextSpan span)
+    private string Intrinsic(string role, ResolveCtx ctx, TextSpan span)
     {
         var n = sym.IntrinsicOrNull(role);
         if (n != null) return n;
@@ -800,7 +840,7 @@ sealed class TypeResolver(
     /// Coerces an expression to string by dispatching to the appropriate stringify intrinsic
     /// or the class's ToString method. Reports a diagnostic when no conversion is available.
     /// </summary>
-    IrExpr EnsureString(IrExpr e, ResolveCtx ctx)
+    private IrExpr EnsureString(IrExpr e, ResolveCtx ctx)
     {
         if (e.Type.IsString) return e;
         if (e.Type.IsFloat)
@@ -821,12 +861,15 @@ sealed class TypeResolver(
     /// Extracts the class name from a class-reference type, or null for non-class types.
     /// Follows one level of pointer indirection for pointer-to-class patterns.
     /// </summary>
-    static string? ClassNameOf(IrType t) => t switch
+    private static string? ClassNameOf(IrType t)
     {
-        IrClassRef cr => cr.ClassName,
-        IrPtrType pt => ClassNameOf(pt.Inner),
-        _ => null
-    };
+        return t switch
+        {
+            IrClassRef cr => cr.ClassName,
+            IrPtrType pt => ClassNameOf(pt.Inner),
+            _ => null
+        };
+    }
 
     #endregion
 
@@ -834,23 +877,26 @@ sealed class TypeResolver(
     /// <summary>
     /// Maintains the chain of lexical scopes for variable declarations, tracking ref parameters.
     /// </summary>
-    sealed class ScopeStack
+    private sealed class ScopeStack
     {
-        readonly ScopeStack? _parent;
-        readonly Dictionary<string, IrType> _vars;
-        readonly HashSet<string> _refs;
+        private readonly ScopeStack? _parent;
+        private readonly Dictionary<string, IrType> _vars;
+        private readonly HashSet<string> _refs;
 
         /// <summary>
         /// Constructs a root scope with no parent.
         /// </summary>
         public ScopeStack() { _parent = null; _vars = new(); _refs = new(); }
 
-        ScopeStack(ScopeStack parent) { _parent = parent; _vars = new(); _refs = new(); }
+        private ScopeStack(ScopeStack parent) { _parent = parent; _vars = new(); _refs = new(); }
 
         /// <summary>
         /// Creates a child scope nested inside this one.
         /// </summary>
-        public ScopeStack Push() => new(this);
+        public ScopeStack Push()
+        {
+            return new(this);
+        }
 
         /// <summary>
         /// Declares a variable with the given name and type in the current scope.
@@ -865,7 +911,10 @@ sealed class TypeResolver(
         /// <summary>
         /// Returns true when the name is declared in this (not a parent) scope.
         /// </summary>
-        public bool DeclaredHere(string name) => _vars.ContainsKey(name);
+        public bool DeclaredHere(string name)
+        {
+            return _vars.ContainsKey(name);
+        }
 
         /// <summary>
         /// Searches this scope and all parent scopes for the named variable.
@@ -896,7 +945,7 @@ sealed class TypeResolver(
     /// Immutable resolution context that flows through the AST walk, carrying the current file,
     /// realm, class, function, and loop/unsafe/try depth information.
     /// </summary>
-    readonly record struct ResolveCtx(
+    private readonly record struct ResolveCtx(
         string File,
         string Context,
         string CurClass,
@@ -913,47 +962,74 @@ sealed class TypeResolver(
         /// <summary>
         /// Returns a context with the current class updated.
         /// </summary>
-        public ResolveCtx WithClass(string c) => this with { CurClass = c };
+        public ResolveCtx WithClass(string c)
+        {
+            return this with { CurClass = c };
+        }
 
         /// <summary>
         /// Returns a context with the current function name updated.
         /// </summary>
-        public ResolveCtx WithFunc(string f) => this with { CurFunc = f };
+        public ResolveCtx WithFunc(string f)
+        {
+            return this with { CurFunc = f };
+        }
 
         /// <summary>
         /// Returns a context with the static flag updated.
         /// </summary>
-        public ResolveCtx WithStatic(bool s) => this with { InStatic = s };
+        public ResolveCtx WithStatic(bool s)
+        {
+            return this with { InStatic = s };
+        }
 
         /// <summary>
         /// Returns a context with the unsafe flag updated.
         /// </summary>
-        public ResolveCtx WithUnsafe(bool u) => this with { InUnsafe = u };
+        public ResolveCtx WithUnsafe(bool u)
+        {
+            return this with { InUnsafe = u };
+        }
 
         /// <summary>
         /// Returns a context that marks entry into a try block with the given catch label.
         /// </summary>
-        public ResolveCtx WithTry(string label) => this with { InTry = true, CatchLabel = label };
+        public ResolveCtx WithTry(string label)
+        {
+            return this with { InTry = true, CatchLabel = label };
+        }
 
         /// <summary>
         /// Returns a context with the throws-function flag updated.
         /// </summary>
-        public ResolveCtx WithThrowsFunc(bool t) => this with { InThrowsFunc = t };
+        public ResolveCtx WithThrowsFunc(bool t)
+        {
+            return this with { InThrowsFunc = t };
+        }
 
         /// <summary>
         /// Returns a context with the realm context string updated.
         /// </summary>
-        public ResolveCtx WithContext(string ctx) => this with { Context = ctx };
+        public ResolveCtx WithContext(string ctx)
+        {
+            return this with { Context = ctx };
+        }
 
         /// <summary>
         /// Returns a context that marks entry into a defer body.
         /// </summary>
-        public ResolveCtx WithDefer() => this with { InDefer = true };
+        public ResolveCtx WithDefer()
+        {
+            return this with { InDefer = true };
+        }
 
         /// <summary>
         /// Returns a context with a new child scope pushed.
         /// </summary>
-        public ResolveCtx PushScope() => this with { Scope = Scope.Push() };
+        public ResolveCtx PushScope()
+        {
+            return this with { Scope = Scope.Push() };
+        }
     }
 
     #endregion
@@ -962,17 +1038,26 @@ sealed class TypeResolver(
     /// <summary>
     /// Returns true when the type is any numeric type (integer or float).
     /// </summary>
-    static bool IsNum(IrType t) => t.IsNumeric || t.IsFloat;
+    private static bool IsNum(IrType t)
+    {
+        return t.IsNumeric || t.IsFloat;
+    }
 
     /// <summary>
     /// Returns true when the type is numeric and not bool. Used for arithmetic operators.
     /// </summary>
-    static bool IsArith(IrType t) => IsNum(t) && t is not IrPrimType { CName: "bool" };
+    private static bool IsArith(IrType t)
+    {
+        return IsNum(t) && t is not IrPrimType { CName: "bool" };
+    }
 
     /// <summary>
     /// Returns true when the type is an integer type (not float, not bool).
     /// </summary>
-    static bool IsInteger(IrType t) => t.IsNumeric && t is not IrPrimType { CName: "bool" };
+    private static bool IsInteger(IrType t)
+    {
+        return t.IsNumeric && t is not IrPrimType { CName: "bool" };
+    }
 
     #endregion
 
@@ -1000,7 +1085,7 @@ sealed class TypeResolver(
     /// <summary>
     /// Scans top-level items for generic function templates and registers them for on-demand instantiation.
     /// </summary>
-    void CollectFuncTemplates(TopLevel[] items, string context, string file)
+    private void CollectFuncTemplates(TopLevel[] items, string context, string file)
     {
         foreach (var item in items)
             switch (item)
@@ -1017,7 +1102,7 @@ sealed class TypeResolver(
     /// <summary>
     /// Reports an error for an unknown @preamble target and returns a safe fallback section.
     /// </summary>
-    (NativeSection, Visibility) Unknown(string target, ResolveCtx ctx, TextSpan span)
+    private (NativeSection, Visibility) Unknown(string target, ResolveCtx ctx, TextSpan span)
     {
         diag.Error(Codes.UnknownPreambleTarget, ctx.File, span,
             $"unknown @preamble target '{target}'; expected 'boot', 'kernel', or 'user'");
@@ -1027,7 +1112,7 @@ sealed class TypeResolver(
     /// <summary>
     /// Resolves a single top-level declaration and adds its output to the module.
     /// </summary>
-    void ResolveTop(TopLevel item, ResolveCtx ctx, IrModule module)
+    private void ResolveTop(TopLevel item, ResolveCtx ctx, IrModule module)
     {
         switch (item)
         {
@@ -1091,12 +1176,15 @@ sealed class TypeResolver(
     /// <summary>
     /// Maps a realm context string to its IR visibility.
     /// </summary>
-    static Visibility VisOf(string ctx) => ctx switch
+    private static Visibility VisOf(string ctx)
     {
-        "kernel" => Visibility.Kernel,
-        "user" => Visibility.User,
-        _ => Visibility.Shared
-    };
+        return ctx switch
+        {
+            "kernel" => Visibility.Kernel,
+            "user" => Visibility.User,
+            _ => Visibility.Shared
+        };
+    }
 
     #endregion
 
@@ -1105,13 +1193,16 @@ sealed class TypeResolver(
     /// Converts a Gata type string to its IR type. Returns IrVoidType for null or "void".
     /// Handles function types, fixed-array types, pointer types, primitives, enums, unions, and classes.
     /// </summary>
-    public IrType ResolveType(string? t) => ResolveType(t.AsSpan());
+    public IrType ResolveType(string? t)
+    {
+        return ResolveType(t.AsSpan());
+    }
 
     /// <summary>
     /// Converts a Gata type span to its IR type. Returns IrVoidType for null or "void".
     /// Handles function types, fixed-array types, pointer types, primitives, enums, unions, and classes.
     /// </summary>
-    IrType ResolveType(ReadOnlySpan<char> t)
+    private IrType ResolveType(ReadOnlySpan<char> t)
     {
         if (t.IsEmpty || t.Equals("void", StringComparison.Ordinal)) return IrType.Void;
         if (t.StartsWith("func("))
@@ -1149,7 +1240,7 @@ sealed class TypeResolver(
     /// <summary>
     /// Resolves a class declaration, including all fields, methods, and operator overloads.
     /// </summary>
-    IrClass ResolveClass(ClassDecl cd, ResolveCtx ctx)
+    private IrClass ResolveClass(ClassDecl cd, ResolveCtx ctx)
     {
         bool lib = ctx.Context == "none";
         var vis = VisOf(ctx.Context);
@@ -1200,7 +1291,7 @@ sealed class TypeResolver(
     /// Resolves a method declaration, type-checking its signature and body,
     /// and declaring parameters and optionally 'self' in the method's scope.
     /// </summary>
-    IrFunction ResolveMethod(string cls, MethodDecl md, ResolveCtx ctx, bool lib, Visibility vis, bool isModule)
+    private IrFunction ResolveMethod(string cls, MethodDecl md, ResolveCtx ctx, bool lib, Visibility vis, bool isModule)
     {
         bool isStatic = md.Modifiers.Contains("static") || isModule;
         if (!md.Throws) CheckType(md.ReturnType, ctx, md.Span, allowVoid: true);
@@ -1231,7 +1322,7 @@ sealed class TypeResolver(
     /// Resolves an operator declaration, type-checking its signature and body
     /// and registering 'self' and all parameters in the operator's scope.
     /// </summary>
-    IrOperator ResolveOperator(string cls, OperatorDecl od, ResolveCtx ctx, bool lib, Visibility vis)
+    private IrOperator ResolveOperator(string cls, OperatorDecl od, ResolveCtx ctx, bool lib, Visibility vis)
     {
         CheckType(od.ReturnType, ctx, od.Span, allowVoid: true);
         foreach (var p in od.Params) CheckType(p.Type, ctx, p.Span);
@@ -1259,7 +1350,7 @@ sealed class TypeResolver(
     /// Resolves a free function declaration, type-checking its signature and body,
     /// and producing a fully typed IR function node.
     /// </summary>
-    IrFunction ResolveFreeFunc(FuncDecl fd, ResolveCtx ctx)
+    private IrFunction ResolveFreeFunc(FuncDecl fd, ResolveCtx ctx)
     {
         bool lib = ctx.Context == "none";
         var vis = VisOf(ctx.Context);
@@ -1291,17 +1382,20 @@ sealed class TypeResolver(
     /// <summary>
     /// Resolves a method body or native block, returning the IR block and raw C kernel/user strings.
     /// </summary>
-    (IrBlock? Body, string? Kernel, string? User) ResolveBodyOrNative(MethodBody b, ResolveCtx ctx, IrType ret) => b switch
+    private (IrBlock? Body, string? Kernel, string? User) ResolveBodyOrNative(MethodBody b, ResolveCtx ctx, IrType ret)
     {
-        NativeMethodBody nmb => (null, nmb.Native.KernelC, nmb.Native.UserC),
-        BlockBody bb => (ResolveBlock(bb.Block, ctx, ret), null, null),
-        _ => (null, null, null)
-    };
+        return b switch
+        {
+            NativeMethodBody nmb => (null, nmb.Native.KernelC, nmb.Native.UserC),
+            BlockBody bb => (ResolveBlock(bb.Block, ctx, ret), null, null),
+            _ => (null, null, null)
+        };
+    }
 
     /// <summary>
     /// Resolves a process declaration to its IR form, resolving each thread's entry function.
     /// </summary>
-    IrProcess ResolveProcess(ProcessDecl pd, ResolveCtx ctx)
+    private IrProcess ResolveProcess(ProcessDecl pd, ResolveCtx ctx)
     {
         var vis = VisOf(ctx.Context);
         var threads = new List<IrThread>(pd.Threads.Length);
@@ -1318,7 +1412,7 @@ sealed class TypeResolver(
     /// Resolves a thread entry function declaration, checking parameter types and building the IR body.
     /// Applies CheckBodyQuality so unused-variable warnings are emitted for entry code.
     /// </summary>
-    IrFunction ResolveThreadEntry(string fullName, EntryFuncDecl ef, ResolveCtx ctx, Visibility vis)
+    private IrFunction ResolveThreadEntry(string fullName, EntryFuncDecl ef, ResolveCtx ctx, Visibility vis)
     {
         foreach (var p in ef.Params) CheckType(p.Type, ctx, p.Span);
         CheckParams(ef.Params, ctx);
@@ -1343,7 +1437,7 @@ sealed class TypeResolver(
     /// supplied argument types, mangling the name, and queuing the instantiation for
     /// resolution after the main pass completes.
     /// </summary>
-    IrExpr ResolveGenericCall(
+    private IrExpr ResolveGenericCall(
         (FuncDecl Decl, string File, string Context) t,
         List<IrExpr> args, ResolveCtx ctx, TextSpan span, Expr[]? astArgs = null)
     {
@@ -1387,7 +1481,7 @@ sealed class TypeResolver(
     /// Resolves every generic free-function instantiation queued during the main pass,
     /// substituting concrete type bindings and registering the result in the module.
     /// </summary>
-    void DrainGenericInstances(IrModule module)
+    private void DrainGenericInstances(IrModule module)
     {
         while (_genericQueue.Count > 0)
         {
@@ -1407,7 +1501,7 @@ sealed class TypeResolver(
     /// Checks whether a bare call is a retain/release ARC intrinsic and returns the appropriate
     /// IR node. Returns null for all other names.
     /// </summary>
-    IrExpr? TryResolveArcIntrinsic(string name, List<IrExpr> args, ResolveCtx ctx, TextSpan span)
+    private IrExpr? TryResolveArcIntrinsic(string name, List<IrExpr> args, ResolveCtx ctx, TextSpan span)
     {
         var fsym = sym.LookupFreeFunc(name);
         if (fsym == null || !FuncInScope(fsym)) return null;
@@ -1430,13 +1524,16 @@ sealed class TypeResolver(
     /// <summary>
     /// Returns true for class-type values that participate in ARC reference counting.
     /// </summary>
-    bool IsManagedRef(IrType t) => t is IrClassRef cr && sym.IsClass(cr.ClassName) && !sym.Modules.Contains(cr.ClassName);
+    private bool IsManagedRef(IrType t)
+    {
+        return t is IrClassRef cr && sym.IsClass(cr.ClassName) && !sym.Modules.Contains(cr.ClassName);
+    }
 
     /// <summary>
     /// Resolves an enum declaration to its IR form.
     /// Members may carry optional explicit integer values parsed from integer literals.
     /// </summary>
-    IrEnum ResolveEnum(EnumDecl ed, ResolveCtx ctx)
+    private IrEnum ResolveEnum(EnumDecl ed, ResolveCtx ctx)
     {
         var members = new List<(string, string?)>();
         foreach (var m in ed.Members)
@@ -1456,7 +1553,7 @@ sealed class TypeResolver(
     /// Resolves a union declaration to its IR form.
     /// Variant fields must be unmanaged value types; class references are rejected.
     /// </summary>
-    IrUnion ResolveUnion(UnionDecl ud, ResolveCtx ctx)
+    private IrUnion ResolveUnion(UnionDecl ud, ResolveCtx ctx)
     {
         var variants = new List<IrUnionVariant>();
         foreach (var v in ud.Variants)
@@ -1482,7 +1579,7 @@ sealed class TypeResolver(
     /// <summary>
     /// Resolves a block by pushing a new scope, resolving all statements, and warning on unreachable code.
     /// </summary>
-    IrBlock ResolveBlock(Block b, ResolveCtx ctx, IrType retType)
+    private IrBlock ResolveBlock(Block b, ResolveCtx ctx, IrType retType)
     {
         var inner = ctx.PushScope();
         var stmts = new List<IrStmt>();
@@ -1499,7 +1596,7 @@ sealed class TypeResolver(
     /// <summary>
     /// Resolves a statement, propagating the source span to the result when the resolver did not set one.
     /// </summary>
-    IrStmt ResolveStmt(Stmt s, ResolveCtx ctx, IrType retType)
+    private IrStmt ResolveStmt(Stmt s, ResolveCtx ctx, IrType retType)
     {
         var r = ResolveStmtCore(s, ctx, retType);
         return r.Span.IsNone ? r with { Span = s.Span } : r;
@@ -1509,7 +1606,7 @@ sealed class TypeResolver(
     /// Core statement resolver. Handles all statement forms: native blocks, let declarations,
     /// assignments, control flow, loops, try/catch, defer, match, switch, and panic/debug/throw.
     /// </summary>
-    IrStmt ResolveStmtCore(Stmt s, ResolveCtx ctx, IrType retType)
+    private IrStmt ResolveStmtCore(Stmt s, ResolveCtx ctx, IrType retType)
     {
         switch (s)
         {
@@ -1670,7 +1767,7 @@ sealed class TypeResolver(
     /// Wraps a single statement in an IrBlock, pushing a new scope.
     /// When the statement is already a Block, resolves it directly without double-wrapping.
     /// </summary>
-    IrBlock WrapBlock(Stmt s, ResolveCtx ctx, IrType retType)
+    private IrBlock WrapBlock(Stmt s, ResolveCtx ctx, IrType retType)
     {
         if (s is Block b) return ResolveBlock(b, ctx, retType);
         var inner = ctx.PushScope();
@@ -1681,7 +1778,7 @@ sealed class TypeResolver(
     /// Resolves a for statement, handling let, assignment, and expression init clauses
     /// in a new scope with the loop depth incremented.
     /// </summary>
-    IrStmt ResolveFor(ForStmt fs, ResolveCtx ctx, IrType retType)
+    private IrStmt ResolveFor(ForStmt fs, ResolveCtx ctx, IrType retType)
     {
         var fctx = ctx.PushScope() with { LoopDepth = ctx.LoopDepth + 1 };
         IrStmt? init = null;
@@ -1709,7 +1806,7 @@ sealed class TypeResolver(
     /// <summary>
     /// Resolves a for-in statement over a fixed array or any class with Length and Get methods.
     /// </summary>
-    IrStmt ResolveForIn(ForInStmt fi, ResolveCtx ctx, IrType retType)
+    private IrStmt ResolveForIn(ForInStmt fi, ResolveCtx ctx, IrType retType)
     {
         var collection = ResolveExpr(fi.Collection, ctx);
         ForbidNestedThrows(collection, ctx, allowRoot: false);
@@ -1758,7 +1855,7 @@ sealed class TypeResolver(
     /// Resolves a switch statement on an integer or enum scrutinee,
     /// validating that each case label is comparable to the scrutinee type.
     /// </summary>
-    IrStmt ResolveSwitch(SwitchStmt sw, ResolveCtx ctx, IrType retType)
+    private IrStmt ResolveSwitch(SwitchStmt sw, ResolveCtx ctx, IrType retType)
     {
         var scrut = ResolveExpr(sw.Scrutinee, ctx);
         ForbidNestedThrows(scrut, ctx, allowRoot: false);
@@ -1790,7 +1887,7 @@ sealed class TypeResolver(
     /// Resolves a match statement on a union scrutinee, binding each variant's fields
     /// into scope and checking exhaustiveness unless a default case is present.
     /// </summary>
-    IrStmt ResolveMatch(MatchStmt ms, ResolveCtx ctx, IrType retType)
+    private IrStmt ResolveMatch(MatchStmt ms, ResolveCtx ctx, IrType retType)
     {
         var scrut = ResolveExpr(ms.Scrutinee, ctx);
         ForbidNestedThrows(scrut, ctx, allowRoot: false);
@@ -1852,7 +1949,7 @@ sealed class TypeResolver(
     /// Resolves a try/catch statement, giving the try block a catch label so
     /// throwing calls inside it know where to jump on failure.
     /// </summary>
-    IrStmt ResolveTryCatch(TryCatchStmt tc, ResolveCtx ctx, IrType retType)
+    private IrStmt ResolveTryCatch(TryCatchStmt tc, ResolveCtx ctx, IrType retType)
     {
         int seq = _labelSeq++;
         var tctx = ctx.WithTry($"_catch_{seq}");
@@ -1865,7 +1962,7 @@ sealed class TypeResolver(
     /// Resolves a let declaration: infers or checks its type, resolves the initializer,
     /// checks assignability, and declares the variable in the current scope.
     /// </summary>
-    IrDeclVar ResolveLet(LetStmt ls, ResolveCtx ctx)
+    private IrDeclVar ResolveLet(LetStmt ls, ResolveCtx ctx)
     {
         IrType type;
         IrExpr? init = ls.Init != null ? ResolveExpr(ls.Init, ctx) : null;
@@ -1902,7 +1999,7 @@ sealed class TypeResolver(
     /// <summary>
     /// Resolves an expression and propagates the source span when the resolver did not set one.
     /// </summary>
-    IrExpr ResolveExpr(Expr e, ResolveCtx ctx)
+    private IrExpr ResolveExpr(Expr e, ResolveCtx ctx)
     {
         var r = ResolveExprCore(e, ctx);
         return r.Span.IsNone ? r with { Span = e.Span } : r;
@@ -1912,7 +2009,7 @@ sealed class TypeResolver(
     /// Core expression resolver. Handles literals, identifiers, casts, postfix, unary, and binary expressions.
     /// Additional expression forms added in later commits.
     /// </summary>
-    IrExpr ResolveExprCore(Expr e, ResolveCtx ctx)
+    private IrExpr ResolveExprCore(Expr e, ResolveCtx ctx)
     {
         switch (e)
         {
@@ -1996,7 +2093,7 @@ sealed class TypeResolver(
     /// <summary>
     /// Resolves a unary expression, validating that the operand type is compatible with the operator.
     /// </summary>
-    IrExpr ResolveUnary(UnaryExpr un, ResolveCtx ctx)
+    private IrExpr ResolveUnary(UnaryExpr un, ResolveCtx ctx)
     {
         var operand = ResolveExpr(un.Operand, ctx);
         if (un.Op == "!" && operand.Type is not IrPrimType { CName: "bool" })
@@ -2016,7 +2113,7 @@ sealed class TypeResolver(
     /// Resolves a binary expression. Handles string concatenation, operator overloading,
     /// pointer arithmetic, logical, equality, relational, bitwise, and arithmetic operators.
     /// </summary>
-    IrExpr ResolveBin(BinExpr be, ResolveCtx ctx)
+    private IrExpr ResolveBin(BinExpr be, ResolveCtx ctx)
     {
         var left = ResolveExpr(be.Left, ctx);
         var right = ResolveExpr(be.Right, ctx);
@@ -2085,7 +2182,7 @@ sealed class TypeResolver(
     /// Parses an integer literal lexeme into its bit pattern, IR type, and optional verbatim C text.
     /// Returns false when the magnitude does not fit in 64 bits.
     /// </summary>
-    static bool TryParseIntLit(ReadOnlySpan<char> raw, out long v, out IrType type, out string? ctext)
+    private static bool TryParseIntLit(ReadOnlySpan<char> raw, out long v, out IrType type, out string? ctext)
     {
         v = 0; type = IrType.Int; ctext = null;
 
@@ -2131,14 +2228,16 @@ sealed class TypeResolver(
     /// <summary>
     /// Returns the IR type for a floating-point literal: float for an f/F suffix, double otherwise.
     /// </summary>
-    static IrPrimType FloatLitType(string raw) =>
-        raw.Length > 0 && raw[^1] is 'f' or 'F' ? IrType.Float : IrType.Double;
+    private static IrPrimType FloatLitType(string raw)
+    {
+        return raw.Length > 0 && raw[^1] is 'f' or 'F' ? IrType.Float : IrType.Double;
+    }
 
     /// <summary>
     /// Resolves a bare identifier expression to a variable reference, bool/null literal,
     /// self-expression, or class reference. Reports UndefinedVariable for unknown names.
     /// </summary>
-    IrExpr ResolveIdent(IdentExpr ie, ResolveCtx ctx)
+    private IrExpr ResolveIdent(IdentExpr ie, ResolveCtx ctx)
     {
         string name = ie.Name;
         if (name == "true")  return new IrLitBool(true);
@@ -2215,7 +2314,7 @@ sealed class TypeResolver(
     /// <summary>
     /// Resolves a member access expression, handling enum constants and class field loads.
     /// </summary>
-    IrExpr ResolveMemberAccess(MemberAccessExpr ma, ResolveCtx ctx)
+    private IrExpr ResolveMemberAccess(MemberAccessExpr ma, ResolveCtx ctx)
     {
         // Enum member access: Color.Red.
         if (ma.Object is IdentExpr eid && sym.IsEnum(eid.Name) && ctx.Scope.Lookup(eid.Name) == null)
@@ -2247,7 +2346,7 @@ sealed class TypeResolver(
     /// <summary>
     /// Coerces each resolved argument to its declared parameter type and validates ref/non-ref passing.
     /// </summary>
-    void CoerceArgs(List<IrExpr> args, MethodSig? sig, ResolveCtx ctx, Expr[]? astArgs = null)
+    private void CoerceArgs(List<IrExpr> args, MethodSig? sig, ResolveCtx ctx, Expr[]? astArgs = null)
     {
         if (sig == null) return;
         for (int i = 0; i < args.Count && i < sig.Params.Count; i++)
@@ -2277,7 +2376,7 @@ sealed class TypeResolver(
     /// Resolves a call expression: member calls, bare free-function calls, sibling method calls,
     /// indirect function-pointer calls, and ARC intrinsics. Uses overload resolution throughout.
     /// </summary>
-    IrExpr ResolveCall(CallExpr ce, ResolveCtx ctx)
+    private IrExpr ResolveCall(CallExpr ce, ResolveCtx ctx)
     {
         // ref arguments are resolved as their plain target so type inference sees the real type;
         // ref/non-ref matching and address-of wrapping happen in CoerceArgs once the callee is known.
@@ -2440,7 +2539,7 @@ sealed class TypeResolver(
     /// <summary>
     /// Resolves an indirect function-pointer call, checking argument count and types against the pointer's signature.
     /// </summary>
-    IrExpr ResolveIndirectCallArgs(IrExpr target, IrFuncPtrType fpt, List<IrExpr> args, ResolveCtx ctx,
+    private IrExpr ResolveIndirectCallArgs(IrExpr target, IrFuncPtrType fpt, List<IrExpr> args, ResolveCtx ctx,
         TextSpan span, Expr[]? astArgs = null)
     {
         if (args.Count != fpt.Params.Count)
@@ -2464,7 +2563,7 @@ sealed class TypeResolver(
     /// Resolves an index expression, dispatching to the class operator [] overload,
     /// fixed-array element access, or unsafe pointer indexing.
     /// </summary>
-    IrExpr ResolveIndex(IndexExpr ix, ResolveCtx ctx)
+    private IrExpr ResolveIndex(IndexExpr ix, ResolveCtx ctx)
     {
         var obj = ResolveExpr(ix.Object, ctx);
         var idx = ResolveExpr(ix.Index, ctx);
@@ -2495,7 +2594,7 @@ sealed class TypeResolver(
     /// Resolves an indexed assignment, handling operator []= overloads with compound
     /// assignment hoisting, and plain fixed-array or pointer index targets.
     /// </summary>
-    IrStmt ResolveIndexAssign(IndexExpr ixt, AssignStmt asgn, ResolveCtx ctx)
+    private IrStmt ResolveIndexAssign(IndexExpr ixt, AssignStmt asgn, ResolveCtx ctx)
     {
         var obj = ResolveExpr(ixt.Object, ctx);
         var idx = ResolveExpr(ixt.Index, ctx);
@@ -2597,7 +2696,7 @@ sealed class TypeResolver(
     /// Resolves a new expression, validating the type is a class in scope and checking
     /// the constructor argument count. Handles collection initializers via ResolveCollectionInit.
     /// </summary>
-    IrExpr ResolveNew(NewExpr ne, ResolveCtx ctx)
+    private IrExpr ResolveNew(NewExpr ne, ResolveCtx ctx)
     {
         var args = new List<IrExpr>(ne.Args.Length);
         for (int i = 0; i < ne.Args.Length; i++)
@@ -2636,7 +2735,7 @@ sealed class TypeResolver(
     /// <summary>
     /// Resolves a collection initializer by looking up an Add method and coercing each element.
     /// </summary>
-    IrExpr ResolveCollectionInit(NewExpr ne, List<IrExpr> ctorArgs, ResolveCtx ctx)
+    private IrExpr ResolveCollectionInit(NewExpr ne, List<IrExpr> ctorArgs, ResolveCtx ctx)
     {
         var add = sym.LookupMethod(ne.Type, "Add");
         if (add?.Sig == null)
@@ -2666,7 +2765,7 @@ sealed class TypeResolver(
     /// <summary>
     /// Resolves a fixed-size array literal, checking that all elements share a common type.
     /// </summary>
-    IrExpr ResolveArrayLit(ArrayLitExpr al, ResolveCtx ctx)
+    private IrExpr ResolveArrayLit(ArrayLitExpr al, ResolveCtx ctx)
     {
         if (al.Elems.Length == 0)
         {
@@ -2691,7 +2790,7 @@ sealed class TypeResolver(
     /// Resolves a union variant construction call, validating the variant name and
     /// coercing each argument to its declared field type.
     /// </summary>
-    IrExpr ResolveUnionConstruct(string unionName, string variant, List<IrExpr> args, ResolveCtx ctx, TextSpan span)
+    private IrExpr ResolveUnionConstruct(string unionName, string variant, List<IrExpr> args, ResolveCtx ctx, TextSpan span)
     {
         var variants = sym.UnionDef(unionName)!;
         int idx = variants.FindIndex(v => v.Name == variant);
@@ -2733,7 +2832,10 @@ sealed class TypeResolver(
             return true;
         }
 
-        public override bool Equals(object? obj) => obj is FuncPtrKey other && Equals(other);
+        public override bool Equals(object? obj)
+        {
+            return obj is FuncPtrKey other && Equals(other);
+        }
 
         public override int GetHashCode()
         {

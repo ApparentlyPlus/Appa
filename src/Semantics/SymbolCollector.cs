@@ -4,25 +4,25 @@ namespace Appa;
 
 // Result of declaration collection: the populated SymbolTable and the auxiliary
 // set the resolver needs.
-record CollectionResult(SymbolTable Sym, HashSet<string> HasInit, HashSet<string> PreDefinedStructs,
+internal record CollectionResult(SymbolTable Sym, HashSet<string> HasInit, HashSet<string> PreDefinedStructs,
                                                     HashSet<string> OpaqueFieldClasses, DiagnosticBag Diag);
 
 // Pass 1 - declaration collection. Populates the SymbolTable with classes, fields,
 // methods, operators, free functions, throws registrations, and @intrinsic bindings.
-sealed class SymbolCollector(DiagnosticBag diag)
+internal sealed class SymbolCollector(DiagnosticBag diag)
 {
-    readonly SymbolTable _sym = new();
-    readonly HashSet<string> _hasInit = [];
-    readonly HashSet<string> _declaredClasses = [];
-    readonly Dictionary<string, HashSet<string>> _declaredFieldNames = [];
-    readonly Dictionary<string, HashSet<string>> _declaredMethodNames = [];
-    readonly Dictionary<string, HashSet<string>> _declaredMethodSigs = [];
-    readonly HashSet<string> _declaredFuncs = [];
-    readonly HashSet<string> _declaredFuncSigs = [];
-    readonly HashSet<(string File, string Sig)>  _declaredPrivateFuncSigs  = [];
-    readonly HashSet<string> _externFuncs = [];
-    readonly HashSet<string> _preDefinedStructs = [];
-    readonly HashSet<string> _opaqueFieldClasses = [];
+    private readonly SymbolTable _sym = new();
+    private readonly HashSet<string> _hasInit = [];
+    private readonly HashSet<string> _declaredClasses = [];
+    private readonly Dictionary<string, HashSet<string>> _declaredFieldNames = [];
+    private readonly Dictionary<string, HashSet<string>> _declaredMethodNames = [];
+    private readonly Dictionary<string, HashSet<string>> _declaredMethodSigs = [];
+    private readonly HashSet<string> _declaredFuncs = [];
+    private readonly HashSet<string> _declaredFuncSigs = [];
+    private readonly HashSet<(string File, string Sig)>  _declaredPrivateFuncSigs  = [];
+    private readonly HashSet<string> _externFuncs = [];
+    private readonly HashSet<string> _preDefinedStructs = [];
+    private readonly HashSet<string> _opaqueFieldClasses = [];
 
     /// <summary>
     /// Runs pass 1 over all programs and returns the populated symbol table.
@@ -43,7 +43,7 @@ sealed class SymbolCollector(DiagnosticBag diag)
     /// Bind any @intrinsic(role) annotations to the C name the symbol is emitted under.
     /// Validates the role and rejects double-binding.
     /// </summary>
-    void BindIntrinsics(Annotation[]? anns, string cName, string file, TextSpan span, bool allowKeep = false)
+    private void BindIntrinsics(Annotation[]? anns, string cName, string file, TextSpan span, bool allowKeep = false)
     {
         if (anns == null) return;
         foreach (var a in anns)
@@ -71,7 +71,7 @@ sealed class SymbolCollector(DiagnosticBag diag)
     /// <summary>
     /// Dispatches a single top-level item to the appropriate P1 handler.
     /// </summary>
-    void P1Top(TopLevel item, string file)
+    private void P1Top(TopLevel item, string file)
     {
         switch (item)
         {
@@ -114,7 +114,7 @@ sealed class SymbolCollector(DiagnosticBag diag)
     /// <summary>
     /// Registers a class and all its fields, methods, and operators.
     /// </summary>
-    void P1Class(ClassDecl cd, string file)
+    private void P1Class(ClassDecl cd, string file)
     {
         // Throw an error if the class name is already declared, but still register it so the resolver can find it.
         if (!_declaredClasses.Add(cd.Name))
@@ -199,7 +199,7 @@ sealed class SymbolCollector(DiagnosticBag diag)
     /// <summary>
     /// Registers a free function, including private and generic-template cases.
     /// </summary>
-    void P1Func(FuncDecl fd, string file)
+    private void P1Func(FuncDecl fd, string file)
     {
         // `static` only means anything on a class/module method; it's a category
         // error on a free function, not a redundant-but-harmless spelling.
@@ -239,7 +239,7 @@ sealed class SymbolCollector(DiagnosticBag diag)
     /// <summary>
     /// Registers a native type declaration as a pre-defined C struct.
     /// </summary>
-    void P1NativeType(NativeTypeDecl nd, string file)
+    private void P1NativeType(NativeTypeDecl nd, string file)
     {
         if (!_declaredClasses.Add(nd.Name))
             diag.Error(Codes.DuplicateName, file, nd.Span, $"type '{nd.Name}' is already declared");
@@ -251,7 +251,7 @@ sealed class SymbolCollector(DiagnosticBag diag)
     /// <summary>
     /// Scans raw C text for struct/typedef names and adds them to _preDefinedStructs.
     /// </summary>
-    void ScanNativeForStructs(string raw)
+    private void ScanNativeForStructs(string raw)
     {
         foreach (var name in NativeC.ScanStructs(raw))
             _preDefinedStructs.Add(name);
@@ -260,7 +260,7 @@ sealed class SymbolCollector(DiagnosticBag diag)
     /// <summary>
     /// Registers an extern function forward declaration.
     /// </summary>
-    void P1Extern(ExternFuncDecl ed, string file)
+    private void P1Extern(ExternFuncDecl ed, string file)
     {
         // Re-declaring the same extern across files is harmless; clashing with a
         // defined Gata function is not.
