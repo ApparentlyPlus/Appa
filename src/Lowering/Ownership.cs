@@ -512,19 +512,23 @@ sealed class Ownership(IrModule module)
         args.Select(a => Flatten(a, false, pre, cl)).ToList();
 
     /// <summary>
-    /// Flattens both arms of a ternary; materialises into an if/else temp when either arm
-    /// has sequencing side effects.
+    /// A ternary evaluates exactly one arm at runtime, so an arm's hoists/retains must
+    /// never spill into the surrounding unconditional pre. Non-managed arms with nothing
+    /// to sequence stay inline; otherwise both arms materialise into a temp via if/else.
+    /// A managed temp is owned (+1) and released by the caller's frame (borrow) or consumed.
     /// </summary>
     IrExpr FlattenTernary(IrTernary t, bool owned, List<IrStmt> pre, List<(string, IrType)> cl)
     {
         IrExpr cond = Flatten(t.Cond, false, pre, cl);
+        bool managed = IsManaged(t.Type) && !_inUnsafe;
 
         var tp = new List<IrStmt>(); var tc = new List<(string, IrType)>();
         var ep = new List<IrStmt>(); var ec = new List<(string, IrType)>();
-        IrExpr tv = Flatten(t.Then, owned, tp, tc);
-        IrExpr ev = Flatten(t.Else, owned, ep, ec);
+        IrExpr tv = managed ? Consume(t.Then, tp, tc) : Flatten(t.Then, owned, tp, tc);
+        IrExpr ev = managed ? Consume(t.Else, ep, ec) : Flatten(t.Else, owned, ep, ec);
 
-        if (tp.Count == 0 && tc.Count == 0 && ep.Count == 0 && ec.Count == 0)
+        // Fast path: no conditional sequencing needed - a pure C conditional expression.
+        if (!managed && tp.Count == 0 && tc.Count == 0 && ep.Count == 0 && ec.Count == 0)
             return t with { Cond = cond, Then = tv, Else = ev };
 
         string tmp = Tmp("_tern");
@@ -535,6 +539,7 @@ sealed class Ownership(IrModule module)
         var elseStmts = new List<IrStmt>(ep); elseStmts.Add(new IrAssign(tgt, "=", ev)); ReleaseAll(ec, elseStmts);
         pre.Add(new IrIf(cond, new IrBlock(thenStmts), new IrBlock(elseStmts)));
 
+        if (managed && !owned) cl.Add((tmp, t.Type));   // borrow: release when the statement ends
         return tgt;
     }
 
