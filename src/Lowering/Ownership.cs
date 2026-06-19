@@ -5,75 +5,179 @@ namespace Appa;
 /// explicit - owning locals are released at scope exit, return, break, and throw.
 /// After this pass the emitter prints the IR with no ARC logic of its own.
 /// </summary>
-sealed class Ownership(IrModule module)
+internal sealed class Ownership(IrModule module)
 {
-    readonly HashSet<string> _managed =
-        module.Classes.Where(c => !c.IsModule).Select(c => c.Name).ToHashSet();
+    private readonly HashSet<string> _managed = InitializeManaged(module);
 
-    readonly string _retain = Role(module, Roles.Retain);
-    readonly string _release = Role(module, Roles.Release);
-
-    static string Role(IrModule m, string role) =>
-        m.Symbols.IntrinsicOrNull(role) ?? $"gata_MISSING_{role}";
-
-    bool IsManaged(IrType t) => t is IrClassRef cr && _managed.Contains(cr.ClassName);
-
-    bool IsProducer(IrExpr e) => e switch
+    /// <summary>
+    /// Populates a set of managed class names from the module.
+    /// </summary>
+    private static HashSet<string> InitializeManaged(IrModule m)
     {
-        IrNew or IrNewInit or IrLitString => true,
-        IrCast c => IsProducer(c.Value),
-        IrStaticCall sc when IsManaged(sc.Type) => true,
-        IrInstanceCall ic when IsManaged(ic.Type) => true,
-        IrIndirectCall ic when IsManaged(ic.Type) => true,
-        IrTernary t when IsManaged(t.Type) => true,
-        _ => false
-    };
+        var set = new HashSet<string>(m.Classes.Count);
+        for (int i = 0; i < m.Classes.Count; i++)
+        {
+            var c = m.Classes[i];
+            if (!c.IsModule)
+                set.Add(c.Name);
+        }
+        return set;
+    }
 
-    int _seq;
-    string Tmp(string prefix) => $"{prefix}{_seq++}";
+    private readonly string _retain = Role(module, Roles.Retain);
+    private readonly string _release = Role(module, Roles.Release);
 
-    sealed class Frame { public List<(string Name, IrType Type)> Owners = []; public List<IrStmt> Defers = []; public bool Loop; public bool Try; }
-    readonly Stack<Frame> _frames = new();
-    bool _nextFrameIsLoop;
+    /// <summary>
+    /// Returns the intrinsic symbol for a role, or a placeholder if not found.
+    /// </summary>
+    private static string Role(IrModule m, string role)
+    {
+        return m.Symbols.IntrinsicOrNull(role) ?? $"gata_MISSING_{role}";
+    }
 
-    bool _inTry;
-    string _catchLabel = "";
-    bool _inThrowsFunc;
-    IrResultType? _resultType;
+    /// <summary>
+    /// Returns true if the type is a managed class reference, false otherwise.
+    /// </summary>
+    private bool IsManaged(IrType t)
+    {
+        return t is IrClassRef cr && _managed.Contains(cr.ClassName);
+    }
+
+    /// <summary>
+    /// Returns true if the expression is a producer of a managed value, false otherwise.
+    /// </summary>
+    private bool IsProducer(IrExpr e)
+    {
+        return e switch
+        {
+            IrNew or IrNewInit or IrLitString => true,
+            IrCast c => IsProducer(c.Value),
+            IrStaticCall sc when IsManaged(sc.Type) => true,
+            IrInstanceCall ic when IsManaged(ic.Type) => true,
+            IrIndirectCall ic when IsManaged(ic.Type) => true,
+            IrTernary t when IsManaged(t.Type) => true,
+            _ => false
+        };
+    }
+
+    private int _seq;
+    /// <summary>
+    /// Generates a unique temporary variable name with the given prefix.
+    /// </summary>
+    private string Tmp(string prefix)
+    {
+        return $"{prefix}{_seq++}";
+    }
+
+    // A frame represents a lexical scope in the lowered IR, tracking owning locals and deferred actions.
+    private sealed class Frame
+    {
+        public List<(string Name, IrType Type)>? Owners;
+        public List<IrStmt>? Defers;
+        public bool Loop;
+        public bool Try;
+
+        /// <summary>
+        /// Registers a local variable as an owner in this frame, lazily initializing the owner list.
+        /// </summary>
+        public void AddOwner(string name, IrType type)
+        {
+            Owners ??= [];
+            Owners.Add((name, type));
+        }
+
+        /// <summary>
+        /// Registers a deferred action in this frame, lazily initializing the defers list.
+        /// </summary>
+        public void AddDefer(IrStmt action)
+        {
+            Defers ??= [];
+            Defers.Insert(0, action);
+        }
+    }
+
+    private readonly Stack<Frame> _frames = new();
+    private bool _nextFrameIsLoop;
+    private bool _inTry;
+    private string _catchLabel = "";
+    private bool _inThrowsFunc;
+    private IrResultType? _resultType;
 
     // Inside `unsafe`, automatic reference counting is suppressed: owning stores,
     // owner tracking, consume-retains and producer hoisting all step aside, so the
     // author manages element lifetimes by hand via retain/release. Exits (return /
     // break / throw) still release owners from the enclosing safe frames.
-    bool _inUnsafe;
+    private bool _inUnsafe;
+
+    // Zero-allocation side-effect and cleanup lists
+    private readonly List<IrStmt> _pre = [];
+    private readonly List<(string Name, IrType Type)> _cl = [];
 
     #region Entry
 
     /// <summary>
     /// Runs the ARC pass over an entire module, lowering all functions.
     /// </summary>
-    public IrModule Run() => module with
+    public IrModule Run()
     {
-        Classes = module.Classes.Select(LowerClass).ToList(),
-        FreeFunctions = module.FreeFunctions.Select(LowerFunction).ToList(),
-        Processes = module.Processes.Select(LowerProcess).ToList(),
-    };
+        var classes = new List<IrClass>(module.Classes.Count);
+        for (int i = 0; i < module.Classes.Count; i++)
+            classes.Add(LowerClass(module.Classes[i]));
 
-    IrClass LowerClass(IrClass c) => c with
-    {
-        Methods = c.Methods.Select(LowerFunction).ToList(),
-        Operators = c.Operators.Select(LowerOperator).ToList(),
-    };
+        var freeFunctions = new List<IrFunction>(module.FreeFunctions.Count);
+        for (int i = 0; i < module.FreeFunctions.Count; i++)
+            freeFunctions.Add(LowerFunction(module.FreeFunctions[i]));
 
-    IrProcess LowerProcess(IrProcess p) => p with
+        var processes = new List<IrProcess>(module.Processes.Count);
+        for (int i = 0; i < module.Processes.Count; i++)
+            processes.Add(LowerProcess(module.Processes[i]));
+
+        return module with
+        {
+            Classes = classes,
+            FreeFunctions = freeFunctions,
+            Processes = processes
+        };
+    }
+
+    /// <summary>
+    /// Lowers a single class, lowering all its methods and operators.
+    /// </summary>
+    private IrClass LowerClass(IrClass c)
     {
-        Threads = p.Threads.Select(t => t.EntryFunc == null ? t : t with { EntryFunc = LowerFunction(t.EntryFunc) }).ToList()
-    };
+        var methods = new List<IrFunction>(c.Methods.Count);
+        for (int i = 0; i < c.Methods.Count; i++)
+            methods.Add(LowerFunction(c.Methods[i]));
+
+        var operators = new List<IrOperator>(c.Operators.Count);
+        for (int i = 0; i < c.Operators.Count; i++)
+            operators.Add(LowerOperator(c.Operators[i]));
+
+        return c with
+        {
+            Methods = methods,
+            Operators = operators
+        };
+    }
+
+    /// <summary>
+    /// Lowers a single process, lowering all its threads.
+    /// </summary>
+    private IrProcess LowerProcess(IrProcess p)
+    {
+        var threads = new List<IrThread>(p.Threads.Count);
+        for (int i = 0; i < p.Threads.Count; i++)
+        {
+            var t = p.Threads[i];
+            threads.Add(t.EntryFunc == null ? t : t with { EntryFunc = LowerFunction(t.EntryFunc) });
+        }
+        return p with { Threads = threads };
+    }
 
     /// <summary>
     /// Lowers a single function body, tracking whether it is a throws function.
     /// </summary>
-    IrFunction LowerFunction(IrFunction f)
+    private IrFunction LowerFunction(IrFunction f)
     {
         if (f.Body == null) return f;
         var prev = (_inThrowsFunc, _resultType);
@@ -83,7 +187,13 @@ sealed class Ownership(IrModule module)
         return f with { Body = body };
     }
 
-    IrOperator LowerOperator(IrOperator o) => o.Body == null ? o : o with { Body = LowerBlock(o.Body) };
+    /// <summary>
+    /// Lowers a single operator body, tracking whether it is a throws operator.
+    /// </summary>
+    private IrOperator LowerOperator(IrOperator o)
+    {
+        return o.Body == null ? o : o with { Body = LowerBlock(o.Body) };
+    }
 
     #endregion
 
@@ -92,7 +202,7 @@ sealed class Ownership(IrModule module)
     /// <summary>
     /// Pushes a new frame, lowers all statements into it, emits owner releases, then pops.
     /// </summary>
-    IrBlock LowerBlock(IrBlock b)
+    private IrBlock LowerBlock(IrBlock b)
     {
         var frame = new Frame { Loop = _nextFrameIsLoop };
         _nextFrameIsLoop = false;
@@ -104,7 +214,10 @@ sealed class Ownership(IrModule module)
         return new IrBlock(outs) { Span = b.Span };
     }
 
-    void LowerBodyInto(IrBlock b, List<IrStmt> outs)
+    /// <summary>
+    /// Lowers all statements in a block into the given output list, without pushing a new frame.
+    /// </summary>
+    private void LowerBodyInto(IrBlock b, List<IrStmt> outs)
     {
         foreach (var s in b.Stmts) LowerStmt(s, outs);
     }
@@ -115,18 +228,24 @@ sealed class Ownership(IrModule module)
     /// before ARC touches its refcount. Re-lowered fresh at each splice site so each
     /// occurrence gets its own hoisted-temp names.
     /// </summary>
-    void ReleaseFrame(Frame f, List<IrStmt> outs)
+    private void ReleaseFrame(Frame f, List<IrStmt> outs)
     {
-        foreach (var action in f.Defers) LowerStmt(action, outs);
-        for (int i = f.Owners.Count - 1; i >= 0; i--)
-            outs.Add(ReleaseStmt(new IrVar(f.Owners[i].Name, f.Owners[i].Type)));
+        if (f.Defers != null)
+        {
+            foreach (var action in f.Defers) LowerStmt(action, outs);
+        }
+        if (f.Owners != null)
+        {
+            for (int i = f.Owners.Count - 1; i >= 0; i--)
+                outs.Add(ReleaseStmt(new IrVar(f.Owners[i].Name, f.Owners[i].Type)));
+        }
     }
 
     /// <summary>
     /// Releases all frames from innermost outward, stopping after the first frame where stopAfter returns true.
     /// Used by early-exit statements such as return, break, and throw.
     /// </summary>
-    void ReleaseForExit(List<IrStmt> outs, Func<Frame, bool> stopAfter)
+    private void ReleaseForExit(List<IrStmt> outs, Func<Frame, bool> stopAfter)
     {
         foreach (var f in _frames)
         {
@@ -139,30 +258,47 @@ sealed class Ownership(IrModule module)
     /// Registers a local variable as an owner in the current frame.
     /// Skipped inside unsafe blocks where lifetimes are managed by hand.
     /// </summary>
-    void RegisterOwner(string name, IrType type)
+    private void RegisterOwner(string name, IrType type)
     {
         if (_inUnsafe) return;   // unsafe locals are released by hand
-        if (_frames.Count > 0) _frames.Peek().Owners.Add((name, type));
+        if (_frames.Count > 0) _frames.Peek().AddOwner(name, type);
     }
 
-    IrStmt ReleaseStmt(IrExpr e) => new IrExprStmt(new IrStaticCall(_release, IrType.Void, [e]));
-    IrExpr Retain(IrExpr e) => new IrStaticCall(_retain, e.Type, [e]) { Span = e.Span };
+    /// <summary>
+    /// Wraps an expression in a release call, returning a statement that discards the result.
+    /// </summary>
+    private IrExprStmt ReleaseStmt(IrExpr e)
+    {
+        return new IrExprStmt(new IrStaticCall(_release, IrType.Void, [e]));
+    }
+
+    /// <summary>
+    /// Wraps an expression in a retain call, returning a new expression that owns the value.
+    /// </summary>
+    private IrStaticCall Retain(IrExpr e)
+    {
+        return new IrStaticCall(_retain, e.Type, [e]) { Span = e.Span };
+    }
+
 
     /// <summary>
     /// Registers the unlowered defer action with the enclosing frame for splicing at every exit.
     /// Kept unlowered so each splice site re-lowers it fresh with its own temp names.
     /// Prepended for LIFO order against other defers already in the frame.
     /// </summary>
-    void LowerDefer(IrDefer d)
+    private void LowerDefer(IrDefer d)
     {
-        if (_frames.Count > 0) _frames.Peek().Defers.Insert(0, d.Action);
+        if (_frames.Count > 0) _frames.Peek().AddDefer(d.Action);
     }
 
     #endregion
 
     #region Statements
 
-    void LowerStmt(IrStmt s, List<IrStmt> outs)
+    /// <summary>
+    /// Dispatches a statement node to its children, lowering it into the given output list.
+    /// </summary>
+    private void LowerStmt(IrStmt s, List<IrStmt> outs)
     {
         switch (s)
         {
@@ -192,9 +328,36 @@ sealed class Ownership(IrModule module)
         }
     }
 
-    void LowerDecl(IrDeclVar dv, List<IrStmt> outs)
+    /// <summary>
+    /// Releases all owners and defers from the current frame, then emits a throw statement.
+    /// </summary>
+    private void LowerDecl(IrDeclVar dv, List<IrStmt> outs)
     {
         bool managed = IsManaged(dv.Type);
+
+        if (dv.Init is IrThrowsCall or IrThrowsInstanceCall)
+        {
+            int preStart = _pre.Count;
+            int clStart = _cl.Count;
+            var call = FlattenThrows(dv.Init);
+            
+            for (int i = preStart; i < _pre.Count; i++)
+                outs.Add(_pre[i]);
+            _pre.RemoveRange(preStart, _pre.Count - preStart);
+
+            string res = $"_res_{dv.Name}";
+            outs.Add(new IrDeclVar(res, dv.Init.Type, call));
+            
+            int clCount = _cl.Count - clStart;
+            for (int i = 0; i < clCount; i++)
+                outs.Add(ReleaseStmt(new IrVar(_cl[clStart + i].Name, _cl[clStart + i].Type)));
+            _cl.RemoveRange(clStart, clCount);
+
+            ThrowsCheck(res, outs);
+            outs.Add(new IrRaw($"{dv.Type.ToCType()} {dv.Name} = {res}.value;"));
+            if (managed) RegisterOwner(dv.Name, dv.Type);
+            return;
+        }
 
         if (dv.Init == null)
         {
@@ -203,48 +366,120 @@ sealed class Ownership(IrModule module)
             return;
         }
 
-        var p = new List<IrStmt>(); var c = new List<(string, IrType)>();
-        IrExpr init = managed ? Consume(dv.Init, p, c) : Flatten(dv.Init, false, p, c);
-        outs.AddRange(p);
+        int pStart = _pre.Count;
+        int cStart = _cl.Count;
+        IrExpr init = managed ? Consume(dv.Init) : Flatten(dv.Init, false);
+
+        for (int i = pStart; i < _pre.Count; i++)
+            outs.Add(_pre[i]);
+        _pre.RemoveRange(pStart, _pre.Count - pStart);
+
         outs.Add(new IrDeclVar(dv.Name, dv.Type, init) { Span = dv.Span });
-        ReleaseAll(c, outs);
+
+        int cCount = _cl.Count - cStart;
+        for (int i = 0; i < cCount; i++)
+            outs.Add(ReleaseStmt(new IrVar(_cl[cStart + i].Name, _cl[cStart + i].Type)));
+        _cl.RemoveRange(cStart, cCount);
+
         if (managed) RegisterOwner(dv.Name, dv.Type);
     }
 
-    void LowerAssign(IrAssign a, List<IrStmt> outs)
+    /// <summary>
+    /// Lowers an assignment statement, releasing the old value if the target is a managed type.
+    /// </summary>
+    private void LowerAssign(IrAssign a, List<IrStmt> outs)
     {
-        var p = new List<IrStmt>(); var c = new List<(string, IrType)>();
+        int preStart = _pre.Count;
+        int clStart = _cl.Count;
+
         if (a.Op == "=" && IsManaged(a.Target.Type) && !_inUnsafe)
         {
             // Owning store: release the old value, install the new (+1) one.
-            IrExpr tgt = Flatten(a.Target, false, p, c);
-            IrExpr val = Consume(a.Value, p, c);
-            outs.AddRange(p);
+            IrExpr tgt = Flatten(a.Target, false);
+            IrExpr val = Consume(a.Value);
+
+            for (int i = preStart; i < _pre.Count; i++)
+                outs.Add(_pre[i]);
+            _pre.RemoveRange(preStart, _pre.Count - preStart);
+
             string tmp = Tmp("_asg");
             outs.Add(new IrDeclVar(tmp, a.Target.Type, val));
             outs.Add(ReleaseStmt(tgt));
             outs.Add(new IrAssign(tgt, "=", new IrVar(tmp, a.Target.Type)));
-            ReleaseAll(c, outs);
+
+            int clCount = _cl.Count - clStart;
+            for (int i = 0; i < clCount; i++)
+                outs.Add(ReleaseStmt(new IrVar(_cl[clStart + i].Name, _cl[clStart + i].Type)));
+            _cl.RemoveRange(clStart, clCount);
+
             return;
         }
-        IrExpr t = Flatten(a.Target, false, p, c);
-        IrExpr v = Flatten(a.Value, false, p, c);
-        outs.AddRange(p);
+
+        IrExpr t = Flatten(a.Target, false);
+        IrExpr v = Flatten(a.Value, false);
+
+        for (int i = preStart; i < _pre.Count; i++)
+            outs.Add(_pre[i]);
+        _pre.RemoveRange(preStart, _pre.Count - preStart);
+
         outs.Add(new IrAssign(t, a.Op, v) { Span = a.Span });
-        ReleaseAll(c, outs);
+
+        int clCount2 = _cl.Count - clStart;
+        for (int i = 0; i < clCount2; i++)
+            outs.Add(ReleaseStmt(new IrVar(_cl[clStart + i].Name, _cl[clStart + i].Type)));
+        _cl.RemoveRange(clStart, clCount2);
     }
 
-    void LowerExprStmt(IrExprStmt es, List<IrStmt> outs)
+    /// <summary>
+    /// Lowers an expression statement, releasing any hoisted temps and checking for throws.
+    /// </summary>
+    private void LowerExprStmt(IrExprStmt es, List<IrStmt> outs)
     {
-        var p = new List<IrStmt>(); var c = new List<(string, IrType)>();
-        IrExpr e = Flatten(es.Expr, false, p, c);
-        outs.AddRange(p);
+        if (es.Expr is IrThrowsCall or IrThrowsInstanceCall)
+        {
+            int pStart = _pre.Count;
+            int cStart = _cl.Count;
+            var call = FlattenThrows(es.Expr);
+
+            for (int i = pStart; i < _pre.Count; i++)
+                outs.Add(_pre[i]);
+            _pre.RemoveRange(pStart, _pre.Count - pStart);
+
+            string res = Tmp("_res_tmp_");
+            outs.Add(new IrDeclVar(res, es.Expr.Type, call));
+
+            int cCount = _cl.Count - cStart;
+            for (int i = 0; i < cCount; i++)
+                outs.Add(ReleaseStmt(new IrVar(_cl[cStart + i].Name, _cl[cStart + i].Type)));
+            _cl.RemoveRange(cStart, cCount);
+
+            ThrowsCheck(res, outs);
+            if (es.Expr.Type is IrResultType rt && IsManaged(rt.Inner))
+                outs.Add(new IrRaw($"{_release}({res}.value);"));
+            return;
+        }
+
+        int p2Start = _pre.Count;
+        int c2Start = _cl.Count;
+        IrExpr e = Flatten(es.Expr, false);
+
+        for (int i = p2Start; i < _pre.Count; i++)
+            outs.Add(_pre[i]);
+        _pre.RemoveRange(p2Start, _pre.Count - p2Start);
+
         if (!(IsProducer(es.Expr) && IsManaged(es.Expr.Type)))
             outs.Add(new IrExprStmt(e) { Span = es.Span });   // hoisted producers are already released temps
-        ReleaseAll(c, outs);
+
+        int c2Count = _cl.Count - c2Start;
+        for (int i = 0; i < c2Count; i++)
+            outs.Add(ReleaseStmt(new IrVar(_cl[c2Start + i].Name, _cl[c2Start + i].Type)));
+        _cl.RemoveRange(c2Start, c2Count);
     }
 
-    void LowerReturn(IrReturn rs, List<IrStmt> outs)
+    /// <summary>
+    /// Releases all owners and defers from the current frame, then emits a return statement.
+    /// </summary>
+    private void LowerReturn(IrReturn rs, List<IrStmt> outs)
     {
         if (rs.Value == null)
         {
@@ -252,68 +487,124 @@ sealed class Ownership(IrModule module)
             outs.Add(_inThrowsFunc ? new IrRaw($"return ({_resultType!.ToCType()}){{ .has_error = false }};") : new IrReturn(null));
             return;
         }
-        var p = new List<IrStmt>(); var c = new List<(string, IrType)>();
+
+        int pStart = _pre.Count;
+        int cStart = _cl.Count;
         bool managed = IsManaged(rs.Value.Type);
-        IrExpr val = managed ? Consume(rs.Value, p, c) : Flatten(rs.Value, false, p, c);
-        outs.AddRange(p);
+        IrExpr val = managed ? Consume(rs.Value) : Flatten(rs.Value, false);
+
+        for (int i = pStart; i < _pre.Count; i++)
+            outs.Add(_pre[i]);
+        _pre.RemoveRange(pStart, _pre.Count - pStart);
+
         string tmp = Tmp("_ret");
         outs.Add(new IrDeclVar(tmp, rs.Value.Type, val));
-        ReleaseAll(c, outs);
+
+        int cCount = _cl.Count - cStart;
+        for (int i = 0; i < cCount; i++)
+            outs.Add(ReleaseStmt(new IrVar(_cl[cStart + i].Name, _cl[cStart + i].Type)));
+        _cl.RemoveRange(cStart, cCount);
+
         ReleaseForExit(outs, _ => false);
         outs.Add(_inThrowsFunc
             ? new IrRaw($"return ({_resultType!.ToCType()}){{ .value = {tmp}, .has_error = false }};")
             : new IrReturn(new IrVar(tmp, rs.Value.Type)));
     }
 
-    void LowerIf(IrIf ifs, List<IrStmt> outs)
+    /// <summary>
+    /// Lowers an if statement, hoisting any pre- or post-allocations into the surrounding block.
+    /// </summary>
+    private void LowerIf(IrIf ifs, List<IrStmt> outs)
     {
-        var p = new List<IrStmt>(); var c = new List<(string, IrType)>();
-        IrExpr cond = Flatten(ifs.Cond, false, p, c);
-        if (p.Count == 0 && c.Count == 0)
+        int pStart = _pre.Count;
+        int cStart = _cl.Count;
+        IrExpr cond = Flatten(ifs.Cond, false);
+        int pCount = _pre.Count - pStart;
+        int cCount = _cl.Count - cStart;
+
+        if (pCount == 0 && cCount == 0)
         {
             outs.Add(new IrIf(cond, LowerBlock(ifs.Then), ifs.Else == null ? null : LowerBlock(ifs.Else)) { Span = ifs.Span });
             return;
         }
-        outs.AddRange(p);
+
+        for (int i = pStart; i < _pre.Count; i++)
+            outs.Add(_pre[i]);
+        _pre.RemoveRange(pStart, pCount);
+
         string cv = Tmp("_if");
         outs.Add(new IrDeclVar(cv, IrType.Bool, cond));
-        ReleaseAll(c, outs);
+
+        for (int i = cStart; i < _cl.Count; i++)
+            outs.Add(ReleaseStmt(new IrVar(_cl[i].Name, _cl[i].Type)));
+        _cl.RemoveRange(cStart, cCount);
+
         outs.Add(new IrIf(new IrVar(cv, IrType.Bool), LowerBlock(ifs.Then), ifs.Else == null ? null : LowerBlock(ifs.Else)));
     }
 
-    void LowerWhile(IrWhile ws, List<IrStmt> outs)
+    /// <summary>
+    /// Lowers a while statement, hoisting any pre- or post-allocations into the surrounding block.
+    /// </summary>
+    private void LowerWhile(IrWhile ws, List<IrStmt> outs)
     {
-        var p = new List<IrStmt>(); var c = new List<(string, IrType)>();
-        IrExpr cond = Flatten(ws.Cond, false, p, c);
-        if (p.Count == 0 && c.Count == 0)
+        int pStart = _pre.Count;
+        int cStart = _cl.Count;
+        IrExpr cond = Flatten(ws.Cond, false);
+        int pCount = _pre.Count - pStart;
+        int cCount = _cl.Count - cStart;
+
+        if (pCount == 0 && cCount == 0)
         {
             _nextFrameIsLoop = true;
             outs.Add(new IrWhile(cond, LowerBlock(ws.Body)) { Span = ws.Span });
             return;
         }
+
         // Condition allocates each iteration: re-evaluate (and release) per pass.
-        var inner = new List<IrStmt>();
-        inner.AddRange(p);
+        var inner = new List<IrStmt>(pCount + 2);
+        for (int i = pStart; i < _pre.Count; i++)
+            inner.Add(_pre[i]);
+        _pre.RemoveRange(pStart, pCount);
+
         string cv = Tmp("_wh");
         inner.Add(new IrDeclVar(cv, IrType.Bool, cond));
-        ReleaseAll(c, inner);
+
+        for (int i = cStart; i < _cl.Count; i++)
+            inner.Add(ReleaseStmt(new IrVar(_cl[i].Name, _cl[i].Type)));
+        _cl.RemoveRange(cStart, cCount);
+
         inner.Add(new IrRaw($"if (!{cv}) break;"));
         _nextFrameIsLoop = true;
         inner.Add(LowerBlock(ws.Body));
         outs.Add(new IrWhile(new IrLitBool(true), new IrBlock(inner)));
     }
 
-    void LowerFor(IrFor fr, List<IrStmt> outs)
+    /// <summary>
+    /// Lowers a for statement, hoisting any pre- or post-allocations into the surrounding block.
+    /// </summary>
+    private void LowerFor(IrFor fr, List<IrStmt> outs)
     {
         bool initManaged = fr.Init is IrDeclVar idv && IsManaged(idv.Type);
-        var cp = new List<IrStmt>(); var cc = new List<(string, IrType)>();
-        var sp = new List<IrStmt>(); var sc = new List<(string, IrType)>();
-        IrExpr? cond = fr.Cond == null ? null : Flatten(fr.Cond, false, cp, cc);
-        IrExpr? step = fr.Step == null ? null : Flatten(fr.Step, false, sp, sc);
-        bool simple = !initManaged && cp.Count == 0 && cc.Count == 0 && sp.Count == 0 && sc.Count == 0;
+
+        int cpStart = _pre.Count;
+        int ccStart = _cl.Count;
+        IrExpr? cond = fr.Cond == null ? null : Flatten(fr.Cond, false);
+        int cpCount = _pre.Count - cpStart;
+        int ccCount = _cl.Count - ccStart;
+
+        int spStart = _pre.Count;
+        int scStart = _cl.Count;
+        IrExpr? step = fr.Step == null ? null : Flatten(fr.Step, false);
+        int spCount = _pre.Count - spStart;
+        int scCount = _cl.Count - scStart;
+
+        bool simple = !initManaged && cpCount == 0 && ccCount == 0 && spCount == 0 && scCount == 0;
 
         if (simple)
         {
+            _pre.RemoveRange(cpStart, _pre.Count - cpStart);
+            _cl.RemoveRange(ccStart, _cl.Count - ccStart);
+
             IrStmt? init = fr.Init switch
             {
                 IrDeclVar dv => dv,
@@ -339,26 +630,32 @@ sealed class Ownership(IrModule module)
         {
             firstFlag = Tmp("_first");
             outer.Add(new IrRaw($"int {firstFlag} = 1;"));
-            var stepStmts = new List<IrStmt>();
-            var p3 = new List<IrStmt>(); var c3 = new List<(string, IrType)>();
-            IrExpr st = Flatten(fr.Step, false, p3, c3);
-            stepStmts.AddRange(p3);
-            stepStmts.Add(new IrExprStmt(st));
-            ReleaseAll(c3, stepStmts);
+            var stepStmts = new List<IrStmt>(spCount + 2 + scCount);
+
+            for (int i = 0; i < spCount; i++)
+                stepStmts.Add(_pre[spStart + i]);
+            stepStmts.Add(new IrExprStmt(step!));
+            for (int i = 0; i < scCount; i++)
+                stepStmts.Add(ReleaseStmt(new IrVar(_cl[scStart + i].Name, _cl[scStart + i].Type)));
+
             loop.Add(new IrRaw($"if (!{firstFlag})"));
             loop.Add(new IrBlock(stepStmts));
             loop.Add(new IrRaw($"{firstFlag} = 0;"));
         }
         if (fr.Cond != null)
         {
-            var p2 = new List<IrStmt>(); var c2 = new List<(string, IrType)>();
-            IrExpr c = Flatten(fr.Cond, false, p2, c2);
-            loop.AddRange(p2);
+            for (int i = 0; i < cpCount; i++)
+                loop.Add(_pre[cpStart + i]);
             string cv = Tmp("_fc");
-            loop.Add(new IrDeclVar(cv, IrType.Bool, c));
-            ReleaseAll(c2, loop);
+            loop.Add(new IrDeclVar(cv, IrType.Bool, cond));
+            for (int i = 0; i < ccCount; i++)
+                loop.Add(ReleaseStmt(new IrVar(_cl[ccStart + i].Name, _cl[ccStart + i].Type)));
             loop.Add(new IrRaw($"if (!{cv}) break;"));
         }
+
+        _pre.RemoveRange(cpStart, _pre.Count - cpStart);
+        _cl.RemoveRange(ccStart, _cl.Count - ccStart);
+
         _nextFrameIsLoop = true;
         loop.Add(LowerBlock(fr.Body));
         outer.Add(new IrWhile(new IrLitBool(true), new IrBlock(loop)));
@@ -367,17 +664,30 @@ sealed class Ownership(IrModule module)
         outs.Add(new IrBlock(outer));
     }
 
-    void LowerForIn(IrForIn fi, List<IrStmt> outs)
+    /// <summary>
+    /// Lowers a for-in statement, hoisting any pre- or post-allocations into the surrounding block.
+    /// </summary>
+    private void LowerForIn(IrForIn fi, List<IrStmt> outs)
     {
-        var p = new List<IrStmt>(); var c = new List<(string, IrType)>();
+        int pStart = _pre.Count;
+        int cStart = _cl.Count;
 
         if (fi.ArraySize >= 0)
         {
-            IrExpr acol = Flatten(fi.Collection, false, p, c);
-            outs.AddRange(p);
+            IrExpr acol = Flatten(fi.Collection, false);
+
+            for (int i = pStart; i < _pre.Count; i++)
+                outs.Add(_pre[i]);
+            _pre.RemoveRange(pStart, _pre.Count - pStart);
+
             string av = Tmp("_arr");
             outs.Add(new IrDeclVar(av, fi.Collection.Type, acol));
-            ReleaseAll(c, outs);
+
+            int cCount = _cl.Count - cStart;
+            for (int i = 0; i < cCount; i++)
+                outs.Add(ReleaseStmt(new IrVar(_cl[cStart + i].Name, _cl[cStart + i].Type)));
+            _cl.RemoveRange(cStart, cCount);
+
             outs.Add(new IrRaw($"for (int _fi = 0; _fi < {fi.ArraySize}; _fi++)"));
             var body = new List<IrStmt>();
             var frame = new Frame { Loop = true };
@@ -396,12 +706,21 @@ sealed class Ownership(IrModule module)
             return;
         }
 
-        IrExpr col = Consume(fi.Collection, p, c);
-        outs.AddRange(p);
+        IrExpr col = Consume(fi.Collection);
+
+        for (int i = pStart; i < _pre.Count; i++)
+            outs.Add(_pre[i]);
+        _pre.RemoveRange(pStart, _pre.Count - pStart);
+
         bool colManaged = IsManaged(fi.Collection.Type);
         string cv = Tmp("_col");
         outs.Add(new IrDeclVar(cv, fi.Collection.Type, col));
-        ReleaseAll(c, outs);
+
+        int c2Count = _cl.Count - cStart;
+        for (int i = 0; i < c2Count; i++)
+            outs.Add(ReleaseStmt(new IrVar(_cl[cStart + i].Name, _cl[cStart + i].Type)));
+        _cl.RemoveRange(cStart, c2Count);
+
         outs.Add(new IrRaw($"for (int _fi = 0; _fi < {fi.LenCName}({cv}); _fi++)"));
         var b2 = new List<IrStmt>();
         var f2 = new Frame { Loop = true };
@@ -415,7 +734,10 @@ sealed class Ownership(IrModule module)
         if (colManaged) outs.Add(ReleaseStmt(new IrVar(cv, fi.Collection.Type)));
     }
 
-    void LowerTryCatch(IrTryCatch tc, List<IrStmt> outs)
+    /// <summary>
+    /// Lowers a try-catch statement, hoisting any pre- or post-allocations into the surrounding block.
+    /// </summary>
+    private void LowerTryCatch(IrTryCatch tc, List<IrStmt> outs)
     {
         string catchLbl = $"_catch_{tc.Seq}";
         string endLbl = $"_end_{tc.Seq}";
@@ -446,9 +768,33 @@ sealed class Ownership(IrModule module)
     }
 
     /// <summary>
+    /// Emits the error-branch check after a throwing call's Result is captured into res.
+    /// Inside a try, routes to the catch label; otherwise propagates upward as a return.
+    /// </summary>
+    private void ThrowsCheck(string res, List<IrStmt> outs)
+    {
+        var branch = new List<IrStmt>();
+        if (_inTry)
+        {
+            outs.Add(new IrRaw($"_has_error = {res}.has_error;"));
+            ReleaseForExit(branch, f => f.Try);
+            branch.Add(new IrRaw($"goto {_catchLabel};"));
+            outs.Add(new IrRaw("if (_has_error)"));
+        }
+        else
+        {
+            ReleaseForExit(branch, _ => false);
+            branch.Add(new IrRaw($"{_resultType!.ToCType()} _err = {{ .has_error = true }};"));
+            branch.Add(new IrRaw("return _err;"));
+            outs.Add(new IrRaw($"if ({res}.has_error)"));
+        }
+        outs.Add(new IrBlock(branch));
+    }
+
+    /// <summary>
     /// Releases owners out to the catch or function boundary, then jumps to the handler.
     /// </summary>
-    void LowerThrow(List<IrStmt> outs)
+    private void LowerThrow(List<IrStmt> outs)
     {
         if (_inTry)
         {
@@ -471,45 +817,50 @@ sealed class Ownership(IrModule module)
     /// Returns a simple IrExpr; hoists managed producers in borrow position into temps.
     /// Mirrors the emitter's former EmitExprH.
     /// </summary>
-    IrExpr Flatten(IrExpr e, bool owned, List<IrStmt> pre, List<(string, IrType)> cl)
+    private IrExpr Flatten(IrExpr e, bool owned)
     {
         if (e is IrNewInit ni)
         {
-            var v = LowerNewInit(ni, pre);
-            if (!owned) cl.Add((v.Name, v.Type));
+            var v = LowerNewInit(ni);
+            if (!owned) _cl.Add((v.Name, v.Type));
             return v;
         }
 
-        if (e is IrTernary tern) return FlattenTernary(tern, owned, pre, cl);
+        if (e is IrTernary tern) return FlattenTernary(tern, owned);
 
         IrExpr inline = e switch
         {
-            IrStaticCall sc => sc with { Args = FlattenArgs(sc.Args, pre, cl) },
-            IrInstanceCall ic => ic with { Recv = Flatten(ic.Recv, false, pre, cl), Args = FlattenArgs(ic.Args, pre, cl) },
-            IrThrowsCall tc => tc with { Args = FlattenArgs(tc.Args, pre, cl) },
-            IrThrowsInstanceCall ti => ti with { Recv = Flatten(ti.Recv, false, pre, cl), Args = FlattenArgs(ti.Args, pre, cl) },
-            IrNew n => n with { Args = FlattenArgs(n.Args, pre, cl) },
-            IrCast c => c with { Value = Flatten(c.Value, true, pre, cl) },
-            IrFieldLoad fl => fl with { Obj = Flatten(fl.Obj, false, pre, cl) },
-            IrIndex ix => ix with { Obj = Flatten(ix.Obj, false, pre, cl), Idx = Flatten(ix.Idx, false, pre, cl) },
-            IrBinOp b => b with { Left = Flatten(b.Left, false, pre, cl), Right = Flatten(b.Right, false, pre, cl) },
-            IrUnaryOp u => u with { Operand = Flatten(u.Operand, false, pre, cl) },
-            IrPostfix pf => pf with { Operand = Flatten(pf.Operand, false, pre, cl) },
-            IrAddrOf a => a with { Target = Flatten(a.Target, false, pre, cl) },
-            IrDeref d => d with { Ptr = Flatten(d.Ptr, false, pre, cl) },
-            IrIndirectCall ic2 => ic2 with { Target = Flatten(ic2.Target, false, pre, cl), Args = FlattenArgs(ic2.Args, pre, cl) },
-            IrUnionConstruct uc => uc with { Args = FlattenArgs(uc.Args, pre, cl) },
-            IrUnionField uf => uf with { Union = Flatten(uf.Union, false, pre, cl) },
+            IrStaticCall sc => sc with { Args = FlattenArgs(sc.Args) },
+            IrInstanceCall ic => ic with { Recv = Flatten(ic.Recv, false), Args = FlattenArgs(ic.Args) },
+            IrThrowsCall tc => tc with { Args = FlattenArgs(tc.Args) },
+            IrThrowsInstanceCall ti => ti with { Recv = Flatten(ti.Recv, false), Args = FlattenArgs(ti.Args) },
+            IrNew n => n with { Args = FlattenArgs(n.Args) },
+            IrCast c => c with { Value = Flatten(c.Value, true) },
+            IrFieldLoad fl => fl with { Obj = Flatten(fl.Obj, false) },
+            IrIndex ix => ix with { Obj = Flatten(ix.Obj, false), Idx = Flatten(ix.Idx, false) },
+            IrBinOp b => b with { Left = Flatten(b.Left, false), Right = Flatten(b.Right, false) },
+            IrUnaryOp u => u with { Operand = Flatten(u.Operand, false) },
+            IrPostfix pf => pf with { Operand = Flatten(pf.Operand, false) },
+            IrAddrOf a => a with { Target = Flatten(a.Target, false) },
+            IrDeref d => d with { Ptr = Flatten(d.Ptr, false) },
+            IrIndirectCall ic2 => ic2 with { Target = Flatten(ic2.Target, false), Args = FlattenArgs(ic2.Args) },
+            IrUnionConstruct uc => uc with { Args = FlattenArgs(uc.Args) },
+            IrUnionField uf => uf with { Union = Flatten(uf.Union, false) },
             _ => e   // literals, IrVar, IrSelfExpr, IrArrayLit, IrFuncRef
         };
 
         if (IsProducer(e))
-            return owned || _inUnsafe ? inline : Hoist(inline, e.Type, pre, cl);
+            return owned || _inUnsafe ? inline : Hoist(inline, e.Type);
         return inline;
     }
 
-    List<IrExpr> FlattenArgs(List<IrExpr> args, List<IrStmt> pre, List<(string, IrType)> cl) =>
-        args.Select(a => Flatten(a, false, pre, cl)).ToList();
+    private List<IrExpr> FlattenArgs(List<IrExpr> args)
+    {
+        var result = new List<IrExpr>(args.Count);
+        for (int i = 0; i < args.Count; i++)
+            result.Add(Flatten(args[i], false));
+        return result;
+    }
 
     /// <summary>
     /// A ternary evaluates exactly one arm at runtime, so an arm's hoists/retains must
@@ -517,87 +868,134 @@ sealed class Ownership(IrModule module)
     /// to sequence stay inline; otherwise both arms materialise into a temp via if/else.
     /// A managed temp is owned (+1) and released by the caller's frame (borrow) or consumed.
     /// </summary>
-    IrExpr FlattenTernary(IrTernary t, bool owned, List<IrStmt> pre, List<(string, IrType)> cl)
+    private IrExpr FlattenTernary(IrTernary t, bool owned)
     {
-        IrExpr cond = Flatten(t.Cond, false, pre, cl);
+        IrExpr cond = Flatten(t.Cond, false);
         bool managed = IsManaged(t.Type) && !_inUnsafe;
 
-        var tp = new List<IrStmt>(); var tc = new List<(string, IrType)>();
-        var ep = new List<IrStmt>(); var ec = new List<(string, IrType)>();
-        IrExpr tv = managed ? Consume(t.Then, tp, tc) : Flatten(t.Then, owned, tp, tc);
-        IrExpr ev = managed ? Consume(t.Else, ep, ec) : Flatten(t.Else, owned, ep, ec);
+        int thenPreStart = _pre.Count;
+        int thenClStart = _cl.Count;
+        IrExpr tv = managed ? Consume(t.Then) : Flatten(t.Then, owned);
+        int thenPreCount = _pre.Count - thenPreStart;
+        int thenClCount = _cl.Count - thenClStart;
+
+        int elsePreStart = _pre.Count;
+        int elseClStart = _cl.Count;
+        IrExpr ev = managed ? Consume(t.Else) : Flatten(t.Else, owned);
+        int elsePreCount = _pre.Count - elsePreStart;
+        int elseClCount = _cl.Count - elseClStart;
 
         // Fast path: no conditional sequencing needed - a pure C conditional expression.
-        if (!managed && tp.Count == 0 && tc.Count == 0 && ep.Count == 0 && ec.Count == 0)
+        if (!managed && thenPreCount == 0 && thenClCount == 0 && elsePreCount == 0 && elseClCount == 0)
+        {
+            _pre.RemoveRange(thenPreStart, _pre.Count - thenPreStart);
+            _cl.RemoveRange(thenClStart, _cl.Count - thenClStart);
             return t with { Cond = cond, Then = tv, Else = ev };
+        }
 
         string tmp = Tmp("_tern");
         var tgt = new IrVar(tmp, t.Type);
-        pre.Add(new IrDeclVar(tmp, t.Type, null));
+        _pre.Insert(thenPreStart, new IrDeclVar(tmp, t.Type, null));
+        thenPreStart++;
+        elsePreStart++;
 
-        var thenStmts = new List<IrStmt>(tp); thenStmts.Add(new IrAssign(tgt, "=", tv)); ReleaseAll(tc, thenStmts);
-        var elseStmts = new List<IrStmt>(ep); elseStmts.Add(new IrAssign(tgt, "=", ev)); ReleaseAll(ec, elseStmts);
-        pre.Add(new IrIf(cond, new IrBlock(thenStmts), new IrBlock(elseStmts)));
+        var thenStmts = new List<IrStmt>(thenPreCount + 1 + thenClCount);
+        for (int i = 0; i < thenPreCount; i++)
+            thenStmts.Add(_pre[thenPreStart + i]);
+        thenStmts.Add(new IrAssign(tgt, "=", tv));
+        for (int i = 0; i < thenClCount; i++)
+            thenStmts.Add(ReleaseStmt(new IrVar(_cl[thenClStart + i].Name, _cl[thenClStart + i].Type)));
 
-        if (managed && !owned) cl.Add((tmp, t.Type));   // borrow: release when the statement ends
+        var elseStmts = new List<IrStmt>(elsePreCount + 1 + elseClCount);
+        for (int i = 0; i < elsePreCount; i++)
+            elseStmts.Add(_pre[elsePreStart + i]);
+        elseStmts.Add(new IrAssign(tgt, "=", ev));
+        for (int i = 0; i < elseClCount; i++)
+            elseStmts.Add(ReleaseStmt(new IrVar(_cl[elseClStart + i].Name, _cl[elseClStart + i].Type)));
+
+        _pre.RemoveRange(thenPreStart, _pre.Count - thenPreStart);
+        _cl.RemoveRange(thenClStart, _cl.Count - thenClStart);
+
+        _pre.Add(new IrIf(cond, new IrBlock(thenStmts), new IrBlock(elseStmts)));
+
+        if (managed && !owned) _cl.Add((tmp, t.Type));   // borrow: release when the statement ends
         return tgt;
     }
 
     // A +1-owned value for a consuming position: producers pass through; a managed borrow is retained.
-    IrExpr Consume(IrExpr e, List<IrStmt> pre, List<(string, IrType)> cl)
+    private IrExpr Consume(IrExpr e)
     {
-        IrExpr s = Flatten(e, true, pre, cl);
+        IrExpr s = Flatten(e, true);
         return IsManaged(e.Type) && !IsProducer(e) && !_inUnsafe ? Retain(s) : s;
     }
 
-    IrVar Hoist(IrExpr inline, IrType t, List<IrStmt> pre, List<(string, IrType)> cl)
+    private IrVar Hoist(IrExpr inline, IrType t)
     {
         string tmp = Tmp("_a");
-        pre.Add(new IrDeclVar(tmp, t, inline));
-        cl.Add((tmp, t));
+        _pre.Add(new IrDeclVar(tmp, t, inline));
+        _cl.Add((tmp, t));
         return new IrVar(tmp, t);
     }
 
-    IrExpr FlattenThrows(IrExpr e, List<IrStmt> pre, List<(string, IrType)> cl) => e switch
+    private IrExpr FlattenThrows(IrExpr e)
     {
-        IrThrowsCall tc => new IrStaticCall(tc.CName, tc.Type, FlattenArgs(tc.Args, pre, cl)) { Span = tc.Span },
-        IrThrowsInstanceCall ti => new IrInstanceCall(Flatten(ti.Recv, false, pre, cl), ti.CName, ti.Type, FlattenArgs(ti.Args, pre, cl)) { Span = ti.Span },
-        _ => e
-    };
+        return e switch
+        {
+            IrThrowsCall tc => new IrStaticCall(tc.CName, tc.Type, FlattenArgs(tc.Args)) { Span = tc.Span },
+            IrThrowsInstanceCall ti => new IrInstanceCall(Flatten(ti.Recv, false), ti.CName, ti.Type, FlattenArgs(ti.Args)) { Span = ti.Span },
+            _ => e
+        };
+    }
+
 
     /// <summary>
     /// Lowers a collection initializer into an alloc followed by Add-per-element calls.
     /// Returns the new collection temp (a +1 producer).
     /// </summary>
-    IrVar LowerNewInit(IrNewInit ni, List<IrStmt> pre)
+    private IrVar LowerNewInit(IrNewInit ni)
     {
         string v = Tmp("_ci");
         var ct = new IrClassRef(ni.ClassName);
-        var ap = new List<IrStmt>(); var ac = new List<(string, IrType)>();
-        var args = FlattenArgs(ni.Args, ap, ac);
-        pre.AddRange(ap);
-        pre.Add(new IrDeclVar(v, ct, new IrNew(ni.ClassName, args)));
-        ReleaseAll(ac, pre);
+
+        int apStart = _pre.Count;
+        int acStart = _cl.Count;
+        var args = FlattenArgs(ni.Args);
+
+        int acCount = _cl.Count - acStart;
+        _pre.Add(new IrDeclVar(v, ct, new IrNew(ni.ClassName, args)));
+
+        for (int i = 0; i < acCount; i++)
+            _pre.Add(ReleaseStmt(new IrVar(_cl[acStart + i].Name, _cl[acStart + i].Type)));
+        _cl.RemoveRange(acStart, acCount);
+
         foreach (var el in ni.Inits)
         {
-            var ep = new List<IrStmt>(); var ec = new List<(string, IrType)>();
-            IrExpr es = Flatten(el, true, ep, ec);
-            pre.AddRange(ep);
+            int epStart = _pre.Count;
+            int ecStart = _cl.Count;
+            IrExpr es = Flatten(el, true);
+            int ecCount = _cl.Count - ecStart;
+
             if (IsProducer(el) && IsManaged(el.Type))
             {
                 string e2 = Tmp("_e");
-                pre.Add(new IrDeclVar(e2, el.Type, es));
-                pre.Add(new IrExprStmt(new IrStaticCall(ni.AddCName, IrType.Void, [new IrVar(v, ct), new IrVar(e2, el.Type)])));
-                pre.Add(ReleaseStmt(new IrVar(e2, el.Type)));
+                _pre.Add(new IrDeclVar(e2, el.Type, es));
+                _pre.Add(new IrExprStmt(new IrStaticCall(ni.AddCName, IrType.Void, [new IrVar(v, ct), new IrVar(e2, el.Type)])));
+                _pre.Add(ReleaseStmt(new IrVar(e2, el.Type)));
             }
             else
-                pre.Add(new IrExprStmt(new IrStaticCall(ni.AddCName, IrType.Void, [new IrVar(v, ct), es])));
-            ReleaseAll(ec, pre);
+                _pre.Add(new IrExprStmt(new IrStaticCall(ni.AddCName, IrType.Void, [new IrVar(v, ct), es])));
+
+            for (int i = 0; i < ecCount; i++)
+                _pre.Add(ReleaseStmt(new IrVar(_cl[ecStart + i].Name, _cl[ecStart + i].Type)));
+            _cl.RemoveRange(ecStart, ecCount);
         }
         return new IrVar(v, ct);
     }
 
-    void ReleaseAll(List<(string Name, IrType Type)> cl, List<IrStmt> outs)
+    /// <summary>
+    /// Releases all owners in the given list, adding the release statements to outs.
+    /// </summary>
+    private void ReleaseAll(List<(string Name, IrType Type)> cl, List<IrStmt> outs)
     {
         foreach (var (name, type) in cl) outs.Add(ReleaseStmt(new IrVar(name, type)));
     }
