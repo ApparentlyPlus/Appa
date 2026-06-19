@@ -32,7 +32,7 @@ sealed class Ownership(IrModule module)
     int _seq;
     string Tmp(string prefix) => $"{prefix}{_seq++}";
 
-    sealed class Frame { public List<(string Name, IrType Type)> Owners = []; public bool Loop; public bool Try; }
+    sealed class Frame { public List<(string Name, IrType Type)> Owners = []; public List<IrStmt> Defers = []; public bool Loop; public bool Try; }
     readonly Stack<Frame> _frames = new();
     bool _nextFrameIsLoop;
 
@@ -110,10 +110,14 @@ sealed class Ownership(IrModule module)
     }
 
     /// <summary>
-    /// Emits release calls for all owning locals in the frame, in reverse declaration order.
+    /// Splices this frame's defers (in LIFO order) then releases its owning locals.
+    /// Deferred cleanup runs before owners are released so a defer can still use a local
+    /// before ARC touches its refcount. Re-lowered fresh at each splice site so each
+    /// occurrence gets its own hoisted-temp names.
     /// </summary>
     void ReleaseFrame(Frame f, List<IrStmt> outs)
     {
+        foreach (var action in f.Defers) LowerStmt(action, outs);
         for (int i = f.Owners.Count - 1; i >= 0; i--)
             outs.Add(ReleaseStmt(new IrVar(f.Owners[i].Name, f.Owners[i].Type)));
     }
@@ -144,6 +148,16 @@ sealed class Ownership(IrModule module)
     IrStmt ReleaseStmt(IrExpr e) => new IrExprStmt(new IrStaticCall(_release, IrType.Void, [e]));
     IrExpr Retain(IrExpr e) => new IrStaticCall(_retain, e.Type, [e]) { Span = e.Span };
 
+    /// <summary>
+    /// Registers the unlowered defer action with the enclosing frame for splicing at every exit.
+    /// Kept unlowered so each splice site re-lowers it fresh with its own temp names.
+    /// Prepended for LIFO order against other defers already in the frame.
+    /// </summary>
+    void LowerDefer(IrDefer d)
+    {
+        if (_frames.Count > 0) _frames.Peek().Defers.Insert(0, d.Action);
+    }
+
     #endregion
 
     #region Statements
@@ -173,7 +187,7 @@ sealed class Ownership(IrModule module)
             case IrFor fr: LowerFor(fr, outs); break;
             case IrForIn fi: LowerForIn(fi, outs); break;
             case IrTryCatch tc: LowerTryCatch(tc, outs); break;
-            case IrDefer d: _ = d; break;
+            case IrDefer d: LowerDefer(d); break;
             default: throw new InvalidOperationException($"[Ownership] unhandled IrStmt: {s.GetType().Name}");
         }
     }
