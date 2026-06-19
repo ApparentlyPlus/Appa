@@ -41,6 +41,12 @@ sealed class Ownership(IrModule module)
     bool _inThrowsFunc;
     IrResultType? _resultType;
 
+    // Inside `unsafe`, automatic reference counting is suppressed: owning stores,
+    // owner tracking, consume-retains and producer hoisting all step aside, so the
+    // author manages element lifetimes by hand via retain/release. Exits (return /
+    // break / throw) still release owners from the enclosing safe frames.
+    bool _inUnsafe;
+
     #region Entry
 
     /// <summary>
@@ -127,9 +133,11 @@ sealed class Ownership(IrModule module)
 
     /// <summary>
     /// Registers a local variable as an owner in the current frame.
+    /// Skipped inside unsafe blocks where lifetimes are managed by hand.
     /// </summary>
     void RegisterOwner(string name, IrType type)
     {
+        if (_inUnsafe) return;   // unsafe locals are released by hand
         if (_frames.Count > 0) _frames.Peek().Owners.Add((name, type));
     }
 
@@ -146,7 +154,13 @@ sealed class Ownership(IrModule module)
         {
             case IrNativeStmt or IrRaw or IrDebug or IrPanic: outs.Add(s); break;
             case IrBlock b: outs.Add(LowerBlock(b)); break;
-            case IrUnsafeBlock u: outs.Add(LowerBlock(u.Body)); break;
+            case IrUnsafeBlock u:
+            {
+                bool prev = _inUnsafe; _inUnsafe = true;
+                outs.Add(LowerBlock(u.Body));
+                _inUnsafe = prev;
+                break;
+            }
             case IrThrow: LowerThrow(outs); break;
             case IrDeclVar dv: LowerDecl(dv, outs); break;
             case IrAssign a: LowerAssign(a, outs); break;
@@ -186,7 +200,7 @@ sealed class Ownership(IrModule module)
     void LowerAssign(IrAssign a, List<IrStmt> outs)
     {
         var p = new List<IrStmt>(); var c = new List<(string, IrType)>();
-        if (a.Op == "=" && IsManaged(a.Target.Type))
+        if (a.Op == "=" && IsManaged(a.Target.Type) && !_inUnsafe)
         {
             // Owning store: release the old value, install the new (+1) one.
             IrExpr tgt = Flatten(a.Target, false, p, c);
@@ -476,7 +490,7 @@ sealed class Ownership(IrModule module)
         };
 
         if (IsProducer(e))
-            return owned ? inline : Hoist(inline, e.Type, pre, cl);
+            return owned || _inUnsafe ? inline : Hoist(inline, e.Type, pre, cl);
         return inline;
     }
 
@@ -514,7 +528,7 @@ sealed class Ownership(IrModule module)
     IrExpr Consume(IrExpr e, List<IrStmt> pre, List<(string, IrType)> cl)
     {
         IrExpr s = Flatten(e, true, pre, cl);
-        return IsManaged(e.Type) && !IsProducer(e) ? Retain(s) : s;
+        return IsManaged(e.Type) && !IsProducer(e) && !_inUnsafe ? Retain(s) : s;
     }
 
     IrVar Hoist(IrExpr inline, IrType t, List<IrStmt> pre, List<(string, IrType)> cl)
