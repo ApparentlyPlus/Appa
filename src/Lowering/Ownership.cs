@@ -170,13 +170,13 @@ sealed class Ownership(IrModule module)
 
         if (dv.Init == null)
         {
-            outs.Add(dv);
+            outs.Add(dv);   // emitter NULL/{0}-initialises managed/array locals
             if (managed) RegisterOwner(dv.Name, dv.Type);
             return;
         }
 
         var p = new List<IrStmt>(); var c = new List<(string, IrType)>();
-        IrExpr init = Flatten(dv.Init, false, p, c);
+        IrExpr init = managed ? Consume(dv.Init, p, c) : Flatten(dv.Init, false, p, c);
         outs.AddRange(p);
         outs.Add(new IrDeclVar(dv.Name, dv.Type, init) { Span = dv.Span });
         ReleaseAll(c, outs);
@@ -186,6 +186,19 @@ sealed class Ownership(IrModule module)
     void LowerAssign(IrAssign a, List<IrStmt> outs)
     {
         var p = new List<IrStmt>(); var c = new List<(string, IrType)>();
+        if (a.Op == "=" && IsManaged(a.Target.Type))
+        {
+            // Owning store: release the old value, install the new (+1) one.
+            IrExpr tgt = Flatten(a.Target, false, p, c);
+            IrExpr val = Consume(a.Value, p, c);
+            outs.AddRange(p);
+            string tmp = Tmp("_asg");
+            outs.Add(new IrDeclVar(tmp, a.Target.Type, val));
+            outs.Add(ReleaseStmt(tgt));
+            outs.Add(new IrAssign(tgt, "=", new IrVar(tmp, a.Target.Type)));
+            ReleaseAll(c, outs);
+            return;
+        }
         IrExpr t = Flatten(a.Target, false, p, c);
         IrExpr v = Flatten(a.Value, false, p, c);
         outs.AddRange(p);
@@ -198,7 +211,8 @@ sealed class Ownership(IrModule module)
         var p = new List<IrStmt>(); var c = new List<(string, IrType)>();
         IrExpr e = Flatten(es.Expr, false, p, c);
         outs.AddRange(p);
-        outs.Add(new IrExprStmt(e) { Span = es.Span });
+        if (!(IsProducer(es.Expr) && IsManaged(es.Expr.Type)))
+            outs.Add(new IrExprStmt(e) { Span = es.Span });   // hoisted producers are already released temps
         ReleaseAll(c, outs);
     }
 
@@ -211,7 +225,8 @@ sealed class Ownership(IrModule module)
             return;
         }
         var p = new List<IrStmt>(); var c = new List<(string, IrType)>();
-        IrExpr val = Flatten(rs.Value, false, p, c);
+        bool managed = IsManaged(rs.Value.Type);
+        IrExpr val = managed ? Consume(rs.Value, p, c) : Flatten(rs.Value, false, p, c);
         outs.AddRange(p);
         string tmp = Tmp("_ret");
         outs.Add(new IrDeclVar(tmp, rs.Value.Type, val));
@@ -339,7 +354,13 @@ sealed class Ownership(IrModule module)
             var body = new List<IrStmt>();
             var frame = new Frame { Loop = true };
             _frames.Push(frame);
-            body.Add(new IrRaw($"{fi.ElemType.ToCType()} {fi.Var} = ({av})._[_fi];"));
+            string elem = $"({av})._[_fi]";
+            if (IsManaged(fi.ElemType))
+            {
+                body.Add(new IrRaw($"{fi.ElemType.ToCType()} {fi.Var} = {_retain}({elem});"));
+                RegisterOwner(fi.Var, fi.ElemType);
+            }
+            else body.Add(new IrRaw($"{fi.ElemType.ToCType()} {fi.Var} = {elem};"));
             LowerBodyInto(fi.Body, body);
             ReleaseFrame(frame, body);
             _frames.Pop();
@@ -347,7 +368,7 @@ sealed class Ownership(IrModule module)
             return;
         }
 
-        IrExpr col = Flatten(fi.Collection, false, p, c);
+        IrExpr col = Consume(fi.Collection, p, c);
         outs.AddRange(p);
         bool colManaged = IsManaged(fi.Collection.Type);
         string cv = Tmp("_col");
@@ -358,6 +379,7 @@ sealed class Ownership(IrModule module)
         var f2 = new Frame { Loop = true };
         _frames.Push(f2);
         b2.Add(new IrRaw($"{fi.ElemType.ToCType()} {fi.Var} = {fi.GetCName}({cv}, _fi);"));
+        if (IsManaged(fi.ElemType)) RegisterOwner(fi.Var, fi.ElemType);
         LowerBodyInto(fi.Body, b2);
         ReleaseFrame(f2, b2);
         _frames.Pop();
@@ -453,6 +475,8 @@ sealed class Ownership(IrModule module)
             _ => e   // literals, IrVar, IrSelfExpr, IrArrayLit, IrFuncRef
         };
 
+        if (IsProducer(e))
+            return owned ? inline : Hoist(inline, e.Type, pre, cl);
         return inline;
     }
 
@@ -486,8 +510,12 @@ sealed class Ownership(IrModule module)
         return tgt;
     }
 
-    IrExpr Consume(IrExpr e, List<IrStmt> pre, List<(string, IrType)> cl) =>
-        Flatten(e, true, pre, cl);
+    // A +1-owned value for a consuming position: producers pass through; a managed borrow is retained.
+    IrExpr Consume(IrExpr e, List<IrStmt> pre, List<(string, IrType)> cl)
+    {
+        IrExpr s = Flatten(e, true, pre, cl);
+        return IsManaged(e.Type) && !IsProducer(e) ? Retain(s) : s;
+    }
 
     IrVar Hoist(IrExpr inline, IrType t, List<IrStmt> pre, List<(string, IrType)> cl)
     {
