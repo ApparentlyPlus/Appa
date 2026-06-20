@@ -3,7 +3,7 @@ namespace Appa;
 /// <summary>
 /// Desugaring pass that rewrites high-level convenience nodes into ordinary calls
 /// so the emitter never special-cases them.
-/// Handles string interpolation and switch statements; match is added next.
+/// Lowers string interpolation, switch, and match; after this pass the emitter sees only if/else chains.
 /// </summary>
 internal sealed class Desugar(SymbolTable sym, DiagnosticBag diag) : IrRewriter
 {
@@ -19,12 +19,45 @@ internal sealed class Desugar(SymbolTable sym, DiagnosticBag diag) : IrRewriter
     }
 
     /// <summary>
-    /// Rewrites children first, then lowers switch statements to if/else-if chains.
+    /// Rewrites children first, then lowers switch and match statements to if/else-if chains.
     /// </summary>
     protected override IrStmt RewriteStmt(IrStmt s)
     {
         s = base.RewriteStmt(s);
-        return s is IrSwitch sw ? LowerSwitch(sw) : s;
+        return s switch
+        {
+            IrSwitch sw => LowerSwitch(sw),
+            IrMatch ms => LowerMatch(ms),
+            _ => s
+        };
+    }
+
+    /// <summary>
+    /// Lowers a match to a scrutinee temp followed by a tag-equality if/else-if chain with payload bindings.
+    /// Mirrors the shape of LowerSwitch exactly, using the union's __tag field as the discriminant.
+    /// </summary>
+    private IrStmt LowerMatch(IrMatch ms)
+    {
+        var stmts = new List<IrStmt>();
+        string v = $"_mt{_seq++}";
+        var vr = new IrVar(v, ms.Scrutinee.Type);
+        stmts.Add(new IrDeclVar(v, ms.Scrutinee.Type, ms.Scrutinee));
+
+        IrStmt? chain = ms.Default;
+        for (int i = ms.Cases.Count - 1; i >= 0; i--)
+        {
+            var c = ms.Cases[i];
+            IrExpr cond = new IrBinOp("==",
+                new IrFieldLoad(vr, "__tag", IrType.Int), new IrLitInt(c.VariantIndex), IrType.Bool);
+            var bodyStmts = new List<IrStmt>();
+            foreach (var b in c.Binds)
+                bodyStmts.Add(new IrDeclVar(b.BindName, b.Type, new IrUnionField(vr, c.VariantIndex, b.FieldName, b.Type)));
+            bodyStmts.AddRange(c.Body.Stmts);
+            IrBlock? elseBlk = chain switch { null => null, IrBlock b2 => b2, var x => new IrBlock([x]) };
+            chain = new IrIf(cond, new IrBlock(bodyStmts), elseBlk);
+        }
+        if (chain != null) stmts.Add(chain);
+        return new IrBlock(stmts);
     }
 
     /// <summary>
