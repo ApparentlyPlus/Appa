@@ -3,7 +3,8 @@ namespace Appa;
 /// <summary>
 /// Post-DCE dense naming pass that assigns short sequential identifiers (_g0, _g1, ...) to
 /// every reachable internal class and function, rewrites all call sites and definitions to use them,
-/// and updates Mangler so the emitter only ever sees the short names.
+/// updates Mangler so the emitter only ever sees the short names, and produces a sourcemap from
+/// each dense token back to its original readable name.
 /// Exports, @keep symbols, and native type names keep their readable names.
 /// </summary>
 internal sealed class Densifier(IrModule m)
@@ -28,17 +29,19 @@ internal sealed class Densifier(IrModule m)
     }
 
     /// <summary>
-    /// Runs the dense naming pass and returns a new IrModule with all internal names replaced.
+    /// Runs the dense naming pass and returns the renamed module together with a sourcemap
+    /// that maps each dense token back to its original readable name.
     /// </summary>
-    public IrModule Run()
+    public (IrModule Module, IReadOnlyDictionary<string, string> Sourcemap) Run()
     {
         var fn = new Dictionary<string, string>();
         var classTok = new Dictionary<string, string>();
+        var src = new Dictionary<string, string>();
 
         void MapFn(string old)
         {
             if (fn.ContainsKey(old)) return;
-            string d = Next(); fn[old] = d;
+            string d = Next(); fn[old] = d; src[d] = old;
         }
 
         // Internal free functions and all methods/operators get dense names.
@@ -54,8 +57,8 @@ internal sealed class Densifier(IrModule m)
         // them by the readable gata_<Name> form continues to resolve correctly.
         foreach (var c in m.Classes)
         {
-            if (c.Keep) { classTok[c.Name] = c.CName; continue; }
-            string d = Next(); classTok[c.Name] = d;
+            if (c.Keep) { classTok[c.Name] = c.CName; src[c.CName] = c.CName; continue; }
+            string d = Next(); classTok[c.Name] = d; src[d] = c.CName;
         }
 
         var renamed = new CallRenamer(fn).Run(m);
@@ -75,7 +78,7 @@ internal sealed class Densifier(IrModule m)
                 module.Symbols.Intrinsics[role] = d;
 
         Mangler.SetDense(classTok);
-        return module;
+        return (module, src);
     }
 
     /// <summary>
