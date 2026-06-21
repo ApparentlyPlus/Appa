@@ -14,7 +14,22 @@ internal sealed class Densifier(IrModule m)
     /// <summary>
     /// Returns the next dense token in base-36 sequence, prefixed with _g.
     /// </summary>
-    private string Next() => "_g" + Base36(_seq++);
+    private string Next()
+    {
+        int v = _seq++;
+        const string D = "0123456789abcdefghijklmnopqrstuvwxyz";
+        if (v == 0) return "_g0";
+        Span<char> buffer = stackalloc char[18];
+        int pos = 18;
+        while (v > 0)
+        {
+            buffer[--pos] = D[v % 36];
+            v /= 36;
+        }
+        buffer[pos - 2] = '_';
+        buffer[pos - 1] = 'g';
+        return new string(buffer[(pos - 2)..]);
+    }
 
     /// <summary>
     /// Converts a non-negative integer to a base-36 string using digits 0-9 and letters a-z.
@@ -23,9 +38,14 @@ internal sealed class Densifier(IrModule m)
     {
         const string D = "0123456789abcdefghijklmnopqrstuvwxyz";
         if (v == 0) return "0";
-        var s = "";
-        for (; v > 0; v /= 36) s = D[v % 36] + s;
-        return s;
+        Span<char> buffer = stackalloc char[16];
+        int pos = 16;
+        while (v > 0)
+        {
+            buffer[--pos] = D[v % 36];
+            v /= 36;
+        }
+        return new string(buffer[pos..]);
     }
 
     /// <summary>
@@ -34,9 +54,15 @@ internal sealed class Densifier(IrModule m)
     /// </summary>
     public (IrModule Module, IReadOnlyDictionary<string, string> Sourcemap) Run()
     {
-        var fn = new Dictionary<string, string>();
-        var classTok = new Dictionary<string, string>();
-        var src = new Dictionary<string, string>();
+        int classCount = m.Classes.Count;
+        int totalMembers = 0;
+        for (int i = 0; i < classCount; i++)
+            totalMembers += m.Classes[i].Methods.Count + m.Classes[i].Operators.Count;
+        int fnCapacity = m.FreeFunctions.Count + totalMembers;
+
+        var fn = new Dictionary<string, string>(fnCapacity);
+        var classTok = new Dictionary<string, string>(classCount);
+        var src = new Dictionary<string, string>(fnCapacity + classCount);
 
         void MapFn(string old)
         {
@@ -62,15 +88,38 @@ internal sealed class Densifier(IrModule m)
         }
 
         var renamed = new CallRenamer(fn).Run(m);
-        var module = renamed with
+
+        var freeFunctions = new List<IrFunction>(renamed.FreeFunctions.Count);
+        for (int i = 0; i < renamed.FreeFunctions.Count; i++)
+            freeFunctions.Add(Rename(renamed.FreeFunctions[i], fn));
+
+        var classes = new List<IrClass>(renamed.Classes.Count);
+        for (int i = 0; i < renamed.Classes.Count; i++)
         {
-            FreeFunctions = renamed.FreeFunctions.Select(f => Rename(f, fn)).ToList(),
-            Classes = renamed.Classes.Select(c => c with
+            var c = renamed.Classes[i];
+            var methods = new List<IrFunction>(c.Methods.Count);
+            for (int j = 0; j < c.Methods.Count; j++)
+                methods.Add(Rename(c.Methods[j], fn));
+
+            var operators = new List<IrOperator>(c.Operators.Count);
+            for (int j = 0; j < c.Operators.Count; j++)
+            {
+                var o = c.Operators[j];
+                operators.Add(fn.TryGetValue(o.CName, out var d) ? o with { CName = d } : o);
+            }
+
+            classes.Add(c with
             {
                 CName = classTok[c.Name],
-                Methods = c.Methods.Select(mm => Rename(mm, fn)).ToList(),
-                Operators = c.Operators.Select(o => fn.TryGetValue(o.CName, out var d) ? o with { CName = d } : o).ToList(),
-            }).ToList(),
+                Methods = methods,
+                Operators = operators
+            });
+        }
+
+        var module = renamed with
+        {
+            FreeFunctions = freeFunctions,
+            Classes = classes
         };
 
         foreach (var role in module.Symbols.Intrinsics.Keys.ToList())

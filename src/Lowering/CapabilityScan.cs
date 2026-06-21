@@ -14,10 +14,32 @@ internal sealed class CapabilityScan(IrModule m) : IrWalker
     public bool Input;
     public bool Threads;
 
-    private readonly Dictionary<string, IrFunction> _funcs = new();
-    private readonly Dictionary<string, IrOperator> _ops = new();
-    private readonly HashSet<string> _seen = new();
+    private readonly Dictionary<string, IrFunction> _funcs = new(GetFuncsCapacity(m));
+    private readonly Dictionary<string, IrOperator> _ops = new(GetOpsCapacity(m));
+    private readonly HashSet<string> _seen = [];
     private readonly Queue<IrStmt> _work = new();
+
+    /// <summary>
+    /// Calculates the number of functions in the module to preallocate the dictionary.
+    /// </summary>
+    private static int GetFuncsCapacity(IrModule m)
+    {
+        int methodCount = 0;
+        for (int i = 0; i < m.Classes.Count; i++)
+            methodCount += m.Classes[i].Methods.Count;
+        return methodCount + m.FreeFunctions.Count;
+    }
+
+    /// <summary>
+    /// Calculates the number of operators in the module to preallocate the dictionary.
+    /// </summary>
+    private static int GetOpsCapacity(IrModule m)
+    {
+        int opCount = 0;
+        for (int i = 0; i < m.Classes.Count; i++)
+            opCount += m.Classes[i].Operators.Count;
+        return opCount;
+    }
 
     /// <summary>
     /// Runs the capability scan from all entry points and returns this instance with flags populated.

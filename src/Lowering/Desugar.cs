@@ -75,9 +75,11 @@ internal sealed class Desugar(SymbolTable sym, DiagnosticBag diag) : IrRewriter
         for (int i = sw.Cases.Count - 1; i >= 0; i--)
         {
             var c = sw.Cases[i];
-            IrExpr cond = c.Labels
-                .Select(l => (IrExpr)new IrBinOp("==", vr, l, IrType.Bool))
-                .Aggregate((a, b) => new IrBinOp("||", a, b, IrType.Bool));
+            IrExpr cond = new IrBinOp("==", vr, c.Labels[0], IrType.Bool);
+            for (int j = 1; j < c.Labels.Count; j++)
+            {
+                cond = new IrBinOp("||", cond, new IrBinOp("==", vr, c.Labels[j], IrType.Bool), IrType.Bool);
+            }
             IrBlock? elseBlk = chain switch { null => null, IrBlock b => b, var x => new IrBlock([x]) };
             chain = new IrIf(cond, c.Body, elseBlk);
         }

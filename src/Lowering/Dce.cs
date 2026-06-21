@@ -8,16 +8,23 @@ namespace Appa;
 /// </summary>
 internal sealed class Dce(IrModule m) : IrWalker
 {
-    // Unit identity: a class by its Gata name, a free function tagged "fn:"+cname.
-    private static string Fn(string cname) => "fn:" + cname;
+    private readonly record struct UnitKey(string Name, bool IsFunction);
 
-    private readonly Dictionary<string, string> _unitOf = new();
-    private readonly Dictionary<string, IrClass> _classes = new();
-    private readonly Dictionary<string, IrFunction> _funcs = new();
-    private readonly HashSet<string> _live = [];
-    private readonly Queue<string> _work = new();
+    private readonly Dictionary<string, UnitKey> _unitOf = new(GetUnitOfCapacity(m));
+    private readonly Dictionary<string, IrClass> _classes = new(m.Classes.Count);
+    private readonly Dictionary<string, IrFunction> _funcs = new(m.FreeFunctions.Count);
+    private readonly HashSet<UnitKey> _live = [];
+    private readonly Queue<UnitKey> _work = new();
 
-    private void Root(string unit) { if (_live.Add(unit)) _work.Enqueue(unit); }
+    private static int GetUnitOfCapacity(IrModule m)
+    {
+        int count = m.FreeFunctions.Count;
+        for (int i = 0; i < m.Classes.Count; i++)
+            count += m.Classes[i].Methods.Count + m.Classes[i].Operators.Count;
+        return count;
+    }
+
+    private void Root(UnitKey unit) { if (_live.Add(unit)) _work.Enqueue(unit); }
     private void Ref(string cname) { if (_unitOf.TryGetValue(cname, out var u)) Root(u); }
 
     /// <summary>
@@ -28,12 +35,17 @@ internal sealed class Dce(IrModule m) : IrWalker
         foreach (var c in m.Classes)
         {
             _classes[c.Name] = c;
-            foreach (var mm in c.Methods) _unitOf[mm.CName] = c.Name;
-            foreach (var o in c.Operators) _unitOf[o.CName] = c.Name;
+            var classKey = new UnitKey(c.Name, false);
+            foreach (var mm in c.Methods) _unitOf[mm.CName] = classKey;
+            foreach (var o in c.Operators) _unitOf[o.CName] = classKey;
         }
-        foreach (var f in m.FreeFunctions) { _unitOf[f.CName] = Fn(f.CName); _funcs[f.CName] = f; }
+        foreach (var f in m.FreeFunctions)
+        {
+            _unitOf[f.CName] = new UnitKey(f.CName, true);
+            _funcs[f.CName] = f;
+        }
 
-        foreach (var f in m.FreeFunctions) if (f.IsEntry) Root(Fn(f.CName));
+        foreach (var f in m.FreeFunctions) if (f.IsEntry) Root(new UnitKey(f.CName, true));
         foreach (var p in m.Processes)
             foreach (var t in p.Threads)
                 if (t.EntryFunc is { } e) MarkFunc(e);
@@ -41,25 +53,25 @@ internal sealed class Dce(IrModule m) : IrWalker
             if (m.Symbols.IntrinsicOrNull(role) is { } cn) Ref(cn);
 
         // @keep is the explicit escape hatch for symbols reachable only through native text.
-        foreach (var c in m.Classes) if (c.Keep) Root(c.Name);
-        foreach (var f in m.FreeFunctions) if (f.Annotations.Any(a => a is KeepAnnotation)) Root(Fn(f.CName));
+        foreach (var c in m.Classes) if (c.Keep) Root(new UnitKey(c.Name, false));
+        foreach (var f in m.FreeFunctions) if (f.Annotations.Any(a => a is KeepAnnotation)) Root(new UnitKey(f.CName, true));
 
         while (_work.Count > 0) ScanUnit(_work.Dequeue());
 
         return m with
         {
-            Classes = m.Classes.Where(c => _live.Contains(c.Name)).ToList(),
-            FreeFunctions = m.FreeFunctions.Where(f => f.IsEntry || _live.Contains(Fn(f.CName))).ToList(),
+            Classes = m.Classes.Where(c => _live.Contains(new UnitKey(c.Name, false))).ToList(),
+            FreeFunctions = m.FreeFunctions.Where(f => f.IsEntry || _live.Contains(new UnitKey(f.CName, true))).ToList(),
         };
     }
 
     /// <summary>
     /// Dispatches a live unit token to MarkClass or MarkFunc based on its prefix.
     /// </summary>
-    private void ScanUnit(string unit)
+    private void ScanUnit(UnitKey unit)
     {
-        if (unit.StartsWith("fn:")) { if (_funcs.TryGetValue(unit[3..], out var f)) MarkFunc(f); return; }
-        if (_classes.TryGetValue(unit, out var c)) MarkClass(c);
+        if (unit.IsFunction) { if (_funcs.TryGetValue(unit.Name, out var f)) MarkFunc(f); return; }
+        if (_classes.TryGetValue(unit.Name, out var c)) MarkClass(c);
     }
 
     /// <summary>
@@ -100,7 +112,7 @@ internal sealed class Dce(IrModule m) : IrWalker
     {
         switch (t)
         {
-            case IrClassRef cr: Root(cr.ClassName); break;
+            case IrClassRef cr: Root(new UnitKey(cr.ClassName, false)); break;
             case IrPtrType p: MarkType(p.Inner); break;
             case IrArrayType a: MarkType(a.Elem); break;
             case IrResultType r: MarkType(r.Inner); break;
@@ -132,8 +144,8 @@ internal sealed class Dce(IrModule m) : IrWalker
             case IrInstanceCall ic: Ref(ic.CName); break;
             case IrThrowsCall tc: Ref(tc.CName); break;
             case IrThrowsInstanceCall ti: Ref(ti.CName); break;
-            case IrNew n: Root(n.ClassName); break;
-            case IrNewInit ni: Root(ni.ClassName); Ref(ni.AddCName); break;
+            case IrNew n: Root(new UnitKey(n.ClassName, false)); break;
+            case IrNewInit ni: Root(new UnitKey(ni.ClassName, false)); Ref(ni.AddCName); break;
             case IrCast c: MarkType(c.To); break;
             case IrArrayLit al: MarkType(al.ArrType); break;
             case IrSizeof so: MarkType(so.Of); break;
