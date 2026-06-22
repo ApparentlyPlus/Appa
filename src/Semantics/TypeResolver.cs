@@ -60,7 +60,7 @@ internal sealed class TypeResolver(
 
     // Every distinct function-pointer signature used; the emitter stamps one typedef per signature.
     private readonly List<IrFuncPtrType> _funcPtrTypes = [];
-    private readonly Dictionary<FuncPtrKey, IrFuncPtrType> _funcPtrSeen = new();
+    private readonly Dictionary<FuncPtrKey, IrFuncPtrType> _funcPtrSeen = [];
 
     /// <summary>
     /// Returns or creates a function-pointer type for the given return type and parameter list.
@@ -76,7 +76,7 @@ internal sealed class TypeResolver(
     }
 
     // Generic free-function templates; each distinct instantiation is stamped once.
-    private readonly Dictionary<string, (FuncDecl Decl, string File, string Context)> _funcTemplates = new();
+    private readonly Dictionary<string, (FuncDecl Decl, string File, string Context)> _funcTemplates = [];
     private readonly Queue<(FuncDecl Decl, string File, string Context, Dictionary<string, string> Binds, string Mangled)> _genericQueue = new();
     private readonly HashSet<string> _genericSeen = [];
     private int _labelSeq;
@@ -886,9 +886,9 @@ internal sealed class TypeResolver(
         /// <summary>
         /// Constructs a root scope with no parent.
         /// </summary>
-        public ScopeStack() { _parent = null; _vars = new(); _refs = new(); }
+        public ScopeStack() { _parent = null; _vars = []; _refs = []; }
 
-        private ScopeStack(ScopeStack parent) { _parent = parent; _vars = new(); _refs = new(); }
+        private ScopeStack(ScopeStack parent) { _parent = parent; _vars = []; _refs = []; }
 
         /// <summary>
         /// Creates a child scope nested inside this one.
