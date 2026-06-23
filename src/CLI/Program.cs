@@ -1114,5 +1114,243 @@ static void RunQemu(string isoPath, string artifactsDir, bool headless, int? tim
 
 #endregion
 
-// Stub - implemented in subsequent commit.
-static void RunSetup(bool isUpdate) => throw new NotImplementedException();
+#region appa setup / appa update
+
+/// <summary>
+/// Downloads and installs (or re-installs) the GatOS toolchain, libgata, template, and appa binary.
+/// </summary>
+static void RunSetup(bool isUpdate)
+{
+    Log.Info(isUpdate
+        ? "Updating appa toolchain, libgata, and template (overwriting existing)..."
+        : "Setting up appa toolchain and resources...");
+    Log.Info($"Installation directory: {AppaPaths.Root}");
+
+    // Re-running setup re-downloads everything. If already installed, confirm first
+    // (interactive only; `update` is always intentional).
+    if (!isUpdate && Directory.Exists(AppaPaths.ToolchainDir) && !Console.IsInputRedirected)
+    {
+        Console.Write($"{C.YELLOW}appa is already installed at {AppaPaths.Root}. Re-download and overwrite? [y/N]: {C.NC}");
+        if (Console.ReadLine()?.Trim().ToLowerInvariant() is not ("y" or "yes"))
+        { Log.Info("Setup cancelled - existing install left untouched."); return; }
+    }
+
+    bool isWin = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+    bool isMac = RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
+
+    // Ask about PATH first (setup only, interactive only). Putting appa on PATH is a
+    // privileged, system-wide change, so we decide up front: if the user wants it but
+    // we're not elevated, tell them to re-run with privileges and continue without it.
+    bool wantsPath = false;
+    if (!isUpdate && !Console.IsInputRedirected)
+    {
+        Console.Write($"{C.CYAN}Add appa to your PATH so you can run it from anywhere? [y/N]: {C.NC}");
+        wantsPath = Console.ReadLine()?.Trim().ToLowerInvariant() is "y" or "yes";
+        if (wantsPath && !Environment.IsPrivilegedProcess)
+        {
+            Log.Warn("Adding appa to PATH needs elevated privileges.");
+            Log.Info(isWin
+                ? "Re-run 'appa setup' from an Administrator terminal."
+                : "Re-run 'sudo appa setup'.");
+            Environment.Exit(1);
+        }
+    }
+
+    Directory.CreateDirectory(AppaPaths.ToolchainDir);
+    Directory.CreateDirectory(AppaPaths.LibgataDir);
+    Directory.CreateDirectory(AppaPaths.TemplateDir);
+    Directory.CreateDirectory(AppaPaths.BinDir);
+
+    string tcZip = Path.Combine(Path.GetTempPath(), "appa_tc.zip");
+    DownloadWithProgress(Urls.Toolchain(), tcZip, "toolchain");
+    Log.Step("Extracting toolchain...");
+    System.IO.Compression.ZipFile.ExtractToDirectory(tcZip, AppaPaths.ToolchainDir, true);
+    File.Delete(tcZip);
+
+    // The libgata zip carries two sibling folders: libgata/ (stdlib) and envs/ (env
+    // templates for `appa init`), so it extracts into the appa root.
+    string libZip = Path.Combine(Path.GetTempPath(), "appa_libgata.zip");
+    DownloadWithProgress(Urls.Libgata, libZip, "libgata");
+    Log.Step("Extracting libgata...");
+    System.IO.Compression.ZipFile.ExtractToDirectory(libZip, AppaPaths.Root, true);
+    File.Delete(libZip);
+
+    string tmplZip = Path.Combine(Path.GetTempPath(), "appa_template.zip");
+    DownloadWithProgress(Urls.Template, tmplZip, "GatOS template");
+    Log.Step("Extracting GatOS template...");
+    ExtractTemplate(tmplZip, AppaPaths.TemplateDir);
+    File.Delete(tmplZip);
+
+    if (!isWin)
+    {
+        Log.Step("Setting executable permissions...");
+        Exec("chmod", $"-R +x \"{AppaPaths.PlatformToolchain}\"", null, silent: true);
+    }
+
+    if (isUpdate)
+        UpdateAppaBinary(isWin, isMac);
+    else
+        InstallSelf(isWin);
+
+    if (wantsPath && Environment.IsPrivilegedProcess)
+        AddToPath(isWin);
+
+    Log.Ok(isUpdate
+        ? "Update complete. Toolchain, libgata, template, and appa are now up to date."
+        : "Setup complete. Run 'appa init <project>' to create a new project.");
+}
+
+/// <summary>
+/// Adds the appa bin directory to the system PATH.
+/// Unix creates a symlink in /usr/local/bin; Windows appends to the machine PATH variable.
+/// Requires elevated privileges (checked by caller).
+/// </summary>
+static void AddToPath(bool isWin)
+{
+    try
+    {
+        if (isWin)
+        {
+            string bin = AppaPaths.BinDir;
+            string cur = Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.Machine) ?? "";
+            bool present = cur.Split(';', StringSplitOptions.RemoveEmptyEntries)
+                              .Any(p => string.Equals(p.TrimEnd('\\'), bin.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase));
+            if (present) { Log.Info("appa's bin directory is already on PATH."); return; }
+            Environment.SetEnvironmentVariable("PATH", cur.TrimEnd(';') + ";" + bin, EnvironmentVariableTarget.Machine);
+            Log.Ok($"Added {bin} to the system PATH. Open a new terminal for it to take effect.");
+        }
+        else
+        {
+            const string link = "/usr/local/bin/appa";
+            var r = Exec("ln", $"-sf \"{AppaPaths.AppaBin}\" \"{link}\"", null, silent: true, capture: true);
+            if (r.ExitCode == 0)
+                Log.Ok($"Linked {link} → {AppaPaths.AppaBin}. 'appa' is now on your PATH.");
+            else
+                Log.Warn($"Could not create symlink {link}: {r.Stderr.Trim()}");
+        }
+    }
+    catch (Exception ex) { Log.Warn($"Could not add appa to PATH: {ex.Message}"); }
+}
+
+/// <summary>
+/// Copies the currently-running appa binary into the bin dir (used by `appa setup`).
+/// </summary>
+static void InstallSelf(bool isWin)
+{
+    string self = Environment.ProcessPath ?? "";
+    if (string.IsNullOrEmpty(self) || !File.Exists(self))
+    { Log.Warn("Could not locate the running appa binary to install."); return; }
+
+    string target = AppaPaths.AppaBin;
+    if (string.Equals(Path.GetFullPath(self), Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase))
+        return;
+
+    try
+    {
+        Log.Step("Installing appa binary...");
+        File.Copy(self, target, true);
+        if (!isWin) Exec("chmod", $"+x \"{target}\"", null, silent: true);
+        Log.Info($"appa installed to {target}");
+    }
+    catch (Exception ex) { Log.Warn($"Could not install appa binary: {ex.Message}"); }
+}
+
+/// <summary>
+/// Downloads the latest appa binary and swaps it in after this process exits.
+/// The replacement is deferred to a detached process because the installed binary
+/// may be the one currently running.
+/// </summary>
+static void UpdateAppaBinary(bool isWin, bool isMac)
+{
+    string target = AppaPaths.AppaBin;
+    string newBin = Path.Combine(Path.GetTempPath(), isWin ? "appa_new.exe" : "appa_new");
+
+    try { DownloadWithProgress(Urls.AppaBinary(), newBin, "appa"); }
+    catch (Exception ex) { Log.Warn($"Could not download new appa binary: {ex.Message}"); return; }
+
+    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+
+    try
+    {
+        if (isWin)
+        {
+            var psi = new ProcessStartInfo("cmd.exe",
+                $"/c timeout /t 2 /nobreak >nul & move /Y \"{newBin}\" \"{target}\"")
+            { UseShellExecute = false, CreateNoWindow = true };
+            Process.Start(psi);
+        }
+        else
+        {
+            string script = $"sleep 2; mv -f '{newBin}' '{target}'; chmod +x '{target}'; ";
+            if (isMac) script += $"xattr -d com.apple.quarantine '{target}' 2>/dev/null; ";
+            script += "true";
+            var psi = new ProcessStartInfo("/bin/sh") { UseShellExecute = false, CreateNoWindow = true };
+            psi.ArgumentList.Add("-c");
+            psi.ArgumentList.Add(script);
+            Process.Start(psi);
+        }
+        Log.Info("Downloaded the latest appa; it will replace the installed binary momentarily.");
+    }
+    catch (Exception ex) { Log.Warn($"Could not schedule appa self-update: {ex.Message}"); }
+}
+
+/// <summary>
+/// Downloads a URL to a local file, printing a progress bar or byte counter while downloading.
+/// </summary>
+static void DownloadWithProgress(string url, string dest, string name)
+{
+    using var client = new System.Net.Http.HttpClient();
+    client.Timeout = TimeSpan.FromMinutes(10);
+    using var response = client.GetAsync(url, System.Net.Http.HttpCompletionOption.ResponseHeadersRead).Result;
+    response.EnsureSuccessStatusCode();
+    long? total = response.Content.Headers.ContentLength;
+    using var stream  = response.Content.ReadAsStream();
+    using var outFile = File.Create(dest);
+    var buffer        = new byte[81920];
+    const string spin = @"|/-\";
+    long downloaded   = 0;
+    int  read, ticks  = 0;
+    while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
+    {
+        outFile.Write(buffer, 0, read);
+        downloaded += read;
+        // A known, positive Content-Length draws a percentage bar; an absent or
+        // zero-length total (e.g. GitHub archive endpoints) shows a live byte counter.
+        if (total is > 0)
+        {
+            int pct    = (int)(downloaded * 100 / total.Value);
+            int filled = pct * 40 / 100;
+            string bar = new string('=', filled) + new string(' ', 40 - filled);
+            Out.Redraw($"{name}  |{bar}| {pct}% ({downloaded/1048576.0:F1}/{total.Value/1048576.0:F1} MB)");
+        }
+        else
+            Out.Redraw($"{name}  {spin[ticks++ % 4]} {downloaded/1048576.0:F1} MB");
+    }
+    Console.WriteLine();
+}
+
+/// <summary>
+/// Extracts the GatOS template zip into destDir, flattening GitHub's single wrapper
+/// folder and keeping only its top-level directories (src/, targets/).
+/// </summary>
+static void ExtractTemplate(string zipPath, string destDir)
+{
+    string staging = Path.Combine(Path.GetTempPath(), $"appa-tmpl-stage-{Environment.ProcessId}");
+    if (Directory.Exists(staging)) Directory.Delete(staging, true);
+    System.IO.Compression.ZipFile.ExtractToDirectory(zipPath, staging);
+
+    var entries = Directory.GetFileSystemEntries(staging);
+    string root = entries.Length == 1 && Directory.Exists(entries[0]) ? entries[0] : staging;
+
+    if (Directory.Exists(destDir)) Directory.Delete(destDir, true);
+    Directory.CreateDirectory(destDir);
+    foreach (var dir in Directory.GetDirectories(root))
+    {
+        string dst = Path.Combine(destDir, Path.GetFileName(dir));
+        Directory.CreateDirectory(dst);
+        CopyDirectory(dir, dst);
+    }
+    Directory.Delete(staging, true);
+}
+
+#endregion
