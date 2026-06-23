@@ -94,7 +94,7 @@ static void RunInit(string[] args)
 static void RunBuild(string[] args)
 {
     string? manifestArg = null, envOverride = null, entryOverride = null, stdlibOverride = null;
-    bool warnAsError = false, doRun = false, headless = false, pureTranspile = false;
+    bool warnAsError = false, doRun = false, headless = false, pureTranspile = false, emitSourcemap = false;
     int? timeout = null;
 
     for (int i = 0; i < args.Length; i++)
@@ -103,10 +103,11 @@ static void RunBuild(string[] args)
             case "--env"     when i+1 < args.Length: envOverride    = args[++i]; break;
             case "--entry"   when i+1 < args.Length: entryOverride  = args[++i]; break;
             case "--stdlib"  when i+1 < args.Length: stdlibOverride = args[++i]; break;
-            case "--werror":         warnAsError   = true; break;
-            case "--run":            doRun         = true; break;
-            case "--headless":       headless      = true; break;
-            case "--pure-transpile": pureTranspile = true; break;
+            case "--werror":          warnAsError   = true; break;
+            case "--run":             doRun         = true; break;
+            case "--headless":        headless      = true; break;
+            case "--pure-transpile":  pureTranspile = true; break;
+            case "--emit-sourcemap":  emitSourcemap = true; break;
             default:
                 if (args[i].StartsWith("--timeout=")) timeout = ParseTimeout(args[i]["--timeout=".Length..]);
                 else if (args[i].StartsWith("--")) Fail($"unknown option '{args[i]}'");
@@ -153,7 +154,7 @@ static void RunBuild(string[] args)
     var inputFiles = new List<string> { Path.GetFullPath(envPath), Path.GetFullPath(entryPath) };
     var (programs, attempted, imports, diag) = Transpile(inputFiles, projectRoot, stdlibDir!);
     var visible = VisibleModules(imports);
-    var (module, _, caps) = BuildModule(programs, visible, manifest?.Mode ?? Mode.Debug, diag);
+    var (module, sourcemap, caps) = BuildModule(programs, visible, manifest?.Mode ?? Mode.Debug, diag);
 
     ValidateEnvironment(programs, diag);
     ValidateFloor(module, diag);
@@ -177,12 +178,14 @@ static void RunBuild(string[] args)
     {
         string outDir = Path.Combine(projectRoot, "transpilation");
         WriteOutputs(output, outDir);
+        if (emitSourcemap) WriteSourcemap(sourcemap, outDir);
         Console.WriteLine();
         Console.WriteLine($"{C.BOLD}Finished{C.NC} {C.DIM}→{C.NC} {outDir}{Path.DirectorySeparatorChar}");
         foreach (var f in output) Out.Child($"{C.DIM}{Path.Combine("transpilation", f.Name)}{C.NC}");
         return;
     }
 
+    if (emitSourcemap) WriteSourcemap(sourcemap, projectRoot);
     var defines = CapabilityDefines(caps, manifest!);
     BuildGatOSImage(output, manifest!, projectRoot, defines, CapabilitiesNote(caps, manifest!), doRun, headless, timeout);
 }
@@ -275,6 +278,23 @@ static int ParseTimeout(string val)
     return m.Groups[2].Value switch { "m" => n * 60, "h" => n * 3600, _ => n };
 }
 
+// The sourcemap: dense machine name to original readable C name, written as JSON by hand
+// (no reflection-based serializer, AOT-safe).
+/// <summary>
+/// Writes the dense-to-readable name sourcemap as sourcemap.json in the given directory.
+/// </summary>
+static void WriteSourcemap(IReadOnlyDictionary<string, string> map, string dir)
+{
+    if (map.Count == 0) return;
+    Directory.CreateDirectory(dir);
+    var sb = new System.Text.StringBuilder("{\n");
+    var items = map.OrderBy(kv => kv.Key, StringComparer.Ordinal).ToList();
+    for (int i = 0; i < items.Count; i++)
+        sb.Append($"  \"{items[i].Key}\": \"{items[i].Value}\"{(i < items.Count - 1 ? "," : "")}\n");
+    sb.Append("}\n");
+    File.WriteAllText(Path.Combine(dir, "sourcemap.json"), sb.ToString());
+}
+
 /// <summary>
 /// Reports a fatal configuration error and exits.
 /// </summary>
@@ -300,6 +320,7 @@ static void PrintHelp() => Console.WriteLine($$"""
   --pure-transpile                Emit C and stop (file-level: needs --env + --entry)
   --env <env.g>                   Environment file (overrides discovery; required for --pure-transpile)
   --entry <file.g>                Entry source (overrides discovery; required for --pure-transpile)
+  --emit-sourcemap                 Write sourcemap.json (dense name → readable name)
   --run / --headless / --timeout=<Xs>   Launch QEMU after a GatOS image build
 
   A project build auto-discovers its environment (the @environment file in the
