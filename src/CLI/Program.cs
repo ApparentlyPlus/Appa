@@ -10,12 +10,12 @@ try
 {
     switch (args[0])
     {
-        case "setup":  RunSetup(isUpdate: false); break;
-        case "update": RunSetup(isUpdate: true);  break;
-        case "init":   RunInit(args[1..]);         break;
-        case "build":  RunBuild(args[1..]);        break;
+        case "setup": RunSetup(isUpdate: false); break;
+        case "update": RunSetup(isUpdate: true); break;
+        case "init": RunInit(args[1..]); break;
+        case "build": RunBuild(args[1..]); break;
         case "--help":
-        case "-h":     PrintHelp();               break;
+        case "-h": PrintHelp(); break;
         default:
             Log.Error($"Unknown command '{args[0]}'");
             PrintHelp();
@@ -36,6 +36,10 @@ catch (Exception ex)
 
 #region appa init
 
+/// <summary>
+/// Scaffolds a new GatOS project: a .gconf, an env.g copied from the installed
+/// environment, and a starter src/main.g, then prints a short file tree.
+/// </summary>
 static void RunInit(string[] args)
 {
     string name = args.ElementAtOrDefault(0) ?? "myproject";
@@ -57,8 +61,8 @@ static void RunInit(string[] args)
     var entries = new (string Path, string Desc)[]
     {
         ($"{name}.gconf", "build configuration"),
-        ("env.g",         "platform environment (@environment)"),
-        ("src/main.g",    "entry point"),
+        ("env.g", "platform environment (@environment)"),
+        ("src/main.g", "entry point"),
     };
     int width = entries.Max(e => e.Path.Length);
 
@@ -91,6 +95,10 @@ static void RunInit(string[] args)
 // project dir) and its entry (src/main.g). --env/--entry also work standalone
 // against a real manifest project, to point at a shared environment file without
 // copying it into every project dir.
+/// <summary>
+/// Parses build arguments, transpiles and lowers the project, then dispatches to
+/// the GatOS image builder or the hosted pure-transpile path.
+/// </summary>
 static void RunBuild(string[] args)
 {
     string? manifestArg = null, envOverride = null, entryOverride = null, stdlibOverride = null;
@@ -100,14 +108,14 @@ static void RunBuild(string[] args)
     for (int i = 0; i < args.Length; i++)
         switch (args[i])
         {
-            case "--env"     when i+1 < args.Length: envOverride    = args[++i]; break;
-            case "--entry"   when i+1 < args.Length: entryOverride  = args[++i]; break;
-            case "--stdlib"  when i+1 < args.Length: stdlibOverride = args[++i]; break;
-            case "--werror":          warnAsError   = true; break;
-            case "--run":             doRun         = true; break;
-            case "--headless":        headless      = true; break;
-            case "--pure-transpile":  pureTranspile = true; break;
-            case "--emit-sourcemap":  emitSourcemap = true; break;
+            case "--env" when i+1 < args.Length: envOverride = args[++i]; break;
+            case "--entry" when i+1 < args.Length: entryOverride = args[++i]; break;
+            case "--stdlib" when i+1 < args.Length: stdlibOverride = args[++i]; break;
+            case "--werror": warnAsError = true; break;
+            case "--run": doRun = true; break;
+            case "--headless": headless = true; break;
+            case "--pure-transpile": pureTranspile = true; break;
+            case "--emit-sourcemap": emitSourcemap = true; break;
             default:
                 if (args[i].StartsWith("--timeout=")) timeout = ParseTimeout(args[i]["--timeout=".Length..]);
                 else if (args[i].StartsWith("--")) Fail($"unknown option '{args[i]}'");
@@ -122,9 +130,9 @@ static void RunBuild(string[] args)
         try
         {
             string? manifestPath =
-                manifestArg == null           ? ManifestReader.Discover(Directory.GetCurrentDirectory())
-              : Directory.Exists(manifestArg) ? ManifestReader.Discover(manifestArg)
-              :                                 manifestArg;
+                manifestArg == null ? ManifestReader.Discover(Directory.GetCurrentDirectory())
+                : Directory.Exists(manifestArg) ? ManifestReader.Discover(manifestArg)
+                : manifestArg;
             if (manifestPath != null) manifest = ManifestReader.Load(manifestPath);
         }
         catch (ManifestError e) { Fail(e.Message); }
@@ -134,9 +142,9 @@ static void RunBuild(string[] args)
     else if (manifestArg != null)
         Log.Warn($"project argument '{manifestArg}' is ignored with --pure-transpile --env --entry (loose-file mode discovers nothing from a project)");
 
-    string? envPath   = envOverride   ?? (manifest != null ? DiscoverEnv(manifest.Dir)   : null);
+    string? envPath = envOverride ?? (manifest != null ? DiscoverEnv(manifest.Dir) : null);
     string? entryPath = entryOverride ?? (manifest != null ? DiscoverEntry(manifest.Dir) : null);
-    if (envPath   == null) Fail("no environment found - mark one project file @environment, or pass --env");
+    if (envPath == null) Fail("no environment found - mark one project file @environment, or pass --env");
     if (entryPath == null) Fail("no entry point - expected src/main.g, or pass --entry");
 
     string projectRoot = manifest?.Dir ?? Path.GetDirectoryName(Path.GetFullPath(entryPath))!;
@@ -211,7 +219,7 @@ static string? DiscoverEnv(string projectRoot)
 }
 
 /// <summary>
-/// Returns the entry point path (src/main.g convention), or null if it doesn't exist.
+/// Returns the entry point path (src/main.g convention), or null if it does not exist.
 /// </summary>
 static string? DiscoverEntry(string projectRoot)
 {
@@ -234,7 +242,7 @@ static string? FindLibgata()
 /// Reports a diagnostic and returns an empty string if the module file is missing.
 /// </summary>
 static string ResolveLibgata(string name, string libgataDir, string fromFile,
-                             DiagnosticBag diag, Span span)
+                             DiagnosticBag diag, TextSpan span)
 {
     string candidate = Path.Combine(libgataDir, name + ".g");
     if (File.Exists(candidate)) return candidate;
@@ -253,6 +261,23 @@ static void WriteOutputs(IReadOnlyList<OutputFile> files, string dir)
 {
     Directory.CreateDirectory(dir);
     foreach (var f in files) File.WriteAllText(Path.Combine(dir, f.Name), f.Content);
+}
+
+// The sourcemap: dense machine name to original readable C name, written as JSON by hand
+// (no reflection-based serializer, AOT-safe).
+/// <summary>
+/// Writes the dense-to-readable name sourcemap as sourcemap.json in the given directory.
+/// </summary>
+static void WriteSourcemap(IReadOnlyDictionary<string, string> map, string dir)
+{
+    if (map.Count == 0) return;
+    Directory.CreateDirectory(dir);
+    var sb = new System.Text.StringBuilder("{\n");
+    var items = map.OrderBy(kv => kv.Key, StringComparer.Ordinal).ToList();
+    for (int i = 0; i < items.Count; i++)
+        sb.Append($"  \"{items[i].Key}\": \"{items[i].Value}\"{(i < items.Count - 1 ? "," : "")}\n");
+    sb.Append("}\n");
+    File.WriteAllText(Path.Combine(dir, "sourcemap.json"), sb.ToString());
 }
 
 /// <summary>
@@ -278,23 +303,6 @@ static int ParseTimeout(string val)
     return m.Groups[2].Value switch { "m" => n * 60, "h" => n * 3600, _ => n };
 }
 
-// The sourcemap: dense machine name to original readable C name, written as JSON by hand
-// (no reflection-based serializer, AOT-safe).
-/// <summary>
-/// Writes the dense-to-readable name sourcemap as sourcemap.json in the given directory.
-/// </summary>
-static void WriteSourcemap(IReadOnlyDictionary<string, string> map, string dir)
-{
-    if (map.Count == 0) return;
-    Directory.CreateDirectory(dir);
-    var sb = new System.Text.StringBuilder("{\n");
-    var items = map.OrderBy(kv => kv.Key, StringComparer.Ordinal).ToList();
-    for (int i = 0; i < items.Count; i++)
-        sb.Append($"  \"{items[i].Key}\": \"{items[i].Value}\"{(i < items.Count - 1 ? "," : "")}\n");
-    sb.Append("}\n");
-    File.WriteAllText(Path.Combine(dir, "sourcemap.json"), sb.ToString());
-}
-
 /// <summary>
 /// Reports a fatal configuration error and exits.
 /// </summary>
@@ -305,6 +313,9 @@ static void Fail(string message) { Log.Error(message); Environment.Exit(1); }
 
 #region Help
 
+/// <summary>
+/// Prints the top-level usage text: commands, build options, and examples.
+/// </summary>
 static void PrintHelp() => Console.WriteLine($$"""
 {{C.GREEN}}appa{{C.NC}} - the Gata language compiler for GatOS
 
@@ -320,7 +331,7 @@ static void PrintHelp() => Console.WriteLine($$"""
   --pure-transpile                Emit C and stop (file-level: needs --env + --entry)
   --env <env.g>                   Environment file (overrides discovery; required for --pure-transpile)
   --entry <file.g>                Entry source (overrides discovery; required for --pure-transpile)
-  --emit-sourcemap                 Write sourcemap.json (dense name → readable name)
+  --emit-sourcemap                 Write sourcemap.json (dense name -> readable name)
   --run / --headless / --timeout=<Xs>   Launch QEMU after a GatOS image build
 
   A project build auto-discovers its environment (the @environment file in the
@@ -334,135 +345,23 @@ static void PrintHelp() => Console.WriteLine($$"""
 
 #endregion
 
-#region Templates and flags
-
-// Files written by `appa init`.
-static class Templates
-{
-    /// <summary>
-    /// Returns the .gconf file content for a new GatOS project.
-    /// </summary>
-    public static string GatOSGconf(string name) => $"""
-<!--
-  TargetBackend:        GatOS | Hosted
-  BuildMode:            Debug | Release
-  OutputType:           Framebuffer | Serial
-  KeyboardSupport:      Default (PS/2) | External (+ USB) | Hotplug (+ hotplug)
-  CapabilityDiscovery:  On (infer mem/input/threads from the program, default)
-                        | Off (assume all three - escape valve for a native blind spot)
--->
-<appa>
-    <ProjectName>{name}</ProjectName>
-    <TargetBackend>GatOS</TargetBackend>
-    <BuildMode>Debug</BuildMode>
-    <OutputType>Framebuffer</OutputType>
-    <KeyboardSupport>Default</KeyboardSupport>
-    <CapabilityDiscovery>On</CapabilityDiscovery>
-</appa>
-
-""";
-
-    /// <summary>
-    /// Returns the src/main.g starter file content for a new GatOS project.
-    /// </summary>
-    public static string GatOSMain(string name) => $$"""
-import LibGata;
-import Collections;
-
-kernel {
-    entry func Main() {
-        Misc.PrintBanner();
-        Console.PrintLine("Hello from {{name}}!");
-    }
-}
-
-user {
-    foreground process App {
-        thread Main {
-            entry func Run() {
-                Console.PrintLine("Hello from userspace!");
-            }
-        }
-    }
-}
-
-""";
-}
-
-// The GatOS gcc flag set. appa owns these - a .gconf carries none of them. This must
-// match the GatOS build.py exactly: kernel code uses the FPU freely (lazy save/restore
-// handles it), and SSE is disabled ONLY in the fixed set of files whose code runs from
-// interrupt context (where touching XMM would corrupt the interrupted thread's state).
-static class GatosFlags
-{
-    public static readonly string[] Common =
-        ["-m64", "-ffreestanding", "-nostdlib", "-fno-pic", "-mcmodel=kernel",
-         "-mno-red-zone", "-ffunction-sections", "-fdata-sections"];
-
-    // Applied ONLY to the interrupt-path files below - never to ordinary kernel code.
-    public static readonly string[] FpuRestrictions =
-        ["-mno-sse", "-mno-sse2", "-mno-mmx", "-mno-80387"];
-
-    public static readonly HashSet<string> InterruptPath = new(StringComparer.Ordinal)
-    {
-        "arch/x86_64/cpu/interrupts.c",
-        "kernel/sys/scheduler.c",
-        "kernel/sys/timers.c",
-        "kernel/drivers/keyboard.c",
-        "kernel/drivers/xhci.c",
-        "tests/test_timers.c",
-        "kernel/memory/vmm.c",
-        "kernel/memory/pmm.c",
-        "klibc/avl.c",
-    };
-
-    /// <summary>
-    /// Returns the optimization flags for the given build mode.
-    /// </summary>
-    public static string[] For(Mode mode) => mode == Mode.Release
-        ? ["-O3", "-fpredictive-commoning", "-fstrict-aliasing",
-           "-fno-delete-null-pointer-checks", "-fomit-frame-pointer", "-fno-stack-protector"]
-        : [];
-}
-
-#endregion
-
-#region Log
-
-// Plain, flush-left narration for setup/update/init.
-static class Log
-{
-    /// <summary>Prints an informational message.</summary>
-    public static void Info(string m)  => Console.WriteLine(m);
-    /// <summary>Prints a success message with a green checkmark.</summary>
-    public static void Ok(string m)    => Console.WriteLine($"{C.GREEN}✓{C.NC} {m}");
-    /// <summary>Prints a step message in cyan.</summary>
-    public static void Step(string m)  => Console.WriteLine($"{C.CYAN}{m}{C.NC}");
-    /// <summary>Prints a warning message.</summary>
-    public static void Warn(string m)  => Console.WriteLine($"{C.YELLOW}warning:{C.NC} {m}");
-    /// <summary>Prints an error message and optional hint to stderr.</summary>
-    public static void Error(string m, string? hint = null)
-    {
-        Console.Error.WriteLine($"{C.RED}error:{C.NC} {m}");
-        if (hint != null) Console.Error.WriteLine($"  hint: {hint}");
-    }
-}
-
-#endregion
-
 #region Build pipeline
 
 // The semantic pipeline: AST programs to a fully lowered IrModule, ready to print.
 // Each stage is a total transform - monomorphize generics, collect declarations,
 // resolve+typecheck into typed IR, then the IR-to-IR lowering passes that peel ARC and
 // desugaring out of the emitter. Front-end orchestration stays in RunBuild.
+/// <summary>
+/// Runs the full front-end and lowering pipeline over a parsed program set and
+/// returns the lowered module, its name sourcemap, and the scanned capability set.
+/// </summary>
 static (IrModule Module, IReadOnlyDictionary<string, string> Sourcemap, CapabilityScan Caps) BuildModule(
     List<(string path, Appa.Program prog)> programs,
     Dictionary<string, HashSet<string>> visible, Mode mode, DiagnosticBag diag)
 {
     Mangler.ResetDense();
     Mangler.ResetGenericDisplay();
-    new Monomorphizer(diag).Process(programs);
+    new Monomorphizer(diag).Process(programs.Select(t => (t.prog, t.path)).ToList());
     var collected = new SymbolCollector(diag).Collect(programs.Select(t => (t.path, t.prog)).ToList());
     var module = new TypeResolver(collected.Sym, collected.HasInit,
                                   collected.PreDefinedStructs, collected.OpaqueFieldClasses, visible,
@@ -485,18 +384,22 @@ static (IrModule Module, IReadOnlyDictionary<string, string> Sourcemap, Capabili
 // Parse each file once and walk the module graph from its parsed import decls.
 // Files are returned in dependency order; imports records each file's directly-imported
 // files for scope resolution.
+/// <summary>
+/// Parses the given entry files and follows their imports transitively, returning
+/// the parsed programs in dependency order along with the per-file import graph.
+/// </summary>
 static (List<(string path, Appa.Program prog)> programs, List<string> attempted,
         Dictionary<string, List<string>> imports, DiagnosticBag diag)
     Transpile(List<string> inputFiles, string projectRoot, string libgataDir)
 {
-    var sources   = new SourceSet();
-    var diag      = new DiagnosticBag(sources);
-    var ordered   = new List<(string path, Appa.Program prog)>();
+    var sources = new SourceSet();
+    var diag = new DiagnosticBag(sources);
+    var ordered = new List<(string path, Appa.Program prog)>();
     var attempted = new List<string>();
-    var imports   = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-    var visited   = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    var imports = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+    var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-    void Resolve(string path, string? from, Span fromSpan)
+    void Resolve(string path, string? from, TextSpan fromSpan)
     {
         path = Path.GetFullPath(path);
         if (!visited.Add(path)) return;
@@ -530,7 +433,7 @@ static (List<(string path, Appa.Program prog)> programs, List<string> attempted,
         attempted.Add(path);
     }
 
-    foreach (var f in inputFiles) Resolve(Path.GetFullPath(f), null, Span.None);
+    foreach (var f in inputFiles) Resolve(Path.GetFullPath(f), null, TextSpan.None);
     return (ordered, attempted, imports, diag);
 }
 
@@ -562,7 +465,7 @@ static void ValidateEnvironment(List<(string path, Appa.Program prog)> programs,
         .SelectMany(t => t.prog.Items.OfType<EnvironmentDecl>().Select(e => (t.path, e.Span)))
         .ToList();
     if (envs.Count == 0)
-        diag.Error(Codes.File, "", Span.None, "no @environment file in the build");
+        diag.Error(Codes.File, "", TextSpan.None, "no @environment file in the build");
     else
         foreach (var (path, span) in envs.Skip(1))
             diag.Error(Codes.File, path, span, "multiple @environment files; exactly one is allowed");
@@ -595,7 +498,7 @@ static void ValidateFloor(IrModule module, DiagnosticBag diag)
 
     foreach (var name in probe.Refs.OrderBy(n => n, StringComparer.Ordinal))
         if (!System.Text.RegularExpressions.Regex.IsMatch(env, $@"\b{System.Text.RegularExpressions.Regex.Escape(name)}\b"))
-            diag.Error(Codes.MissingFloorBind, "<environment>", Span.None,
+            diag.Error(Codes.MissingFloorBind, "<environment>", TextSpan.None,
                 $"the active environment's @preamble provides no definition of '{name}'; add one (the environment file, not your Gata source, is incomplete)");
 }
 
@@ -606,8 +509,8 @@ static void ValidateStructure(List<(string path, Appa.Program prog)> programs, D
 {
     if (diag.HasErrors) return;
 
-    var kernelBlocks = new List<(string file, Span span)>();
-    var entryFuncs   = new List<(string file, Span span)>();
+    var kernelBlocks = new List<(string file, TextSpan span)>();
+    var entryFuncs = new List<(string file, TextSpan span)>();
 
     foreach (var (path, prog) in programs)
         foreach (var item in prog.Items)
@@ -621,7 +524,7 @@ static void ValidateStructure(List<(string path, Appa.Program prog)> programs, D
 
     if (kernelBlocks.Count == 0)
     {
-        diag.Error(Codes.MissingEntryPoint, "", Span.None, "no 'kernel { }' entry point found in any .g file");
+        diag.Error(Codes.MissingEntryPoint, "", TextSpan.None, "no 'kernel { }' entry point found in any .g file");
         return;
     }
 
@@ -655,7 +558,7 @@ static void WarnReferenceCycles(IrModule module)
     }
 
     var index = new Dictionary<string, int>();
-    var low   = new Dictionary<string, int>();
+    var low = new Dictionary<string, int>();
     var onStk = new HashSet<string>();
     var stack = new Stack<string>();
     int counter = 0;
@@ -716,8 +619,8 @@ static void ReportGataFiles(List<string> attempted, DiagnosticBag diag, bool war
     {
         i++;
         var fileDiags = diag.All.Where(d => string.Equals(d.Loc.File, path, StringComparison.OrdinalIgnoreCase)).ToList();
-        var errors    = fileDiags.Where(d => d.Severity == Severity.Error).ToList();
-        var warnings  = fileDiags.Where(d => d.Severity == Severity.Warning).ToList();
+        var errors = fileDiags.Where(d => d.Severity == Severity.Error).ToList();
+        var warnings = fileDiags.Where(d => d.Severity == Severity.Warning).ToList();
 
         if (errors.Count > 0 || (warnAsError && warnings.Count > 0))
             Fail(errors.Concat(warnings));
@@ -760,10 +663,10 @@ static (int ExitCode, string Stdout, string Stderr) Exec(
 
     var psi = new ProcessStartInfo(exe, arguments)
     {
-        UseShellExecute        = false,
+        UseShellExecute = false,
         RedirectStandardOutput = capture,
-        RedirectStandardError  = capture,
-        WorkingDirectory       = workDir ?? ""
+        RedirectStandardError = capture,
+        WorkingDirectory = workDir ?? ""
     };
 
     using var proc = Process.Start(psi)!;
@@ -777,53 +680,15 @@ static (int ExitCode, string Stdout, string Stderr) Exec(
 
 #endregion
 
-#region EnvProbe
-
-// Collects every `_env_*` floor bind referenced anywhere in the lowered IR.
-sealed class EnvProbe : IrRewriter
-{
-    public readonly HashSet<string> Refs = [];
-
-    /// <summary>
-    /// Collects _env_* names from static call expressions.
-    /// </summary>
-    protected override IrExpr RewriteExpr(IrExpr e)
-    {
-        if (e is IrStaticCall { CName: var c } && c.StartsWith("_env_")) Refs.Add(c);
-        return base.RewriteExpr(e);
-    }
-
-    /// <summary>
-    /// Collects _env_dbg and _env_panic from debug and panic statements.
-    /// </summary>
-    protected override IrStmt RewriteStmt(IrStmt s)
-    {
-        if (s is IrDebug) Refs.Add("_env_dbg");
-        if (s is IrPanic) Refs.Add("_env_panic");
-        return base.RewriteStmt(s);
-    }
-
-    /// <summary>
-    /// Runs the probe over the whole module and populates Refs.
-    /// </summary>
-    public void Run(IrModule m)
-    {
-        foreach (var c in m.Classes)
-        {
-            foreach (var mm in c.Methods) if (mm.Body != null) RewriteStmt(mm.Body);
-            foreach (var o in c.Operators) if (o.Body != null) RewriteStmt(o.Body);
-        }
-        foreach (var f in m.FreeFunctions) if (f.Body != null) RewriteStmt(f.Body);
-    }
-}
-
-#endregion
-
 #region GatOS image build
 
 // Resolved capability set, with every platform-transitive implication applied.
 // Mirrors the implications in GatOS's kernel/caps.h exactly so that header's
 // #ifdefs and what appa reports/emits here can never drift apart.
+/// <summary>
+/// Resolves the final Mem/Input/Threads/Discover capability set for a build,
+/// combining the scanned capabilities with the manifest's discovery setting.
+/// </summary>
 static (bool Mem, bool Input, bool Threads, bool Discover) ResolveCaps(CapabilityScan caps, Manifest m)
 {
     bool discover = m.CapabilityDiscovery == CapabilityDiscovery.On;
@@ -858,15 +723,15 @@ static List<string> CapabilityDefines(CapabilityScan caps, Manifest m)
     var r = ResolveCaps(caps, m);
 
     var d = new List<string>();
-    if (r.Mem)     d.Add("-DGATA_CAP_MEM");
-    if (r.Input)   d.Add("-DGATA_CAP_INPUT");
+    if (r.Mem) d.Add("-DGATA_CAP_MEM");
+    if (r.Input) d.Add("-DGATA_CAP_INPUT");
     if (r.Threads) d.Add("-DGATA_CAP_THREADS");
     d.Add(m.Output == Output.Serial ? "-DGATA_OUTPUT_SERIAL" : "-DGATA_CAP_FRAMEBUFFER");
     d.Add(m.Keyboard switch
     {
         Keyboard.External => "-DGATA_KBD_EXTERNAL",
-        Keyboard.Hotplug  => "-DGATA_KBD_HOTPLUG",
-        _                 => "-DGATA_KBD_DEFAULT",
+        Keyboard.Hotplug => "-DGATA_KBD_HOTPLUG",
+        _ => "-DGATA_KBD_DEFAULT",
     });
 
     return d;
@@ -916,14 +781,14 @@ static void BuildGatOSImage(IReadOnlyList<OutputFile> output, Manifest manifest,
         if (!File.Exists(Path.Combine(targetsDir, "linker.ld")))
             Fail("Template is missing targets/x86_64/linker.ld.");
 
-        var srcDir  = Path.Combine(buildDir, "src");
-        var objDir  = Path.Combine(buildDir, "build");
+        var srcDir = Path.Combine(buildDir, "src");
+        var objDir = Path.Combine(buildDir, "build");
         var distDir = Path.Combine(buildDir, "dist", "x86_64");
-        var isoDir  = Path.Combine(buildDir, "targets", "x86_64", "iso");
+        var isoDir = Path.Combine(buildDir, "targets", "x86_64", "iso");
         Directory.CreateDirectory(objDir);
         Directory.CreateDirectory(distDir);
 
-        var cFiles   = Directory.GetFiles(srcDir, "*.c", SearchOption.AllDirectories).ToList();
+        var cFiles = Directory.GetFiles(srcDir, "*.c", SearchOption.AllDirectories).ToList();
         var asmFiles = Directory.GetFiles(srcDir, "*.S", SearchOption.AllDirectories).ToList();
         var objFiles = CompileAll(cFiles, asmFiles, srcDir, objDir, manifest.Mode, defines);
 
@@ -951,6 +816,10 @@ static void BuildGatOSImage(IReadOnlyList<OutputFile> output, Manifest manifest,
 }
 
 // A translation unit is userspace iff it is ulibc or the emitted user process file.
+/// <summary>
+/// Returns true if the given translation unit path belongs to the userspace
+/// realm rather than the kernel.
+/// </summary>
 static bool IsUserspace(string rel) =>
     rel.StartsWith("ulibc/") || rel == "kernel/uproc.c";
 
@@ -993,10 +862,10 @@ static List<string> CompileAll(List<string> cFiles, List<string> asmFiles,
     }
 
     (string Name, string Stderr)? failure = null;
-    object  gate      = new();
-    int     completed = 0, total = jobs.Count;
-    var     sw  = Stopwatch.StartNew();
-    bool    tty = !Console.IsOutputRedirected;
+    object gate = new();
+    int completed = 0, total = jobs.Count;
+    var sw = Stopwatch.StartNew();
+    bool tty = !Console.IsOutputRedirected;
     Parallel.ForEach(jobs, new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount },
         (job, state) =>
         {
@@ -1079,7 +948,7 @@ static string MakeIso(string kernelBin, string isoDir, string distDir, string bu
     if (r1.ExitCode != 0) { Log.Error($"grub-mkstandalone failed:\n{r1.Stderr}"); Environment.Exit(1); }
 
     string isoOut = Path.Combine(distDir, "GatOS.iso");
-    bool isWin    = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+    bool isWin = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
     string mkrescueArgs = isWin
         ? $"-d \"{AppaPaths.GrubDir}\" -o \"{isoOut}\" \"{isoDir}\""
         : $"--xorriso=\"{AppaPaths.XorrisoExe}\" --fonts=unicode --themes= -o \"{isoOut}\" \"{isoDir}\"";
@@ -1325,12 +1194,12 @@ static void DownloadWithProgress(string url, string dest, string name)
     using var response = client.GetAsync(url, System.Net.Http.HttpCompletionOption.ResponseHeadersRead).Result;
     response.EnsureSuccessStatusCode();
     long? total = response.Content.Headers.ContentLength;
-    using var stream  = response.Content.ReadAsStream();
+    using var stream = response.Content.ReadAsStream();
     using var outFile = File.Create(dest);
-    var buffer        = new byte[81920];
+    var buffer = new byte[81920];
     const string spin = @"|/-\";
-    long downloaded   = 0;
-    int  read, ticks  = 0;
+    long downloaded = 0;
+    int read, ticks = 0;
     while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
     {
         outFile.Write(buffer, 0, read);
@@ -1339,7 +1208,7 @@ static void DownloadWithProgress(string url, string dest, string name)
         // zero-length total (e.g. GitHub archive endpoints) shows a live byte counter.
         if (total is > 0)
         {
-            int pct    = (int)(downloaded * 100 / total.Value);
+            int pct = (int)(downloaded * 100 / total.Value);
             int filled = pct * 40 / 100;
             string bar = new string('=', filled) + new string(' ', 40 - filled);
             Out.Redraw($"{name}  |{bar}| {pct}% ({downloaded/1048576.0:F1}/{total.Value/1048576.0:F1} MB)");
@@ -1375,3 +1244,165 @@ static void ExtractTemplate(string zipPath, string destDir)
 }
 
 #endregion
+
+// Type declarations must follow all top-level statements.
+
+// Files written by `appa init`.
+static class Templates
+{
+    /// <summary>
+    /// Returns the .gconf file content for a new GatOS project.
+    /// </summary>
+    public static string GatOSGconf(string name) => $"""
+<!--
+  TargetBackend:        GatOS | Hosted
+  BuildMode:            Debug | Release
+  OutputType:           Framebuffer | Serial
+  KeyboardSupport:      Default (PS/2) | External (+ USB) | Hotplug (+ hotplug)
+  CapabilityDiscovery:  On (infer mem/input/threads from the program, default)
+                        | Off (assume all three - escape valve for a native blind spot)
+-->
+<appa>
+    <ProjectName>{name}</ProjectName>
+    <TargetBackend>GatOS</TargetBackend>
+    <BuildMode>Debug</BuildMode>
+    <OutputType>Framebuffer</OutputType>
+    <KeyboardSupport>Default</KeyboardSupport>
+    <CapabilityDiscovery>On</CapabilityDiscovery>
+</appa>
+
+""";
+
+    /// <summary>
+    /// Returns the src/main.g starter file content for a new GatOS project.
+    /// </summary>
+    public static string GatOSMain(string name) => $$"""
+import LibGata;
+import Collections;
+
+kernel {
+    entry func Main() {
+        Misc.PrintBanner();
+        Console.PrintLine("Hello from {{name}}!");
+    }
+}
+
+user {
+    foreground process App {
+        thread Main {
+            entry func Run() {
+                Console.PrintLine("Hello from userspace!");
+            }
+        }
+    }
+}
+
+""";
+}
+
+// The GatOS gcc flag set. appa owns these - a .gconf carries none of them. This must
+// match the GatOS build.py exactly: kernel code uses the FPU freely (lazy save/restore
+// handles it), and SSE is disabled ONLY in the fixed set of files whose code runs from
+// interrupt context (where touching XMM would corrupt the interrupted thread's state).
+static class GatosFlags
+{
+    public static readonly string[] Common =
+        ["-m64", "-ffreestanding", "-nostdlib", "-fno-pic", "-mcmodel=kernel",
+         "-mno-red-zone", "-ffunction-sections", "-fdata-sections"];
+
+    // Applied ONLY to the interrupt-path files below - never to ordinary kernel code.
+    public static readonly string[] FpuRestrictions =
+        ["-mno-sse", "-mno-sse2", "-mno-mmx", "-mno-80387"];
+
+    public static readonly HashSet<string> InterruptPath = new(StringComparer.Ordinal)
+    {
+        "arch/x86_64/cpu/interrupts.c",
+        "kernel/sys/scheduler.c",
+        "kernel/sys/timers.c",
+        "kernel/drivers/keyboard.c",
+        "kernel/drivers/xhci.c",
+        "tests/test_timers.c",
+        "kernel/memory/vmm.c",
+        "kernel/memory/pmm.c",
+        "klibc/avl.c",
+    };
+
+    /// <summary>
+    /// Returns the optimization flags for the given build mode.
+    /// </summary>
+    public static string[] For(Mode mode) => mode == Mode.Release
+        ? ["-O3", "-fpredictive-commoning", "-fstrict-aliasing",
+           "-fno-delete-null-pointer-checks", "-fomit-frame-pointer", "-fno-stack-protector"]
+        : [];
+}
+
+// Plain, flush-left narration for setup/update/init.
+static class Log
+{
+    /// <summary>
+    /// Prints an informational message.
+    /// </summary>
+    public static void Info(string m) => Console.WriteLine(m);
+
+    /// <summary>
+    /// Prints a success message with a green checkmark.
+    /// </summary>
+    public static void Ok(string m) => Console.WriteLine($"{C.GREEN}✓{C.NC} {m}");
+
+    /// <summary>
+    /// Prints a step message in cyan.
+    /// </summary>
+    public static void Step(string m) => Console.WriteLine($"{C.CYAN}{m}{C.NC}");
+
+    /// <summary>
+    /// Prints a warning message.
+    /// </summary>
+    public static void Warn(string m) => Console.WriteLine($"{C.YELLOW}warning:{C.NC} {m}");
+
+    /// <summary>
+    /// Prints an error message and optional hint to stderr.
+    /// </summary>
+    public static void Error(string m, string? hint = null)
+    {
+        Console.Error.WriteLine($"{C.RED}error:{C.NC} {m}");
+        if (hint != null) Console.Error.WriteLine($"  hint: {hint}");
+    }
+}
+
+// Collects every `_env_*` floor bind referenced anywhere in the lowered IR.
+sealed class EnvProbe : IrRewriter
+{
+    public readonly HashSet<string> Refs = [];
+
+    /// <summary>
+    /// Collects _env_* names from static call expressions.
+    /// </summary>
+    protected override IrExpr RewriteExpr(IrExpr e)
+    {
+        if (e is IrStaticCall { CName: var c } && c.StartsWith("_env_")) Refs.Add(c);
+        return base.RewriteExpr(e);
+    }
+
+    /// <summary>
+    /// Collects _env_dbg and _env_panic from debug and panic statements.
+    /// </summary>
+    protected override IrStmt RewriteStmt(IrStmt s)
+    {
+        if (s is IrDebug) Refs.Add("_env_dbg");
+        if (s is IrPanic) Refs.Add("_env_panic");
+        return base.RewriteStmt(s);
+    }
+
+    /// <summary>
+    /// Runs the probe over the whole module and populates Refs.
+    /// </summary>
+    public void Run(IrModule m)
+    {
+        foreach (var c in m.Classes)
+        {
+            foreach (var mm in c.Methods) if (mm.Body != null) RewriteStmt(mm.Body);
+            foreach (var o in c.Operators) if (o.Body != null) RewriteStmt(o.Body);
+        }
+        foreach (var f in m.FreeFunctions) if (f.Body != null) RewriteStmt(f.Body);
+    }
+}

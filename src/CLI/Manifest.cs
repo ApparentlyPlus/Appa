@@ -3,7 +3,7 @@ namespace Appa;
 using System.Xml.Linq;
 
 // What a build produces / how it is hosted.
-//   GatOS  - a bootable ISO (the kernel target).
+//   GatOS - a bootable ISO (the kernel target).
 //   Hosted - C against the libc platform (the test/ASAN harness target).
 enum Target { GatOS, Hosted }
 
@@ -16,9 +16,9 @@ enum Mode { Debug, Release }
 enum Output { Framebuffer, Serial }
 
 // Keyboard support level - explicitly chosen, passed through to GatOS as-is.
-//   Default  - PS/2 only (laptops)
+//   Default - PS/2 only (laptops)
 //   External - PS/2 plus external (USB) keyboards
-//   Hotplug  - PS/2 plus external keyboards with hotplug
+//   Hotplug - PS/2 plus external keyboards with hotplug
 enum Keyboard { Default, External, Hotplug }
 
 // On (default): MEM/INPUT/THREADS are inferred from the program by CapabilityScan,
@@ -35,12 +35,12 @@ enum CapabilityDiscovery { On, Off }
 // environment is auto-discovered (@environment), and the entry is the src/main.g
 // convention.
 sealed record Manifest(
-    string              Dir,
-    string              ProjectName,
-    Target              Target,
-    Mode                Mode,
-    Output              Output,
-    Keyboard            Keyboard,
+    string Dir,
+    string ProjectName,
+    Target Target,
+    Mode Mode,
+    Output Output,
+    Keyboard Keyboard,
     CapabilityDiscovery CapabilityDiscovery);
 
 static class ManifestReader
@@ -73,13 +73,13 @@ static class ManifestReader
             throw new ManifestError($"{Path.GetFileName(path)} must have an <appa> root, got <{root.Name.LocalName}>");
         string dir = Path.GetDirectoryName(Path.GetFullPath(path))!;
 
-        Target              target   = ParseEnum<Target>(root, "TargetBackend", Target.GatOS);
-        Mode                mode     = ParseEnum<Mode>(root, "BuildMode", Mode.Debug);
-        Output              output   = ParseEnum<Output>(root, "OutputType", Output.Framebuffer);
-        Keyboard            keyboard = ParseEnum<Keyboard>(root, "KeyboardSupport", Keyboard.Default);
-        CapabilityDiscovery capDisc  = ParseEnum<CapabilityDiscovery>(root, "CapabilityDiscovery", CapabilityDiscovery.On);
-        string              name     = root.Element("ProjectName")?.Value.Trim() is { Length: > 0 } n
-                                         ? n : new DirectoryInfo(dir).Name;
+        Target target = ParseEnum<Target>(root, "TargetBackend", Target.GatOS);
+        Mode mode = ParseEnum<Mode>(root, "BuildMode", Mode.Debug);
+        Output output = ParseEnum<Output>(root, "OutputType", Output.Framebuffer);
+        Keyboard keyboard = ParseEnum<Keyboard>(root, "KeyboardSupport", Keyboard.Default);
+        CapabilityDiscovery capDisc = ParseEnum<CapabilityDiscovery>(root, "CapabilityDiscovery", CapabilityDiscovery.On);
+        string name = root.Element("ProjectName")?.Value.Trim() is { Length: > 0 } n
+            ? n : new DirectoryInfo(dir).Name;
 
         return new Manifest(dir, name, target, mode, output, keyboard, capDisc);
     }

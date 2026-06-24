@@ -8,9 +8,9 @@ using System.Runtime.InteropServices;
 static class Urls
 {
     const string Rel = "https://github.com/ApparentlyPlus/Gata/releases/download/artifacts";
-    const string Tc  = "https://github.com/ApparentlyPlus/GatOS/releases/download/build-toolchain";
+    const string Tc = "https://github.com/ApparentlyPlus/GatOS/releases/download/build-toolchain";
 
-    public const string Libgata  = Rel + "/Gata-Internals.zip";
+    public const string Libgata = Rel + "/Gata-Internals.zip";
 
     // GitHub branch archive - wraps everything in a single top-level folder, which
     // the extractor flattens away (see ExtractTemplate).
@@ -20,9 +20,9 @@ static class Urls
     /// Returns the platform toolchain bundle URL for the current OS.
     /// </summary>
     public static string Toolchain() =>
-        RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? Tc + "/x86_64-win.zip"   :
-        RuntimeInformation.IsOSPlatform(OSPlatform.OSX)     ? Tc + "/x86_64-macOS.zip"  :
-                                                               Tc + "/x86_64-linux.zip";
+        RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? Tc + "/x86_64-win.zip" :
+        RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? Tc + "/x86_64-macOS.zip" :
+        Tc + "/x86_64-linux.zip";
 
     /// <summary>
     /// Returns the self-update URL for the appa binary on the current platform.
@@ -47,20 +47,20 @@ static class AppaPaths
     public static readonly string Root = Path.Combine(Path.GetTempPath(), "appa");
 
     public static string ToolchainDir => Path.Combine(Root, "toolchain");
-    public static string LibgataDir   => Path.Combine(Root, "libgata");
-    public static string EnvsDir      => Path.Combine(Root, "envs");
-    public static string TemplateDir  => Path.Combine(Root, "template");
-    public static string BinDir       => Path.Combine(Root, "bin");
+    public static string LibgataDir => Path.Combine(Root, "libgata");
+    public static string EnvsDir => Path.Combine(Root, "envs");
+    public static string TemplateDir => Path.Combine(Root, "template");
+    public static string BinDir => Path.Combine(Root, "bin");
 
     public static string AppaBin => Path.Combine(BinDir,
         RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "appa.exe" : "appa");
 
     public static string PlatformToolchain => Path.Combine(ToolchainDir,
         RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "x86_64-win" :
-        RuntimeInformation.IsOSPlatform(OSPlatform.OSX)     ? "x86_64-macos" :
-                                                               "x86_64-linux");
+        RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? "x86_64-macos" :
+        "x86_64-linux");
 
-    public static string GccBin  => Path.Combine(PlatformToolchain, "gcc", "bin");
+    public static string GccBin => Path.Combine(PlatformToolchain, "gcc", "bin");
     public static string GrubDir => Path.Combine(PlatformToolchain, "grub");
     public static string QemuExe => RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
         ? Path.Combine(PlatformToolchain, "qemu", "qemu-system-x86_64.exe")
@@ -91,14 +91,14 @@ static class AppaPaths
 // ANSI color codes for console output.
 static class C
 {
-    public const string NC     = "\x1b[0m";
-    public const string GREEN  = "\x1b[1;32m";
-    public const string RED    = "\x1b[1;31m";
+    public const string NC = "\x1b[0m";
+    public const string GREEN = "\x1b[1;32m";
+    public const string RED = "\x1b[1;31m";
     public const string YELLOW = "\x1b[1;33m";
-    public const string BLUE   = "\x1b[1;34m";
-    public const string CYAN   = "\x1b[1;36m";
-    public const string BOLD   = "\x1b[1m";
-    public const string DIM    = "\x1b[2m";
+    public const string BLUE = "\x1b[1;34m";
+    public const string CYAN = "\x1b[1;36m";
+    public const string BOLD = "\x1b[1m";
+    public const string DIM = "\x1b[2m";
     static C() { if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) Console.OutputEncoding = System.Text.Encoding.UTF8; }
 }
 
