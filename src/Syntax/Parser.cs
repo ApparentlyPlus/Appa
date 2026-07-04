@@ -1479,29 +1479,38 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Parses a 'new' expression. After the type spec, either '(' for a constructor arg list or
-    /// '[' for a collection initializer may follow. A bare 'new Type' with neither is valid for
-    /// fixed-size array types like '[5]char' that carry their size in the type string.
+    /// Parses a 'new' expression. After the type spec, an optional '(' constructor arg list
+    /// and an optional collection initializer (either '{' or '[' delimited) may each follow,
+    /// independently of one another - 'new Foo(args) { init }' is legal. A bare 'new Type'
+    /// with neither is valid for fixed-size array types like '[5]char' that carry their size
+    /// in the type string.
     /// </summary>
     private NewExpr ParseNewExpr(int s)
     {
         Expect(TK.New);
         string type = ParseTypeSpec();
+        Expr[] args = [];
         if (At(TK.LParen))
         {
-            Advance(); var args = ParseArgList(); Expect(TK.RParen);
-            return new NewExpr(type, args, [], To(s));
+            Advance(); args = ParseArgList(); Expect(TK.RParen);
         }
-        if (At(TK.LBrack))
-        {
-            Advance();
-            if (At(TK.RBrack)) { Advance(); return new NewExpr(type, [], [], To(s)); }
-            List<Expr> elems = [ParseExpr()];
-            while (Try(TK.Comma)) elems.Add(ParseExpr());
-            Expect(TK.RBrack);
-            return new NewExpr(type, [], [.. elems], To(s));
-        }
-        return new NewExpr(type, [], [], To(s));
+        if (At(TK.LBrace)) return new NewExpr(type, args, ParseCollectionInit(TK.LBrace, TK.RBrace), To(s));
+        if (At(TK.LBrack)) return new NewExpr(type, args, ParseCollectionInit(TK.LBrack, TK.RBrack), To(s));
+        return new NewExpr(type, args, [], To(s));
+    }
+
+    /// <summary>
+    /// Parses a delimited, comma-separated element list for a 'new' collection initializer.
+    /// Returns an empty array for an empty delimiter pair.
+    /// </summary>
+    private Expr[] ParseCollectionInit(TK open, TK close)
+    {
+        Advance(); // opening delimiter
+        if (At(close)) { Advance(); return []; }
+        List<Expr> elems = [ParseExpr()];
+        while (Try(TK.Comma)) elems.Add(ParseExpr());
+        Expect(close);
+        return [.. elems];
     }
 
     #endregion
