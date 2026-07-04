@@ -19,7 +19,7 @@ public class AsanTests
     /// driver's checksum with no sanitizer violations.
     /// </summary>
     [Fact]
-    public void HostedProgramPassesUnderSanitizers()
+    public async Task HostedProgramPassesUnderSanitizers()
     {
         if (!ToolchainProbe.HasGcc())
         {
@@ -48,12 +48,13 @@ public class AsanTests
 
             string programC = Path.Combine(work, "transpilation", "program.c");
             string binary = Path.Combine(work, "asan_test");
-            var compile = RunProcess("gcc",
+            var compile = await RunProcess("gcc",
                 $"-fsanitize=address,undefined -g -O1 -I\"{Path.Combine(work, "transpilation")}\" " +
-                $"\"{programC}\" \"{driverPath}\" -lm -o \"{binary}\"", work);
+                $"\"{programC}\" \"{driverPath}\" -lm -o \"{binary}\"", work, TimeSpan.FromMinutes(2));
             Assert.True(compile.ExitCode == 0, $"gcc failed:\n{compile.StdErr}");
 
-            var run = RunProcess(binary, "", work, env: new() { ["ASAN_OPTIONS"] = "detect_leaks=1" });
+            var run = await RunProcess(binary, "", work, TimeSpan.FromSeconds(30),
+                env: new() { ["ASAN_OPTIONS"] = "detect_leaks=1" });
             Assert.True(run.ExitCode == 0, $"asan_test exited {run.ExitCode}:\n{run.StdOut}\n{run.StdErr}");
             Assert.Contains("ASAN_REGRESSION_OK", run.StdOut);
             Assert.Contains($"checksum={ExpectedChecksum}", run.StdOut);
@@ -66,9 +67,10 @@ public class AsanTests
 
     /// <summary>
     /// Runs an external process to completion and captures its exit code and output.
+    /// Kills the process if it outlives the given timeout.
     /// </summary>
-    private static (int ExitCode, string StdOut, string StdErr) RunProcess(
-        string exe, string args, string workDir, Dictionary<string, string>? env = null)
+    private static async Task<(int ExitCode, string StdOut, string StdErr)> RunProcess(
+        string exe, string args, string workDir, TimeSpan timeout, Dictionary<string, string>? env = null)
     {
         var psi = new ProcessStartInfo(exe, args)
         {
@@ -80,10 +82,15 @@ public class AsanTests
         if (env != null)
             foreach (var (k, v) in env) psi.Environment[k] = v;
 
+        // Read both streams concurrently before waiting: reading one to completion
+        // first deadlocks if the process fills the other's OS pipe buffer, since it
+        // then blocks on that write while we block on this read.
         using var proc = Process.Start(psi)!;
-        string stdout = proc.StandardOutput.ReadToEnd();
-        string stderr = proc.StandardError.ReadToEnd();
-        proc.WaitForExit();
-        return (proc.ExitCode, stdout, stderr);
+        var outTask = proc.StandardOutput.ReadToEndAsync();
+        var errTask = proc.StandardError.ReadToEndAsync();
+        using var cts = new CancellationTokenSource(timeout);
+        try { await proc.WaitForExitAsync(cts.Token); }
+        catch (OperationCanceledException) { try { proc.Kill(entireProcessTree: true); } catch { } }
+        return (proc.ExitCode, await outTask, await errTask);
     }
 }
