@@ -794,17 +794,20 @@ internal record IrModule(
 )
 {
     // The realms a build emits are those the environment declared via @preamble:
-    // (kernel)/(boot) -> kernel realm; (user) -> user realm.
+    // (kernel)/(boot) -> kernel realm; (user) -> user realm. Computed on every access,
+    // not cached at construction - NativeBlocks is populated by ResolveTop's Add calls
+    // on this same instance after the constructor already ran, so a get-only property
+    // initializer here would always see an empty list.
     /// <summary>
     /// Returns true if the module emits a kernel realm, determined by the presence of kernel preamble or boot blocks.
     /// </summary>
-    public bool HasKernelRealm { get; } = NativeBlocks.Any(nb =>
+    public bool HasKernelRealm => NativeBlocks.Any(nb =>
         nb.Vis == Visibility.Kernel && nb.Section is NativeSection.Preamble or NativeSection.Boot);
 
     /// <summary>
     /// Returns true if the module emits a user realm, determined by the presence of user preamble blocks.
     /// </summary>
-    public bool HasUserRealm { get; } = NativeBlocks.Any(nb =>
+    public bool HasUserRealm => NativeBlocks.Any(nb =>
         nb.Vis == Visibility.User && nb.Section == NativeSection.Preamble);
 }
 
