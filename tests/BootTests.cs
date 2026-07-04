@@ -29,7 +29,6 @@ public class BootTests
 
         string fixturesDir = Path.Combine(AppContext.BaseDirectory, "Fixtures");
         string appaDll = Path.Combine(AppContext.BaseDirectory, "Appa.dll");
-        string libgataDir = Path.Combine(fixturesDir, "Libgata");
 
         string work = Directory.CreateTempSubdirectory("appa-boot-").FullName;
         try
@@ -46,8 +45,10 @@ public class BootTests
                 </appa>
                 """);
 
+            // No --stdlib: this test exercises the real, installed GatOS toolchain end
+            // to end, so it discovers libgata the same way a real 'appa build' does.
             var psi = new ProcessStartInfo("dotnet",
-                $"\"{appaDll}\" build --stdlib \"{libgataDir}\" --run --headless --timeout={(int)Timeout.TotalSeconds}s")
+                $"\"{appaDll}\" build --run --headless --timeout={(int)Timeout.TotalSeconds}s")
             {
                 UseShellExecute = false,
                 RedirectStandardOutput = true,

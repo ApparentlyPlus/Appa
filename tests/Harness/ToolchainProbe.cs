@@ -3,22 +3,17 @@ namespace Appa.Tests;
 using System.Diagnostics;
 
 /// <summary>
-/// Cheap presence checks for external toolchains that asan/boot tests shell out to.
+/// Cheap presence check for the GatOS cross toolchain that BootTests shells out to.
 /// Used to skip gracefully rather than fail when a machine lacks the toolchain.
 /// </summary>
 internal static class ToolchainProbe
 {
     /// <summary>
-    /// True if a host gcc is reachable on PATH. Asan uses the host compiler directly,
-    /// not the GatOS cross toolchain.
-    /// </summary>
-    public static bool HasGcc() => CanStart("gcc", "--version");
-
-    /// <summary>
-    /// True if the GatOS cross toolchain and QEMU are installed (via 'appa setup').
+    /// True if the GatOS cross toolchain, libgata, and QEMU are installed (via 'appa setup').
     /// </summary>
     public static bool HasGatOSToolchain() =>
         Directory.Exists(AppaPaths.ToolchainDir) && File.Exists(AppaPaths.Gcc()) &&
+        Directory.Exists(AppaPaths.LibgataDir) && Directory.GetFiles(AppaPaths.LibgataDir, "*.g").Length > 0 &&
         CanStart(AppaPaths.QemuExe, "--version");
 
     /// <summary>
