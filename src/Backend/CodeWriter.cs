@@ -35,7 +35,7 @@ internal sealed class CodeWriter
     /// <summary>
     /// Appends each string in the sequence as a separate indented line.
     /// </summary>
-    public void Lines(params string[] lines) { foreach (var l in lines) Line(l); }
+    public void Lines(params ReadOnlySpan<string> lines) { foreach (var l in lines) Line(l); }
 
     /// <summary>
     /// Appends a completely blank line with no indentation.

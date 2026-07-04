@@ -14,7 +14,6 @@ internal static class EscapeCodes
     public const string CYAN    = "\x1b[1;36m";
     public const string BOLD    = "\x1b[1m";
     public const string DIM     = "\x1b[2m";
-    static EscapeCodes() { Console.OutputEncoding = Encoding.UTF8; }
 }
 
 /// <summary>

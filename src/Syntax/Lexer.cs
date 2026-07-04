@@ -106,7 +106,10 @@ internal sealed class Lexer(string src)
 
     // Cache for character literal integer string values to avoid allocations
     private static readonly string[] chrstrs;
-    
+
+    // Cache for single-character punctuation token values to avoid allocations
+    private static readonly string[] punctstrs;
+
     // Constructor to initialize the static keyword string array based on the kw dictionary
     static Lexer()
     {
@@ -118,6 +121,9 @@ internal sealed class Lexer(string src)
 
         chrstrs = new string[256];
         for (int i = 0; i < 256; i++) chrstrs[i] = i.ToString();
+
+        punctstrs = new string[128];
+        for (int i = 0; i < 128; i++) punctstrs[i] = ((char)i).ToString();
     }
 
     // Public method to tokenize the source string and return a list of tokens
@@ -339,7 +345,7 @@ internal sealed class Lexer(string src)
             ':' => TK.Colon,
             '.' => TK.Dot,
             _ => TK.Punct
-        }, c.ToString());
+        }, c < 128 ? punctstrs[c] : c.ToString());
     }
 
     /// <summary>

@@ -99,7 +99,6 @@ static class C
     public const string CYAN = "\x1b[1;36m";
     public const string BOLD = "\x1b[1m";
     public const string DIM = "\x1b[2m";
-    static C() { if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) Console.OutputEncoding = System.Text.Encoding.UTF8; }
 }
 
 // A quiet table for build-pipeline output: an indented fact per line, with its

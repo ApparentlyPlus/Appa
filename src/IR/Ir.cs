@@ -173,7 +173,7 @@ internal record IrClassRef(string ClassName) : IrType
     private readonly bool _isString = ClassName is "String" or "gata_String";
     public override string ToCType()
     {
-        throw new NotImplementedException();
+        return $"{Mangler.Class(ClassName)}*";
     }
 
     public override string MangledName => ClassName;

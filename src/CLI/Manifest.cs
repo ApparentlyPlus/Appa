@@ -92,9 +92,9 @@ static class ManifestReader
     {
         string? v = root.Element(elementName)?.Value.Trim();
         if (string.IsNullOrEmpty(v)) return dflt;
-        foreach (var name in Enum.GetNames<T>())
-            if (string.Equals(name, v, StringComparison.OrdinalIgnoreCase))
-                return Enum.Parse<T>(name);
+        // TryParse also accepts the enum's numeric underlying value; reject that so a
+        // manifest can only spell a member by name, matching the previous strict behavior.
+        if (!char.IsAsciiDigit(v[0]) && Enum.TryParse<T>(v, ignoreCase: true, out var result)) return result;
         throw new ManifestError(
             $"'{v}' is not a valid <{elementName}>; expected one of: {string.Join(", ", Enum.GetNames<T>())}");
     }

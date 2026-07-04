@@ -5,6 +5,10 @@ using System.Runtime.InteropServices;
 
 #region Entry point
 
+// Windows consoles historically default to a non-UTF8 codepage; Unix terminals
+// already default to UTF-8, so this only needs to run on Windows.
+if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) Console.OutputEncoding = System.Text.Encoding.UTF8;
+
 if (args.Length == 0) { PrintHelp(); Environment.Exit(1); }
 try
 {
