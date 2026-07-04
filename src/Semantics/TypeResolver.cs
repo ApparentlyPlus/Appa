@@ -320,12 +320,22 @@ internal sealed class TypeResolver(
             (IrPtrType x, IrPtrType y) => SameType(x.Inner, y.Inner),
             (IrArrayType x, IrArrayType y) => x.Size == y.Size && SameType(x.Elem, y.Elem),
             (IrResultType x, IrResultType y) => SameType(x.Inner, y.Inner),
-            (IrFuncPtrType x, IrFuncPtrType y) =>
-                SameType(x.Ret, y.Ret) && x.Params.Count == y.Params.Count
-                && x.Params.Zip(y.Params, SameType).All(v => v),
+            (IrFuncPtrType x, IrFuncPtrType y) => SameFuncPtrParams(x, y),
             (IrUnionType x, IrUnionType y) => x.Name == y.Name,
             _ => false
         };
+    }
+
+    /// <summary>
+    /// Returns true when two function pointer types have the same return type and
+    /// pairwise-identical parameter types, without allocating a LINQ enumerator.
+    /// </summary>
+    private static bool SameFuncPtrParams(IrFuncPtrType x, IrFuncPtrType y)
+    {
+        if (!SameType(x.Ret, y.Ret) || x.Params.Count != y.Params.Count) return false;
+        for (int i = 0; i < x.Params.Count; i++)
+            if (!SameType(x.Params[i], y.Params[i])) return false;
+        return true;
     }
 
     /// <summary>
@@ -1402,6 +1412,9 @@ internal sealed class TypeResolver(
         for (int i = 0; i < pd.Threads.Length; i++)
         {
             var td = pd.Threads[i];
+            if (td.Mode != null)
+                diag.Error(Codes.ThreadModeNotAllowed, ctx.File, td.Span,
+                    $"thread '{td.Name}' has explicit mode '{td.Mode}'; threads do not support 'foreground' or 'background' modifiers");
             string tFull = $"{pd.Name}_{td.Name}";
             threads.Add(new IrThread(td.Name, "foreground", tFull, ResolveThreadEntry(tFull, td.Entry, ctx, vis)));
         }

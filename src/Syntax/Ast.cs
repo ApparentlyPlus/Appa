@@ -198,10 +198,12 @@ internal record NativeMethodBody(NativeBody Native) : MethodBody;
 #region Process / thread
 
 /// <summary>
-/// A thread inside a process. Points at exactly one entry function.
-/// Threads do not carry their own deployment mode, that belongs to the process.
+/// A thread inside a process. Points at exactly one entry function. Threads do not
+/// carry their own deployment mode, that belongs to the process. Mode is non-null
+/// only when the source explicitly (and invalidly) wrote 'foreground'/'background'
+/// before 'thread'; the type resolver rejects that as G043.
 /// </summary>
-internal record ThreadDecl(string Name, EntryFuncDecl Entry, TextSpan Span);
+internal record ThreadDecl(string Name, string? Mode, EntryFuncDecl Entry, TextSpan Span);
 
 /// <summary>
 /// The entry function of a thread. It consists of parameters and a single block body. Not a FuncDecl

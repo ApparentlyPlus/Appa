@@ -131,11 +131,11 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     /// with instances. Deferred inner uses (template bodies that reference other templates
     /// via their own type parameters) are replayed once their owning instantiation is done.
     /// </summary>
-    public void Process(List<(Program prog, string file)> programs)
+    public void Process(List<(string path, Program prog)> programs)
     {
         var templates = new Dictionary<string, Template>();
         var tmplNames = new HashSet<string>();
-        foreach (var (prog, _) in programs)
+        foreach (var (_, prog) in programs)
             foreach (var item in prog.Items)
                 if (item is ClassDecl cd && cd.GenericParams.Length > 0)
                 {
@@ -148,7 +148,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
 
         var directUses = new List<(GenericUse Use, string File)>();
         var deferredByOwner = new Dictionary<string, List<(GenericUse Use, string File)>>();
-        foreach (var (prog, path) in programs)
+        foreach (var (path, prog) in programs)
         {
             var ownersInFile = templates.Values.Where(t => prog.Items.Contains(t.Decl)).ToList();
             foreach (var use in prog.GenericUses)
@@ -218,7 +218,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
 
         for (int i = 0; i < programs.Count; i++)
         {
-            var (prog, file) = programs[i];
+            var (path, prog) = programs[i];
             bool changed = false;
             var rewritten = new List<TopLevel>(prog.Items.Length);
             foreach (var item in prog.Items)
@@ -231,7 +231,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
                 }
                 else rewritten.Add(item);
             }
-            if (changed) programs[i] = (prog with { Items = [..rewritten] }, file);
+            if (changed) programs[i] = (path, prog with { Items = [..rewritten] });
         }
     }
 

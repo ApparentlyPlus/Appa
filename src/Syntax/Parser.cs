@@ -74,7 +74,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     /// </summary>
     private Token Expect(TK k)
     {
-        if (Cur.Kind != k) Fail($"expected {k}");
+        if (Cur.Kind != k) Fail($"expected {k}, found '{Cur.Value}'");
         return Advance();
     }
 
@@ -350,7 +350,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     /// </summary>
     private string ExpectBareGenericParam()
     {
-        if (!At(TK.Ident)) Fail("generic parameter must be a plain name");
+        if (!At(TK.Ident)) Fail($"generic parameter must be a plain name, found '{Cur.Value}'");
         var tok = Advance().Value;
         if (At(TK.LBrack)) Fail($"generic parameter '{tok}' cannot itself be generic");
         return tok;
@@ -417,21 +417,38 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
             variants = [];
             int vs = Cur.Span.Start;
             var vname = Expect(TK.Ident).Value;
-            Param[] fields = [];
-            if (At(TK.LParen)) { Advance(); fields = ParseParamList(); Expect(TK.RParen); }
+            Param[] fields = At(TK.LParen) ? ParseUnionFieldList() : [];
             variants.Add(new UnionVariant(vname, fields, To(vs)));
             while (Try(TK.Comma))
             {
                 if (At(TK.RBrace)) Fail("trailing comma not allowed after the last union variant; remove it");
                 vs = Cur.Span.Start;
                 vname = Expect(TK.Ident).Value;
-                fields = [];
-                if (At(TK.LParen)) { Advance(); fields = ParseParamList(); Expect(TK.RParen); }
+                fields = At(TK.LParen) ? ParseUnionFieldList() : [];
                 variants.Add(new UnionVariant(vname, fields, To(vs)));
             }
         }
         Expect(TK.RBrace);
         return new UnionDecl(name, variants?.ToArray() ?? [], To(s), anns);
+    }
+
+    /// <summary>
+    /// Parses a union variant's parenthesised field list. A trailing comma right
+    /// before the closing paren is a hard error with a specific message, since the
+    /// shared ParseParamList used for function parameters does not check for one.
+    /// </summary>
+    private Param[] ParseUnionFieldList()
+    {
+        Advance(); // opening (
+        if (At(TK.RParen)) { Advance(); return []; }
+        List<Param> fields = [ParseParam()];
+        while (Try(TK.Comma))
+        {
+            if (At(TK.RParen)) Fail("trailing comma not allowed after the last field; remove it");
+            fields.Add(ParseParam());
+        }
+        Expect(TK.RParen);
+        return [.. fields];
     }
 
     #endregion
@@ -460,7 +477,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
             Advance();
             List<string> args = [ParseTypeArg()];
             while (Try(TK.Comma)) args.Add(ParseTypeArg());
-            if (!At(TK.RBrack)) Fail($"invalid type argument in '{name}[...]'");
+            if (!At(TK.RBrack)) Fail($"invalid type argument in '{name}[...]', found '{Cur.Value}'");
             Expect(TK.RBrack);
             var argsArray = args.ToArray();
             generics = argsArray;
@@ -486,7 +503,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     {
         if (At(TK.Ident) || At(TK.Process) || At(TK.Thread)) return Advance().Value;
         if (IsPrim(Cur.Kind)) return PrimName(Advance());
-        Fail("expected type name");
+        Fail($"expected type name, found '{Cur.Value}'");
         return "";
     }
 
@@ -639,7 +656,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         if (AtP("&") || AtP("|") || AtP("^") || At(TK.Shl) || At(TK.Shr)) return Advance().Value;
         // operator func [](K) -> V for getter, operator func []=(K, V) for setter.
         if (At(TK.LBrack)) { Advance(); Expect(TK.RBrack); return Try(TK.Eq) ? "[]=" : "[]"; }
-        Fail("expected operator symbol");
+        Fail($"expected operator symbol, found '{Cur.Value}'");
         return "+";
     }
 
@@ -723,12 +740,16 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
 
     /// <summary>
     /// Parses a thread declaration inside a process body. A foreground or background keyword
-    /// before 'thread' is G043. Threads don't have their own deployment mode, only the process does.
+    /// before 'thread' is syntactically accepted and captured in Mode; the type resolver
+    /// rejects it as G043, since threads don't have their own deployment mode, only the
+    /// process does.
     /// </summary>
     private ThreadDecl ParseThreadDecl()
     {
         int s = Cur.Span.Start;
-        if (At(TK.Foreground) || At(TK.Background)) Fail("thread mode is set by the process, not the thread (G043)");
+        string? mode = null;
+        if (At(TK.Foreground)) { mode = "foreground"; Advance(); }
+        else if (At(TK.Background)) { mode = "background"; Advance(); }
         if (!At(TK.Thread)) Fail("a process body may only contain 'thread' declarations");
         Advance();
         var name = Expect(TK.Ident).Value;
@@ -736,7 +757,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         var entry = ParseThreadEntry();
         if (!At(TK.RBrace)) Fail("a thread body must contain a single 'entry func' and nothing else");
         Expect(TK.RBrace);
-        return new ThreadDecl(name, entry, To(s));
+        return new ThreadDecl(name, mode, entry, To(s));
     }
 
     /// <summary>
@@ -1435,7 +1456,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
 
         if (At(TK.Ident)) { var t = Advance(); return new IdentExpr(t.Value, t.Span); }
 
-        Fail("expected expression");
+        Fail($"expected expression, found '{Cur.Value}'");
         return new NullExpr(To(s)); // unreachable
     }
 
@@ -1450,7 +1471,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         while (!At(TK.InterpStrEnd) && !At(TK.EOF))
         {
             if (At(TK.StrLit)) { var t = Advance(); parts.Add(new StrLitExpr(t.Value, t.Span)); }
-            else if (AtP("{")) { Advance(); parts.Add(ParseExpr()); if (!AtP("}")) Fail("expected '}'"); Advance(); }
+            else if (AtP("{")) { Advance(); parts.Add(ParseExpr()); if (!AtP("}")) Fail($"expected '}}', found '{Cur.Value}'"); Advance(); }
             else break;
         }
         Expect(TK.InterpStrEnd);

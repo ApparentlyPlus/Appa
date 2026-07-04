@@ -147,7 +147,9 @@ internal sealed class SymbolTable
 
     private static List<Symbol> Bucket<K>(Dictionary<K, List<Symbol>> d, K key) where K : notnull
     {
-        return d.TryGetValue(key, out var l) ? l : d[key] = [];
+        ref var l = ref CollectionsMarshal.GetValueRefOrAddDefault(d, key, out bool exists);
+        if (!exists) l = [];
+        return l!;
     }
 
     /// <summary>

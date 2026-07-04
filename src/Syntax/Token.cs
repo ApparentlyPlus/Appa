@@ -3,7 +3,7 @@ namespace Appa;
 /// <summary>
 /// Represents the type of a token in the Appa programming language.
 /// </summary>
-internal enum TK
+internal enum TK : byte
 {
     // Literals
     Ident, IntLit, FloatLit, StrLit, BoolLit, InterpStrStart, InterpStrEnd, CharLit,
