@@ -612,7 +612,11 @@ internal sealed class Lexer(string src)
                     else Advance();
                 }
 
-                Emit(TK.StrLit, sb.Length == 0 ? src[start.._pp] : sb.Append(src, start, _pp - start).ToString());
+                // Quoted to match ReadString()'s convention - the resolver and emitter
+                // both expect a StrLit token's value to be a ready-to-emit C string
+                // literal, quotes included, not just the bare decoded content.
+                string content = sb.Length == 0 ? src[start.._pp] : sb.Append(src, start, _pp - start).ToString();
+                Emit(TK.StrLit, "\"" + content + "\"");
             }
         }
 

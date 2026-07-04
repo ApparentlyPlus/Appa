@@ -289,7 +289,7 @@ public class LexerTests
         var tokens = SingleFileCompile.Tokenize("$\"count={n}\"");
         Assert.Equal(TK.InterpStrStart, tokens[0].Kind);
         Assert.Equal(TK.StrLit, tokens[1].Kind);
-        Assert.Equal("count=", tokens[1].Value);
+        Assert.Equal("\"count=\"", tokens[1].Value);
         Assert.Equal(TK.Punct, tokens[2].Kind);
         Assert.Equal("{", tokens[2].Value);
         Assert.Equal(TK.Ident, tokens[3].Kind);
@@ -310,7 +310,7 @@ public class LexerTests
         var tokens = SingleFileCompile.Tokenize("$\"{{literal}}\"");
         Assert.Equal(TK.InterpStrStart, tokens[0].Kind);
         Assert.Equal(TK.StrLit, tokens[1].Kind);
-        Assert.Equal("{literal}", tokens[1].Value);
+        Assert.Equal("\"{literal}\"", tokens[1].Value);
         Assert.Equal(TK.InterpStrEnd, tokens[2].Kind);
     }
 
@@ -324,7 +324,7 @@ public class LexerTests
     {
         var tokens = SingleFileCompile.Tokenize("$\"line1\\nline2\"");
         Assert.Equal(TK.StrLit, tokens[1].Kind);
-        Assert.Equal("line1\\nline2", tokens[1].Value);
+        Assert.Equal("\"line1\\nline2\"", tokens[1].Value);
     }
 
     /// <summary>
