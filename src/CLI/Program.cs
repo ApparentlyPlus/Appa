@@ -365,7 +365,7 @@ static (IrModule Module, IReadOnlyDictionary<string, string> Sourcemap, Capabili
 {
     Mangler.ResetDense();
     Mangler.ResetGenericDisplay();
-    new Monomorphizer(diag).Process(programs.Select(t => (t.prog, t.path)).ToList());
+    new Monomorphizer(diag).Process(programs);
     var collected = new SymbolCollector(diag).Collect(programs.Select(t => (t.path, t.prog)).ToList());
     var module = new TypeResolver(collected.Sym, collected.HasInit,
                                   collected.PreDefinedStructs, collected.OpaqueFieldClasses, visible,

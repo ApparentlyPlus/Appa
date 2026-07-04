@@ -451,11 +451,18 @@ internal sealed class Lexer(string src)
         // Use ReadOnlySpan<char> to avoid allocating a new string for the identifier
         ReadOnlySpan<char> span = src.AsSpan(start, _pp - start);
 
-        // Check if the identifier matches a keyword in the KeywordsLookup dictionary. 
+        // Check if the identifier matches a keyword in the KeywordsLookup dictionary.
         // If it does, emit the corresponding keyword token. Otherwise, emit an identifier token.
         if (KeywordsLookup.TryGetValue(span, out var kw))
         {
-            Emit(kw, kwstr[(int)kw]);
+            // Several TK kinds have more than one valid spelling (true/false -> BoolLit;
+            // Process/process -> TK.Process; Thread/thread -> TK.Thread; the whole
+            // TPrim family). The cached canonical spelling only matches the actual
+            // source text for single-spelling keywords; anywhere it differs, the
+            // token's value must carry the real spelling, not the cached one, or
+            // the two spellings collapse into whichever happened to be cached.
+            string canonical = kwstr[(int)kw];
+            Emit(kw, span.Equals(canonical, StringComparison.Ordinal) ? canonical : new string(span));
         }
         else
         {
@@ -554,7 +561,7 @@ internal sealed class Lexer(string src)
 
         while (_pp < src.Length && Cur != '"' && Cur != '\n')
         {
-            if (Cur == '{')
+            if (Cur == '{' && Peek() != '{')
             {
                 // Emit opening '{'
                 _ts = _pp; Advance();
@@ -576,7 +583,7 @@ internal sealed class Lexer(string src)
                     ReadOne();
                 }
 
-                // If we reached the end of the source string and brdepth is still greater than 0, 
+                // If we reached the end of the source string and brdepth is still greater than 0,
                 // it means we have an unterminated '{' in the interpolated string. Throw a ParseException in that case.
                 if (brdepth > 0) Fail("unterminated '{' in interpolated string");
 
@@ -584,13 +591,18 @@ internal sealed class Lexer(string src)
                 _ts = _pp; Advance();
                 Emit(TK.Punct, "}");
             }
-            // emit a string literal segment until the next '{', '"', or newline
+            // emit a string literal segment until the next real '{', '"', or newline.
+            // `{{`/`}}` are literal-brace escapes (C#-style) and collapse to a single
+            // brace in the emitted text rather than starting a real interpolation.
             else
             {
                 int start = _pp;
-                while (_pp < src.Length && Cur != '{' && Cur != '"' && Cur != '\n')
+                var sb = new System.Text.StringBuilder();
+                while (_pp < src.Length && Cur != '"' && Cur != '\n' && !(Cur == '{' && Peek() != '{'))
                 {
-                    if (Cur == '\\')
+                    if (Cur == '{' && Peek() == '{') { sb.Append(src, start, _pp - start); Advance(2); sb.Append('{'); start = _pp; }
+                    else if (Cur == '}' && Peek() == '}') { sb.Append(src, start, _pp - start); Advance(2); sb.Append('}'); start = _pp; }
+                    else if (Cur == '\\')
                     {
                         Advance();
                         if (_pp >= src.Length) break;
@@ -600,7 +612,7 @@ internal sealed class Lexer(string src)
                     else Advance();
                 }
 
-                Emit(TK.StrLit, src[start.._pp]);
+                Emit(TK.StrLit, sb.Length == 0 ? src[start.._pp] : sb.Append(src, start, _pp - start).ToString());
             }
         }
 
