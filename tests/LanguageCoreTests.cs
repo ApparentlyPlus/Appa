@@ -251,7 +251,7 @@ public class LanguageCoreTests
             int func F(float a, int b) { return b; }
             kernel { entry func Main() { let int x = F(1, 1); } }
             """ },
-            { "annotation_on_block", "G000", """
+            { "annotation_on_block", "G048", """
             @intrinsic(alloc)
             kernel { entry func Main() { } }
             """ },
@@ -280,16 +280,16 @@ public class LanguageCoreTests
             { "cast_to_void", "G028", """
             kernel { entry func Main() { let int x = 5; let y = x as void; } }
             """ },
-            { "catch_binding", "G000", """
+            { "catch_binding", "G044", """
             throws int func risky(int x) { if (x < 0) { throw; } return x; }
             kernel { entry func Main() {
               try { let int v = risky(1); } catch (e) { }
             } }
             """ },
-            { "char_bad_escape", "G000", """
+            { "char_bad_escape", "G047", """
             kernel { entry func Main() { let c = '\q'; } }
             """ },
-            { "char_empty", "G000", """
+            { "char_empty", "G046", """
             kernel { entry func Main() { let c = ''; } }
             """ },
             { "compound_str", "G004", """
@@ -318,7 +318,7 @@ public class LanguageCoreTests
             { "defer_defer", "G004", """
             kernel { entry func Main() { defer defer { } } }
             """ },
-            { "dual_return_type", "G000", """
+            { "dual_return_type", "G053", """
             int func Foo() -> String { return "hi"; }
             kernel { entry func Main() { } }
             """ },
@@ -333,7 +333,7 @@ public class LanguageCoreTests
             void* func B(usize n) { return null; }
             kernel { entry func Main() { } }
             """ },
-            { "enum_trailing_comma", "G000", """
+            { "enum_trailing_comma", "G052", """
             enum Color { Red, Green, Blue, }
             kernel { entry func Main() { } }
             """ },
@@ -341,19 +341,19 @@ public class LanguageCoreTests
             class C { int x; func f() { let y = self.x(); } }
             kernel { entry func Main() { } }
             """ },
-            { "field_static", "G000", """
+            { "field_static", "G053", """
             class C { static int x; }
             kernel { entry func Main() { } }
             """ },
-            { "field_with_entry", "G000", """
+            { "field_with_entry", "G053", """
             class C { entry int x; }
             kernel { entry func Main() { } }
             """ },
-            { "field_with_throws", "G000", """
+            { "field_with_throws", "G053", """
             class C { throws int x; }
             kernel { entry func Main() { } }
             """ },
-            { "for_step_not_expr", "G000", """
+            { "for_step_not_expr", "G045", """
             kernel { entry func Main() {
               let int i = 0;
               for (i = 0; i < 5; i = i + 1) { }
@@ -389,7 +389,7 @@ public class LanguageCoreTests
             T func same[T](T a, T b) { return a; }
             kernel { entry func Main() { let int64 z = same(3, (4 as int64)); } }
             """ },
-            { "generic_expr", "G000", """
+            { "generic_expr", "G044", """
             kernel { entry func Main() { let List[Main(x)] a; } }
             """ },
             { "generic_no_infer", "G007", """
@@ -414,7 +414,7 @@ public class LanguageCoreTests
             native { #kernel: int x; #user: int x; }
             kernel { entry func Main() { } }
             """ },
-            { "keep_on_enum", "G000", """
+            { "keep_on_enum", "G048", """
             @keep
             enum Color { Red, Green }
             kernel { entry func Main() { } }
@@ -423,7 +423,7 @@ public class LanguageCoreTests
             class C { @keep int func F() { return 1; } }
             kernel { entry func Main() { } }
             """ },
-            { "keyword_as_ident_unreachable", "G000", """
+            { "keyword_as_ident_unreachable", "G044", """
             kernel { entry func Main() {
               let int x = thread + process;
             } }
@@ -431,7 +431,7 @@ public class LanguageCoreTests
             { "logical_int", "G004", """
             kernel { entry func Main() { let x = 3 && 4; } }
             """ },
-            { "match_duplicate_default", "G000", """
+            { "match_duplicate_default", "G003", """
             union Shape { Circle(float radius), Square(float side), Point }
 
             float func Area(Shape s) {
@@ -444,7 +444,7 @@ public class LanguageCoreTests
 
             kernel { entry func Main() { } }
             """ },
-            { "method_with_entry", "G000", """
+            { "method_with_entry", "G053", """
             class C {
                 entry void func Run() {}
             }
@@ -456,14 +456,14 @@ public class LanguageCoreTests
             { "narrow_long_int", "G007", """
             kernel { entry func Main() { let long a = 5; } }
             """ },
-            { "native_in_class", "G000", """
+            { "native_in_class", "G044", """
             class Box {
               int v;
               native { int extra; }
             }
             kernel { entry func Main() { } }
             """ },
-            { "nested_kernel", "G000", """
+            { "nested_kernel", "G051", """
             kernel { kernel { entry func Main() { } } }
             """ },
             { "new_module", "G011", """
@@ -476,7 +476,7 @@ public class LanguageCoreTests
             int func F(String a) { return 0; }
             kernel { entry func Main() { let Widget w = new Widget(); let int x = F(w); } }
             """ },
-            { "nonsense_generic_class_header", "G000", """
+            { "nonsense_generic_class_header", "G053", """
             class Foo[Bar[Baz]] { int v; }
             kernel { entry func Main() { } }
             """ },
@@ -524,7 +524,7 @@ public class LanguageCoreTests
             module M { private int func helper() { return 1; } }
             kernel { entry func Main() { let int z = M.helper(); } }
             """ },
-            { "process_non_thread", "G000", """
+            { "process_non_thread", "G053", """
             user { process App { int func oops() { return 1; } } }
             """ },
             { "redeclare", "G003", """
@@ -566,14 +566,14 @@ public class LanguageCoreTests
             class C { public int func F() { return 1; } }
             kernel { entry func Main() { let int x = C.F(); } }
             """ },
-            { "string_bad_escape", "G000", """
+            { "string_bad_escape", "G047", """
             kernel { entry func Main() { let s = "hi \q there"; } }
             """ },
-            { "string_raw_newline", "G000", """
+            { "string_raw_newline", "G046", """
             kernel { entry func Main() { let s = "line1
             line2"; } }
             """ },
-            { "switch_duplicate_default", "G000", """
+            { "switch_duplicate_default", "G003", """
             kernel { entry func Main() {
               let int x = 5;
               switch (x) {
@@ -615,13 +615,13 @@ public class LanguageCoreTests
               }
             }
             """ },
-            { "thread_nested", "G000", """
+            { "thread_nested", "G051", """
             user { process App { thread T { thread U { entry func R() { } } } } }
             """ },
-            { "thread_no_entry", "G000", """
+            { "thread_no_entry", "G053", """
             user { process App { thread T { } } }
             """ },
-            { "thread_stray_func", "G000", """
+            { "thread_stray_func", "G053", """
             user { process App { thread T {
               entry func R() { }
               int func helper() { return 1; }
@@ -660,18 +660,18 @@ public class LanguageCoreTests
               let int x = risky(1);
             } }
             """ },
-            { "trailing_return_type_only", "G000", """
+            { "trailing_return_type_only", "G053", """
             func Foo() -> int { return 1; }
             kernel { entry func Main() { } }
             """ },
             { "undef_var", "G005", """
             kernel { entry func Main() { let int x = y + 1; } }
             """ },
-            { "union_trailing_comma", "G000", """
+            { "union_trailing_comma", "G052", """
             union U { A, B, }
             kernel { entry func Main() { } }
             """ },
-            { "unknown_annotation", "G000", """
+            { "unknown_annotation", "G048", """
             kernel { entry func Main() { let int @foo = 5; } }
             """ },
             { "unknown_intrinsic_role", "G017", """

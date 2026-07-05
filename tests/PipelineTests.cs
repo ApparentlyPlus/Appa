@@ -18,7 +18,7 @@ public class PipelineTests
     /// Each source produces at least one error diagnostic carrying the expected code.
     /// </summary>
     [Theory]
-    [InlineData("G000", "kernel { entry func Main() { let int x = 5 } }")]
+    [InlineData("G044", "kernel { entry func Main() { let int x = 5 } }")]
     [InlineData("G003", "kernel { entry func Main() { } } int func f(int x, int x) { return x; }")]
     [InlineData("G003", "kernel { entry func Main() { let int s = 10; let String s = \"hi\"; } }")]
     [InlineData("G004", "kernel { entry func Main() { let x = true + 5; } }")]
