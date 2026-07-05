@@ -83,6 +83,17 @@ internal static class Codes
     public const string WrongAnnotationKind   = "G041";
     public const string UnknownPreambleTarget = "G042";
     public const string ThreadModeNotAllowed  = "G043";
+    public const string Syntax                = "G044";
+    public const string AssignInExpr          = "G045";
+    public const string UnterminatedLiteral   = "G046";
+    public const string BadEscape             = "G047";
+    public const string BadAnnotation         = "G048";
+    public const string BadNumber             = "G049";
+    public const string MissingLet            = "G050";
+    public const string InvalidNesting        = "G051";
+    public const string TrailingComma         = "G052";
+    public const string BadDeclHeader         = "G053";
+    public const string CannotInfer           = "G054";
 }
 
 /// <summary>

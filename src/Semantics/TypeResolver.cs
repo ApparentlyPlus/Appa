@@ -510,12 +510,33 @@ internal sealed class TypeResolver(
             IrBlock b => ReturnsList(b.Stmts),
             IrUnsafeBlock u => ReturnsList(u.Body.Stmts),
             IrIf i => i.Else != null && DefinitelyReturns(i.Then) && DefinitelyReturns(i.Else),
-            IrWhile w => w.Cond is IrLitBool { Value: true },
+            IrWhile w => w.Cond is IrLitBool { Value: true } && !HasLoopBreak(w.Body),
+            IrFor f => (f.Cond == null || f.Cond is IrLitBool { Value: true }) && !HasLoopBreak(f.Body),
+            IrPanic => true,
             IrTryCatch t => DefinitelyReturns(t.Try) && DefinitelyReturns(t.Catch),
             IrSwitch sw => sw.Default != null && sw.Cases.All(c => DefinitelyReturns(c.Body))
                            && DefinitelyReturns(sw.Default),
             IrMatch ms => ms.Cases.All(c => DefinitelyReturns(c.Body))
                           && (ms.Default == null || DefinitelyReturns(ms.Default)),
+            _ => false
+        };
+    }
+
+    /// <summary>
+    /// Returns true when the statement contains a 'break' that would exit the enclosing loop.
+    /// Does not descend into nested loops, whose breaks target the inner loop instead.
+    /// </summary>
+    private static bool HasLoopBreak(IrStmt s)
+    {
+        return s switch
+        {
+            IrBreak => true,
+            IrBlock b => b.Stmts.Any(HasLoopBreak),
+            IrUnsafeBlock u => HasLoopBreak(u.Body),
+            IrIf i => HasLoopBreak(i.Then) || (i.Else != null && HasLoopBreak(i.Else)),
+            IrTryCatch t => HasLoopBreak(t.Try) || HasLoopBreak(t.Catch),
+            IrSwitch sw => sw.Cases.Any(c => HasLoopBreak(c.Body)) || (sw.Default != null && HasLoopBreak(sw.Default)),
+            IrMatch m => m.Cases.Any(c => HasLoopBreak(c.Body)) || (m.Default != null && HasLoopBreak(m.Default)),
             _ => false
         };
     }
@@ -1549,13 +1570,19 @@ internal sealed class TypeResolver(
     private IrEnum ResolveEnum(EnumDecl ed, ResolveCtx ctx)
     {
         var members = new List<(string, string?)>();
+        var seen = new HashSet<string>();
         foreach (var m in ed.Members)
         {
+            if (!seen.Add(m.Name))
+                diag.Error(Codes.DuplicateName, ctx.File, m.Span,
+                    $"enum '{ed.Name}' already declares a member '{m.Name}'");
             string? cval = null;
-            if (m.Value is IntLitExpr il && TryParseIntLit(il.Value.AsSpan(), out var v, out _, out _))
-                cval = v.ToString();
+            var (neg, lit) = m.Value is UnaryExpr { Op: UnOp.Neg, Operand: IntLitExpr nil }
+                ? (true, nil) : (false, m.Value as IntLitExpr);
+            if (lit != null && TryParseIntLit(lit.Value.AsSpan(), out var v, out _, out _))
+                cval = neg ? (-v).ToString() : v.ToString();
             else if (m.Value != null)
-                diag.Error(Codes.TypeMismatch, ctx.File, ed.Span,
+                diag.Error(Codes.TypeMismatch, ctx.File, m.Span,
                     $"enum '{ed.Name}' member '{m.Name}' must be an integer literal");
             members.Add((m.Name, cval));
         }
@@ -1569,8 +1596,12 @@ internal sealed class TypeResolver(
     private IrUnion ResolveUnion(UnionDecl ud, ResolveCtx ctx)
     {
         var variants = new List<IrUnionVariant>();
+        var seen = new HashSet<string>();
         foreach (var v in ud.Variants)
         {
+            if (!seen.Add(v.Name))
+                diag.Error(Codes.DuplicateName, ctx.File, v.Span,
+                    $"union '{ud.Name}' already declares a variant '{v.Name}'");
             var fields = new List<IrParam>();
             foreach (var f in v.Fields)
             {
@@ -1876,6 +1907,7 @@ internal sealed class TypeResolver(
             diag.Error(Codes.TypeMismatch, ctx.File, sw.Scrutinee.Span,
                 $"switch requires an integer or enum value, got '{Describe(scrut.Type)}'");
         var cases = new List<IrSwitchCase>();
+        var seenLabels = new HashSet<string>();
         foreach (var c in sw.Cases)
         {
             var labels = new List<IrExpr>(c.Labels.Length);
@@ -1889,11 +1921,30 @@ internal sealed class TypeResolver(
                 if (!ComparableEq(scrut, lbl))
                     diag.Error(Codes.TypeMismatch, ctx.File, lbl.Span,
                         $"case label of type '{Describe(lbl.Type)}' is not comparable to the switch value '{Describe(scrut.Type)}'");
+                if (ConstLabelKey(lbl) is { } key && !seenLabels.Add(key))
+                    diag.Error(Codes.DuplicateName, ctx.File, lbl.Span,
+                        "this 'case' value is already handled by an earlier arm");
             }
             cases.Add(new IrSwitchCase(labels, ResolveBlock(c.Body, ctx, retType)));
         }
         var def = sw.Default == null ? null : ResolveBlock(sw.Default, ctx, retType);
         return new IrSwitch(scrut, cases, def);
+    }
+
+    /// <summary>
+    /// Returns a duplicate-detection key for a constant case label, or null for
+    /// non-constant labels that cannot be checked at compile time.
+    /// Int and char labels share a key space since C compares them as integers.
+    /// </summary>
+    private static string? ConstLabelKey(IrExpr lbl)
+    {
+        return lbl switch
+        {
+            IrLitInt li => "n:" + li.Value,
+            IrLitChar lc => "n:" + lc.Codepoint,
+            IrEnumConst ec => $"e:{ec.EnumName}.{ec.Member}",
+            _ => null
+        };
     }
 
     /// <summary>
@@ -1924,15 +1975,15 @@ internal sealed class TypeResolver(
             int idx = variants.FindIndex(v => v.Name == c.Variant);
             if (idx < 0)
             {
-                diag.Error(Codes.UndefinedVariable, ctx.File, ms.Span, $"union '{ut.Name}' has no variant '{c.Variant}'");
+                diag.Error(Codes.UndefinedVariable, ctx.File, c.Span, $"union '{ut.Name}' has no variant '{c.Variant}'");
                 cases.Add(new IrMatchCase(0, [], ResolveBlock(c.Body, ctx, retType)));
                 continue;
             }
             if (!covered.Add(idx))
-                diag.Error(Codes.DuplicateName, ctx.File, ms.Span, $"variant '{c.Variant}' is already matched in this 'match'");
+                diag.Error(Codes.DuplicateName, ctx.File, c.Span, $"variant '{c.Variant}' is already matched in this 'match'");
             var fields = variants[idx].Fields;
             if (c.Bindings.Length != fields.Length)
-                diag.Error(Codes.WrongArgCount, ctx.File, ms.Span,
+                diag.Error(Codes.WrongArgCount, ctx.File, c.Span,
                     $"'{c.Variant}' has {fields.Length} field(s), but {c.Bindings.Length} binding(s) were given");
             var caseCtx = ctx.PushScope();
             var binds = new List<IrMatchBind>();
@@ -1988,8 +2039,25 @@ internal sealed class TypeResolver(
         else if (init != null)
         {
             type = init.Type is IrResultType rt ? rt.Inner : init.Type;
+            if (init is IrLitNull)
+            {
+                diag.Error(Codes.CannotInfer, ctx.File, ls.Span,
+                    $"cannot infer a type for '{ls.Name}' from 'null'; give it an explicit type");
+                type = IrType.Int;
+            }
+            else if (type is IrVoidType)
+            {
+                diag.Error(Codes.CannotInfer, ctx.File, ls.Span,
+                    $"cannot declare '{ls.Name}': the initializer has no value (its type is 'void')");
+                type = IrType.Int;
+            }
         }
-        else type = IrType.Int;
+        else
+        {
+            diag.Error(Codes.CannotInfer, ctx.File, ls.Span,
+                $"cannot infer a type for '{ls.Name}'; add a type ('let int {ls.Name};') or an initializer");
+            type = IrType.Int;
+        }
 
         if (init != null && init.Type is not IrResultType)
         {
@@ -2045,7 +2113,23 @@ internal sealed class TypeResolver(
                 CheckCast(inner, to, ctx);
                 return new IrCast(to, inner);
             }
-            case PostfixExpr pf: return new IrPostfix(pf.Op, ResolveExpr(pf.Operand, ctx));
+            case PostfixExpr pf:
+            {
+                var opnd = ResolveExpr(pf.Operand, ctx);
+                if (opnd is not (IrVar or IrFieldLoad or IrIndex or IrDeref))
+                    diag.Error(Codes.NotAnLvalue, ctx.File, pf.Span,
+                        $"'{pf.Op.Sym()}' needs a variable, field, or element to modify");
+                else if (opnd.Type is IrPtrType)
+                {
+                    if (!ctx.InUnsafe)
+                        diag.Error(Codes.UnsafeRequired, ctx.File, pf.Span,
+                            $"pointer '{pf.Op.Sym()}' requires an 'unsafe' block");
+                }
+                else if (!IsArith(opnd.Type))
+                    diag.Error(Codes.TypeMismatch, ctx.File, pf.Span,
+                        $"'{pf.Op.Sym()}' requires a numeric operand, got '{Describe(opnd.Type)}'");
+                return new IrPostfix(pf.Op, opnd);
+            }
             case UnaryExpr un: return ResolveUnary(un, ctx);
             case BinExpr be: return ResolveBin(be, ctx);
             case CallExpr ce: return ResolveCall(ce, ctx);
