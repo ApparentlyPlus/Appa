@@ -1000,7 +1000,13 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             _            => ""
         };
         string cond = fr.Cond != null ? EmitExpr(fr.Cond) : "";
-        string step = fr.Step != null ? EmitExpr(fr.Step) : "";
+        string step = fr.Step switch
+        {
+            IrAssign sa  => $"{EmitExpr(sa.Target)} {sa.Op.Sym()} {EmitExpr(sa.Value)}",
+            IrExprStmt e => EmitExpr(e.Expr),
+            null         => "",
+            _            => throw new InvalidOperationException($"[Emitter] for-step must be an assignment or expression, got {fr.Step.GetType().Name}")
+        };
         w.Line($"for ({init}; {cond}; {step})");
         EmitBlock(fr.Body, w);
     }

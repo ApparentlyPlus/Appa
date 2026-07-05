@@ -537,9 +537,10 @@ internal record IfStmt(Expr Cond, Stmt Then, Stmt? Else, TextSpan Span) : Stmt(S
 internal record WhileStmt(Expr Cond, Stmt Body, TextSpan Span) : Stmt(Span);
 
 /// <summary>
-/// A C-style for loop. Init, Cond, and Step are all optional.
+/// A C-style for loop. Init, Cond, and Step are all optional. Init and Step are statements
+/// so both clauses accept a plain or compound assignment as well as an expression.
 /// </summary>
-internal record ForStmt(Stmt? Init, Expr? Cond, Expr? Step, Block Body, TextSpan Span) : Stmt(Span);
+internal record ForStmt(Stmt? Init, Expr? Cond, Stmt? Step, Block Body, TextSpan Span) : Stmt(Span);
 
 /// <summary>
 /// A for-in loop that iterates over a collection. Var is the loop variable name.

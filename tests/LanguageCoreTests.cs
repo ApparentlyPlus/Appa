@@ -53,6 +53,15 @@ public class LanguageCoreTests
               for (i = 0; i < 5; i++) { sum = sum + i; }
             } }
             """ },
+            { "for_step_assign", """
+            kernel { entry func Main() {
+              let int sum = 0;
+              for (let int i = 0; i < 100; i = i + 1) { sum = sum + i; }
+              for (let int j = 0; j < 100; j += 7) { sum = sum + j; }
+              for (let int k = 64; k > 0; k >>= 1) { sum = sum + k; }
+              if (sum > 0) { } else { }
+            } }
+            """ },
             { "generic_funcs", """
             T func max[T](T a, T b) { if (a > b) { return a; } return b; }
             T func identity[T](T x) { return x; }
@@ -352,12 +361,6 @@ public class LanguageCoreTests
             { "field_with_throws", "G053", """
             class C { throws int x; }
             kernel { entry func Main() { } }
-            """ },
-            { "for_step_not_expr", "G045", """
-            kernel { entry func Main() {
-              let int i = 0;
-              for (i = 0; i < 5; i = i + 1) { }
-            } }
             """ },
             { "forin_int", "G032", """
             kernel { entry func Main() { for i in 5 { } } }

@@ -491,7 +491,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
             case ForStmt fs:
                 var newFInit = fs.Init is null ? null : SubStmt(fs.Init, ctx);
                 var newFCond = fs.Cond is null ? null : SubExpr(fs.Cond, ctx);
-                var newFStep = fs.Step is null ? null : SubExpr(fs.Step, ctx);
+                var newFStep = fs.Step is null ? null : SubStmt(fs.Step, ctx);
                 var newFBody = SubBlock(fs.Body, ctx);
                 if (ReferenceEquals(newFInit, fs.Init) && ReferenceEquals(newFCond, fs.Cond) &&
                     ReferenceEquals(newFStep, fs.Step) && ReferenceEquals(newFBody, fs.Body))

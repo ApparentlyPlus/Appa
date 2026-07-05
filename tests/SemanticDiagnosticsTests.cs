@@ -176,13 +176,13 @@ public class SemanticDiagnosticsTests
     }
 
     /// <summary>
-    /// A non-literal enum value is still rejected.
+    /// A non-constant enum value is rejected.
     /// </summary>
     [Fact]
-    public void NonLiteralEnumValueIsRejected()
+    public void NonConstEnumValueIsStillRejected()
     {
         AssertError(Codes.TypeMismatch,
-            "enum E { A = 1 + 2 } kernel { entry func Main() { } }");
+            "enum E { A = \"str\" } kernel { entry func Main() { } }");
     }
 
     /// <summary>
@@ -265,6 +265,177 @@ public class SemanticDiagnosticsTests
         var (diag, _) = SingleFileCompile.Check(src);
         var err = diag.All.First(d => d.Code == Codes.UndefinedVariable);
         Assert.Equal(src.IndexOf("case Bogus"), err.Loc.Span.Start);
+    }
+
+    #endregion
+
+    #region For-step assignment
+
+    /// <summary>
+    /// A for-step assignment resolves, lowers, and emits as an inline C step expression.
+    /// </summary>
+    [Fact]
+    public void ForStepAssignmentEmitsInline()
+    {
+        var files = SingleFileCompile.Emit("""
+        @preamble(kernel)
+        native { }
+        kernel { entry func Main() {
+          let int sum = 0;
+          for (let int i = 0; i < 100; i = i + 1) { sum = sum + i; }
+          if (sum > 0) { } else { }
+        } }
+        """);
+        Assert.NotEmpty(files);
+        Assert.Contains(files, f => f.Content.Contains("i = (i + 1))"));
+    }
+
+    /// <summary>
+    /// A for-step assignment goes through full statement checking: bad types and
+    /// non-lvalue targets are rejected the same as anywhere else.
+    /// </summary>
+    [Theory]
+    [InlineData("kernel { entry func Main() { for (let int i = 0; i < 5; i = \"x\") { } } }")]
+    [InlineData("kernel { entry func Main() { for (let int i = 0; i < 5; i &= 1.5) { } } }")]
+    public void ForStepAssignmentIsTypeChecked(string src)
+    {
+        AssertError(Codes.TypeMismatch, src);
+    }
+
+    #endregion
+
+    #region Enum const folding
+
+    /// <summary>
+    /// Constant expressions in enum values fold at compile time, including
+    /// references to earlier members of the same enum.
+    /// </summary>
+    [Fact]
+    public void EnumConstExprsFold()
+    {
+        var (diag, module) = SingleFileCompile.Check("""
+        enum Flags {
+          None = 0,
+          Read = 1 << 0,
+          Write = 1 << 1,
+          Exec = 1 << 2,
+          All = Read | Write | Exec,
+          Also = Flags.All,
+          Neg = -(2 * 3),
+          Ch = 'x',
+          Masked = ~0 & 15
+        }
+        kernel { entry func Main() { let Flags f = Flags.All; if (f == Flags.All) { } } }
+        """);
+        Assert.False(diag.HasErrors, string.Join("; ", diag.All.Select(d => d.Message)));
+        var e = module!.Enums.Single();
+        string? ValueOf(string name) => e.Members.Single(m => m.Item1 == name).Item2;
+        Assert.Equal("7", ValueOf("All"));
+        Assert.Equal("7", ValueOf("Also"));
+        Assert.Equal("-6", ValueOf("Neg"));
+        Assert.Equal("120", ValueOf("Ch"));
+        Assert.Equal("15", ValueOf("Masked"));
+    }
+
+    /// <summary>
+    /// Implicit members count from the previous folded value, so a later reference
+    /// to an implicit member folds to the right number.
+    /// </summary>
+    [Fact]
+    public void ImplicitEnumMembersFoldFromPreviousValue()
+    {
+        var (diag, module) = SingleFileCompile.Check("""
+        enum E { A = 10, B, C = B + 5 }
+        kernel { entry func Main() { let E e = E.C; if (e == E.C) { } } }
+        """);
+        Assert.False(diag.HasErrors);
+        Assert.Equal("16", module!.Enums.Single().Members.Single(m => m.Item1 == "C").Item2);
+    }
+
+    /// <summary>
+    /// Non-constant enum values are still rejected: unknown names, forward
+    /// references, and division by zero.
+    /// </summary>
+    [Theory]
+    [InlineData("enum E { A = x + 1 } kernel { entry func Main() { } }")]
+    [InlineData("enum E { A = B + 1, B } kernel { entry func Main() { } }")]
+    [InlineData("enum E { A = 1 / 0 } kernel { entry func Main() { } }")]
+    public void NonConstEnumValueIsRejected(string src)
+    {
+        AssertError(Codes.TypeMismatch, src);
+    }
+
+    #endregion
+
+    #region Operator overload checking
+
+    private const string VecDecl = """
+    class Vec {
+      public int x;
+      func _init(int a) { self.x = a; }
+      operator func +(Vec other) -> Vec { return new Vec(self.x + other.x); }
+    }
+    """;
+
+    /// <summary>
+    /// The right operand of a user-defined operator is checked against the
+    /// operator's declared parameter type.
+    /// </summary>
+    [Theory]
+    [InlineData("let Vec c = a + 5;")]
+    [InlineData("let Vec c = a + true;")]
+    public void OperatorOperandTypeIsChecked(string stmt)
+    {
+        AssertError(Codes.ArgTypeMismatch, VecDecl + $$"""
+        kernel { entry func Main() {
+          let Vec a = new Vec(1);
+          {{stmt}}
+        } }
+        """);
+    }
+
+    /// <summary>
+    /// Compound assignment through an operator overload checks the operand too.
+    /// </summary>
+    [Fact]
+    public void CompoundOperatorOperandTypeIsChecked()
+    {
+        AssertError(Codes.ArgTypeMismatch, VecDecl + """
+        kernel { entry func Main() {
+          let Vec a = new Vec(1);
+          a += 5;
+        } }
+        """);
+    }
+
+    /// <summary>
+    /// A well-typed operand still resolves cleanly.
+    /// </summary>
+    [Fact]
+    public void MatchingOperatorOperandStillChecks()
+    {
+        AssertClean(VecDecl + """
+        kernel { entry func Main() {
+          let Vec a = new Vec(1);
+          let Vec b = new Vec(2);
+          let Vec c = a + b;
+          a += b;
+          if (c.x >= 0) { } else { }
+        } }
+        """);
+    }
+
+    /// <summary>
+    /// Operator declarations enforce their arity: one parameter for binary and '[]',
+    /// two for '[]='. A wrong-arity indexer no longer crashes the resolver at use sites.
+    /// </summary>
+    [Theory]
+    [InlineData("class C { int v; operator func +(C a, C b) -> C { return a; } } kernel { entry func Main() { } }")]
+    [InlineData("class C { int v; operator func [](int i, int j) -> int { return 0; } } kernel { entry func Main() { let C c = new C(); let int x = c[0]; } }")]
+    [InlineData("class C { int v; operator func []=(int i) { } } kernel { entry func Main() { let C c = new C(); c[0] = 1; } }")]
+    public void OperatorArityIsEnforced(string src)
+    {
+        AssertError(Codes.WrongArgCount, src);
     }
 
     #endregion

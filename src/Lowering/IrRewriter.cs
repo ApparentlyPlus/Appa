@@ -420,7 +420,7 @@ internal abstract class IrRewriter
     {
         var init = f.Init == null ? null : RewriteStmt(f.Init);
         var cond = f.Cond == null ? null : RewriteExpr(f.Cond);
-        var step = f.Step == null ? null : RewriteExpr(f.Step);
+        var step = f.Step == null ? null : RewriteStmt(f.Step);
         var body = RewriteBlock(f.Body);
         return ReferenceEquals(init, f.Init) && ReferenceEquals(cond, f.Cond) && ReferenceEquals(step, f.Step) && ReferenceEquals(body, f.Body)
             ? f

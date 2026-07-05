@@ -1122,34 +1122,36 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         Expect(TK.LParen);
         Stmt? init = null;
         if (!At(TK.Semi))
-        {
-            if (At(TK.Let))
-                init = ParseLetNoSemi();
-            else
-            {
-                int es = Cur.Span.Start;
-                var lhs = ParseExpr();
-                if (At(TK.Eq) || At(TK.PlusEq) || At(TK.MinusEq) || At(TK.StarEq)
-                    || At(TK.SlashEq) || At(TK.PercentEq) || At(TK.AmpEq)
-                    || At(TK.PipeEq) || At(TK.CaretEq) || At(TK.ShlEq) || At(TK.ShrEq))
-                {
-                    var op = AssignOpOf(Cur.Kind); Advance();
-                    init = new AssignStmt(lhs, op, ParseExpr(), To(es));
-                }
-                else
-                    init = new ExprStmt(lhs, To(es));
-            }
-        }
+            init = At(TK.Let) ? ParseLetNoSemi() : ParseForClause();
         Expect(TK.Semi);
         Expr? cond = At(TK.Semi) ? null : ParseExpr();
         if (cond != null)
             NoAssignHere("the loop condition", At(TK.Eq) ? "did you mean '=='?" : "move the update into the loop body");
         Expect(TK.Semi);
-        Expr? step = At(TK.RParen) ? null : ParseExpr();
-        if (step != null)
-            NoAssignHere("the for-loop step", "use 'i++'/'i--' or move the update into the loop body");
+        Stmt? step = null;
+        if (!At(TK.RParen))
+        {
+            if (At(TK.Let)) Fail("cannot declare a variable in the for-loop step");
+            step = ParseForClause();
+        }
         Expect(TK.RParen);
         return new ForStmt(init, cond, step, ParseBlock(), To(s));
+    }
+
+    /// <summary>
+    /// Parses a for-loop init or step clause without a trailing semicolon: an expression,
+    /// optionally promoted to an assignment when an assignment operator follows.
+    /// </summary>
+    private Stmt ParseForClause()
+    {
+        int es = Cur.Span.Start;
+        var lhs = ParseExpr();
+        if (IsAssignTk(Cur.Kind))
+        {
+            var op = AssignOpOf(Cur.Kind); Advance();
+            return new AssignStmt(lhs, op, ParseExpr(), To(es));
+        }
+        return new ExprStmt(lhs, To(es));
     }
 
     /// <summary>
@@ -1191,9 +1193,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     private Stmt ParseExprOrAssign(int s)
     {
         var expr = ParseExpr();
-        if (At(TK.Eq) || At(TK.PlusEq) || At(TK.MinusEq) || At(TK.StarEq)
-            || At(TK.SlashEq) || At(TK.PercentEq) || At(TK.AmpEq)
-            || At(TK.PipeEq) || At(TK.CaretEq) || At(TK.ShlEq) || At(TK.ShrEq))
+        if (IsAssignTk(Cur.Kind))
         {
             var op = AssignOpOf(Cur.Kind); Advance();
             var val = ParseExpr();

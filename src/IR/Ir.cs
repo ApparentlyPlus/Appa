@@ -587,7 +587,7 @@ internal record IrWhile(IrExpr Cond, IrBlock Body) : IrStmt;
 /// <summary>
 /// A C-style for loop with optional init, condition, and step.
 /// </summary>
-internal record IrFor(IrStmt? Init, IrExpr? Cond, IrExpr? Step, IrBlock Body) : IrStmt;
+internal record IrFor(IrStmt? Init, IrExpr? Cond, IrStmt? Step, IrBlock Body) : IrStmt;
 
 /// <summary>
 /// A for-in loop over a collection or fixed array.

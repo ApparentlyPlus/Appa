@@ -653,7 +653,7 @@ internal sealed class TypeResolver(
                 case IrReturn r: Ex(r.Value); break;
                 case IrIf i: Ex(i.Cond); St(i.Then); if (i.Else != null) St(i.Else); break;
                 case IrWhile w: Ex(w.Cond); St(w.Body); break;
-                case IrFor f: if (f.Init != null) St(f.Init); Ex(f.Cond); Ex(f.Step); St(f.Body); break;
+                case IrFor f: if (f.Init != null) St(f.Init); Ex(f.Cond); if (f.Step != null) St(f.Step); St(f.Body); break;
                 case IrForIn fi: Ex(fi.Collection); St(fi.Body); break;
                 case IrTryCatch t: St(t.Try); St(t.Catch); break;
                 case IrSwitch sw:
@@ -1355,6 +1355,11 @@ internal sealed class TypeResolver(
     /// </summary>
     private IrOperator ResolveOperator(string cls, OperatorDecl od, ResolveCtx ctx, bool lib, Visibility vis)
     {
+        // '[]=' takes (index, value); every other operator is binary over self and one operand.
+        int want = od.Op == "[]=" ? 2 : 1;
+        if (od.Params.Length != want)
+            diag.Error(Codes.WrongArgCount, ctx.File, od.Span,
+                $"operator '{od.Op}' must take exactly {want} parameter(s), got {od.Params.Length}");
         CheckType(od.ReturnType, ctx, od.Span, allowVoid: true);
         foreach (var p in od.Params) CheckType(p.Type, ctx, p.Span);
         CheckParams(od.Params, ctx);
@@ -1571,22 +1576,85 @@ internal sealed class TypeResolver(
     {
         var members = new List<(string, string?)>();
         var seen = new HashSet<string>();
+        var values = new Dictionary<string, long>();
+        long next = 0;
         foreach (var m in ed.Members)
         {
             if (!seen.Add(m.Name))
                 diag.Error(Codes.DuplicateName, ctx.File, m.Span,
                     $"enum '{ed.Name}' already declares a member '{m.Name}'");
             string? cval = null;
-            var (neg, lit) = m.Value is UnaryExpr { Op: UnOp.Neg, Operand: IntLitExpr nil }
-                ? (true, nil) : (false, m.Value as IntLitExpr);
-            if (lit != null && TryParseIntLit(lit.Value.AsSpan(), out var v, out _, out _))
-                cval = neg ? (-v).ToString() : v.ToString();
-            else if (m.Value != null)
-                diag.Error(Codes.TypeMismatch, ctx.File, m.Span,
-                    $"enum '{ed.Name}' member '{m.Name}' must be an integer literal");
+            if (m.Value != null)
+            {
+                if (TryConstEval(m.Value, ed.Name, values, out long v))
+                {
+                    cval = v.ToString();
+                    next = v;
+                }
+                else
+                    diag.Error(Codes.TypeMismatch, ctx.File, m.Span,
+                        $"enum '{ed.Name}' member '{m.Name}' must be a constant integer expression " +
+                        "(integer/char literals, earlier members, and + - * / % << >> & | ^ ~ -)");
+            }
+            values[m.Name] = next;
             members.Add((m.Name, cval));
+            next++;
         }
         return new IrEnum(ed.Name, Mangler.Enum(ed.Name), members);
+    }
+
+    /// <summary>
+    /// Folds a constant integer expression at compile time. Supports integer and char
+    /// literals, unary negate/complement, the arithmetic/bitwise/shift binary operators,
+    /// and references to earlier members of the enclosing enum (bare or enum-qualified).
+    /// Returns false on any non-constant subexpression or a division by zero.
+    /// </summary>
+    private static bool TryConstEval(Expr e, string enumName, Dictionary<string, long> members, out long v)
+    {
+        v = 0;
+        switch (e)
+        {
+            case IntLitExpr il:
+                return TryParseIntLit(il.Value.AsSpan(), out v, out _, out _);
+            case CharLitExpr cl:
+                v = cl.Value;
+                return true;
+            case IdentExpr ie:
+                return members.TryGetValue(ie.Name, out v);
+            case MemberAccessExpr { Object: IdentExpr oid } ma when oid.Name == enumName:
+                return members.TryGetValue(ma.Member, out v);
+            case UnaryExpr un:
+            {
+                if (!TryConstEval(un.Operand, enumName, members, out long o)) return false;
+                switch (un.Op)
+                {
+                    case UnOp.Neg: v = -o; return true;
+                    case UnOp.BitNot: v = ~o; return true;
+                    default: return false;
+                }
+            }
+            case BinExpr be:
+            {
+                if (!TryConstEval(be.Left, enumName, members, out long l)) return false;
+                if (!TryConstEval(be.Right, enumName, members, out long r)) return false;
+                switch (be.Op)
+                {
+                    case BinOp.Add: v = l + r; return true;
+                    case BinOp.Sub: v = l - r; return true;
+                    case BinOp.Mul: v = l * r; return true;
+                    case BinOp.Div: if (r == 0) return false; v = l / r; return true;
+                    case BinOp.Mod: if (r == 0) return false; v = l % r; return true;
+                    case BinOp.Shl: v = l << (int)(r & 63); return true;
+                    case BinOp.Shr: v = l >> (int)(r & 63); return true;
+                    case BinOp.BitAnd: v = l & r; return true;
+                    case BinOp.BitOr: v = l | r; return true;
+                    case BinOp.BitXor: v = l ^ r; return true;
+                    default: return false;
+                }
+            }
+            default:
+                return false;
+        }
     }
 
     /// <summary>
@@ -1677,6 +1745,7 @@ internal sealed class TypeResolver(
                 string? lhsClass = ClassNameOf(target.Type);
                 if (lhsClass != null && sym.LookupOperator(lhsClass, baseOp) is { } opSym)
                 {
+                    value = CheckOpArg(opSym, value, ctx);
                     var composed = new IrStaticCall(opSym.CName, ResolveType(opSym.Type), [target, value]);
                     CheckAssign(composed, target.Type, "the assignment target", ctx, Codes.TypeMismatch);
                     ForbidNestedThrows(composed, ctx, allowRoot: false);
@@ -1819,29 +1888,18 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Resolves a for statement, handling let, assignment, and expression init clauses
-    /// in a new scope with the loop depth incremented.
+    /// Resolves a for statement, handling let, assignment, and expression init and step
+    /// clauses in a new scope with the loop depth incremented. Both clauses go through
+    /// the full statement resolver so assignments get lvalue, type, and throws checking.
     /// </summary>
     private IrStmt ResolveFor(ForStmt fs, ResolveCtx ctx, IrType retType)
     {
         var fctx = ctx.PushScope() with { LoopDepth = ctx.LoopDepth + 1 };
-        IrStmt? init = null;
-        if (fs.Init is LetStmt ls) init = ResolveLet(ls, fctx);
-        else if (fs.Init is AssignStmt asgn)
-        {
-            var t = ResolveExpr(asgn.Target, fctx);
-            var v = ResolveExpr(asgn.Value, fctx);
-            CheckLValue(t, fctx);
-            if (asgn.Op == AssignOp.Assign) { v = Coerce(v, t.Type, fctx); CheckAssign(v, t.Type, "the assignment target", fctx, Codes.TypeMismatch); }
-            else CheckCompound(asgn.Op, t, v, fctx);
-            init = new IrAssign(t, asgn.Op, v) { Span = asgn.Span };
-        }
-        else if (fs.Init is ExprStmt es) init = new IrExprStmt(ResolveExpr(es.E, fctx)) { Span = es.Span };
+        IrStmt? init = fs.Init != null ? ResolveStmt(fs.Init, fctx, retType) : null;
         IrExpr? cond = fs.Cond != null ? ResolveExpr(fs.Cond, fctx) : null;
-        IrExpr? step = fs.Step != null ? ResolveExpr(fs.Step, fctx) : null;
         ForbidNestedThrows(cond, fctx, allowRoot: false);
         if (cond != null) CheckCondition(cond, fctx);
-        ForbidNestedThrows(step, fctx, allowRoot: false);
+        IrStmt? step = fs.Step != null ? ResolveStmt(fs.Step, fctx, retType) : null;
         var body = ResolveBlock(fs.Body, fctx, retType);
         WarnIfEmpty(body, "for", fctx, fs.Span);
         return new IrFor(init, cond, step, body);
@@ -2207,6 +2265,21 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
+    /// Coerces and type-checks the right-hand operand of a user-defined binary operator
+    /// against the operator's declared parameter type. Returns the coerced operand.
+    /// </summary>
+    private IrExpr CheckOpArg(Symbol op, IrExpr right, ResolveCtx ctx)
+    {
+        if (op.Sig is not { Params: [var p] }) return right;
+        var pt = ResolveType(p.Type);
+        right = Coerce(right, pt, ctx);
+        if (right.Type is not IrResultType && !Assignable(right, pt))
+            diag.Error(Codes.ArgTypeMismatch, ctx.File, right.Span,
+                $"operator '{op.Name}' on '{Mangler.DisplayName(op.Owner ?? "")}' takes '{Describe(pt)}', got '{Describe(right.Type)}'");
+        return right;
+    }
+
+    /// <summary>
     /// Resolves a binary expression. Handles string concatenation, operator overloading,
     /// pointer arithmetic, logical, equality, relational, bitwise, and arithmetic operators.
     /// </summary>
@@ -2225,7 +2298,10 @@ internal sealed class TypeResolver(
 
         string? lhsClass = ClassNameOf(left.Type);
         if (lhsClass != null && sym.LookupOperator(lhsClass, be.Op.Sym()) is { } op)
+        {
+            right = CheckOpArg(op, right, ctx);
             return new IrStaticCall(op.CName, ResolveType(op.Type), [left, right]);
+        }
 
         if (left.Type is IrPtrType && be.Op is BinOp.Add or BinOp.Sub && right.Type.IsNumeric)
         {
@@ -2664,7 +2740,7 @@ internal sealed class TypeResolver(
     {
         var obj = ResolveExpr(ix.Object, ctx);
         var idx = ResolveExpr(ix.Index, ctx);
-        if (obj.Type is IrClassRef icr && sym.LookupOperator(icr.ClassName, "[]") is { } getOp)
+        if (obj.Type is IrClassRef icr && sym.LookupOperator(icr.ClassName, "[]") is { Sig.Params: [_] } getOp)
         {
             var idxType = ResolveType(getOp.Sig!.Params[0].Type);
             idx = Coerce(idx, idxType, ctx);
@@ -2696,7 +2772,7 @@ internal sealed class TypeResolver(
         var obj = ResolveExpr(ixt.Object, ctx);
         var idx = ResolveExpr(ixt.Index, ctx);
 
-        if (obj.Type is IrClassRef cr && sym.LookupOperator(cr.ClassName, "[]=") is { } setOp)
+        if (obj.Type is IrClassRef cr && sym.LookupOperator(cr.ClassName, "[]=") is { Sig.Params: [_, _] } setOp)
         {
             var idxType = ResolveType(setOp.Sig!.Params[0].Type);
             var valType = ResolveType(setOp.Sig!.Params[1].Type);
@@ -2728,7 +2804,10 @@ internal sealed class TypeResolver(
             string? elemClass = ClassNameOf(current.Type);
             IrExpr combined;
             if (elemClass != null && sym.LookupOperator(elemClass, baseOp.Sym()) is { } elemOp)
+            {
+                rhs = CheckOpArg(elemOp, rhs, ctx);
                 combined = new IrStaticCall(elemOp.CName, ResolveType(elemOp.Type), [current, rhs]);
+            }
             else
             {
                 CheckCompound(asgn.Op, current, rhs, ctx);
@@ -2772,6 +2851,7 @@ internal sealed class TypeResolver(
         string elemBaseOp = asgn.Op.BaseOp()!.Value.Sym();
         if (ClassNameOf(elem) is { } elemClass2 && sym.LookupOperator(elemClass2, elemBaseOp) is { } elemOp2)
         {
+            val = CheckOpArg(elemOp2, val, ctx);
             var stmts = new List<IrStmt>();
             var objRef = HoistIfImpure(obj, "_ixo", stmts);
             var idxRef = HoistIfImpure(idx, "_ixi", stmts);

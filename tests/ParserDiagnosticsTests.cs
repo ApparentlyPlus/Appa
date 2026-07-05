@@ -17,18 +17,27 @@ public class ParserDiagnosticsTests
     }
 
     /// <summary>
-    /// An assignment in the for-loop step gets the assignment-is-a-statement
-    /// diagnostic, not "expected ')', found '='".
+    /// Plain and compound assignments are valid for-loop steps, mirroring the init clause.
     /// </summary>
     [Theory]
     [InlineData("func F() { for (let int i = 0; i < 5; i = i + 1) { } }")]
     [InlineData("func F() { for (let int i = 0; i < 5; i += 1) { } }")]
-    public void AssignmentInForStepGetsTargetedDiagnostic(string src)
+    [InlineData("func F() { for (let int i = 10; i > 0; i >>= 1) { } }")]
+    public void AssignmentInForStepParses(string src)
     {
-        var ex = Parse(src);
-        Assert.Equal(Codes.AssignInExpr, ex.Code);
-        Assert.Contains("assignment is a statement", ex.Message);
-        Assert.Contains("i++", ex.Message);
+        var func = Assert.IsType<FuncDecl>(SingleFileCompile.Parse(src).Items[0]);
+        var forStmt = Assert.IsType<ForStmt>(((BlockBody)func.Body).Block.Stmts[0]);
+        Assert.IsType<AssignStmt>(forStmt.Step);
+    }
+
+    /// <summary>
+    /// A variable declaration makes no sense in the for-loop step and is rejected.
+    /// </summary>
+    [Fact]
+    public void LetInForStepIsRejected()
+    {
+        var ex = Parse("func F() { for (let int i = 0; i < 5; let int j = 0) { } }");
+        Assert.Contains("cannot declare a variable in the for-loop step", ex.Message);
     }
 
     /// <summary>
