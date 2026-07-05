@@ -196,10 +196,12 @@ internal record IrEnumType(string Name) : IrType
         return Cache.GetOrAdd(name, n => new IrEnumType(n));
     }
 
-    private readonly string _cType = Mangler.Enum(Name);
+    // Computed on every call, not cached at construction: this instance is shared
+    // via Cache/Get and may be first constructed before Densifier.SetDense runs, at
+    // which point Mangler.Enum would freeze the pre-dense name into a cached field.
     public override string ToCType()
     {
-        return _cType;
+        return Mangler.Enum(Name);
     }
 
     public override string MangledName => Name;
@@ -217,10 +219,10 @@ internal record IrPtrType(IrType Inner) : IrType
         return Cache.GetOrAdd(inner, i => new IrPtrType(i));
     }
 
-    private readonly string _cType = $"{Inner.ToCType()}*";
+    // Computed on every call - see IrEnumType.ToCType for why this can't be cached.
     public override string ToCType()
     {
-        return _cType;
+        return $"{Inner.ToCType()}*";
     }
 
     public override string MangledName => Inner.MangledName + "_p";
@@ -233,10 +235,10 @@ internal record IrPtrType(IrType Inner) : IrType
 /// </summary>
 internal record IrArrayType(IrType Elem, int Size) : IrType
 {
-    private readonly string _cType = Mangler.Class($"Arr_{Elem.MangledName}_{Size}");
+    // Computed on every call - see IrEnumType.ToCType for why this can't be cached.
     public override string ToCType()
     {
-        return _cType;
+        return Mangler.Class($"Arr_{Elem.MangledName}_{Size}");
     }
 
     public override string MangledName => $"Arr_{Elem.MangledName}_{Size}";
@@ -265,8 +267,10 @@ internal record IrResultType(IrType Inner) : IrType
 
     /// <summary>
     /// The C typedef name for this result type, e.g. Result_int or Result_MyClass.
+    /// Computed on every call, not cached - see IrEnumType.ToCType for why the
+    /// fallback branch's Inner.ToCType() can't be captured at construction.
     /// </summary>
-    public string ResultName { get; } = $"Result_{(
+    public string ResultName => $"Result_{(
         Inner switch
         {
             IrVoidType    => "int",
@@ -301,18 +305,17 @@ internal record IrFuncPtrType(IrType Ret, List<IrType> Params) : IrType
         }
     )}";
 
-    private readonly string _cType = Mangler.Class($"Fn_{Ret.MangledName}__{(
-        Params.Count switch
-        {
-            0 => "",
-            1 => Params[0].MangledName,
-            _ => string.Join("_", Params.Select(p => p.MangledName))
-        }
-    )}");
-
+    // Computed on every call - see IrEnumType.ToCType for why this can't be cached.
     public override string ToCType()
     {
-        return _cType;
+        return Mangler.Class($"Fn_{Ret.MangledName}__{(
+            Params.Count switch
+            {
+                0 => "",
+                1 => Params[0].MangledName,
+                _ => string.Join("_", Params.Select(p => p.MangledName))
+            }
+        )}");
     }
 }
 
@@ -322,10 +325,10 @@ internal record IrFuncPtrType(IrType Ret, List<IrType> Params) : IrType
 /// </summary>
 internal record IrUnionType(string Name) : IrType
 {
-    private readonly string _cType = Mangler.Union(Name);
+    // Computed on every call - see IrEnumType.ToCType for why this can't be cached.
     public override string ToCType()
     {
-        return _cType;
+        return Mangler.Union(Name);
     }
 
     public override string MangledName => Name;
@@ -794,17 +797,20 @@ internal record IrModule(
 )
 {
     // The realms a build emits are those the environment declared via @preamble:
-    // (kernel)/(boot) -> kernel realm; (user) -> user realm.
+    // (kernel)/(boot) -> kernel realm; (user) -> user realm. Computed on every access,
+    // not cached at construction - NativeBlocks is populated by ResolveTop's Add calls
+    // on this same instance after the constructor already ran, so a get-only property
+    // initializer here would always see an empty list.
     /// <summary>
     /// Returns true if the module emits a kernel realm, determined by the presence of kernel preamble or boot blocks.
     /// </summary>
-    public bool HasKernelRealm { get; } = NativeBlocks.Any(nb =>
+    public bool HasKernelRealm => NativeBlocks.Any(nb =>
         nb.Vis == Visibility.Kernel && nb.Section is NativeSection.Preamble or NativeSection.Boot);
 
     /// <summary>
     /// Returns true if the module emits a user realm, determined by the presence of user preamble blocks.
     /// </summary>
-    public bool HasUserRealm { get; } = NativeBlocks.Any(nb =>
+    public bool HasUserRealm => NativeBlocks.Any(nb =>
         nb.Vis == Visibility.User && nb.Section == NativeSection.Preamble);
 }
 
