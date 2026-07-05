@@ -18,7 +18,7 @@ internal enum TK : byte
     Entry, Throws, Operator, As, Fields, Ref,
 
     // Annotations (@ prefix, parsed as keywords)
-    AtIntrinsic, AtPreamble, AtExtern, AtEnvironment, AtKeep,
+    AtIntrinsic, AtPreamble, AtExtern, AtEnvironment, AtKeep, AtBuiltin,
 
     // Keywords (Flow control)
     Return, If, Else, While, For, In, Break, Continue, Switch, Case,

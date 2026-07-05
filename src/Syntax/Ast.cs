@@ -141,6 +141,13 @@ internal record PreambleAnnotation(string Target, TextSpan Span) : Annotation;
 /// </summary>
 internal record KeepAnnotation(TextSpan Span) : Annotation;
 
+/// <summary>
+/// @builtin(name): binds a class or native type declaration to a named compiler builtin
+/// type slot (eg. "String", "Process", "Thread"), the same way @intrinsic binds a role -
+/// the compiler never hardcodes these names, it resolves them from this declaration.
+/// </summary>
+internal record BuiltinAnnotation(string Name, TextSpan Span) : Annotation;
+
 #endregion
 
 #region Class members

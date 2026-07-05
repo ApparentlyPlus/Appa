@@ -413,8 +413,12 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     {
         if (t.EndsWith('*')) return t;
         if (PrimTypes.IsPrim(t)) return PrimTypes.ToC(t);
-        if (t == "String") return $"{Mangler.Class("String")}*";
-        if (t is "Process" or "Thread") return "void*";
+        // Monomorphization runs before symbol collection (Pipeline.cs), so no
+        // SymbolTable/@builtin binding exists yet to resolve against here - these
+        // three names are sourced from the same BuiltinTypes constants everywhere
+        // else uses, rather than being independently re-typed as literals.
+        if (t == BuiltinTypes.String) return $"{Mangler.Class(BuiltinTypes.String)}*";
+        if (t is BuiltinTypes.Process or BuiltinTypes.Thread) return "void*";
         return $"{Mangler.Class(t)}*";
     }
 

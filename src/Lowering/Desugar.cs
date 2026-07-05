@@ -105,7 +105,8 @@ internal sealed class Desugar(SymbolTable sym, DiagnosticBag diag) : IrRewriter
     /// </summary>
     private string Concat(TextSpan span)
     {
-        var op = sym.LookupOperator("String", "+");
+        string stringClass = sym.Builtins.GetValueOrDefault(BuiltinTypes.String, BuiltinTypes.String);
+        var op = sym.LookupOperator(stringClass, "+");
         if (op != null) return op.CName;
         diag.Error(Codes.MissingIntrinsic, "<runtime>", span, "String defines no '+' operator for concatenation");
         return "gata_MISSING_String_concat";

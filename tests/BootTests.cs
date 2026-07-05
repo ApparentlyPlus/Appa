@@ -9,7 +9,8 @@ using System.Diagnostics;
 /// GatOS toolchain + template that 'appa setup' installs; skips gracefully when
 /// that isn't present.
 /// </summary>
-public class BootTests
+[Collection("Boot")]
+public class BootTests(BootFixture fixture)
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(35);
 
@@ -35,7 +36,7 @@ public class BootTests
         {
             Directory.CreateDirectory(Path.Combine(work, "src"));
             File.Copy(Path.Combine(fixturesDir, "Boot", "main.g"), Path.Combine(work, "src", "main.g"));
-            File.Copy(Path.Combine(fixturesDir, "Envs", "env.GatOS.g"), Path.Combine(work, "env.g"));
+            File.Copy(Path.Combine(fixture.EnvsDir!, "env.GatOS.g"), Path.Combine(work, "env.g"));
             File.WriteAllText(Path.Combine(work, "boot.gconf"), """
                 <appa>
                     <ProjectName>boot</ProjectName>

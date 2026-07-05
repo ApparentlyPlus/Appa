@@ -175,7 +175,7 @@ internal sealed class TypeResolver(
             return;
         }
         if (SymbolTable.Primitives.GetAlternateLookup<ReadOnlySpan<char>>().Contains(bSpan)) return;
-        if (bSpan.Equals("String", StringComparison.Ordinal) || bSpan.Equals("Process", StringComparison.Ordinal) || bSpan.Equals("Thread", StringComparison.Ordinal)) return;
+        if (BuiltinTypes.All.GetAlternateLookup<ReadOnlySpan<char>>().Contains(bSpan)) return;
         if (sym.IsEnum(bSpan)) return;
         if (sym.IsUnion(bSpan)) return;
         if (ClassInScope(bSpan)) return;
@@ -1256,8 +1256,9 @@ internal sealed class TypeResolver(
             return Arr(ResolveType(t[(close + 1)..]), n);
         }
         if (t.EndsWith("*")) return new IrPtrType(ResolveType(t[..^1]));
-        if (t.Equals("String", StringComparison.Ordinal)) return IrType.String;
-        if (t.Equals("Process", StringComparison.Ordinal) || t.Equals("Thread", StringComparison.Ordinal)) return new IrPtrType(IrType.Void);
+        if (BuiltinTypes.All.GetAlternateLookup<ReadOnlySpan<char>>().TryGetValue(t, out var builtinName))
+            return sym.ResolveBuiltinType(builtinName)
+                ?? (builtinName == BuiltinTypes.String ? IrType.String : new IrPtrType(IrType.Void));
         if (PrimTypes.IsPrim(t)) return new IrPrimType(t.ToString());
         if (sym.IsEnum(t)) return new IrEnumType(t.ToString());
         if (sym.IsUnion(t)) return new IrUnionType(t.ToString());
@@ -2291,8 +2292,9 @@ internal sealed class TypeResolver(
         // String concatenation: '+' with a String operand stringifies the other side.
         if (be.Op == BinOp.Add && (left.Type.IsString || right.Type.IsString))
         {
-            var sop = sym.LookupOperator("String", "+");
-            string cn = sop?.CName ?? Mangler.Operator("String", "+");
+            string stringClass = sym.Builtins.GetValueOrDefault(BuiltinTypes.String, BuiltinTypes.String);
+            var sop = sym.LookupOperator(stringClass, "+");
+            string cn = sop?.CName ?? Mangler.Operator(stringClass, "+");
             return new IrStaticCall(cn, IrType.String, [EnsureString(left, ctx), EnsureString(right, ctx)]);
         }
 

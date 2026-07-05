@@ -48,6 +48,6 @@ internal static class SingleFileCompile
     {
         var (diag, module) = Check(src, path);
         if (diag.HasErrors || module == null) return [];
-        return Layout.Compose(new Emitter(module, diag).Build());
+        return Layout.Compose(new Emitter(module, diag).Build(), module.Symbols);
     }
 }

@@ -94,6 +94,11 @@ internal static class Codes
     public const string TrailingComma         = "G052";
     public const string BadDeclHeader         = "G053";
     public const string CannotInfer           = "G054";
+    public const string KernelBlockInHosted    = "G055";
+    public const string MissingUserRealm       = "G056";
+    public const string DuplicateUserRealm     = "G057";
+    public const string MissingUserEntry       = "G058";
+    public const string DuplicateUserEntry     = "G059";
 }
 
 /// <summary>

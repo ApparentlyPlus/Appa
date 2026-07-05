@@ -41,9 +41,11 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
 
     /// <summary>
     /// Bind any @intrinsic(role) annotations to the C name the symbol is emitted under.
-    /// Validates the role and rejects double-binding.
+    /// Validates the role and rejects double-binding. @builtin(name) is bound the same
+    /// way when allowBuiltin is set (classes and native types only).
     /// </summary>
-    private void BindIntrinsics(Annotation[]? anns, string cName, string file, TextSpan span, bool allowKeep = false)
+    private void BindIntrinsics(Annotation[]? anns, string cName, string file, TextSpan span,
+        bool allowKeep = false, bool allowBuiltin = false)
     {
         if (anns == null) return;
         foreach (var a in anns)
@@ -52,6 +54,21 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
             {
                 if (!allowKeep)
                     diag.Error(Codes.WrongAnnotationKind, file, span, "'@keep' has no effect here; it only matters on a free function or a class");
+                continue;
+            }
+            if (a is BuiltinAnnotation ba)
+            {
+                if (!allowBuiltin)
+                {
+                    diag.Error(Codes.WrongAnnotationKind, file, span, "'@builtin' has no effect here; it only matters on a class or native type");
+                    continue;
+                }
+                if (!BuiltinTypes.All.Contains(ba.Name))
+                    diag.Error(Codes.UnknownIntrinsic, file, span, $"unknown @builtin type '{ba.Name}'");
+                else if (_sym.Builtins.TryGetValue(ba.Name, out var prevB) && prevB != cName)
+                    diag.Error(Codes.DuplicateIntrinsic, file, span, $"@builtin({ba.Name}) is already bound to '{prevB}'");
+                else
+                    _sym.Builtins[ba.Name] = cName;
                 continue;
             }
             if (a is not IntrinsicAnnotation ia)
@@ -123,6 +140,10 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
         // Register the class in the symbol table, and if it's a module, add it to the modules set.
         _sym.RegisterClass(cd.Name, file);
         if (cd.IsModule) _sym.Modules.Add(cd.Name);
+
+        // Bind any @builtin(name) annotation to this class's readable Gata name - the
+        // resolver compares against this name throughout, not the (not-yet-assigned) C name.
+        BindIntrinsics(cd.Annotations, cd.Name, file, cd.Span, allowBuiltin: true);
 
 
         var fieldNames = _declaredFieldNames.TryGetValue(cd.Name, out var fs)  ? fs : (_declaredFieldNames[cd.Name]  = []);
@@ -245,7 +266,7 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
             diag.Error(Codes.DuplicateName, file, nd.Span, $"type '{nd.Name}' is already declared");
         _sym.RegisterClass(nd.Name, file);
         _preDefinedStructs.Add(nd.Name);
-        BindIntrinsics(nd.Annotations, Mangler.Class(nd.Name), file, nd.Span);
+        BindIntrinsics(nd.Annotations, Mangler.Class(nd.Name), file, nd.Span, allowBuiltin: true);
     }
 
     /// <summary>

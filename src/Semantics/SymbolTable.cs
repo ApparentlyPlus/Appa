@@ -18,11 +18,34 @@ internal static class Roles
     public const string StringifyInt   = "stringify_int";
     public const string StringifyFloat = "stringify_float";
 
+    // The environment floor's C names, bound to their @extern declaration in
+    // libgata (see Sys.g/Mem.g/Console.g) so the compiler never hardcodes them.
+    public const string EnvDebug       = "env_debug";
+    public const string EnvPanic       = "env_panic";
+    public const string EnvProcCreate  = "env_proc_create";
+    public const string EnvProcHide    = "env_proc_hide";
+    public const string EnvThreadSpawn = "env_thread_spawn";
+    public const string EnvRead        = "env_read";
+    public const string EnvAlloc       = "env_alloc";
+
     public static readonly FrozenSet<string> All = FrozenSet.ToFrozenSet(
     [
         Alloc, Retain, Release, ObjHeader, ObjInit,
-        StringifyInt, StringifyFloat
+        StringifyInt, StringifyFloat,
+        EnvDebug, EnvPanic, EnvProcCreate, EnvProcHide, EnvThreadSpawn, EnvRead, EnvAlloc
     ]);
+}
+
+// The closed vocabulary of compiler builtin types. A libgata class or native type
+// declaration annotated @builtin(<name>) fills the slot; the compiler resolves the
+// name from this table instead of comparing type names against a literal string.
+internal static class BuiltinTypes
+{
+    public const string String  = "String";
+    public const string Process = "Process";
+    public const string Thread  = "Thread";
+
+    public static readonly FrozenSet<string> All = FrozenSet.ToFrozenSet([String, Process, Thread]);
 }
 
 /// <summary>
@@ -73,8 +96,6 @@ internal sealed class SymbolTable
     // Every accepted primitive spelling.
     public static readonly FrozenSet<string> Primitives = PrimTypes.Spellings;
 
-    private static readonly FrozenSet<string> KernelPassthrough = FrozenSet.ToFrozenSet(["Process", "Thread"]);
-
     // Result_T typedefs needed by throws functions: name -> inner Gata type.
     public Dictionary<string, string> ResultTypedefs { get; } = [];
 
@@ -83,6 +104,25 @@ internal sealed class SymbolTable
 
     // role -> bound C symbol name, from @intrinsic annotations.
     public Dictionary<string, string> Intrinsics { get; } = [];
+
+    // builtin type name -> bound Gata declaration name, from @builtin annotations.
+    public Dictionary<string, string> Builtins { get; } = [];
+
+    /// <summary>
+    /// Returns the IR type for a given builtin name (String/Process/Thread) if libgata
+    /// declared it via @builtin, or null if unbound. The single place that maps these
+    /// names to their IR shape - callers never hardcode the mapping themselves.
+    /// </summary>
+    public IrType? ResolveBuiltinType(string name)
+    {
+        if (!Builtins.ContainsKey(name)) return null;
+        return name switch
+        {
+            BuiltinTypes.String => IrType.String,
+            BuiltinTypes.Process or BuiltinTypes.Thread => new IrPtrType(IrType.Void),
+            _ => null
+        };
+    }
 
     /// <summary>
     /// Returns the C name bound to the given intrinsic role, or null if unbound.
@@ -416,7 +456,7 @@ internal sealed class SymbolTable
         if (string.IsNullOrEmpty(t) || t == "void") return "void";
         if (t.Length > 0 && t[t.Length - 1] == '*') return t;
         if (PrimTypes.IsPrim(t)) return PrimTypes.ToC(t);
-        if (KernelPassthrough.Contains(t)) return "void*";
+        if ((t == BuiltinTypes.Process || t == BuiltinTypes.Thread) && Builtins.ContainsKey(t)) return "void*";
         return $"{Mangler.Class(t)}*";
     }
 

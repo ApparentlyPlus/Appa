@@ -33,9 +33,7 @@ internal sealed class Lexer(string src)
         ["import"]      = TK.Import,
         ["kernel"]      = TK.Kernel,
         ["user"]        = TK.User,
-        ["Process"]     = TK.Process,   
         ["process"]     = TK.Process,
-        ["Thread"]      = TK.Thread,
         ["thread"]      = TK.Thread,
         ["foreground"]  = TK.Foreground,
         ["background"]  = TK.Background,
@@ -215,10 +213,11 @@ internal sealed class Lexer(string src)
                 case "extern": Emit(TK.AtExtern, "@extern"); return;
                 case "environment": Emit(TK.AtEnvironment, "@environment"); return;
                 case "keep": Emit(TK.AtKeep, "@keep"); return;
+                case "builtin": Emit(TK.AtBuiltin, ReadParenArg("@builtin")); return;
                 default:
                     // If we reach here, it means the annotation name is not recognized.
                     // Throw a ParseException with a message indicating the unknown annotation and the expected ones.
-                    Fail($"unknown annotation '@{nn}'; expected '@intrinsic', '@preamble', '@extern', '@environment', or '@keep'",
+                    Fail($"unknown annotation '@{nn}'; expected '@intrinsic', '@preamble', '@extern', '@environment', '@keep', or '@builtin'",
                         Codes.BadAnnotation);
                     return;
             }
@@ -466,8 +465,7 @@ internal sealed class Lexer(string src)
         if (KeywordsLookup.TryGetValue(span, out var kw))
         {
             // Several TK kinds have more than one valid spelling (true/false -> BoolLit;
-            // Process/process -> TK.Process; Thread/thread -> TK.Thread; the whole
-            // TPrim family). The cached canonical spelling only matches the actual
+            // the whole TPrim family). The cached canonical spelling only matches the actual
             // source text for single-spelling keywords; anywhere it differs, the
             // token's value must carry the real spelling, not the cached one, or
             // the two spellings collapse into whichever happened to be cached.

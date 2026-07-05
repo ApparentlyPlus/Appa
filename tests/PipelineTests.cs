@@ -103,8 +103,46 @@ public class PipelineTests
         var sources = new SourceSet();
         sources.Add("<test>", src);
         var diag = new DiagnosticBag(sources);
-        Pipeline.ValidateStructure(programs, diag);
+        Pipeline.ValidateStructure(programs, target: null, diag);
         Assert.Contains(diag.All, d => d.Severity == Severity.Error && d.Code == expectedCode);
+    }
+
+    /// <summary>
+    /// Hosted-target realm validation: a kernel{} block is a hard error, and exactly one
+    /// user{} block with exactly one entry func is required.
+    /// </summary>
+    [Theory]
+    [InlineData("G055", "kernel { entry func Main() { } } user { entry func Main() { } }")]
+    [InlineData("G056", "class M { }")]
+    [InlineData("G057", "user { entry func A() { } } user { entry func B() { } }")]
+    [InlineData("G058", "user { func f() { } }")]
+    [InlineData("G059", "user { entry func A() { } entry func B() { } }")]
+    public void ValidateStructureProducesExpectedHostedCode(string expectedCode, string src)
+    {
+        var prog = SingleFileCompile.Parse(src);
+        var programs = new List<(string path, Appa.Program prog)> { ("<test>", prog) };
+        var sources = new SourceSet();
+        sources.Add("<test>", src);
+        var diag = new DiagnosticBag(sources);
+        Pipeline.ValidateStructure(programs, Target.Hosted, diag);
+        Assert.Contains(diag.All, d => d.Severity == Severity.Error && d.Code == expectedCode);
+    }
+
+    /// <summary>
+    /// A well-formed Hosted program (one user{} block, one entry func, no kernel{})
+    /// passes validation cleanly.
+    /// </summary>
+    [Fact]
+    public void ValidateStructureAcceptsWellFormedHosted()
+    {
+        const string src = "user { entry func Main() { } }";
+        var prog = SingleFileCompile.Parse(src);
+        var programs = new List<(string path, Appa.Program prog)> { ("<test>", prog) };
+        var sources = new SourceSet();
+        sources.Add("<test>", src);
+        var diag = new DiagnosticBag(sources);
+        Pipeline.ValidateStructure(programs, Target.Hosted, diag);
+        Assert.False(diag.HasErrors);
     }
 
     /// <summary>

@@ -182,6 +182,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
             if (At(TK.AtIntrinsic)) { var t = Advance(); anns ??= []; anns.Add(new IntrinsicAnnotation(t.Value, t.Span)); }
             else if (At(TK.AtPreamble)) { var t = Advance(); anns ??= []; anns.Add(new PreambleAnnotation(t.Value, t.Span)); }
             else if (At(TK.AtKeep)) { var t = Advance(); anns ??= []; anns.Add(new KeepAnnotation(t.Span)); }
+            else if (At(TK.AtBuiltin)) { var t = Advance(); anns ??= []; anns.Add(new BuiltinAnnotation(t.Value, t.Span)); }
             else break;
         }
         return anns?.ToArray() ?? [];
@@ -190,13 +191,15 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Verifies that no invalid annotations were attached to a declaration that can't use them.
     /// @intrinsic and @preamble only bind to native blocks, native types, and functions.
-    /// @keep is the one annotation a class or module can carry; everything else rejects all of them.
+    /// @keep and @builtin are the two annotations a class or module can carry; everything
+    /// else rejects all of them.
     /// </summary>
-    private void RejectAnns(Annotation[] anns, string what, bool allowKeep = false)
+    private void RejectAnns(Annotation[] anns, string what, bool allowKeep = false, bool allowBuiltin = false)
     {
         foreach (var a in anns)
         {
             if (allowKeep && a is KeepAnnotation) continue;
+            if (allowBuiltin && a is BuiltinAnnotation) continue;
             FailAt(AnnSpan(a), $"annotations have no effect on {what}", Codes.BadAnnotation);
         }
     }
@@ -211,6 +214,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
             IntrinsicAnnotation i => i.Span,
             PreambleAnnotation p => p.Span,
             KeepAnnotation k => k.Span,
+            BuiltinAnnotation b => b.Span,
             _ => TextSpan.None
         };
     }
@@ -278,7 +282,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         // so they must be checked after the native decls but before the free function decl.
         if (At(TK.Enum)) { RejectAnns(anns, "an enum"); return ParseEnumDecl(anns, s); }
         if (At(TK.Union)) { RejectAnns(anns, "a union"); return ParseUnionDecl(anns, s); }
-        if (At(TK.Class)) { RejectAnns(anns, "a class", allowKeep: true); return ParseClassDecl(anns, s); }
+        if (At(TK.Class)) { RejectAnns(anns, "a class", allowKeep: true, allowBuiltin: true); return ParseClassDecl(anns, s); }
         if (At(TK.Module)) { RejectAnns(anns, "a module", allowKeep: true); return ParseModuleDecl(anns, s); }
         if (At(TK.Kernel)) { RejectAnns(anns, "kernel"); return ParseContextDecl("kernel"); }
         if (At(TK.User)) { RejectAnns(anns, "user"); return ParseContextDecl("user"); }
@@ -369,7 +373,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         if (At(TK.AtExtern)) return ParseExternDecl(anns, s);
         if (At(TK.Enum)) { RejectAnns(anns, "an enum"); return ParseEnumDecl(anns, s); }
         if (At(TK.Union)) { RejectAnns(anns, "a union"); return ParseUnionDecl(anns, s); }
-        if (At(TK.Class)) { RejectAnns(anns, "a class", allowKeep: true); return ParseClassDecl(anns, s); }
+        if (At(TK.Class)) { RejectAnns(anns, "a class", allowKeep: true, allowBuiltin: true); return ParseClassDecl(anns, s); }
         if (At(TK.Module)) { RejectAnns(anns, "a module", allowKeep: true); return ParseModuleDecl(anns, s); }
         if (At(TK.Process) || At(TK.Foreground) || At(TK.Background))
             { RejectAnns(anns, "a process"); return ParseProcessDeclTop(); }
@@ -561,12 +565,12 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Parses the base name of a type, like an identifier, the Process or Thread keywords
-    /// (which are valid type names), or a primitive keyword.
+    /// Parses the base name of a type, like an identifier (Process/Thread are ordinary
+    /// identifiers, resolved as builtin types later) or a primitive keyword.
     /// </summary>
     private string ParseSimpleTypeName()
     {
-        if (At(TK.Ident) || At(TK.Process) || At(TK.Thread)) return Advance().Value;
+        if (At(TK.Ident)) return Advance().Value;
         if (IsPrim(Cur.Kind)) return PrimName(Advance());
         Fail($"expected a type name, found {Found()}");
         return "";
@@ -699,7 +703,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         if (anns.Length > 0) Fail("annotations have no effect on a field", Codes.BadAnnotation);
         if (mods.HasFlag(Modifiers.Static)) Fail("'static' has no meaning on a field", Codes.BadDeclHeader);
 
-        string? ftype = (At(TK.Ident) || At(TK.Process) || At(TK.Thread)
+        string? ftype = (At(TK.Ident)
             || IsPrim(Cur.Kind) || At(TK.LBrack) || At(TK.Func)) ? ParseTypeSpec() : null;
         var fname = Expect(TK.Ident).Value;
         Expr? init = Try(TK.Eq) ? ParseExpr() : null;
@@ -953,7 +957,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     {
         Expect(TK.Let);
         string? type = null;
-        if (IsPrim(Cur.Kind) || At(TK.LBrack) || At(TK.Func) || At(TK.Process) || At(TK.Thread)
+        if (IsPrim(Cur.Kind) || At(TK.LBrack) || At(TK.Func)
             || (At(TK.Ident) && (Peek().Kind == TK.Ident || Peek().Kind == TK.LBrack
                 || (Peek().Kind == TK.Punct && Peek().Value == "*"))))
             type = ParseTypeSpec();
@@ -1026,7 +1030,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         {
             n++;
         }
-        else if (Peek(n).Kind == TK.Ident || Peek(n).Kind == TK.Process || Peek(n).Kind == TK.Thread)
+        else if (Peek(n).Kind == TK.Ident)
         {
             n++;
             if (Peek(n).Kind == TK.LBrack) { n = SkipBrackets(n); if (n < 0) return -1; }
@@ -1043,7 +1047,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     /// </summary>
     private bool LooksLikeMissingLet()
     {
-        if (!At(TK.Ident) && !At(TK.Process) && !At(TK.Thread) && !At(TK.LBrack)) return false;
+        if (!At(TK.Ident) && !At(TK.LBrack)) return false;
         int n = SkipTypeSpec(0);
         return n >= 0 && Peek(n).Kind == TK.Ident;
     }
@@ -1057,7 +1061,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         if (IsPrim(Cur.Kind)) return true;
         if (At(TK.Func)) return true;
         if (At(TK.LBrack) && Peek().Kind == TK.IntLit && Peek(2).Kind == TK.RBrack) return true;
-        if (!At(TK.Ident) && !At(TK.Process) && !At(TK.Thread)) return false;
+        if (!At(TK.Ident)) return false;
         return Peek().Kind == TK.Ident
             || Peek().Kind == TK.LBrack
             || (Peek().Kind == TK.Punct && Peek().Value == "*");

@@ -14,12 +14,14 @@ try
 {
     switch (args[0])
     {
-        case "setup": RunSetup(isUpdate: false); break;
-        case "update": RunSetup(isUpdate: true); break;
+        case "setup": await RunSetup(isUpdate: false); break;
+        case "update": await RunSetup(isUpdate: true); break;
         case "init": RunInit(args[1..]); break;
         case "build": RunBuild(args[1..]); break;
         case "--help":
         case "-h": PrintHelp(); break;
+        case "--version":
+        case "-v": Console.WriteLine($"appa {AppaVersion.Current}"); break;
         default:
             Log.Error($"Unknown command '{args[0]}'");
             PrintHelp();
@@ -170,11 +172,14 @@ static void RunBuild(string[] args)
 
     Pipeline.ValidateEnvironment(programs, diag);
     Pipeline.ValidateFloor(module, diag);
-    Pipeline.ValidateStructure(programs, diag);
+    Pipeline.ValidateStructure(programs, manifest?.Target, diag);
+    if (manifest?.Target == Target.Hosted && module.HasKernelRealm)
+        diag.Error(Codes.KernelBlockInHosted, "<environment>", TextSpan.None,
+            "the active environment declares a kernel preamble, which is not allowed for a Hosted build");
     if (!diag.HasErrors) Pipeline.WarnReferenceCycles(module);
     Pipeline.ReportGataFiles(attempted, diag, warnAsError);
 
-    var output = Layout.Compose(new Emitter(module, diag).Build());
+    var output = Layout.Compose(new Emitter(module, diag).Build(), module.Symbols);
 
     if (diag.HasErrors)
     {
@@ -269,13 +274,14 @@ static void Fail(string message) { Log.Error(message); Environment.Exit(1); }
 /// Prints the top-level usage text: commands, build options, and examples.
 /// </summary>
 static void PrintHelp() => Console.WriteLine($$"""
-{{C.GREEN}}appa{{C.NC}} - the Gata language compiler for GatOS
+{{C.GREEN}}appa{{C.NC}} {{AppaVersion.Current}} - the Gata language compiler for GatOS
 
 {{C.CYAN}}Usage:{{C.NC}}
   appa setup                      Install the GatOS toolchain, template, and libgata
   appa update                     Re-download and overwrite the installed GatOS bundle
   appa init [project]             Create a GatOS project
   appa build [project|.gconf]     Build the project described by its .gconf
+  appa --version / -v             Print the appa version
 
 {{C.YELLOW}}Build options:{{C.NC}}
   --stdlib  <dir>                 Override the libgata directory
@@ -658,7 +664,7 @@ static void RunQemu(string isoPath, string artifactsDir, bool headless, int? tim
 /// <summary>
 /// Downloads and installs (or re-installs) the GatOS toolchain, libgata, template, and appa binary.
 /// </summary>
-static void RunSetup(bool isUpdate)
+static async Task RunSetup(bool isUpdate)
 {
     Log.Info(isUpdate
         ? "Updating appa toolchain, libgata, and template (overwriting existing)..."
@@ -706,13 +712,17 @@ static void RunSetup(bool isUpdate)
     System.IO.Compression.ZipFile.ExtractToDirectory(tcZip, AppaPaths.ToolchainDir, true);
     File.Delete(tcZip);
 
-    // The libgata zip carries two sibling folders: libgata/ (stdlib) and envs/ (env
-    // templates for `appa init`), so it extracts into the appa root.
-    string libZip = Path.Combine(Path.GetTempPath(), "appa_libgata.zip");
-    DownloadWithProgress(Urls.Libgata, libZip, "libgata");
-    Log.Step("Extracting libgata...");
-    System.IO.Compression.ZipFile.ExtractToDirectory(libZip, AppaPaths.Root, true);
-    File.Delete(libZip);
+    // libgata and envs are fetched live from the Gata repo's "main" branch (not a
+    // release zip), so this content is never duplicated - the Gata repo is the only
+    // source of truth.
+    Log.Step("Fetching libgata and envs from GitHub...");
+    using (var ghClient = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromMinutes(5) })
+    {
+        await GitHubDirDownloader.DownloadDirectoriesAsync(
+            Urls.GataOwner, Urls.GataRepo, Urls.GataRef,
+            new Dictionary<string, string> { ["envs/"] = AppaPaths.EnvsDir, ["libgata/"] = AppaPaths.LibgataDir },
+            ghClient);
+    }
 
     string tmplZip = Path.Combine(Path.GetTempPath(), "appa_template.zip");
     DownloadWithProgress(Urls.Template, tmplZip, "GatOS template");

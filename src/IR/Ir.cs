@@ -121,7 +121,7 @@ internal abstract record IrType
     public static readonly IrPrimType Float  = new("float");
     public static readonly IrPrimType Double = new("double");
     public static readonly IrPrimType SizeT  = new("usize");
-    public static readonly IrClassRef String = new("String");
+    public static readonly IrClassRef String = new(BuiltinTypes.String);
 }
 
 /// <summary>
@@ -170,7 +170,10 @@ internal record IrClassRef(string ClassName) : IrType
         return Cache.GetOrAdd(className, name => new IrClassRef(name));
     }
 
-    private readonly bool _isString = ClassName is "String" or "gata_String";
+    // No SymbolTable is threaded through IrType's static singletons/cache, so this
+    // still names BuiltinTypes.String directly rather than resolving a binding - the
+    // constant itself is shared with everywhere else that references the same slot.
+    private readonly bool _isString = ClassName == BuiltinTypes.String || ClassName == $"gata_{BuiltinTypes.String}";
     public override string ToCType()
     {
         return $"{Mangler.Class(ClassName)}*";
@@ -744,7 +747,7 @@ internal record IrThread(string Name, string Mode, string FullName, IrFunction? 
 #region Module
 
 // Where a native block lands in the output. Types (default) -> the type section,
-// alongside structs. Preamble -> before #include "gata_shared.h". Boot -> after all functions.
+// alongside structs. Preamble -> before #include "shared.h". Boot -> after all functions.
 internal enum NativeSection { Types, Preamble, Boot }
 
 /// <summary>

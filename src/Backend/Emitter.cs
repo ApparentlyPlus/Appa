@@ -93,11 +93,15 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             }
         }
 
+        string? userEntryCName = null;
+        foreach (var fn in module.FreeFunctions)
+            if (fn.IsEntry && fn.Vis == Visibility.User) { userEntryCName = fn.CName; break; }
+
         return new EmitOutput(
             _sharedH.ToString(),
             _kPre.ToString(), _kTypes.ToString(), _kFwd.ToString(), _kFuncs.ToString(), _kBoot.ToString(),
             _uPre.ToString(), _uTypes.ToString(), _uFwd.ToString(), _uFunc.ToString(),
-            module.Processes, module.HasKernelRealm, module.HasUserRealm);
+            module.Processes, module.HasKernelRealm, module.HasUserRealm, userEntryCName);
     }
 
     #region Forward typedefs
@@ -816,17 +820,20 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
 
     /// <summary>
     /// Emits a free function into the appropriate translation unit sections based on its flags.
-    /// Entry functions go to the kernel; library functions are static-inline into both units;
+    /// Entry functions go to their own realm (kernel by default, user if declared inside a
+    /// 'user { }' block - this is what lets a Hosted build's user-realm entry func become
+    /// program.c's invocable main()); library functions are static-inline into both units;
     /// all others are forwarded and emitted into the realm they belong to.
     /// </summary>
     private void EmitFreeFunc(IrFunction fn)
     {
         if (fn.IsEntry)
         {
-            _kFwd.Line($"void {fn.CName}(void);");
-            _kFuncs.Line($"void {fn.CName}(void)");
-            EmitBlock(fn.Body!, _kFuncs);
-            _kFuncs.Line("");
+            var (entryFwd, entryFuncs) = fn.Vis == Visibility.User ? (_uFwd, _uFunc) : (_kFwd, _kFuncs);
+            entryFwd.Line($"void {fn.CName}(void);");
+            entryFuncs.Line($"void {fn.CName}(void)");
+            EmitBlock(fn.Body!, entryFuncs);
+            entryFuncs.Line("");
             return;
         }
 
@@ -955,8 +962,8 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             case IrReturn rs:     w.Line(rs.Value == null ? "return;" : $"return {EmitExpr(rs.Value)};"); break;
             case IrBreak:         w.Line("break;"); break;
             case IrContinue:      w.Line("continue;"); break;
-            case IrDebug d:       w.Line($"_env_dbg({d.Raw});"); break;
-            case IrPanic p:       w.Line($"_env_panic({p.Raw});"); break;
+            case IrDebug d:       w.Line($"{module.Symbols.IntrinsicOrNull(Roles.EnvDebug) ?? "_env_dbg"}({d.Raw});"); break;
+            case IrPanic p:       w.Line($"{module.Symbols.IntrinsicOrNull(Roles.EnvPanic) ?? "_env_panic"}({p.Raw});"); break;
             case IrIf ifs:        EmitIf(ifs, w); break;
             case IrWhile ws:      w.Line($"while ({EmitExpr(ws.Cond)})"); EmitBlock(ws.Body, w); break;
             case IrFor fr:        EmitFor(fr, w); break;
