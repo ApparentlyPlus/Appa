@@ -632,10 +632,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         if (isEntry) Fail("'entry' has no meaning on a field");
         if (isThrow) Fail("'throws' has no meaning on a field");
         if (anns.Length > 0) Fail("annotations have no effect on a field");
-        bool hasStatic = false;
-        for (int i = 0; i < mods.Length; i++)
-            if (mods[i] == "static") { hasStatic = true; break; }
-        if (hasStatic) Fail("'static' has no meaning on a field");
+        if (mods.HasFlag(Modifiers.Static)) Fail("'static' has no meaning on a field");
 
         string? ftype = (At(TK.Ident) || At(TK.Process) || At(TK.Thread)
             || IsPrim(Cur.Kind) || At(TK.LBrack) || At(TK.Func)) ? ParseTypeSpec() : null;
@@ -691,20 +688,19 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Parses zero or more access/storage modifiers. Uses null-lazy allocation so the common
-    /// path (no modifiers) returns a static empty array without any heap allocation.
+    /// Parses zero or more access/storage modifiers into a single flags value.
     /// </summary>
-    private string[] ParseMods()
+    private Modifiers ParseMods()
     {
-        List<string>? mods = null;
+        var mods = Modifiers.None;
         while (true)
         {
-            if (At(TK.Static)) { mods ??= []; mods.Add("static"); Advance(); }
-            else if (At(TK.Public)) { mods ??= []; mods.Add("public"); Advance(); }
-            else if (At(TK.Private)) { mods ??= []; mods.Add("private"); Advance(); }
+            if (At(TK.Static)) { mods |= Modifiers.Static; Advance(); }
+            else if (At(TK.Public)) { mods |= Modifiers.Public; Advance(); }
+            else if (At(TK.Private)) { mods |= Modifiers.Private; Advance(); }
             else break;
         }
-        return mods?.ToArray() ?? [];
+        return mods;
     }
 
     #endregion
@@ -776,7 +772,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         if (At(TK.Ident)) Advance(); // entry name is documentation only; the thread is what names it
         Expect(TK.LParen); var parms = ParseParamList(); Expect(TK.RParen);
         if (ret != null) Fail("a thread entry has no return value; remove the return type");
-        if (mods.Length > 0) Fail($"'{mods[0]}' has no meaning on a thread entry");
+        if (mods != Modifiers.None) Fail("access/storage modifiers have no meaning on a thread entry");
         return new EntryFuncDecl(mods, ret, parms, ParseBlock(), To(s));
     }
 
@@ -1067,7 +1063,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
                     || At(TK.SlashEq) || At(TK.PercentEq) || At(TK.AmpEq)
                     || At(TK.PipeEq) || At(TK.CaretEq) || At(TK.ShlEq) || At(TK.ShrEq))
                 {
-                    string op = Cur.Value; Advance();
+                    var op = AssignOpOf(Cur.Kind); Advance();
                     init = new AssignStmt(lhs, op, ParseExpr(), To(es));
                 }
                 else
@@ -1125,7 +1121,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
             || At(TK.SlashEq) || At(TK.PercentEq) || At(TK.AmpEq)
             || At(TK.PipeEq) || At(TK.CaretEq) || At(TK.ShlEq) || At(TK.ShrEq))
         {
-            string op = Cur.Value; Advance();
+            var op = AssignOpOf(Cur.Kind); Advance();
             var val = ParseExpr();
             Expect(TK.Semi);
             return new AssignStmt(expr, op, val, To(s));
@@ -1133,6 +1129,25 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         Expect(TK.Semi);
         return new ExprStmt(expr, To(s));
     }
+
+    /// <summary>
+    /// Maps an assignment-operator token kind to its AssignOp value.
+    /// </summary>
+    private static AssignOp AssignOpOf(TK k) => k switch
+    {
+        TK.Eq => AssignOp.Assign,
+        TK.PlusEq => AssignOp.AddAssign,
+        TK.MinusEq => AssignOp.SubAssign,
+        TK.StarEq => AssignOp.MulAssign,
+        TK.SlashEq => AssignOp.DivAssign,
+        TK.PercentEq => AssignOp.ModAssign,
+        TK.AmpEq => AssignOp.AndAssign,
+        TK.PipeEq => AssignOp.OrAssign,
+        TK.CaretEq => AssignOp.XorAssign,
+        TK.ShlEq => AssignOp.ShlAssign,
+        TK.ShrEq => AssignOp.ShrAssign,
+        _ => throw new ArgumentOutOfRangeException(nameof(k))
+    };
 
     #endregion
 
@@ -1176,7 +1191,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     {
         int s = Cur.Span.Start;
         var left = ParseAnd();
-        while (At(TK.Or)) { Advance(); left = new BinExpr("||", left, ParseAnd(), To(s)); }
+        while (At(TK.Or)) { Advance(); left = new BinExpr(BinOp.Or, left, ParseAnd(), To(s)); }
         return left;
     }
 
@@ -1187,7 +1202,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     {
         int s = Cur.Span.Start;
         var left = ParseBitOr();
-        while (At(TK.And)) { Advance(); left = new BinExpr("&&", left, ParseBitOr(), To(s)); }
+        while (At(TK.And)) { Advance(); left = new BinExpr(BinOp.And, left, ParseBitOr(), To(s)); }
         return left;
     }
 
@@ -1198,7 +1213,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     {
         int s = Cur.Span.Start;
         var left = ParseBitXor();
-        while (AtP("|")) { Advance(); left = new BinExpr("|", left, ParseBitXor(), To(s)); }
+        while (AtP("|")) { Advance(); left = new BinExpr(BinOp.BitOr, left, ParseBitXor(), To(s)); }
         return left;
     }
 
@@ -1209,7 +1224,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     {
         int s = Cur.Span.Start;
         var left = ParseBitAnd();
-        while (AtP("^")) { Advance(); left = new BinExpr("^", left, ParseBitAnd(), To(s)); }
+        while (AtP("^")) { Advance(); left = new BinExpr(BinOp.BitXor, left, ParseBitAnd(), To(s)); }
         return left;
     }
 
@@ -1220,7 +1235,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     {
         int s = Cur.Span.Start;
         var left = ParseEquality();
-        while (AtP("&")) { Advance(); left = new BinExpr("&", left, ParseEquality(), To(s)); }
+        while (AtP("&")) { Advance(); left = new BinExpr(BinOp.BitAnd, left, ParseEquality(), To(s)); }
         return left;
     }
 
@@ -1233,7 +1248,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         var left = ParseRelational();
         while (At(TK.EqEq) || At(TK.NotEq))
         {
-            string op = Cur.Value; Advance();
+            var op = At(TK.EqEq) ? BinOp.Eq : BinOp.Ne;
+            Advance();
             left = new BinExpr(op, left, ParseRelational(), To(s));
         }
         return left;
@@ -1248,7 +1264,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         var left = ParseShift();
         while (AtP("<") || AtP(">") || At(TK.LtEq) || At(TK.GtEq))
         {
-            string op = Cur.Value; Advance();
+            var op = AtP("<") ? BinOp.Lt : AtP(">") ? BinOp.Gt : At(TK.LtEq) ? BinOp.Le : BinOp.Ge;
+            Advance();
             left = new BinExpr(op, left, ParseShift(), To(s));
         }
         return left;
@@ -1263,7 +1280,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         var left = ParseAdditive();
         while (At(TK.Shl) || At(TK.Shr))
         {
-            string op = Cur.Value; Advance();
+            var op = At(TK.Shl) ? BinOp.Shl : BinOp.Shr;
+            Advance();
             left = new BinExpr(op, left, ParseAdditive(), To(s));
         }
         return left;
@@ -1278,7 +1296,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         var left = ParseMultiplicative();
         while (AtP("+") || AtP("-"))
         {
-            string op = Cur.Value; Advance();
+            var op = AtP("+") ? BinOp.Add : BinOp.Sub;
+            Advance();
             left = new BinExpr(op, left, ParseMultiplicative(), To(s));
         }
         return left;
@@ -1293,7 +1312,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         var left = ParseAs();
         while (AtP("*") || AtP("/") || AtP("%"))
         {
-            string op = Cur.Value; Advance();
+            var op = AtP("*") ? BinOp.Mul : AtP("/") ? BinOp.Div : BinOp.Mod;
+            Advance();
             left = new BinExpr(op, left, ParseAs(), To(s));
         }
         return left;
@@ -1326,9 +1346,9 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     private Expr ParseUnaryInner()
     {
         int s = Cur.Span.Start;
-        if (AtP("!")) { Advance(); return new UnaryExpr("!", ParseUnary(), To(s)); }
-        if (AtP("~")) { Advance(); return new UnaryExpr("~", ParseUnary(), To(s)); }
-        if (AtP("-")) { Advance(); return new UnaryExpr("-", ParseUnary(), To(s)); }
+        if (AtP("!")) { Advance(); return new UnaryExpr(UnOp.Not, ParseUnary(), To(s)); }
+        if (AtP("~")) { Advance(); return new UnaryExpr(UnOp.BitNot, ParseUnary(), To(s)); }
+        if (AtP("-")) { Advance(); return new UnaryExpr(UnOp.Neg, ParseUnary(), To(s)); }
         if (AtP("&")) { Advance(); return new AddrOfExpr(ParseUnary(), To(s)); }
         if (AtP("*")) { Advance(); return new DerefExpr(ParseUnary(), To(s)); }
         return ParsePostfix();
@@ -1343,8 +1363,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         var expr = ParsePrimary();
         while (true)
         {
-            if (At(TK.Inc)) { Advance(); expr = new PostfixExpr("++", expr, To(s)); }
-            else if (At(TK.Dec)) { Advance(); expr = new PostfixExpr("--", expr, To(s)); }
+            if (At(TK.Inc)) { Advance(); expr = new PostfixExpr(PostfixOp.Inc, expr, To(s)); }
+            else if (At(TK.Dec)) { Advance(); expr = new PostfixExpr(PostfixOp.Dec, expr, To(s)); }
             else if (At(TK.Dot)) { Advance(); expr = new MemberAccessExpr(expr, Expect(TK.Ident).Value, To(s)); }
             else if (At(TK.LBrack)) { Advance(); var idx = ParseExpr(); Expect(TK.RBrack); expr = new IndexExpr(expr, idx, To(s)); }
             else if (At(TK.LParen)) { Advance(); var args = ParseArgList(); Expect(TK.RParen); expr = new CallExpr(expr, args, To(s)); }

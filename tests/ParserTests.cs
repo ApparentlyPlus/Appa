@@ -210,7 +210,7 @@ public class ParserTests
         var func = (FuncDecl)prog.Items[0];
         var let = (LetStmt)((BlockBody)func.Body).Block.Stmts[0];
         var bin = Assert.IsType<BinExpr>(let.Init);
-        Assert.Equal("+", bin.Op);
+        Assert.Equal(BinOp.Add, bin.Op);
         Assert.IsType<IntLitExpr>(bin.Left);
         Assert.IsType<IntLitExpr>(bin.Right);
     }

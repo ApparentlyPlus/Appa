@@ -431,17 +431,17 @@ internal sealed class TypeResolver(
     /// <summary>
     /// Validates both operands of a compound assignment operator for type correctness.
     /// </summary>
-    private void CheckCompound(string op, IrExpr target, IrExpr value, ResolveCtx ctx)
+    private void CheckCompound(AssignOp op, IrExpr target, IrExpr value, ResolveCtx ctx)
     {
-        bool bitwise = op is "&=" or "|=" or "^=" or "<<=" or ">>=";
+        bool bitwise = op.IsBitwise();
         bool okTarget = bitwise ? IsInteger(target.Type) : IsArith(target.Type);
         bool okValue = bitwise ? IsInteger(value.Type) : IsArith(value.Type);
         if (!okTarget)
             diag.Error(Codes.TypeMismatch, ctx.File, target.Span,
-                $"operator '{op}' cannot be applied to '{Describe(target.Type)}'");
+                $"operator '{op.Sym()}' cannot be applied to '{Describe(target.Type)}'");
         else if (!okValue)
             diag.Error(Codes.TypeMismatch, ctx.File, value.Span,
-                $"operator '{op}' requires a{(bitwise ? "n integer" : " numeric")} right-hand side, got '{Describe(value.Type)}'");
+                $"operator '{op.Sym()}' requires a{(bitwise ? "n integer" : " numeric")} right-hand side, got '{Describe(value.Type)}'");
     }
 
     /// <summary>
@@ -1303,7 +1303,7 @@ internal sealed class TypeResolver(
     /// </summary>
     private IrFunction ResolveMethod(string cls, MethodDecl md, ResolveCtx ctx, bool lib, Visibility vis, bool isModule)
     {
-        bool isStatic = md.Modifiers.Contains("static") || isModule;
+        bool isStatic = md.Modifiers.HasFlag(Modifiers.Static) || isModule;
         if (!md.Throws) CheckType(md.ReturnType, ctx, md.Span, allowVoid: true);
         foreach (var p in md.Params) CheckType(p.Type, ctx, p.Span);
         CheckParams(md.Params, ctx);
@@ -1376,7 +1376,7 @@ internal sealed class TypeResolver(
             pars.Add(new IrParam(p.Name, ResolveType(p.Type), p.IsRef));
         }
 
-        string cname = fd.Modifiers.Contains("private")
+        string cname = fd.Modifiers.HasFlag(Modifiers.Private)
             ? Mangler.PrivateFreeFunc(Mangler.FileToken(ctx.File), fd.Name, fd.Params,
                 sym.PrivateFuncOverloads(ctx.File, fd.Name).Count > 1)
             : Mangler.FreeFunc(fd.Name, fd.Params, sym.IsOverloadedFunc(fd.Name), fd.IsEntry, isExtern: false);
@@ -1635,21 +1635,21 @@ internal sealed class TypeResolver(
                 var target = ResolveExpr(asgn.Target, ctx);
                 var value = ResolveExpr(asgn.Value, ctx);
                 CheckLValue(target, ctx);
-                if (asgn.Op == "=")
+                if (asgn.Op == AssignOp.Assign)
                 {
                     value = Coerce(value, target.Type, ctx);
                     CheckAssign(value, target.Type, "the assignment target", ctx, Codes.TypeMismatch);
                     ForbidNestedThrows(value, ctx, allowRoot: false);
-                    return new IrAssign(target, "=", value);
+                    return new IrAssign(target, AssignOp.Assign, value);
                 }
-                string baseOp = asgn.Op[..^1];
+                string baseOp = asgn.Op.BaseOp()!.Value.Sym();
                 string? lhsClass = ClassNameOf(target.Type);
                 if (lhsClass != null && sym.LookupOperator(lhsClass, baseOp) is { } opSym)
                 {
                     var composed = new IrStaticCall(opSym.CName, ResolveType(opSym.Type), [target, value]);
                     CheckAssign(composed, target.Type, "the assignment target", ctx, Codes.TypeMismatch);
                     ForbidNestedThrows(composed, ctx, allowRoot: false);
-                    return new IrAssign(target, "=", composed);
+                    return new IrAssign(target, AssignOp.Assign, composed);
                 }
                 CheckCompound(asgn.Op, target, value, ctx);
                 ForbidNestedThrows(value, ctx, allowRoot: false);
@@ -1801,7 +1801,7 @@ internal sealed class TypeResolver(
             var t = ResolveExpr(asgn.Target, fctx);
             var v = ResolveExpr(asgn.Value, fctx);
             CheckLValue(t, fctx);
-            if (asgn.Op == "=") { v = Coerce(v, t.Type, fctx); CheckAssign(v, t.Type, "the assignment target", fctx, Codes.TypeMismatch); }
+            if (asgn.Op == AssignOp.Assign) { v = Coerce(v, t.Type, fctx); CheckAssign(v, t.Type, "the assignment target", fctx, Codes.TypeMismatch); }
             else CheckCompound(asgn.Op, t, v, fctx);
             init = new IrAssign(t, asgn.Op, v) { Span = asgn.Span };
         }
@@ -2109,16 +2109,16 @@ internal sealed class TypeResolver(
     private IrExpr ResolveUnary(UnaryExpr un, ResolveCtx ctx)
     {
         var operand = ResolveExpr(un.Operand, ctx);
-        if (un.Op == "!" && operand.Type is not IrPrimType { CName: "bool" })
+        if (un.Op == UnOp.Not && operand.Type is not IrPrimType { CName: "bool" })
             diag.Error(Codes.TypeMismatch, ctx.File, un.Span,
                 $"operator '!' requires 'bool', got '{Describe(operand.Type)}'");
-        else if (un.Op == "-" && !IsArith(operand.Type))
+        else if (un.Op == UnOp.Neg && !IsArith(operand.Type))
             diag.Error(Codes.TypeMismatch, ctx.File, un.Span,
                 $"unary '-' requires a numeric operand, got '{Describe(operand.Type)}'");
-        else if (un.Op == "~" && !IsInteger(operand.Type))
+        else if (un.Op == UnOp.BitNot && !IsInteger(operand.Type))
             diag.Error(Codes.TypeMismatch, ctx.File, un.Span,
                 $"operator '~' requires an integer operand, got '{Describe(operand.Type)}'");
-        var t = un.Op == "!" ? IrType.Bool : operand.Type;
+        var t = un.Op == UnOp.Not ? IrType.Bool : operand.Type;
         return new IrUnaryOp(un.Op, operand, t);
     }
 
@@ -2132,7 +2132,7 @@ internal sealed class TypeResolver(
         var right = ResolveExpr(be.Right, ctx);
 
         // String concatenation: '+' with a String operand stringifies the other side.
-        if (be.Op == "+" && (left.Type.IsString || right.Type.IsString))
+        if (be.Op == BinOp.Add && (left.Type.IsString || right.Type.IsString))
         {
             var sop = sym.LookupOperator("String", "+");
             string cn = sop?.CName ?? Mangler.Operator("String", "+");
@@ -2140,53 +2140,53 @@ internal sealed class TypeResolver(
         }
 
         string? lhsClass = ClassNameOf(left.Type);
-        if (lhsClass != null && sym.LookupOperator(lhsClass, be.Op) is { } op)
+        if (lhsClass != null && sym.LookupOperator(lhsClass, be.Op.Sym()) is { } op)
             return new IrStaticCall(op.CName, ResolveType(op.Type), [left, right]);
 
-        if (left.Type is IrPtrType && be.Op is "+" or "-" && right.Type.IsNumeric)
+        if (left.Type is IrPtrType && be.Op is BinOp.Add or BinOp.Sub && right.Type.IsNumeric)
         {
             if (!ctx.InUnsafe)
                 diag.Error(Codes.UnsafeRequired, ctx.File, be.Span, "pointer arithmetic requires an 'unsafe' block");
             return new IrBinOp(be.Op, left, right, left.Type);
         }
 
-        if (be.Op is "&&" or "||")
+        if (be.Op is BinOp.And or BinOp.Or)
         {
             if (left.Type is not IrPrimType { CName: "bool" } || right.Type is not IrPrimType { CName: "bool" })
                 diag.Error(Codes.TypeMismatch, ctx.File, be.Span,
-                    $"operator '{be.Op}' requires 'bool' operands, got '{Describe(left.Type)}' and '{Describe(right.Type)}'");
+                    $"operator '{be.Op.Sym()}' requires 'bool' operands, got '{Describe(left.Type)}' and '{Describe(right.Type)}'");
             return new IrBinOp(be.Op, left, right, IrType.Bool);
         }
 
-        if (be.Op is "==" or "!=")
+        if (be.Op is BinOp.Eq or BinOp.Ne)
         {
             if (!ComparableEq(left, right))
                 diag.Error(Codes.TypeMismatch, ctx.File, be.Span,
-                    $"'{be.Op}' operands are not comparable: '{Describe(left.Type)}' and '{Describe(right.Type)}'");
+                    $"'{be.Op.Sym()}' operands are not comparable: '{Describe(left.Type)}' and '{Describe(right.Type)}'");
             return new IrBinOp(be.Op, left, right, IrType.Bool);
         }
 
-        if (be.Op is "<" or ">" or "<=" or ">=")
+        if (be.Op is BinOp.Lt or BinOp.Gt or BinOp.Le or BinOp.Ge)
         {
             if (!(IsArith(left.Type) && IsArith(right.Type)))
                 diag.Error(Codes.TypeMismatch, ctx.File, be.Span,
-                    $"operator '{be.Op}' requires numeric operands, got '{Describe(left.Type)}' and '{Describe(right.Type)}'");
+                    $"operator '{be.Op.Sym()}' requires numeric operands, got '{Describe(left.Type)}' and '{Describe(right.Type)}'");
             return new IrBinOp(be.Op, left, right, IrType.Bool);
         }
 
-        if (be.Op is "&" or "|" or "^" or "<<" or ">>")
+        if (be.Op is BinOp.BitAnd or BinOp.BitOr or BinOp.BitXor or BinOp.Shl or BinOp.Shr)
         {
             if (!(IsInteger(left.Type) && IsInteger(right.Type)))
                 diag.Error(Codes.TypeMismatch, ctx.File, be.Span,
-                    $"operator '{be.Op}' requires integer operands, got '{Describe(left.Type)}' and '{Describe(right.Type)}'");
-            IrType bt = be.Op is "<<" or ">>" ? left.Type
+                    $"operator '{be.Op.Sym()}' requires integer operands, got '{Describe(left.Type)}' and '{Describe(right.Type)}'");
+            IrType bt = be.Op is BinOp.Shl or BinOp.Shr ? left.Type
                       : NumRank(left.Type) >= NumRank(right.Type) ? left.Type : right.Type;
             return new IrBinOp(be.Op, left, right, bt);
         }
 
         if (!(IsArith(left.Type) && IsArith(right.Type)))
             diag.Error(Codes.TypeMismatch, ctx.File, be.Span,
-                $"operator '{be.Op}' cannot be applied to '{Describe(left.Type)}' and '{Describe(right.Type)}'");
+                $"operator '{be.Op.Sym()}' cannot be applied to '{Describe(left.Type)}' and '{Describe(right.Type)}'");
         IrType t = NumRank(left.Type) >= NumRank(right.Type) ? left.Type : right.Type;
         return new IrBinOp(be.Op, left, right, t);
     }
@@ -2618,7 +2618,7 @@ internal sealed class TypeResolver(
             var valType = ResolveType(setOp.Sig!.Params[1].Type);
             idx = Coerce(idx, idxType, ctx);
             CheckAssign(idx, idxType, "the index", ctx, Codes.TypeMismatch);
-            if (asgn.Op == "=")
+            if (asgn.Op == AssignOp.Assign)
             {
                 var value = Coerce(ResolveExpr(asgn.Value, ctx), valType, ctx);
                 CheckAssign(value, valType, "the assignment target", ctx, Codes.TypeMismatch);
@@ -2640,10 +2640,10 @@ internal sealed class TypeResolver(
                 current = new IrLitInt(0);
             }
             var rhs = ResolveExpr(asgn.Value, ctx);
-            string baseOp = asgn.Op[..^1];
+            BinOp baseOp = asgn.Op.BaseOp()!.Value;
             string? elemClass = ClassNameOf(current.Type);
             IrExpr combined;
-            if (elemClass != null && sym.LookupOperator(elemClass, baseOp) is { } elemOp)
+            if (elemClass != null && sym.LookupOperator(elemClass, baseOp.Sym()) is { } elemOp)
                 combined = new IrStaticCall(elemOp.CName, ResolveType(elemOp.Type), [current, rhs]);
             else
             {
@@ -2677,15 +2677,15 @@ internal sealed class TypeResolver(
             elem = IrType.Int;
         }
         var val = ResolveExpr(asgn.Value, ctx);
-        if (asgn.Op == "=")
+        if (asgn.Op == AssignOp.Assign)
         {
             var target = new IrIndex(obj, idx, elem) { Span = ixt.Span };
             val = Coerce(val, target.Type, ctx);
             CheckAssign(val, target.Type, "the assignment target", ctx, Codes.TypeMismatch);
             ForbidNestedThrows(val, ctx, allowRoot: false);
-            return new IrAssign(target, "=", val);
+            return new IrAssign(target, AssignOp.Assign, val);
         }
-        string elemBaseOp = asgn.Op[..^1];
+        string elemBaseOp = asgn.Op.BaseOp()!.Value.Sym();
         if (ClassNameOf(elem) is { } elemClass2 && sym.LookupOperator(elemClass2, elemBaseOp) is { } elemOp2)
         {
             var stmts = new List<IrStmt>();
@@ -2696,7 +2696,7 @@ internal sealed class TypeResolver(
             var composed = new IrStaticCall(elemOp2.CName, ResolveType(elemOp2.Type), [readTarget, val]);
             CheckAssign(composed, elem, "the assignment target", ctx, Codes.TypeMismatch);
             ForbidNestedThrows(composed, ctx, allowRoot: false);
-            stmts.Add(new IrAssign(writeTarget, "=", composed));
+            stmts.Add(new IrAssign(writeTarget, AssignOp.Assign, composed));
             return Seq(stmts, asgn.Span);
         }
         var plainTarget = new IrIndex(obj, idx, elem) { Span = ixt.Span };

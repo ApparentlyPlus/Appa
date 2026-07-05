@@ -453,7 +453,7 @@ internal record IrUnionField(IrExpr Union, int VariantIndex, string Field, IrTyp
 /// <summary>
 /// A binary operator expression.
 /// </summary>
-internal record IrBinOp(string Op, IrExpr Left, IrExpr Right, IrType T) : IrExpr(T);
+internal record IrBinOp(BinOp Op, IrExpr Left, IrExpr Right, IrType T) : IrExpr(T);
 
 /// <summary>
 /// A ternary conditional expression.
@@ -463,12 +463,12 @@ internal record IrTernary(IrExpr Cond, IrExpr Then, IrExpr Else, IrType T) : IrE
 /// <summary>
 /// A prefix unary operator expression.
 /// </summary>
-internal record IrUnaryOp(string Op, IrExpr Operand, IrType T) : IrExpr(T);
+internal record IrUnaryOp(UnOp Op, IrExpr Operand, IrType T) : IrExpr(T);
 
 /// <summary>
 /// A postfix operator expression such as i++ or i--.
 /// </summary>
-internal record IrPostfix(string Op, IrExpr Operand) : IrExpr(Operand.Type);
+internal record IrPostfix(PostfixOp Op, IrExpr Operand) : IrExpr(Operand.Type);
 
 /// <summary>
 /// An explicit cast to a target type.
@@ -550,9 +550,9 @@ internal record IrRaw(string Code) : IrStmt;
 internal record IrDeclVar(string Name, IrType Type, IrExpr? Init) : IrStmt;
 
 /// <summary>
-/// An assignment expression statement. Op is the assignment operator, e.g. = += -=.
+/// An assignment expression statement. Op is the assignment operator kind, e.g. Assign, AddAssign.
 /// </summary>
-internal record IrAssign(IrExpr Target, string Op, IrExpr Value) : IrStmt;
+internal record IrAssign(IrExpr Target, AssignOp Op, IrExpr Value) : IrStmt;
 
 /// <summary>
 /// An expression evaluated for its side effects, result discarded.

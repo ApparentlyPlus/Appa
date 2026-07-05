@@ -392,7 +392,7 @@ internal sealed class Ownership(IrModule module)
         int preStart = _pre.Count;
         int clStart = _cl.Count;
 
-        if (a.Op == "=" && IsManaged(a.Target.Type) && !_inUnsafe)
+        if (a.Op == AssignOp.Assign && IsManaged(a.Target.Type) && !_inUnsafe)
         {
             // Owning store: release the old value, install the new (+1) one.
             IrExpr tgt = Flatten(a.Target, false);
@@ -405,7 +405,7 @@ internal sealed class Ownership(IrModule module)
             string tmp = Tmp("_asg");
             outs.Add(new IrDeclVar(tmp, a.Target.Type, val));
             outs.Add(ReleaseStmt(tgt));
-            outs.Add(new IrAssign(tgt, "=", new IrVar(tmp, a.Target.Type)));
+            outs.Add(new IrAssign(tgt, AssignOp.Assign, new IrVar(tmp, a.Target.Type)));
 
             int clCount = _cl.Count - clStart;
             for (int i = 0; i < clCount; i++)
@@ -902,14 +902,14 @@ internal sealed class Ownership(IrModule module)
         var thenStmts = new List<IrStmt>(thenPreCount + 1 + thenClCount);
         for (int i = 0; i < thenPreCount; i++)
             thenStmts.Add(_pre[thenPreStart + i]);
-        thenStmts.Add(new IrAssign(tgt, "=", tv));
+        thenStmts.Add(new IrAssign(tgt, AssignOp.Assign, tv));
         for (int i = 0; i < thenClCount; i++)
             thenStmts.Add(ReleaseStmt(new IrVar(_cl[thenClStart + i].Name, _cl[thenClStart + i].Type)));
 
         var elseStmts = new List<IrStmt>(elsePreCount + 1 + elseClCount);
         for (int i = 0; i < elsePreCount; i++)
             elseStmts.Add(_pre[elsePreStart + i]);
-        elseStmts.Add(new IrAssign(tgt, "=", ev));
+        elseStmts.Add(new IrAssign(tgt, AssignOp.Assign, ev));
         for (int i = 0; i < elseClCount; i++)
             elseStmts.Add(ReleaseStmt(new IrVar(_cl[elseClStart + i].Name, _cl[elseClStart + i].Type)));
 

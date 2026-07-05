@@ -150,7 +150,7 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
                     
                     // Private by default. A member needs an explicit 'public' to be callable
                     // from outside its declaring class or module.
-                    if (Array.IndexOf(fd.Modifiers, "public") < 0) _sym.PrivateMembers.Add(new(cd.Name, fd.Name));
+                    if (!fd.Modifiers.HasFlag(Modifiers.Public)) _sym.PrivateMembers.Add(new(cd.Name, fd.Name));
                     break;
                 case MethodDecl md:
                     string mSigKey = md.Name + "/" + Mangler.OverloadSuffix(md.Params);
@@ -170,12 +170,12 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
                     // Register the method in the symbol table, and if it's private, add it to the private members set.
                     methodNames.Add(md.Name);
                     var sig = new MethodSig(md.ReturnType ?? "void", [.. md.Params],
-                        Array.IndexOf(md.Modifiers, "static") >= 0 || cd.IsModule, md.Throws, md.IsEntry, [.. md.Annotations]);
+                        md.Modifiers.HasFlag(Modifiers.Static) || cd.IsModule, md.Throws, md.IsEntry, [.. md.Annotations]);
 
                     _sym.RegisterMethod(cd.Name, md.Name, sig);
 
                     // Private by default. A member needs an explicit 'public' to be callable from outside its declaring class or module.
-                    if (Array.IndexOf(md.Modifiers, "public") < 0) _sym.PrivateMembers.Add(new(cd.Name, md.Name));
+                    if (!md.Modifiers.HasFlag(Modifiers.Public)) _sym.PrivateMembers.Add(new(cd.Name, md.Name));
 
                     // Bind any @intrinsic annotations to the C name the method is emitted under.
                     BindIntrinsics(md.Annotations, Mangler.Method(cd.Name, md.Name, md.Params, overloaded: false), file, md.Span);
@@ -203,14 +203,14 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
     {
         // `static` only means anything on a class/module method; it's a category
         // error on a free function, not a redundant-but-harmless spelling.
-        if (Array.IndexOf(fd.Modifiers, "static") >= 0)
+        if (fd.Modifiers.HasFlag(Modifiers.Static))
             diag.Error(Codes.StaticOnFreeFunc, file, fd.Span,
                 $"'static' has no meaning on the free function '{fd.Name}' — it is never an instance member");
 
         if (fd.GenericParams.Length > 0) return;
 
         var sig = new MethodSig(fd.ReturnType ?? "void", [.. fd.Params], true, fd.Throws, fd.IsEntry, [.. fd.Annotations]);
-        if (Array.IndexOf(fd.Modifiers, "private") >= 0)
+        if (fd.Modifiers.HasFlag(Modifiers.Private))
         {
             if (!_declaredPrivateFuncSigs.Add((file, fd.Name + "/" + Mangler.OverloadSuffix(fd.Params))))
             {

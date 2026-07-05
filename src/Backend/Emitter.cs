@@ -950,7 +950,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             case IrBlock b:       EmitBlock(b, w); break;
             case IrUnsafeBlock u: EmitBlock(u.Body, w); break;
             case IrDeclVar dv:    EmitDeclVar(dv, w); break;
-            case IrAssign a:      w.Line($"{EmitExpr(a.Target)} {a.Op} {EmitExpr(a.Value)};"); break;
+            case IrAssign a:      w.Line($"{EmitExpr(a.Target)} {a.Op.Sym()} {EmitExpr(a.Value)};"); break;
             case IrExprStmt es:   w.Line($"{EmitExpr(es.Expr)};"); break;
             case IrReturn rs:     w.Line(rs.Value == null ? "return;" : $"return {EmitExpr(rs.Value)};"); break;
             case IrBreak:         w.Line("break;"); break;
@@ -995,7 +995,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             IrDeclVar dv => dv.Init != null
                 ? $"{dv.Type.ToCType()} {dv.Name} = {EmitExpr(dv.Init)}"
                 : $"{dv.Type.ToCType()} {dv.Name}",
-            IrAssign aa  => $"{EmitExpr(aa.Target)} {aa.Op} {EmitExpr(aa.Value)}",
+            IrAssign aa  => $"{EmitExpr(aa.Target)} {aa.Op.Sym()} {EmitExpr(aa.Value)}",
             IrExprStmt e => EmitExpr(e.Expr),
             _            => ""
         };
@@ -1034,10 +1034,10 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
                                 : $"{EmitExpr(ix.Obj)}[{EmitExpr(ix.Idx)}]",
             IrStaticCall sc => $"{sc.CName}({string.Join(", ", sc.Args.Select(EmitExpr))})",
             IrInstanceCall ic => $"{ic.CName}({string.Join(", ", new[] { EmitExpr(ic.Recv) }.Concat(ic.Args.Select(EmitExpr)))})",
-            IrBinOp bo => $"({EmitExpr(bo.Left)} {bo.Op} {EmitExpr(bo.Right)})",
+            IrBinOp bo => $"({EmitExpr(bo.Left)} {bo.Op.Sym()} {EmitExpr(bo.Right)})",
             IrTernary tn => $"({EmitExpr(tn.Cond)} ? {EmitExpr(tn.Then)} : {EmitExpr(tn.Else)})",
-            IrUnaryOp uo => $"{uo.Op}{EmitExpr(uo.Operand)}",
-            IrPostfix pf => $"{EmitExpr(pf.Operand)}{pf.Op}",
+            IrUnaryOp uo => $"{uo.Op.Sym()}{EmitExpr(uo.Operand)}",
+            IrPostfix pf => $"{EmitExpr(pf.Operand)}{pf.Op.Sym()}",
             IrCast c => $"(({c.To.ToCType()}){EmitExpr(c.Value)})",
             IrNew n => $"{Mangler.Allocator(n.ClassName)}({string.Join(", ", n.Args.Select(EmitExpr))})",
             IrArrayLit al => $"({al.ArrType.ToCType()}){{ {{ {string.Join(", ", al.Elems.Select(EmitExpr))} }} }}",
