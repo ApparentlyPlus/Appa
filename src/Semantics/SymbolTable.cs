@@ -17,6 +17,7 @@ internal static class Roles
     public const string ObjInit        = "obj_init";
     public const string StringifyInt   = "stringify_int";
     public const string StringifyFloat = "stringify_float";
+    public const string StringifyChar  = "stringify_char";
 
     // The environment floor's C names, bound to their @extern declaration in
     // libgata (see Sys.g/Mem.g/Console.g) so the compiler never hardcodes them.
@@ -31,7 +32,7 @@ internal static class Roles
     public static readonly FrozenSet<string> All = FrozenSet.ToFrozenSet(
     [
         Alloc, Retain, Release, ObjHeader, ObjInit,
-        StringifyInt, StringifyFloat,
+        StringifyInt, StringifyFloat, StringifyChar,
         EnvDebug, EnvPanic, EnvProcCreate, EnvProcHide, EnvThreadSpawn, EnvRead, EnvAlloc
     ]);
 }
@@ -375,6 +376,16 @@ internal sealed class SymbolTable
     public bool IsOverloadedMethod(string cls, string method)
     {
         return MethodOverloads(cls, method).Count > 1;
+    }
+
+    /// <summary>
+    /// Returns the distinct method names declared directly on the given class/module,
+    /// for "did you mean" suggestions when a lookup misses.
+    /// </summary>
+    public IEnumerable<string> MethodNames(string cls)
+    {
+        foreach (var key in _methods.Keys)
+            if (key.Owner == cls) yield return key.Name;
     }
 
     /// <summary>

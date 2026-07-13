@@ -108,6 +108,7 @@ internal abstract record IrType
 
     public virtual bool IsNumeric => false;
     public virtual bool IsFloat   => false;
+    public virtual bool IsChar    => false;
     public virtual bool IsString  => false;
     public virtual bool IsVoid    => false;
 
@@ -147,6 +148,7 @@ internal record IrPrimType(string CName) : IrType
     private readonly string _cType = PrimTypes.ToC(CName);
     private readonly bool _isNumeric = PrimTypes.IsIntCanon(CName);
     private readonly bool _isFloat = PrimTypes.IsFloat(CName);
+    private readonly bool _isChar = CName == "char";
 
     public override string ToCType()
     {
@@ -156,6 +158,7 @@ internal record IrPrimType(string CName) : IrType
     public override string MangledName => CName;
     public override bool IsNumeric => _isNumeric;
     public override bool IsFloat   => _isFloat;
+    public override bool IsChar    => _isChar;
 }
 
 /// <summary>

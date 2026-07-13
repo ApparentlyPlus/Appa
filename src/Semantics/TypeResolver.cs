@@ -876,6 +876,8 @@ internal sealed class TypeResolver(
         if (e.Type.IsString) return e;
         if (e.Type.IsFloat)
             return new IrStaticCall(Intrinsic(Roles.StringifyFloat, ctx, e.Span), IrType.String, [e]) { Span = e.Span };
+        if (e.Type.IsChar)
+            return new IrStaticCall(Intrinsic(Roles.StringifyChar, ctx, e.Span), IrType.String, [e]) { Span = e.Span };
         if (e.Type.IsNumeric)
             return new IrStaticCall(Intrinsic(Roles.StringifyInt, ctx, e.Span), IrType.String, [e]) { Span = e.Span };
         var cls = ClassNameOf(e.Type);
@@ -2577,7 +2579,7 @@ internal sealed class TypeResolver(
                 {
                     if (!IsOpaqueStruct(objName))
                         diag.Error(Codes.UndefinedMethod, ctx.File, ce.Span,
-                            $"'{Mangler.DisplayName(objName)}' has no method '{ma.Member}'");
+                            $"'{Mangler.DisplayName(objName)}' has no method '{ma.Member}'{Suggest.Hint(ma.Member, sym.MethodNames(objName))}");
                 }
                 else if (msym.Sig is { IsStatic: false })
                     diag.Error(Codes.StaticOnInstance, ctx.File, ce.Span,
@@ -2609,7 +2611,7 @@ internal sealed class TypeResolver(
                     }
                     if (!IsOpaqueStruct(cls))
                         diag.Error(Codes.UndefinedMethod, ctx.File, ce.Span,
-                            $"'{Mangler.DisplayName(cls)}' has no method '{ma.Member}'");
+                            $"'{Mangler.DisplayName(cls)}' has no method '{ma.Member}'{Suggest.Hint(ma.Member, sym.MethodNames(cls))}");
                 }
                 else if (msym.Sig is { IsStatic: true })
                     diag.Error(Codes.InstanceOnStatic, ctx.File, ce.Span,

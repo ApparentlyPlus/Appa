@@ -102,6 +102,60 @@ internal static class Codes
 }
 
 /// <summary>
+/// "Did you mean ...?" suggestions for misspelled identifiers, by edit distance.
+/// </summary>
+internal static class Suggest
+{
+    /// <summary>
+    /// Returns the candidate closest to `typed` by Levenshtein distance, or null if none is
+    /// close enough to plausibly be a typo of it (distance more than half of `typed`'s length).
+    /// </summary>
+    public static string? Closest(string typed, IEnumerable<string> candidates)
+    {
+        string? best = null;
+        int bestDist = int.MaxValue;
+        foreach (var c in candidates)
+        {
+            int d = Distance(typed, c);
+            if (d < bestDist) { bestDist = d; best = c; }
+        }
+        int maxAllowed = Math.Max(1, typed.Length / 2);
+        return bestDist <= maxAllowed ? best : null;
+    }
+
+    /// <summary>
+    /// Formats a "did you mean 'X'?" suffix for a diagnostic message, or "" if `typed` has no
+    /// close-enough match among `candidates`.
+    /// </summary>
+    public static string Hint(string typed, IEnumerable<string> candidates)
+    {
+        return Closest(typed, candidates) is { } best ? $" — did you mean '{best}'?" : "";
+    }
+
+    /// <summary>
+    /// Classic iterative (two-row) Levenshtein edit distance between two strings.
+    /// </summary>
+    private static int Distance(string a, string b)
+    {
+        var prev = new int[b.Length + 1];
+        var cur = new int[b.Length + 1];
+        for (int j = 0; j <= b.Length; j++) prev[j] = j;
+
+        for (int i = 1; i <= a.Length; i++)
+        {
+            cur[0] = i;
+            for (int j = 1; j <= b.Length; j++)
+            {
+                int cost = a[i - 1] == b[j - 1] ? 0 : 1;
+                cur[j] = Math.Min(Math.Min(cur[j - 1] + 1, prev[j] + 1), prev[j - 1] + cost);
+            }
+            (prev, cur) = (cur, prev);
+        }
+        return prev[b.Length];
+    }
+}
+
+/// <summary>
 /// Collects diagnostics during compilation. It can render them in a human readable format,
 /// with source code context and ANSI colors.
 /// </summary>
