@@ -528,7 +528,7 @@ public class LanguageCoreTests
             kernel { entry func Main() { let int z = M.helper(); } }
             """ },
             { "process_non_thread", "G053", """
-            user { process App { int func oops() { return 1; } } }
+            user { foreground process App { int func oops() { return 1; } } }
             """ },
             { "redeclare", "G003", """
             kernel { entry func Main() { let int s = 10; let String s = "hi"; } }
@@ -619,13 +619,13 @@ public class LanguageCoreTests
             }
             """ },
             { "thread_nested", "G051", """
-            user { process App { thread T { thread U { entry func R() { } } } } }
+            user { foreground process App { thread T { thread U { entry func R() { } } } } }
             """ },
             { "thread_no_entry", "G053", """
-            user { process App { thread T { } } }
+            user { foreground process App { thread T { } } }
             """ },
             { "thread_stray_func", "G053", """
-            user { process App { thread T {
+            user { foreground process App { thread T {
               entry func R() { }
               int func helper() { return 1; }
             } } }

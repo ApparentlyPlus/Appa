@@ -128,7 +128,7 @@ internal static class Pipeline
 
             Appa.Program? prog = null;
             try { prog = new Parser(new Lexer(src).Tokenize()).ParseProgram(); }
-            catch (ParseException ex) { diag.Error(ex.Code, path, ex.Span, ex.Message); }
+            catch (ParseException ex) { diag.Error(ex.Code, path, ex.Span, ex.Message, ex.Hints); }
 
             var edges = new List<string>();
             if (prog != null)
@@ -432,7 +432,7 @@ sealed class EnvProbe(SymbolTable sym) : IrRewriter
     /// <summary>
     /// Runs the probe over the whole module and populates Refs.
     /// </summary>
-    public void Run(IrModule m)
+    public new void Run(IrModule m)
     {
         foreach (var c in m.Classes)
         {

@@ -31,7 +31,7 @@ internal static class SingleFileCompile
 
         Appa.Program? prog = null;
         try { prog = Parse(src); }
-        catch (ParseException ex) { diag.Error(ex.Code, path, ex.Span, ex.Message); }
+        catch (ParseException ex) { diag.Error(ex.Code, path, ex.Span, ex.Message, ex.Hints); }
         if (prog == null) return (diag, null);
 
         var programs = new List<(string path, Appa.Program prog)> { (path, prog) };

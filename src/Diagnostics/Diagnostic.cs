@@ -28,10 +28,15 @@ internal readonly record struct Loc(string File, TextSpan Span);
 
 /// <summary>
 /// A diagnostic is data. It consists of a stable code, a severity, a concise message, and a
-/// location. The message states the problem outright.
+/// location. The message states the problem outright. Hints are optional, separate lines of
+/// suggested fixes, rendered after the source snippet a la rustc's "= help:" lines -- they
+/// belong here, not appended into Message, because Message must state the fault; the fix is
+/// a distinct kind of claim and can be entirely absent.
 /// </summary>
-// 
-internal sealed record Diagnostic(Severity Severity, string Code, string Message, Loc Loc);
+internal sealed record Diagnostic(Severity Severity, string Code, string Message, Loc Loc, string[] Hints)
+{
+    public Diagnostic(Severity Severity, string Code, string Message, Loc Loc) : this(Severity, Code, Message, Loc, []) { }
+}
 
 /// <summary>
 /// This class contains all the diagnostic codes used in the compiler. 
@@ -99,6 +104,7 @@ internal static class Codes
     public const string DuplicateUserRealm     = "G057";
     public const string MissingUserEntry       = "G058";
     public const string DuplicateUserEntry     = "G059";
+    public const string MissingProcessMode     = "G060";
 }
 
 /// <summary>
@@ -124,12 +130,12 @@ internal static class Suggest
     }
 
     /// <summary>
-    /// Formats a "did you mean 'X'?" suffix for a diagnostic message, or "" if `typed` has no
+    /// Builds a "did you mean 'X'?" hint array for a diagnostic, or null if `typed` has no
     /// close-enough match among `candidates`.
     /// </summary>
-    public static string Hint(string typed, IEnumerable<string> candidates)
+    public static string[]? Hints(string typed, IEnumerable<string> candidates)
     {
-        return Closest(typed, candidates) is { } best ? $" — did you mean '{best}'?" : "";
+        return Closest(typed, candidates) is { } best ? [$"did you mean '{best}'?"] : null;
     }
 
     /// <summary>
@@ -177,20 +183,22 @@ internal sealed class DiagnosticBag(SourceSet sources)
     public int WarningCount => _warnCount;
 
     /// <summary>
-    /// Adds an error diagnostic to the bag.
+    /// Adds an error diagnostic to the bag. Hints are optional "= help:" lines rendered after
+    /// the source snippet.
     /// </summary>
-    public void Error(string code, string file, TextSpan span, string message)
+    public void Error(string code, string file, TextSpan span, string message, string[]? hints = null)
     {
-        _d.Add(new Diagnostic(Severity.Error, code, message, new Loc(file, span)));
+        _d.Add(new Diagnostic(Severity.Error, code, message, new Loc(file, span), hints ?? []));
         _errCount++;
     }
 
     /// <summary>
-    /// Adds a warning diagnostic to the bag.
+    /// Adds a warning diagnostic to the bag. Hints are optional "= help:" lines rendered after
+    /// the source snippet.
     /// </summary>
-    public void Warn(string code, string file, TextSpan span, string message)
+    public void Warn(string code, string file, TextSpan span, string message, string[]? hints = null)
     {
-        _d.Add(new Diagnostic(Severity.Warning, code, message, new Loc(file, span)));
+        _d.Add(new Diagnostic(Severity.Warning, code, message, new Loc(file, span), hints ?? []));
         _warnCount++;
     }
 
@@ -238,6 +246,13 @@ internal sealed class DiagnosticBag(SourceSet sources)
                 .Append(EscapeCodes.NC)
                 .Append(": ")
                 .Append(d.Message);
+            foreach (var hint in d.Hints)
+                sb.AppendLine()
+                    .Append(EscapeCodes.CYAN)
+                    .Append("help")
+                    .Append(EscapeCodes.NC)
+                    .Append(": ")
+                    .Append(hint);
             return sb.ToString();
         }
 
@@ -294,6 +309,32 @@ internal sealed class DiagnosticBag(SourceSet sources)
             .Append(color)
             .Append('^', caretLen)
             .Append(EscapeCodes.NC);
+
+        // Render each hint as a rustc-style "= help: ..." line under a blank gutter row.
+        if (d.Hints.Length > 0)
+        {
+            sb.AppendLine()
+                .Append(' ', gutterlen)
+                .Append(' ')
+                .Append(EscapeCodes.BLUE)
+                .Append('|')
+                .Append(EscapeCodes.NC);
+            for (int i = 0; i < d.Hints.Length; i++)
+            {
+                sb.AppendLine()
+                    .Append(' ', gutterlen)
+                    .Append(' ')
+                    .Append(EscapeCodes.BLUE)
+                    .Append('=')
+                    .Append(EscapeCodes.NC)
+                    .Append(' ')
+                    .Append(EscapeCodes.CYAN)
+                    .Append("help")
+                    .Append(EscapeCodes.NC)
+                    .Append(": ")
+                    .Append(d.Hints[i]);
+            }
+        }
 
         return sb.ToString();
     }

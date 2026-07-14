@@ -1862,13 +1862,13 @@ internal sealed class TypeResolver(
             case DebugStmt d:
                 if (releaseMode)
                     diag.Error(Codes.DiagInRelease, ctx.File, s.Span,
-                        "'debug' is not allowed in a release build -- remove it before shipping");
+                        "'debug' is not allowed in a release build", ["remove it before shipping"]);
                 return new IrDebug(d.Raw) { Span = s.Span };
 
             case PanicStmt p:
                 if (releaseMode)
                     diag.Error(Codes.DiagInRelease, ctx.File, s.Span,
-                        "'panic' is not allowed in a release build -- remove it before shipping");
+                        "'panic' is not allowed in a release build", ["remove it before shipping"]);
                 if (ctx.Context != "kernel")
                     diag.Error(Codes.PanicOutsideKernel, ctx.File, s.Span,
                         "'panic' is only valid in the kernel realm");
@@ -2579,7 +2579,8 @@ internal sealed class TypeResolver(
                 {
                     if (!IsOpaqueStruct(objName))
                         diag.Error(Codes.UndefinedMethod, ctx.File, ce.Span,
-                            $"'{Mangler.DisplayName(objName)}' has no method '{ma.Member}'{Suggest.Hint(ma.Member, sym.MethodNames(objName))}");
+                            $"'{Mangler.DisplayName(objName)}' has no method '{ma.Member}'",
+                            Suggest.Hints(ma.Member, sym.MethodNames(objName)));
                 }
                 else if (msym.Sig is { IsStatic: false })
                     diag.Error(Codes.StaticOnInstance, ctx.File, ce.Span,
@@ -2611,7 +2612,8 @@ internal sealed class TypeResolver(
                     }
                     if (!IsOpaqueStruct(cls))
                         diag.Error(Codes.UndefinedMethod, ctx.File, ce.Span,
-                            $"'{Mangler.DisplayName(cls)}' has no method '{ma.Member}'{Suggest.Hint(ma.Member, sym.MethodNames(cls))}");
+                            $"'{Mangler.DisplayName(cls)}' has no method '{ma.Member}'",
+                            Suggest.Hints(ma.Member, sym.MethodNames(cls)));
                 }
                 else if (msym.Sig is { IsStatic: true })
                     diag.Error(Codes.InstanceOnStatic, ctx.File, ce.Span,

@@ -51,7 +51,7 @@ public class ParserDiagnosticsTests
     {
         var ex = Parse(src);
         Assert.Equal(Codes.AssignInExpr, ex.Code);
-        Assert.Contains("did you mean '=='?", ex.Message);
+        Assert.Contains(ex.Hints, h => h.Contains("did you mean '=='?"));
     }
 
     /// <summary>
@@ -100,6 +100,33 @@ public class ParserDiagnosticsTests
     }
 
     /// <summary>
+    /// A process declaration without a foreground/background mode -- in either the leading or
+    /// the trailing colon spelling -- is rejected outright rather than silently defaulting, since
+    /// the mode is a real semantic choice (TTY/keyboard focus, scheduling visibility).
+    /// </summary>
+    [Fact]
+    public void ProcessWithoutModeIsRejected()
+    {
+        var ex = Parse("user { process App { thread T { entry func Run() { } } } }");
+        Assert.Equal(Codes.MissingProcessMode, ex.Code);
+        Assert.Contains("missing a foreground/background mode", ex.Message);
+        Assert.Contains(ex.Hints, h => h.Contains("foreground process App") && h.Contains("background process App"));
+    }
+
+    /// <summary>
+    /// A bare identifier immediately followed by '{' where 'func' was expected hints that a
+    /// 'process' declaration was likely intended, instead of the bare "expected 'func'" message.
+    /// </summary>
+    [Fact]
+    public void MissingProcessKeywordHintsAtFreeFuncError()
+    {
+        var ex = Parse("user { TicTacToe { thread T { entry func Run() { } } } }");
+        Assert.Equal(Codes.BadDeclHeader, ex.Code);
+        Assert.Contains("expected 'func'", ex.Message);
+        Assert.Contains(ex.Hints, h => h.Contains("forget 'process'") && h.Contains("TicTacToe"));
+    }
+
+    /// <summary>
     /// Trailing commas in declaration lists carry the trailing-comma code.
     /// </summary>
     [Theory]
@@ -119,7 +146,7 @@ public class ParserDiagnosticsTests
     {
         var ex = Parse("func F() { MyType x = 1; }");
         Assert.Equal(Codes.MissingLet, ex.Code);
-        Assert.Contains("missing 'let'", ex.Message);
+        Assert.Contains(ex.Hints, h => h.Contains("missing 'let'"));
     }
 
     /// <summary>
@@ -129,7 +156,7 @@ public class ParserDiagnosticsTests
     [InlineData("kernel { user { } }")]
     [InlineData("class A { class B { } }")]
     [InlineData("class A { kernel { } }")]
-    [InlineData("user { process P { thread T { thread U { entry func R() { } } } } }")]
+    [InlineData("user { foreground process P { thread T { thread U { entry func R() { } } } } }")]
     public void NestingViolationsCarryTheirCode(string src)
     {
         Assert.Equal(Codes.InvalidNesting, Parse(src).Code);
