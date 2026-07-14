@@ -6,11 +6,10 @@ using System.Runtime.CompilerServices;
 /// Thrown by the lexer or parser when source text cannot be tokenized or parsed.
 /// Caught at every call site so it never escapes as an unhandled exception.
 /// </summary>
-internal sealed class ParseException(TextSpan span, string message, string code = Codes.Syntax, string[]? hints = null) : Exception(message)
+internal sealed class ParseException(TextSpan span, string message, string code = Codes.Syntax) : Exception(message)
 {
     public TextSpan Span { get; } = span;
     public string Code { get; } = code;
-    public string[] Hints { get; } = hints ?? [];
 }
 
 /// <summary>
@@ -156,9 +155,9 @@ internal sealed class Lexer(string src)
     }
 
     // Throws a ParseException with the given message and a TextSpan covering the current token being read.
-    private void Fail(string m, string code = Codes.Syntax, string[]? hints = null)
+    private void Fail(string m, string code = Codes.Syntax)
     {
-        throw new ParseException(new TextSpan(_ts, Math.Max(1, _pp - _ts)), m, code, hints);
+        throw new ParseException(new TextSpan(_ts, Math.Max(1, _pp - _ts)), m, code);
     }
 
     /// <summary>
@@ -384,7 +383,7 @@ internal sealed class Lexer(string src)
     private string ReadParenArg(string ann)
     {
         SkipWS();
-        if (Cur != '(') Fail($"'{ann}' requires a parenthesized argument", Codes.BadAnnotation, [$"e.g. {ann}(name)"]);
+        if (Cur != '(') Fail($"'{ann}' requires a parenthesized argument, e.g. {ann}(name)", Codes.BadAnnotation);
         Advance();
         SkipWS();
         int s = _pp;
@@ -392,7 +391,7 @@ internal sealed class Lexer(string src)
         // Read until we find a character that is not part of an identifier (letter, digit, or underscore)
         while (_pp < src.Length && IsIdentPart(Cur)) Advance();
         string arg = src[s.._pp];
-        if (arg.Length == 0) Fail($"'{ann}' argument must be a name", Codes.BadAnnotation, [$"e.g. {ann}(name)"]);
+        if (arg.Length == 0) Fail($"'{ann}' argument must be a name, e.g. {ann}(name)", Codes.BadAnnotation);
         SkipWS();
         if (Cur != ')') Fail($"missing ')' after '{ann}({arg}'", Codes.BadAnnotation);
         Advance();

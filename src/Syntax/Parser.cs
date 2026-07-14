@@ -130,21 +130,19 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Throws a ParseException with the given message at the current token's span. Hints are
-    /// optional "= help:" lines rendered after the source snippet.
+    /// Throws a ParseException with the given message at the current token's span.
     /// </summary>
-    private void Fail(string m, string code = Codes.Syntax, string[]? hints = null)
+    private void Fail(string m, string code = Codes.Syntax)
     {
-        throw new ParseException(Cur.Span, m, code, hints);
+        throw new ParseException(Cur.Span, m, code);
     }
 
     /// <summary>
-    /// Throws a ParseException with the given message at an explicit span. Hints are optional
-    /// "= help:" lines rendered after the source snippet.
+    /// Throws a ParseException with the given message at an explicit span.
     /// </summary>
-    private static void FailAt(TextSpan span, string m, string code = Codes.Syntax, string[]? hints = null)
+    private static void FailAt(TextSpan span, string m, string code = Codes.Syntax)
     {
-        throw new ParseException(span, m, code, hints);
+        throw new ParseException(span, m, code);
     }
 
     /// <summary>
@@ -164,8 +162,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     private void NoAssignHere(string where, string hint)
     {
         if (IsAssignTk(Cur.Kind))
-            Fail($"assignment is a statement in Gata, not an expression, and cannot appear in {where}",
-                Codes.AssignInExpr, [hint]);
+            Fail($"assignment is a statement in Gata, not an expression, and cannot appear in {where}; {hint}",
+                Codes.AssignInExpr);
     }
 
     #endregion
@@ -247,8 +245,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         bool isThrow = Try(TK.Throws);
         string? ret = ParseOptionalReturnType();
         if (ret != null && At(TK.LBrace))
-            Fail($"expected 'func', found '{{'", Codes.BadDeclHeader,
-                [$"did you forget 'process' before '{ret}'?", $"try 'foreground process {ret} {{ ... }}' or 'background process {ret} {{ ... }}'"]);
+            Fail($"expected 'func', found '{{' -- did you forget 'process' before '{ret}'? " +
+                 $"(e.g. 'foreground process {ret} {{ ... }}')", Codes.BadDeclHeader);
         Expect(TK.Func);
         var name = Expect(TK.Ident).Value;
         var generics = ParseGenericParamList();
@@ -805,9 +803,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
             else Fail($"expected 'foreground' or 'background' after ':', found {Found()}", Codes.BadDeclHeader);
         }
         if (!modeExplicit)
-            Fail($"'{name}': process declaration is missing a foreground/background mode", Codes.MissingProcessMode,
-                [$"write 'foreground process {name}' or 'background process {name}'",
-                 $"or the trailing form: 'process {name}: foreground' / 'process {name}: background'"]);
+            Fail($"'{name}': process declaration is missing a foreground/background mode -- " +
+                 $"write 'foreground process {name}' or 'background process {name}'", Codes.MissingProcessMode);
         Expect(TK.LBrace);
         List<ThreadDecl> threads = [];
         while (!At(TK.RBrace) && !At(TK.EOF)) threads.Add(ParseThreadDecl());
@@ -939,7 +936,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         }
         if (At(TK.Debug)) {
             Advance();
-            if (!At(TK.StrLit)) Fail("'debug' takes a string literal", hints: ["e.g. debug \"message\";"]);
+            if (!At(TK.StrLit)) Fail("'debug' takes a string literal, e.g. debug \"message\";");
             var raw = Advance().Value;
             Expect(TK.Semi);
             return new DebugStmt(raw, To(s));
@@ -948,14 +945,15 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         // Panic is a statement, not an expression, so it must be handled here instead of in ParseExprOrAssign.
         if (At(TK.Panic)) {
             Advance();
-            if (!At(TK.StrLit)) Fail("'panic' takes a string literal", hints: ["e.g. panic \"message\";"]);
+            if (!At(TK.StrLit)) Fail("'panic' takes a string literal, e.g. panic \"message\";");
             var raw = Advance().Value;
             Expect(TK.Semi);
             return new PanicStmt(raw, To(s));
         }
         if (LooksLikeMissingLet())
-            Fail("expected a statement", Codes.MissingLet,
-                At(TK.Ident) ? [$"missing 'let'? (e.g. 'let {Cur.Value} ...')"] : ["missing 'let'?"]);
+            Fail(At(TK.Ident)
+                ? $"expected a statement -- missing 'let'? (e.g. 'let {Cur.Value} ...')"
+                : "expected a statement -- missing 'let'?", Codes.MissingLet);
         return ParseExprOrAssign(s);
     }
 

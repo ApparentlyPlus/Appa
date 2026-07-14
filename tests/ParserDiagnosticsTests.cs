@@ -51,7 +51,7 @@ public class ParserDiagnosticsTests
     {
         var ex = Parse(src);
         Assert.Equal(Codes.AssignInExpr, ex.Code);
-        Assert.Contains(ex.Hints, h => h.Contains("did you mean '=='?"));
+        Assert.Contains("did you mean '=='?", ex.Message);
     }
 
     /// <summary>
@@ -110,7 +110,8 @@ public class ParserDiagnosticsTests
         var ex = Parse("user { process App { thread T { entry func Run() { } } } }");
         Assert.Equal(Codes.MissingProcessMode, ex.Code);
         Assert.Contains("missing a foreground/background mode", ex.Message);
-        Assert.Contains(ex.Hints, h => h.Contains("foreground process App") && h.Contains("background process App"));
+        Assert.Contains("foreground process App", ex.Message);
+        Assert.Contains("background process App", ex.Message);
     }
 
     /// <summary>
@@ -123,7 +124,8 @@ public class ParserDiagnosticsTests
         var ex = Parse("user { TicTacToe { thread T { entry func Run() { } } } }");
         Assert.Equal(Codes.BadDeclHeader, ex.Code);
         Assert.Contains("expected 'func'", ex.Message);
-        Assert.Contains(ex.Hints, h => h.Contains("forget 'process'") && h.Contains("TicTacToe"));
+        Assert.Contains("forget 'process'", ex.Message);
+        Assert.Contains("TicTacToe", ex.Message);
     }
 
     /// <summary>
@@ -146,7 +148,7 @@ public class ParserDiagnosticsTests
     {
         var ex = Parse("func F() { MyType x = 1; }");
         Assert.Equal(Codes.MissingLet, ex.Code);
-        Assert.Contains(ex.Hints, h => h.Contains("missing 'let'"));
+        Assert.Contains("missing 'let'", ex.Message);
     }
 
     /// <summary>

@@ -128,7 +128,7 @@ internal static class Pipeline
 
             Appa.Program? prog = null;
             try { prog = new Parser(new Lexer(src).Tokenize()).ParseProgram(); }
-            catch (ParseException ex) { diag.Error(ex.Code, path, ex.Span, ex.Message, ex.Hints); }
+            catch (ParseException ex) { diag.Error(ex.Code, path, ex.Span, ex.Message); }
 
             var edges = new List<string>();
             if (prog != null)

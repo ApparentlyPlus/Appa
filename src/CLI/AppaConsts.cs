@@ -7,7 +7,7 @@ using System.Runtime.InteropServices;
 // Download URLs for `appa setup` / `appa update`.
 static class Urls
 {
-    const string Rel = "https://github.com/ApparentlyPlus/Gata/releases/download/artifacts";
+    const string AppaRel = "https://github.com/ApparentlyPlus/Appa/releases/latest/download";
     const string Tc = "https://github.com/ApparentlyPlus/GatOS/releases/download/build-toolchain";
 
     // libgata and envs are fetched live from the Gata repo (see GitHubDirDownloader),
@@ -29,16 +29,17 @@ static class Urls
         Tc + "/x86_64-linux.zip";
 
     /// <summary>
-    /// Returns the self-update URL for the appa binary on the current platform.
-    /// Mac distinguishes Apple Silicon from Intel.
+    /// Returns the self-update URL for the appa binary on the current platform, always
+    /// resolving to the latest GitHub release via the "releases/latest/download" alias.
+    /// Mac distinguishes Apple Silicon (amac) from Intel (imac).
     /// </summary>
     public static string AppaBinary() =>
-        RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? Rel + "/appa-win.exe" :
+        RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? AppaRel + "/appa-win.exe" :
         RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
             ? (RuntimeInformation.OSArchitecture == Architecture.Arm64
-                ? Rel + "/appa-arm-mac"
-                : Rel + "/appa-intel-mac")
-            : Rel + "/appa-linux";
+                ? AppaRel + "/appa-amac"
+                : AppaRel + "/appa-imac")
+            : AppaRel + "/appa-linux";
 }
 
 #endregion
