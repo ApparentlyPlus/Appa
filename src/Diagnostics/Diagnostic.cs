@@ -29,9 +29,7 @@ internal readonly record struct Loc(string File, TextSpan Span);
 /// <summary>
 /// A diagnostic is data. It consists of a stable code, a severity, a concise message, and a
 /// location. The message states the problem outright. Hints are optional, separate lines of
-/// suggested fixes, rendered after the source snippet a la rustc's "= help:" lines -- they
-/// belong here, not appended into Message, because Message must state the fault; the fix is
-/// a distinct kind of claim and can be entirely absent.
+/// suggested fixes, rendered after the source snippet a la rustc's "= help:" lines.
 /// </summary>
 internal sealed record Diagnostic(Severity Severity, string Code, string Message, Loc Loc, string[] Hints)
 {
@@ -113,8 +111,8 @@ internal static class Codes
 internal static class Suggest
 {
     /// <summary>
-    /// Returns the candidate closest to `typed` by Levenshtein distance, or null if none is
-    /// close enough to plausibly be a typo of it (distance more than half of `typed`'s length).
+    /// Returns the candidate closest to typed by Levenshtein distance, or null if none is
+    /// close enough to plausibly be a typo of it (distance more than half of typed's length).
     /// </summary>
     public static string? Closest(string typed, IEnumerable<string> candidates)
     {
@@ -130,12 +128,12 @@ internal static class Suggest
     }
 
     /// <summary>
-    /// Builds a "did you mean 'X'?" hint array for a diagnostic, or null if `typed` has no
-    /// close-enough match among `candidates`.
+    /// Formats a "did you mean 'X'?" suffix for a diagnostic message, or "" if typed has no
+    /// close-enough match among candidates.
     /// </summary>
-    public static string[]? Hints(string typed, IEnumerable<string> candidates)
+    public static string Hint(string typed, IEnumerable<string> candidates)
     {
-        return Closest(typed, candidates) is { } best ? [$"did you mean '{best}'?"] : null;
+        return Closest(typed, candidates) is { } best ? $" — did you mean '{best}'?" : "";
     }
 
     /// <summary>
@@ -246,13 +244,6 @@ internal sealed class DiagnosticBag(SourceSet sources)
                 .Append(EscapeCodes.NC)
                 .Append(": ")
                 .Append(d.Message);
-            foreach (var hint in d.Hints)
-                sb.AppendLine()
-                    .Append(EscapeCodes.CYAN)
-                    .Append("help")
-                    .Append(EscapeCodes.NC)
-                    .Append(": ")
-                    .Append(hint);
             return sb.ToString();
         }
 
