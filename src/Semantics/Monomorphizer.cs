@@ -1,9 +1,6 @@
 namespace Appa;
 
-// Pre-resolution pass that stamps out concrete class bodies for each generic
-// instantiation used in the source. A `class List[T] { ... }` is a template;
-// this pass produces List_int, List_String, etc. from the recorded GenericUses.
-// Only used instantiations are emitted; uninstantiated templates are dropped.
+
 /// <summary>
 /// Rewrites generic class templates into concrete instantiated classes before
 /// symbol collection and type resolution run.
@@ -280,7 +277,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     /// <summary>
     /// Substitutes type parameters in a single class member (field, method, or operator).
     /// </summary>
-    private ClassMember SubMember(ClassMember m, SubstitutionContext ctx)
+    private static ClassMember SubMember(ClassMember m, SubstitutionContext ctx)
     {
         ClassMember r = m switch
         {
@@ -328,7 +325,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
         var newBody = SubBody(od.Body, ctx);
         if (ReferenceEquals(newParams, od.Params) && ReferenceEquals(newRet, od.ReturnType) && ReferenceEquals(newBody, od.Body))
             return od;
-        return new OperatorDecl(od.Op, newParams, newRet, newBody, od.Span);
+        return new OperatorDecl(od.Modifiers, od.Op, newParams, newRet, newBody, od.Span);
     }
 
     /// <summary>
@@ -413,8 +410,12 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     {
         if (t.EndsWith('*')) return t;
         if (PrimTypes.IsPrim(t)) return PrimTypes.ToC(t);
-        if (t == "String") return $"{Mangler.Class("String")}*";
-        if (t is "Process" or "Thread") return "void*";
+        // Monomorphization runs before symbol collection (Pipeline.cs), so no
+        // SymbolTable/@builtin binding exists yet to resolve against here - these
+        // three names are sourced from the same BuiltinTypes constants everywhere
+        // else uses, rather than being independently re-typed as literals.
+        if (t == BuiltinTypes.String) return $"{Mangler.Class(BuiltinTypes.String)}*";
+        if (t is BuiltinTypes.Process or BuiltinTypes.Thread) return "void*";
         return $"{Mangler.Class(t)}*";
     }
 
@@ -491,7 +492,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
             case ForStmt fs:
                 var newFInit = fs.Init is null ? null : SubStmt(fs.Init, ctx);
                 var newFCond = fs.Cond is null ? null : SubExpr(fs.Cond, ctx);
-                var newFStep = fs.Step is null ? null : SubExpr(fs.Step, ctx);
+                var newFStep = fs.Step is null ? null : SubStmt(fs.Step, ctx);
                 var newFBody = SubBlock(fs.Body, ctx);
                 if (ReferenceEquals(newFInit, fs.Init) && ReferenceEquals(newFCond, fs.Cond) &&
                     ReferenceEquals(newFStep, fs.Step) && ReferenceEquals(newFBody, fs.Body))

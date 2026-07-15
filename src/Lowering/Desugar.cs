@@ -36,7 +36,7 @@ internal sealed class Desugar(SymbolTable sym, DiagnosticBag diag) : IrRewriter
     /// Lowers a match to a scrutinee temp followed by a tag-equality if/else-if chain with payload bindings.
     /// Mirrors the shape of LowerSwitch exactly, using the union's __tag field as the discriminant.
     /// </summary>
-    private IrStmt LowerMatch(IrMatch ms)
+    private IrBlock LowerMatch(IrMatch ms)
     {
         var stmts = new List<IrStmt>();
         string v = $"_mt{_seq++}";
@@ -47,7 +47,7 @@ internal sealed class Desugar(SymbolTable sym, DiagnosticBag diag) : IrRewriter
         for (int i = ms.Cases.Count - 1; i >= 0; i--)
         {
             var c = ms.Cases[i];
-            IrExpr cond = new IrBinOp("==",
+            IrExpr cond = new IrBinOp(BinOp.Eq,
                 new IrFieldLoad(vr, "__tag", IrType.Int), new IrLitInt(c.VariantIndex), IrType.Bool);
             var bodyStmts = new List<IrStmt>();
             foreach (var b in c.Binds)
@@ -64,7 +64,7 @@ internal sealed class Desugar(SymbolTable sym, DiagnosticBag diag) : IrRewriter
     /// Lowers a switch to a single-eval scrutinee temp followed by an if/else-if equality chain.
     /// No fallthrough; break and continue inside a case reach the enclosing loop.
     /// </summary>
-    private IrStmt LowerSwitch(IrSwitch sw)
+    private IrBlock LowerSwitch(IrSwitch sw)
     {
         var stmts = new List<IrStmt>();
         string v = $"_sw{_seq++}";
@@ -75,10 +75,10 @@ internal sealed class Desugar(SymbolTable sym, DiagnosticBag diag) : IrRewriter
         for (int i = sw.Cases.Count - 1; i >= 0; i--)
         {
             var c = sw.Cases[i];
-            IrExpr cond = new IrBinOp("==", vr, c.Labels[0], IrType.Bool);
+            IrExpr cond = new IrBinOp(BinOp.Eq, vr, c.Labels[0], IrType.Bool);
             for (int j = 1; j < c.Labels.Count; j++)
             {
-                cond = new IrBinOp("||", cond, new IrBinOp("==", vr, c.Labels[j], IrType.Bool), IrType.Bool);
+                cond = new IrBinOp(BinOp.Or, cond, new IrBinOp(BinOp.Eq, vr, c.Labels[j], IrType.Bool), IrType.Bool);
             }
             IrBlock? elseBlk = chain switch { null => null, IrBlock b => b, var x => new IrBlock([x]) };
             chain = new IrIf(cond, c.Body, elseBlk);
@@ -105,7 +105,8 @@ internal sealed class Desugar(SymbolTable sym, DiagnosticBag diag) : IrRewriter
     /// </summary>
     private string Concat(TextSpan span)
     {
-        var op = sym.LookupOperator("String", "+");
+        string stringClass = sym.Builtins.GetValueOrDefault(BuiltinTypes.String, BuiltinTypes.String);
+        var op = sym.LookupOperator(stringClass, "+");
         if (op != null) return op.CName;
         diag.Error(Codes.MissingIntrinsic, "<runtime>", span, "String defines no '+' operator for concatenation");
         return "gata_MISSING_String_concat";

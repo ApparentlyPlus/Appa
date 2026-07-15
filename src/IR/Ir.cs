@@ -108,6 +108,7 @@ internal abstract record IrType
 
     public virtual bool IsNumeric => false;
     public virtual bool IsFloat   => false;
+    public virtual bool IsChar    => false;
     public virtual bool IsString  => false;
     public virtual bool IsVoid    => false;
 
@@ -121,7 +122,7 @@ internal abstract record IrType
     public static readonly IrPrimType Float  = new("float");
     public static readonly IrPrimType Double = new("double");
     public static readonly IrPrimType SizeT  = new("usize");
-    public static readonly IrClassRef String = new("String");
+    public static readonly IrClassRef String = new(BuiltinTypes.String);
 }
 
 /// <summary>
@@ -147,6 +148,7 @@ internal record IrPrimType(string CName) : IrType
     private readonly string _cType = PrimTypes.ToC(CName);
     private readonly bool _isNumeric = PrimTypes.IsIntCanon(CName);
     private readonly bool _isFloat = PrimTypes.IsFloat(CName);
+    private readonly bool _isChar = CName == "char";
 
     public override string ToCType()
     {
@@ -156,6 +158,7 @@ internal record IrPrimType(string CName) : IrType
     public override string MangledName => CName;
     public override bool IsNumeric => _isNumeric;
     public override bool IsFloat   => _isFloat;
+    public override bool IsChar    => _isChar;
 }
 
 /// <summary>
@@ -170,7 +173,10 @@ internal record IrClassRef(string ClassName) : IrType
         return Cache.GetOrAdd(className, name => new IrClassRef(name));
     }
 
-    private readonly bool _isString = ClassName is "String" or "gata_String";
+    // No SymbolTable is threaded through IrType's static singletons/cache, so this
+    // still names BuiltinTypes.String directly rather than resolving a binding - the
+    // constant itself is shared with everywhere else that references the same slot.
+    private readonly bool _isString = ClassName == BuiltinTypes.String || ClassName == $"gata_{BuiltinTypes.String}";
     public override string ToCType()
     {
         return $"{Mangler.Class(ClassName)}*";
@@ -453,7 +459,7 @@ internal record IrUnionField(IrExpr Union, int VariantIndex, string Field, IrTyp
 /// <summary>
 /// A binary operator expression.
 /// </summary>
-internal record IrBinOp(string Op, IrExpr Left, IrExpr Right, IrType T) : IrExpr(T);
+internal record IrBinOp(BinOp Op, IrExpr Left, IrExpr Right, IrType T) : IrExpr(T);
 
 /// <summary>
 /// A ternary conditional expression.
@@ -463,12 +469,12 @@ internal record IrTernary(IrExpr Cond, IrExpr Then, IrExpr Else, IrType T) : IrE
 /// <summary>
 /// A prefix unary operator expression.
 /// </summary>
-internal record IrUnaryOp(string Op, IrExpr Operand, IrType T) : IrExpr(T);
+internal record IrUnaryOp(UnOp Op, IrExpr Operand, IrType T) : IrExpr(T);
 
 /// <summary>
 /// A postfix operator expression such as i++ or i--.
 /// </summary>
-internal record IrPostfix(string Op, IrExpr Operand) : IrExpr(Operand.Type);
+internal record IrPostfix(PostfixOp Op, IrExpr Operand) : IrExpr(Operand.Type);
 
 /// <summary>
 /// An explicit cast to a target type.
@@ -550,9 +556,9 @@ internal record IrRaw(string Code) : IrStmt;
 internal record IrDeclVar(string Name, IrType Type, IrExpr? Init) : IrStmt;
 
 /// <summary>
-/// An assignment expression statement. Op is the assignment operator, e.g. = += -=.
+/// An assignment expression statement. Op is the assignment operator kind, e.g. Assign, AddAssign.
 /// </summary>
-internal record IrAssign(IrExpr Target, string Op, IrExpr Value) : IrStmt;
+internal record IrAssign(IrExpr Target, AssignOp Op, IrExpr Value) : IrStmt;
 
 /// <summary>
 /// An expression evaluated for its side effects, result discarded.
@@ -587,7 +593,7 @@ internal record IrWhile(IrExpr Cond, IrBlock Body) : IrStmt;
 /// <summary>
 /// A C-style for loop with optional init, condition, and step.
 /// </summary>
-internal record IrFor(IrStmt? Init, IrExpr? Cond, IrExpr? Step, IrBlock Body) : IrStmt;
+internal record IrFor(IrStmt? Init, IrExpr? Cond, IrStmt? Step, IrBlock Body) : IrStmt;
 
 /// <summary>
 /// A for-in loop over a collection or fixed array.
@@ -695,6 +701,9 @@ internal record RawFieldBlock(string Kernel, string User);
 /// <summary>
 /// An operator overload defined on a class.
 /// Body is null for native operators; NativeKernel/NativeUser carry the C text instead.
+/// IsStatic is true only for the one parameter form of 'as' (a static factory converting its
+/// parameter to self, eg. String's 'operator String func as(char c)') - every other
+/// operator, including zero-parameter 'as', is an instance operator over self.
 /// </summary>
 internal record IrOperator(
     string Op,
@@ -706,7 +715,8 @@ internal record IrOperator(
     Visibility Vis,
     IrBlock? Body,
     string? NativeKernel,
-    string? NativeUser
+    string? NativeUser,
+    bool IsStatic = false
 );
 
 /// <summary>
@@ -744,7 +754,7 @@ internal record IrThread(string Name, string Mode, string FullName, IrFunction? 
 #region Module
 
 // Where a native block lands in the output. Types (default) -> the type section,
-// alongside structs. Preamble -> before #include "gata_shared.h". Boot -> after all functions.
+// alongside structs. Preamble -> before #include "shared.h". Boot -> after all functions.
 internal enum NativeSection { Types, Preamble, Boot }
 
 /// <summary>

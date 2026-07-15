@@ -93,11 +93,15 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             }
         }
 
+        string? userEntryCName = null;
+        foreach (var fn in module.FreeFunctions)
+            if (fn.IsEntry && fn.Vis == Visibility.User) { userEntryCName = fn.CName; break; }
+
         return new EmitOutput(
             _sharedH.ToString(),
             _kPre.ToString(), _kTypes.ToString(), _kFwd.ToString(), _kFuncs.ToString(), _kBoot.ToString(),
             _uPre.ToString(), _uTypes.ToString(), _uFwd.ToString(), _uFunc.ToString(),
-            module.Processes, module.HasKernelRealm, module.HasUserRealm);
+            module.Processes, module.HasKernelRealm, module.HasUserRealm, userEntryCName);
     }
 
     #region Forward typedefs
@@ -534,7 +538,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Returns true if a library class is fully self-contained and can live in the shared header.
     /// </summary>
-    private bool CanLiveInSharedHeader(IrClass cls)
+    private static bool CanLiveInSharedHeader(IrClass cls)
     {
         var methods = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(cls.Methods);
         for (int i = 0; i < methods.Length; i++)
@@ -717,7 +721,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Returns the full C function signature for a method, including the implicit self parameter.
     /// </summary>
-    private string MethodSig(IrFunction m)
+    private static string MethodSig(IrFunction m)
     {
         string ret = m.IsThrows ? new IrResultType(m.ReturnType).ToCType() : m.ReturnType.ToCType();
         var sb = new System.Text.StringBuilder();
@@ -743,17 +747,26 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     }
 
     /// <summary>
-    /// Returns the full C function signature for an operator overload, including the self parameter.
+    /// Returns the full C function signature for an operator overload. Includes the self
+    /// parameter for every operator except a static "as" (a factory - self doesn't exist yet),
+    /// which takes only its explicit parameter, the same as a static method would.
     /// </summary>
-    private string OperatorSig(IrOperator o)
+    private static string OperatorSig(IrOperator o)
     {
         var sb = new System.Text.StringBuilder();
         sb.Append(o.ReturnType.ToCType()).Append(' ').Append(o.CName).Append('(');
-        sb.Append(Mangler.Class(o.OwnerClass)).Append("* self");
+        bool needsComma = false;
+        if (!o.IsStatic)
+        {
+            sb.Append(Mangler.Class(o.OwnerClass)).Append("* self");
+            needsComma = true;
+        }
         for (int i = 0; i < o.Params.Count; i++)
         {
             var p = o.Params[i];
-            sb.Append(", ").Append(ParamCType(p)).Append(' ').Append(p.Name);
+            if (needsComma) sb.Append(", ");
+            sb.Append(ParamCType(p)).Append(' ').Append(p.Name);
+            needsComma = true;
         }
         sb.Append(')');
         return sb.ToString();
@@ -762,7 +775,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Returns the C allocator signature, threading through any constructor parameters.
     /// </summary>
-    private string AllocatorSig(IrClass cls)
+    private static string AllocatorSig(IrClass cls)
     {
         var init = InitOf(cls);
         var sb = new System.Text.StringBuilder();
@@ -787,7 +800,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Returns the C signature for the destructor of a class.
     /// </summary>
-    private string DtorSig(IrClass cls)
+    private static string DtorSig(IrClass cls)
     {
         return $"void {Mangler.Dtor(cls.Name)}(void* _vp)";
     }
@@ -795,7 +808,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Returns the full C function signature for a free function.
     /// </summary>
-    private string FuncSig(IrFunction fn)
+    private static string FuncSig(IrFunction fn)
     {
         string ret = fn.IsThrows ? new IrResultType(fn.ReturnType).ToCType() : fn.ReturnType.ToCType();
         var sb = new System.Text.StringBuilder();
@@ -816,17 +829,20 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
 
     /// <summary>
     /// Emits a free function into the appropriate translation unit sections based on its flags.
-    /// Entry functions go to the kernel; library functions are static-inline into both units;
+    /// Entry functions go to their own realm (kernel by default, user if declared inside a
+    /// 'user { }' block - this is what lets a Hosted build's user-realm entry func become
+    /// program.c's invocable main()); library functions are static-inline into both units;
     /// all others are forwarded and emitted into the realm they belong to.
     /// </summary>
     private void EmitFreeFunc(IrFunction fn)
     {
         if (fn.IsEntry)
         {
-            _kFwd.Line($"void {fn.CName}(void);");
-            _kFuncs.Line($"void {fn.CName}(void)");
-            EmitBlock(fn.Body!, _kFuncs);
-            _kFuncs.Line("");
+            var (entryFwd, entryFuncs) = fn.Vis == Visibility.User ? (_uFwd, _uFunc) : (_kFwd, _kFuncs);
+            entryFwd.Line($"void {fn.CName}(void);");
+            entryFuncs.Line($"void {fn.CName}(void)");
+            EmitBlock(fn.Body!, entryFuncs);
+            entryFuncs.Line("");
             return;
         }
 
@@ -950,13 +966,13 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             case IrBlock b:       EmitBlock(b, w); break;
             case IrUnsafeBlock u: EmitBlock(u.Body, w); break;
             case IrDeclVar dv:    EmitDeclVar(dv, w); break;
-            case IrAssign a:      w.Line($"{EmitExpr(a.Target)} {a.Op} {EmitExpr(a.Value)};"); break;
+            case IrAssign a:      w.Line($"{EmitExpr(a.Target)} {a.Op.Sym()} {EmitExpr(a.Value)};"); break;
             case IrExprStmt es:   w.Line($"{EmitExpr(es.Expr)};"); break;
             case IrReturn rs:     w.Line(rs.Value == null ? "return;" : $"return {EmitExpr(rs.Value)};"); break;
             case IrBreak:         w.Line("break;"); break;
             case IrContinue:      w.Line("continue;"); break;
-            case IrDebug d:       w.Line($"_env_dbg({d.Raw});"); break;
-            case IrPanic p:       w.Line($"_env_panic({p.Raw});"); break;
+            case IrDebug d:       w.Line($"{module.Symbols.IntrinsicOrNull(Roles.EnvDebug) ?? "_env_dbg"}({d.Raw});"); break;
+            case IrPanic p:       w.Line($"{module.Symbols.IntrinsicOrNull(Roles.EnvPanic) ?? "_env_panic"}({p.Raw});"); break;
             case IrIf ifs:        EmitIf(ifs, w); break;
             case IrWhile ws:      w.Line($"while ({EmitExpr(ws.Cond)})"); EmitBlock(ws.Body, w); break;
             case IrFor fr:        EmitFor(fr, w); break;
@@ -995,12 +1011,18 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             IrDeclVar dv => dv.Init != null
                 ? $"{dv.Type.ToCType()} {dv.Name} = {EmitExpr(dv.Init)}"
                 : $"{dv.Type.ToCType()} {dv.Name}",
-            IrAssign aa  => $"{EmitExpr(aa.Target)} {aa.Op} {EmitExpr(aa.Value)}",
+            IrAssign aa  => $"{EmitExpr(aa.Target)} {aa.Op.Sym()} {EmitExpr(aa.Value)}",
             IrExprStmt e => EmitExpr(e.Expr),
             _            => ""
         };
         string cond = fr.Cond != null ? EmitExpr(fr.Cond) : "";
-        string step = fr.Step != null ? EmitExpr(fr.Step) : "";
+        string step = fr.Step switch
+        {
+            IrAssign sa  => $"{EmitExpr(sa.Target)} {sa.Op.Sym()} {EmitExpr(sa.Value)}",
+            IrExprStmt e => EmitExpr(e.Expr),
+            null         => "",
+            _            => throw new InvalidOperationException($"[Emitter] for-step must be an assignment or expression, got {fr.Step.GetType().Name}")
+        };
         w.Line($"for ({init}; {cond}; {step})");
         EmitBlock(fr.Body, w);
     }
@@ -1034,10 +1056,10 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
                                 : $"{EmitExpr(ix.Obj)}[{EmitExpr(ix.Idx)}]",
             IrStaticCall sc => $"{sc.CName}({string.Join(", ", sc.Args.Select(EmitExpr))})",
             IrInstanceCall ic => $"{ic.CName}({string.Join(", ", new[] { EmitExpr(ic.Recv) }.Concat(ic.Args.Select(EmitExpr)))})",
-            IrBinOp bo => $"({EmitExpr(bo.Left)} {bo.Op} {EmitExpr(bo.Right)})",
+            IrBinOp bo => $"({EmitExpr(bo.Left)} {bo.Op.Sym()} {EmitExpr(bo.Right)})",
             IrTernary tn => $"({EmitExpr(tn.Cond)} ? {EmitExpr(tn.Then)} : {EmitExpr(tn.Else)})",
-            IrUnaryOp uo => $"{uo.Op}{EmitExpr(uo.Operand)}",
-            IrPostfix pf => $"{EmitExpr(pf.Operand)}{pf.Op}",
+            IrUnaryOp uo => $"{uo.Op.Sym()}{EmitExpr(uo.Operand)}",
+            IrPostfix pf => $"{EmitExpr(pf.Operand)}{pf.Op.Sym()}",
             IrCast c => $"(({c.To.ToCType()}){EmitExpr(c.Value)})",
             IrNew n => $"{Mangler.Allocator(n.ClassName)}({string.Join(", ", n.Args.Select(EmitExpr))})",
             IrArrayLit al => $"({al.ArrType.ToCType()}){{ {{ {string.Join(", ", al.Elems.Select(EmitExpr))} }} }}",

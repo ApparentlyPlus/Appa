@@ -392,7 +392,7 @@ internal sealed class Ownership(IrModule module)
         int preStart = _pre.Count;
         int clStart = _cl.Count;
 
-        if (a.Op == "=" && IsManaged(a.Target.Type) && !_inUnsafe)
+        if (a.Op == AssignOp.Assign && IsManaged(a.Target.Type) && !_inUnsafe)
         {
             // Owning store: release the old value, install the new (+1) one.
             IrExpr tgt = Flatten(a.Target, false);
@@ -405,7 +405,7 @@ internal sealed class Ownership(IrModule module)
             string tmp = Tmp("_asg");
             outs.Add(new IrDeclVar(tmp, a.Target.Type, val));
             outs.Add(ReleaseStmt(tgt));
-            outs.Add(new IrAssign(tgt, "=", new IrVar(tmp, a.Target.Type)));
+            outs.Add(new IrAssign(tgt, AssignOp.Assign, new IrVar(tmp, a.Target.Type)));
 
             int clCount = _cl.Count - clStart;
             for (int i = 0; i < clCount; i++)
@@ -592,13 +592,13 @@ internal sealed class Ownership(IrModule module)
         int cpCount = _pre.Count - cpStart;
         int ccCount = _cl.Count - ccStart;
 
-        int spStart = _pre.Count;
-        int scStart = _cl.Count;
-        IrExpr? step = fr.Step == null ? null : Flatten(fr.Step, false);
-        int spCount = _pre.Count - spStart;
-        int scCount = _cl.Count - scStart;
+        // The step is a full statement; LowerStmt consumes its own pre/cleanup entries,
+        // so a single plain assignment or expression coming back means it can stay inline.
+        var stepOut = new List<IrStmt>();
+        if (fr.Step != null) LowerStmt(fr.Step, stepOut);
+        bool stepSimple = stepOut.Count == 0 || (stepOut.Count == 1 && stepOut[0] is IrExprStmt or IrAssign);
 
-        bool simple = !initManaged && cpCount == 0 && ccCount == 0 && spCount == 0 && scCount == 0;
+        bool simple = !initManaged && cpCount == 0 && ccCount == 0 && stepSimple;
 
         if (simple)
         {
@@ -613,7 +613,7 @@ internal sealed class Ownership(IrModule module)
                 _ => null
             };
             _nextFrameIsLoop = true;
-            outs.Add(new IrFor(init, cond, step, LowerBlock(fr.Body)) { Span = fr.Span });
+            outs.Add(new IrFor(init, cond, stepOut.Count == 1 ? stepOut[0] : null, LowerBlock(fr.Body)) { Span = fr.Span });
             return;
         }
 
@@ -625,21 +625,12 @@ internal sealed class Ownership(IrModule module)
         _frames.Push(frame);
         if (fr.Init != null) LowerStmt(fr.Init, outer);
         var loop = new List<IrStmt>();
-        string? firstFlag = null;
-        if (fr.Step != null)
+        if (stepOut.Count > 0)
         {
-            firstFlag = Tmp("_first");
+            string firstFlag = Tmp("_first");
             outer.Add(new IrRaw($"int {firstFlag} = 1;"));
-            var stepStmts = new List<IrStmt>(spCount + 2 + scCount);
-
-            for (int i = 0; i < spCount; i++)
-                stepStmts.Add(_pre[spStart + i]);
-            stepStmts.Add(new IrExprStmt(step!));
-            for (int i = 0; i < scCount; i++)
-                stepStmts.Add(ReleaseStmt(new IrVar(_cl[scStart + i].Name, _cl[scStart + i].Type)));
-
             loop.Add(new IrRaw($"if (!{firstFlag})"));
-            loop.Add(new IrBlock(stepStmts));
+            loop.Add(new IrBlock(stepOut));
             loop.Add(new IrRaw($"{firstFlag} = 0;"));
         }
         if (fr.Cond != null)
@@ -902,14 +893,14 @@ internal sealed class Ownership(IrModule module)
         var thenStmts = new List<IrStmt>(thenPreCount + 1 + thenClCount);
         for (int i = 0; i < thenPreCount; i++)
             thenStmts.Add(_pre[thenPreStart + i]);
-        thenStmts.Add(new IrAssign(tgt, "=", tv));
+        thenStmts.Add(new IrAssign(tgt, AssignOp.Assign, tv));
         for (int i = 0; i < thenClCount; i++)
             thenStmts.Add(ReleaseStmt(new IrVar(_cl[thenClStart + i].Name, _cl[thenClStart + i].Type)));
 
         var elseStmts = new List<IrStmt>(elsePreCount + 1 + elseClCount);
         for (int i = 0; i < elsePreCount; i++)
             elseStmts.Add(_pre[elsePreStart + i]);
-        elseStmts.Add(new IrAssign(tgt, "=", ev));
+        elseStmts.Add(new IrAssign(tgt, AssignOp.Assign, ev));
         for (int i = 0; i < elseClCount; i++)
             elseStmts.Add(ReleaseStmt(new IrVar(_cl[elseClStart + i].Name, _cl[elseClStart + i].Type)));
 

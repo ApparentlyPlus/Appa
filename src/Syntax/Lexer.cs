@@ -6,9 +6,11 @@ using System.Runtime.CompilerServices;
 /// Thrown by the lexer or parser when source text cannot be tokenized or parsed.
 /// Caught at every call site so it never escapes as an unhandled exception.
 /// </summary>
-internal sealed class ParseException(TextSpan span, string message) : Exception(message)
+internal sealed class ParseException(TextSpan span, string message, string code = Codes.Syntax, string[]? hints = null) : Exception(message)
 {
     public TextSpan Span { get; } = span;
+    public string Code { get; } = code;
+    public string[] Hints { get; } = hints ?? [];
 }
 
 /// <summary>
@@ -32,9 +34,7 @@ internal sealed class Lexer(string src)
         ["import"]      = TK.Import,
         ["kernel"]      = TK.Kernel,
         ["user"]        = TK.User,
-        ["Process"]     = TK.Process,   
         ["process"]     = TK.Process,
-        ["Thread"]      = TK.Thread,
         ["thread"]      = TK.Thread,
         ["foreground"]  = TK.Foreground,
         ["background"]  = TK.Background,
@@ -156,9 +156,9 @@ internal sealed class Lexer(string src)
     }
 
     // Throws a ParseException with the given message and a TextSpan covering the current token being read.
-    private void Fail(string m)
+    private void Fail(string m, string code = Codes.Syntax, string[]? hints = null)
     {
-        throw new ParseException(new TextSpan(_ts, Math.Max(1, _pp - _ts)), m);
+        throw new ParseException(new TextSpan(_ts, Math.Max(1, _pp - _ts)), m, code, hints);
     }
 
     /// <summary>
@@ -181,13 +181,18 @@ internal sealed class Lexer(string src)
         if (Cur == '/' && Peek() == '*')
         {
             // Consume block comment
+            _ts = _pp;
             Advance(2);
 
             // Keep consuming until we find the closing '*/' or reach the end of the source string
             while (_pp < src.Length - 1 && !(Cur == '*' && Peek() == '/')) Advance();
-            
-            // Consume the closing '*/' if we found it
-            Advance(2); 
+
+            // A comment that never closes would otherwise silently swallow the rest of the file.
+            if (!(Cur == '*' && Peek() == '/'))
+                Fail("unterminated block comment; missing closing '*/'", Codes.UnterminatedLiteral);
+
+            // Consume the closing '*/'
+            Advance(2);
             return;
         }
 
@@ -204,15 +209,17 @@ internal sealed class Lexer(string src)
 
             switch (nn)
             {
-                case "intrinsic": Emit(TK.AtIntrinsic, ReadParenArg()); return;
-                case "preamble": Emit(TK.AtPreamble, ReadParenArg()); return;
+                case "intrinsic": Emit(TK.AtIntrinsic, ReadParenArg("@intrinsic")); return;
+                case "preamble": Emit(TK.AtPreamble, ReadParenArg("@preamble")); return;
                 case "extern": Emit(TK.AtExtern, "@extern"); return;
                 case "environment": Emit(TK.AtEnvironment, "@environment"); return;
                 case "keep": Emit(TK.AtKeep, "@keep"); return;
+                case "builtin": Emit(TK.AtBuiltin, ReadParenArg("@builtin")); return;
                 default:
-                    // If we reach here, it means the annotation name is not recognized. 
+                    // If we reach here, it means the annotation name is not recognized.
                     // Throw a ParseException with a message indicating the unknown annotation and the expected ones.
-                    Fail($"unknown annotation '@{nn}'; expected '@intrinsic', '@preamble', '@extern', '@environment', or '@keep'");
+                    Fail($"unknown annotation '@{nn}'; expected '@intrinsic', '@preamble', '@extern', '@environment', '@keep', or '@builtin'",
+                        Codes.BadAnnotation);
                     return;
             }
         }
@@ -371,21 +378,24 @@ internal sealed class Lexer(string src)
     private void SkipWS() { while (_pp < src.Length && IsWhiteSpace(Cur)) Advance(); }
 
     /// <summary>
-    /// Reads an optional (identifier) argument after an annotation keyword, like @intrinsic(retain). Returns "" when absent.
+    /// Reads the required (identifier) argument after an annotation keyword, like @intrinsic(retain).
+    /// A missing, empty, or unclosed argument list is a lex-time error.
     /// </summary>
-    private string ReadParenArg()
+    private string ReadParenArg(string ann)
     {
         SkipWS();
-        if (Cur != '(') return "";
-        Advance(); 
+        if (Cur != '(') Fail($"'{ann}' requires a parenthesized argument", Codes.BadAnnotation, [$"e.g. {ann}(name)"]);
+        Advance();
         SkipWS();
         int s = _pp;
 
         // Read until we find a character that is not part of an identifier (letter, digit, or underscore)
         while (_pp < src.Length && IsIdentPart(Cur)) Advance();
         string arg = src[s.._pp];
+        if (arg.Length == 0) Fail($"'{ann}' argument must be a name", Codes.BadAnnotation, [$"e.g. {ann}(name)"]);
         SkipWS();
-        if (Cur == ')') Advance();
+        if (Cur != ')') Fail($"missing ')' after '{ann}({arg}'", Codes.BadAnnotation);
+        Advance();
         return arg;
     }
 
@@ -435,7 +445,7 @@ internal sealed class Lexer(string src)
         }
 
         // If we reached the end of the source string and depth is still greater than 0, it means we have an unterminated native block. Throw a ParseException in that case.
-        if (depth > 0) Fail("Unterminated native block, missing closing '}'");
+        if (depth > 0) Fail("Unterminated native block, missing closing '}'", Codes.UnterminatedLiteral);
         return src[start..(_pp - 1)];
     }
 
@@ -456,8 +466,7 @@ internal sealed class Lexer(string src)
         if (KeywordsLookup.TryGetValue(span, out var kw))
         {
             // Several TK kinds have more than one valid spelling (true/false -> BoolLit;
-            // Process/process -> TK.Process; Thread/thread -> TK.Thread; the whole
-            // TPrim family). The cached canonical spelling only matches the actual
+            // the whole TPrim family). The cached canonical spelling only matches the actual
             // source text for single-spelling keywords; anywhere it differs, the
             // token's value must carry the real spelling, not the cached one, or
             // the two spellings collapse into whichever happened to be cached.
@@ -482,8 +491,11 @@ internal sealed class Lexer(string src)
         if (Cur == '0' && (Peek() == 'x' || Peek() == 'X'))
         {
             Advance(2);
+            int digits = _pp;
             while (_pp < src.Length && IsHexDigit(Cur)) Advance();
+            if (_pp == digits) Fail("hex literal '0x' has no digits", Codes.BadNumber);
             ReadIntSuffix();
+            if (IsIdentPart(Cur)) Fail($"invalid character '{Cur}' in hex literal", Codes.BadNumber);
             Emit(TK.IntLit, src[start.._pp]);
             return;
         }
@@ -514,11 +526,13 @@ internal sealed class Lexer(string src)
         if (isFloat)
         {
             if (Cur == 'f' || Cur == 'F') Advance(); // single-precision suffix
+            if (IsIdentPart(Cur)) Fail($"invalid suffix on float literal (found '{Cur}' after '{src[start.._pp]}')", Codes.BadNumber);
             Emit(TK.FloatLit, src[start.._pp]);
         }
         else
         {
             ReadIntSuffix();
+            if (IsIdentPart(Cur)) Fail($"invalid suffix on integer literal (found '{Cur}' after '{src[start.._pp]}')", Codes.BadNumber);
             Emit(TK.IntLit, src[start.._pp]);
         }
     }
@@ -585,7 +599,7 @@ internal sealed class Lexer(string src)
 
                 // If we reached the end of the source string and brdepth is still greater than 0,
                 // it means we have an unterminated '{' in the interpolated string. Throw a ParseException in that case.
-                if (brdepth > 0) Fail("unterminated '{' in interpolated string");
+                if (brdepth > 0) Fail("unterminated '{' in interpolated string", Codes.UnterminatedLiteral);
 
                 // emit closing '}'
                 _ts = _pp; Advance();
@@ -596,6 +610,7 @@ internal sealed class Lexer(string src)
             // brace in the emitted text rather than starting a real interpolation.
             else
             {
+                _ts = _pp;
                 int start = _pp;
                 var sb = new System.Text.StringBuilder();
                 while (_pp < src.Length && Cur != '"' && Cur != '\n' && !(Cur == '{' && Peek() != '{'))
@@ -606,7 +621,7 @@ internal sealed class Lexer(string src)
                     {
                         Advance();
                         if (_pp >= src.Length) break;
-                        if (!TryEscape(Cur, out _)) Fail($"unrecognized escape '\\{Cur}' in interpolated string");
+                        if (!TryEscape(Cur, out _)) Fail($"unrecognized escape '\\{Cur}' in interpolated string", Codes.BadEscape);
                         Advance();
                     }
                     else Advance();
@@ -620,7 +635,7 @@ internal sealed class Lexer(string src)
             }
         }
 
-        if (Cur != '"') Fail("unterminated interpolated string");
+        if (Cur != '"') Fail("unterminated interpolated string", Codes.UnterminatedLiteral);
 
         // emit closing '"'
         _ts = _pp; Advance();
@@ -642,14 +657,14 @@ internal sealed class Lexer(string src)
             {
                 Advance();
                 if (_pp >= src.Length) break;
-                if (!TryEscape(Cur, out _)) Fail($"unrecognized escape '\\{Cur}' in string literal");
+                if (!TryEscape(Cur, out _)) Fail($"unrecognized escape '\\{Cur}' in string literal", Codes.BadEscape);
                 Advance();
             }
             else Advance();
         }
 
         // If we reached the end of the source string or a newline without finding a closing quote, throw a ParseException for an unterminated string literal.
-        if (Cur != '"') Fail("unterminated string literal");
+        if (Cur != '"') Fail("unterminated string literal", Codes.UnterminatedLiteral);
         Advance(); // closing "
         return src[start.._pp];
     }
@@ -666,15 +681,15 @@ internal sealed class Lexer(string src)
         if (Cur == '\\')
         {
             Advance();
-            if (!TryEscape(Cur, out char e)) Fail($"unrecognized escape '\\{Cur}' in char literal");
+            if (!TryEscape(Cur, out char e)) Fail($"unrecognized escape '\\{Cur}' in char literal", Codes.BadEscape);
             val = e; Advance();
         }
-        else if (Cur == '\'') Fail("empty char literal");
-        else if (Cur == '\n' || _pp >= src.Length) Fail("unterminated char literal");
+        else if (Cur == '\'') Fail("empty char literal", Codes.UnterminatedLiteral);
+        else if (Cur == '\n' || _pp >= src.Length) Fail("unterminated char literal", Codes.UnterminatedLiteral);
         else { val = Cur; Advance(); }
 
         // Ensure the character literal contains exactly one character
-        if (Cur != '\'') Fail("char literal must hold exactly one character");
+        if (Cur != '\'') Fail("char literal must hold exactly one character", Codes.UnterminatedLiteral);
         Advance(); // closing '
         
         string vstr = (val >= 0 && val < 256) ? chrstrs[val] : val.ToString();

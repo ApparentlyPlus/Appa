@@ -70,7 +70,7 @@ internal static class Pipeline
     /// returns the lowered module, its name sourcemap, and the scanned capability set.
     /// </summary>
     public static (IrModule Module, IReadOnlyDictionary<string, string> Sourcemap, CapabilityScan Caps) BuildModule(
-        List<(string path, Appa.Program prog)> programs,
+        List<(string path, Program prog)> programs,
         Dictionary<string, HashSet<string>> visible, Mode mode, DiagnosticBag diag)
     {
         Mangler.ResetDense();
@@ -102,13 +102,13 @@ internal static class Pipeline
     /// Parses the given entry files and follows their imports transitively, returning
     /// the parsed programs in dependency order along with the per-file import graph.
     /// </summary>
-    public static (List<(string path, Appa.Program prog)> programs, List<string> attempted,
+    public static (List<(string path, Program prog)> programs, List<string> attempted,
             Dictionary<string, List<string>> imports, DiagnosticBag diag)
         Transpile(List<string> inputFiles, string projectRoot, string libgataDir)
     {
         var sources = new SourceSet();
         var diag = new DiagnosticBag(sources);
-        var ordered = new List<(string path, Appa.Program prog)>();
+        var ordered = new List<(string path, Program prog)>();
         var attempted = new List<string>();
         var imports = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -126,9 +126,9 @@ internal static class Pipeline
             string src = File.ReadAllText(path);
             sources.Add(path, src);
 
-            Appa.Program? prog = null;
+            Program? prog = null;
             try { prog = new Parser(new Lexer(src).Tokenize()).ParseProgram(); }
-            catch (ParseException ex) { diag.Error(Codes.File, path, ex.Span, ex.Message); }
+            catch (ParseException ex) { diag.Error(ex.Code, path, ex.Span, ex.Message, ex.Hints); }
 
             var edges = new List<string>();
             if (prog != null)
@@ -173,7 +173,7 @@ internal static class Pipeline
     /// <summary>
     /// Validates that exactly one @environment file takes part in the build.
     /// </summary>
-    public static void ValidateEnvironment(List<(string path, Appa.Program prog)> programs, DiagnosticBag diag)
+    public static void ValidateEnvironment(List<(string path, Program prog)> programs, DiagnosticBag diag)
     {
         var envs = programs
             .SelectMany(t => t.prog.Items.OfType<EnvironmentDecl>().Select(e => (t.path, e.Span)))
@@ -191,7 +191,7 @@ internal static class Pipeline
     /// </summary>
     public static void ValidateFloor(IrModule module, DiagnosticBag diag)
     {
-        var probe = new EnvProbe();
+        var probe = new EnvProbe(module.Symbols);
         probe.Run(module);
 
         // The topology launcher calls _env_proc_create/_env_thread_spawn directly - that's
@@ -199,10 +199,10 @@ internal static class Pipeline
         // a launcher will actually be emitted (dual-realm: kernel + user both present).
         if (module.Processes.Count > 0 && module.HasKernelRealm && module.HasUserRealm)
         {
-            probe.Refs.Add("_env_proc_create");
-            probe.Refs.Add("_env_thread_spawn");
+            probe.Refs.Add(module.Symbols.IntrinsicOrNull(Roles.EnvProcCreate) ?? "_env_proc_create");
+            probe.Refs.Add(module.Symbols.IntrinsicOrNull(Roles.EnvThreadSpawn) ?? "_env_thread_spawn");
             if (module.Processes.Any(p => p.Mode == "background"))
-                probe.Refs.Add("_env_proc_hide");
+                probe.Refs.Add(module.Symbols.IntrinsicOrNull(Roles.EnvProcHide) ?? "_env_proc_hide");
         }
         if (probe.Refs.Count == 0) return;
 
@@ -217,24 +217,61 @@ internal static class Pipeline
     }
 
     /// <summary>
-    /// Validates that the build contains exactly one kernel block with exactly one entry func.
+    /// Validates the build's realm structure against its target. GatOS requires exactly one
+    /// kernel block with exactly one entry func (any number of user blocks). Hosted forbids
+    /// any kernel block and requires exactly one user block with exactly one entry func. With
+    /// no target (loose --pure-transpile mode), the target-agnostic GatOS-shaped rule applies,
+    /// since there's no target signal to react to.
     /// </summary>
-    public static void ValidateStructure(List<(string path, Appa.Program prog)> programs, DiagnosticBag diag)
+    public static void ValidateStructure(List<(string path, Program prog)> programs, Target? target, DiagnosticBag diag)
     {
         if (diag.HasErrors) return;
 
         var kernelBlocks = new List<(string file, TextSpan span)>();
-        var entryFuncs = new List<(string file, TextSpan span)>();
+        var userBlocks = new List<(string file, TextSpan span, TopLevel[] items)>();
 
         foreach (var (path, prog) in programs)
             foreach (var item in prog.Items)
                 if (item is ContextDecl c && c.Kind == "kernel")
-                {
                     kernelBlocks.Add((path, c.Span));
+                else if (item is ContextDecl u && u.Kind == "user")
+                    userBlocks.Add((path, u.Span, u.Items));
+
+        if (target == Target.Hosted)
+        {
+            foreach (var (file, span) in kernelBlocks)
+                diag.Error(Codes.KernelBlockInHosted, file, span, "a 'kernel { }' block is not allowed in a Hosted build");
+
+            if (userBlocks.Count == 0)
+            {
+                diag.Error(Codes.MissingUserRealm, "", TextSpan.None, "no 'user { }' block found in any .g file - a Hosted build requires exactly one");
+                return;
+            }
+            foreach (var (file, span, _) in userBlocks.Skip(1))
+                diag.Error(Codes.DuplicateUserRealm, file, span, "only one 'user { }' block may exist in a Hosted build");
+
+            var entryFuncs = new List<(string file, TextSpan span)>();
+            foreach (var inner in userBlocks[0].items)
+                if (inner is FuncDecl { IsEntry: true } ef)
+                    entryFuncs.Add((userBlocks[0].file, ef.Span));
+
+            if (entryFuncs.Count == 0)
+                diag.Error(Codes.MissingUserEntry, userBlocks[0].file, userBlocks[0].span,
+                    "the 'user { }' block declares no 'entry func'");
+            else
+                foreach (var (file, span) in entryFuncs.Skip(1))
+                    diag.Error(Codes.DuplicateUserEntry, file, span, "the 'user { }' block declares more than one 'entry func'");
+            return;
+        }
+
+        // GatOS, or no target (loose transpile mode): the original kernel-block rule.
+        var kernelEntryFuncs = new List<(string file, TextSpan span)>();
+        foreach (var (path, prog) in programs)
+            foreach (var item in prog.Items)
+                if (item is ContextDecl c && c.Kind == "kernel")
                     foreach (var inner in c.Items)
                         if (inner is FuncDecl { IsEntry: true } ef)
-                            entryFuncs.Add((path, ef.Span));
-                }
+                            kernelEntryFuncs.Add((path, ef.Span));
 
         if (kernelBlocks.Count == 0)
         {
@@ -245,11 +282,11 @@ internal static class Pipeline
         foreach (var (file, span) in kernelBlocks.Skip(1))
             diag.Error(Codes.DuplicateContext, file, span, "only one 'kernel { }' block may exist in the project");
 
-        if (entryFuncs.Count == 0)
+        if (kernelEntryFuncs.Count == 0)
             diag.Error(Codes.MissingEntryPoint, kernelBlocks[0].file, kernelBlocks[0].span,
                 "the 'kernel { }' block declares no 'entry func'");
         else
-            foreach (var (file, span) in entryFuncs.Skip(1))
+            foreach (var (file, span) in kernelEntryFuncs.Skip(1))
                 diag.Error(Codes.DuplicateName, file, span, "the 'kernel { }' block declares more than one 'entry func'");
     }
 
@@ -368,7 +405,7 @@ internal static class Pipeline
 }
 
 // Collects every `_env_*` floor bind referenced anywhere in the lowered IR.
-sealed class EnvProbe : IrRewriter
+sealed class EnvProbe(SymbolTable sym) : IrRewriter
 {
     public readonly HashSet<string> Refs = [];
 
@@ -382,19 +419,20 @@ sealed class EnvProbe : IrRewriter
     }
 
     /// <summary>
-    /// Collects _env_dbg and _env_panic from debug and panic statements.
+    /// Collects debug/panic statements' bound C names (never a hardcoded literal -
+    /// whatever libgata's @intrinsic(env_debug)/@intrinsic(env_panic) resolve to).
     /// </summary>
     protected override IrStmt RewriteStmt(IrStmt s)
     {
-        if (s is IrDebug) Refs.Add("_env_dbg");
-        if (s is IrPanic) Refs.Add("_env_panic");
+        if (s is IrDebug) Refs.Add(sym.IntrinsicOrNull(Roles.EnvDebug) ?? "_env_dbg");
+        if (s is IrPanic) Refs.Add(sym.IntrinsicOrNull(Roles.EnvPanic) ?? "_env_panic");
         return base.RewriteStmt(s);
     }
 
     /// <summary>
     /// Runs the probe over the whole module and populates Refs.
     /// </summary>
-    public void Run(IrModule m)
+    public new void Run(IrModule m)
     {
         foreach (var c in m.Classes)
         {

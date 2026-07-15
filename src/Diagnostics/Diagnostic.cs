@@ -28,10 +28,13 @@ internal readonly record struct Loc(string File, TextSpan Span);
 
 /// <summary>
 /// A diagnostic is data. It consists of a stable code, a severity, a concise message, and a
-/// location. The message states the problem outright.
+/// location. The message states the problem outright. Hints are optional, separate lines of
+/// suggested fixes, rendered after the source snippet a la rustc's "= help:" lines.
 /// </summary>
-// 
-internal sealed record Diagnostic(Severity Severity, string Code, string Message, Loc Loc);
+internal sealed record Diagnostic(Severity Severity, string Code, string Message, Loc Loc, string[] Hints)
+{
+    public Diagnostic(Severity Severity, string Code, string Message, Loc Loc) : this(Severity, Code, Message, Loc, []) { }
+}
 
 /// <summary>
 /// This class contains all the diagnostic codes used in the compiler. 
@@ -83,6 +86,79 @@ internal static class Codes
     public const string WrongAnnotationKind   = "G041";
     public const string UnknownPreambleTarget = "G042";
     public const string ThreadModeNotAllowed  = "G043";
+    public const string Syntax                = "G044";
+    public const string AssignInExpr          = "G045";
+    public const string UnterminatedLiteral   = "G046";
+    public const string BadEscape             = "G047";
+    public const string BadAnnotation         = "G048";
+    public const string BadNumber             = "G049";
+    public const string MissingLet            = "G050";
+    public const string InvalidNesting        = "G051";
+    public const string TrailingComma         = "G052";
+    public const string BadDeclHeader         = "G053";
+    public const string CannotInfer           = "G054";
+    public const string KernelBlockInHosted    = "G055";
+    public const string MissingUserRealm       = "G056";
+    public const string DuplicateUserRealm     = "G057";
+    public const string MissingUserEntry       = "G058";
+    public const string DuplicateUserEntry     = "G059";
+    public const string MissingProcessMode     = "G060";
+}
+
+/// <summary>
+/// "Did you mean ...?" suggestions for misspelled identifiers, by edit distance.
+/// </summary>
+internal static class Suggest
+{
+    /// <summary>
+    /// Returns the candidate closest to typed by Levenshtein distance, or null if none is
+    /// close enough to plausibly be a typo of it (distance more than half of typed's length).
+    /// </summary>
+    public static string? Closest(string typed, IEnumerable<string> candidates)
+    {
+        string? best = null;
+        int bestDist = int.MaxValue;
+        foreach (var c in candidates)
+        {
+            int d = Distance(typed, c);
+            if (d < bestDist) { bestDist = d; best = c; }
+        }
+        int maxAllowed = Math.Max(1, typed.Length / 2);
+        return bestDist <= maxAllowed ? best : null;
+    }
+
+    /// <summary>
+    /// Returns a one-element "did you mean 'X'?" hints array for Diagnostic's separate hints
+    /// line, or an empty array if typed has no close-enough match among candidates. Callers
+    /// pass this to diag.Error's hints parameter, not the message - it renders on its own
+    /// "= help:" line rather than appended to the error text.
+    /// </summary>
+    public static string[] Hints(string typed, IEnumerable<string> candidates)
+    {
+        return Closest(typed, candidates) is { } best ? [$"did you mean '{best}'?"] : [];
+    }
+
+    /// <summary>
+    /// Classic iterative Levenshtein edit distance between two strings.
+    /// </summary>
+    private static int Distance(string a, string b)
+    {
+        var prev = new int[b.Length + 1];
+        var cur = new int[b.Length + 1];
+        for (int j = 0; j <= b.Length; j++) prev[j] = j;
+
+        for (int i = 1; i <= a.Length; i++)
+        {
+            cur[0] = i;
+            for (int j = 1; j <= b.Length; j++)
+            {
+                int cost = a[i - 1] == b[j - 1] ? 0 : 1;
+                cur[j] = Math.Min(Math.Min(cur[j - 1] + 1, prev[j] + 1), prev[j - 1] + cost);
+            }
+            (prev, cur) = (cur, prev);
+        }
+        return prev[b.Length];
+    }
 }
 
 /// <summary>
@@ -107,20 +183,22 @@ internal sealed class DiagnosticBag(SourceSet sources)
     public int WarningCount => _warnCount;
 
     /// <summary>
-    /// Adds an error diagnostic to the bag.
+    /// Adds an error diagnostic to the bag. Hints are optional "= help:" lines rendered after
+    /// the source snippet.
     /// </summary>
-    public void Error(string code, string file, TextSpan span, string message)
+    public void Error(string code, string file, TextSpan span, string message, string[]? hints = null)
     {
-        _d.Add(new Diagnostic(Severity.Error, code, message, new Loc(file, span)));
+        _d.Add(new Diagnostic(Severity.Error, code, message, new Loc(file, span), hints ?? []));
         _errCount++;
     }
 
     /// <summary>
-    /// Adds a warning diagnostic to the bag.
+    /// Adds a warning diagnostic to the bag. Hints are optional "= help:" lines rendered after
+    /// the source snippet.
     /// </summary>
-    public void Warn(string code, string file, TextSpan span, string message)
+    public void Warn(string code, string file, TextSpan span, string message, string[]? hints = null)
     {
-        _d.Add(new Diagnostic(Severity.Warning, code, message, new Loc(file, span)));
+        _d.Add(new Diagnostic(Severity.Warning, code, message, new Loc(file, span), hints ?? []));
         _warnCount++;
     }
 
@@ -224,6 +302,32 @@ internal sealed class DiagnosticBag(SourceSet sources)
             .Append(color)
             .Append('^', caretLen)
             .Append(EscapeCodes.NC);
+
+        // Render each hint as a rustc-style "= help: ..." line under a blank gutter row.
+        if (d.Hints.Length > 0)
+        {
+            sb.AppendLine()
+                .Append(' ', gutterlen)
+                .Append(' ')
+                .Append(EscapeCodes.BLUE)
+                .Append('|')
+                .Append(EscapeCodes.NC);
+            for (int i = 0; i < d.Hints.Length; i++)
+            {
+                sb.AppendLine()
+                    .Append(' ', gutterlen)
+                    .Append(' ')
+                    .Append(EscapeCodes.BLUE)
+                    .Append('=')
+                    .Append(EscapeCodes.NC)
+                    .Append(' ')
+                    .Append(EscapeCodes.CYAN)
+                    .Append("help")
+                    .Append(EscapeCodes.NC)
+                    .Append(": ")
+                    .Append(d.Hints[i]);
+            }
+        }
 
         return sb.ToString();
     }

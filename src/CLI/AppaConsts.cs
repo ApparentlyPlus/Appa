@@ -7,10 +7,14 @@ using System.Runtime.InteropServices;
 // Download URLs for `appa setup` / `appa update`.
 static class Urls
 {
-    const string Rel = "https://github.com/ApparentlyPlus/Gata/releases/download/artifacts";
+    const string AppaRel = "https://github.com/ApparentlyPlus/Appa/releases/latest/download";
     const string Tc = "https://github.com/ApparentlyPlus/GatOS/releases/download/build-toolchain";
 
-    public const string Libgata = Rel + "/Gata-Internals.zip";
+    // libgata and envs are fetched live from the Gata repo (see GitHubDirDownloader),
+    // not from a release zip - this is the single source of truth, no duplication.
+    public const string GataOwner = "ApparentlyPlus";
+    public const string GataRepo = "Gata";
+    public const string GataRef = "main";
 
     // GitHub branch archive - wraps everything in a single top-level folder, which
     // the extractor flattens away (see ExtractTemplate).
@@ -25,26 +29,39 @@ static class Urls
         Tc + "/x86_64-linux.zip";
 
     /// <summary>
-    /// Returns the self-update URL for the appa binary on the current platform.
-    /// Mac distinguishes Apple Silicon from Intel.
+    /// Returns the self-update URL for the appa binary on the current platform, always
+    /// resolving to the latest GitHub release via the "releases/latest/download" alias.
+    /// Mac distinguishes Apple Silicon (amac) from Intel (imac).
     /// </summary>
     public static string AppaBinary() =>
-        RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? Rel + "/appa-win.exe" :
+        RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? AppaRel + "/appa-win.exe" :
         RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
             ? (RuntimeInformation.OSArchitecture == Architecture.Arm64
-                ? Rel + "/appa-arm-mac"
-                : Rel + "/appa-intel-mac")
-            : Rel + "/appa-linux";
+                ? AppaRel + "/appa-amac"
+                : AppaRel + "/appa-imac")
+            : AppaRel + "/appa-linux";
+}
+
+#endregion
+
+#region Version
+
+static class AppaVersion
+{
+    public const string Current = "1.0.0";
 }
 
 #endregion
 
 #region Filesystem Paths
 
-// All appa-managed state lives under <temp>/appa/.
+// All appa-managed state lives under the per-user local app data directory, not
+// temp - temp is reserved for ephemeral build scratch space (see BuildGatOSImage),
+// which is always cleaned up after use and must never hold persistent installs.
 static class AppaPaths
 {
-    public static readonly string Root = Path.Combine(Path.GetTempPath(), "appa");
+    public static readonly string Root = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "appa");
 
     public static string ToolchainDir => Path.Combine(Root, "toolchain");
     public static string LibgataDir => Path.Combine(Root, "libgata");

@@ -62,7 +62,7 @@ internal record ContextDecl(string Kind, TopLevel[] Items, TextSpan Span) : TopL
 /// template monomorphized per call site with type arguments inferred from the argument types.
 /// IsEntry marks it as a thread entry point; Throws means it may propagate a Result error.
 /// </summary>
-internal record FuncDecl(string[] Modifiers, Annotation[] Annotations, string? ReturnType,
+internal record FuncDecl(Modifiers Modifiers, Annotation[] Annotations, string? ReturnType,
                 string Name, string[] GenericParams, Param[] Params,
                 bool IsEntry, bool Throws, MethodBody Body, TextSpan Span) : TopLevel(Span);
 
@@ -141,6 +141,13 @@ internal record PreambleAnnotation(string Target, TextSpan Span) : Annotation;
 /// </summary>
 internal record KeepAnnotation(TextSpan Span) : Annotation;
 
+/// <summary>
+/// @builtin(name): binds a class or native type declaration to a named compiler builtin
+/// type slot (eg. "String", "Process", "Thread"), the same way @intrinsic binds a role -
+/// the compiler never hardcodes these names, it resolves them from this declaration.
+/// </summary>
+internal record BuiltinAnnotation(string Name, TextSpan Span) : Annotation;
+
 #endregion
 
 #region Class members
@@ -159,20 +166,20 @@ internal record FieldsBlock(NativeBody Body, TextSpan Span) : ClassMember(Span);
 /// A Gata field declaration. Init is the optional initializer expression; Type is null
 /// when inferred.
 /// </summary>
-internal record FieldDecl(string[] Modifiers, string? Type, string Name, TextSpan Span, Expr? Init = null) : ClassMember(Span);
+internal record FieldDecl(Modifiers Modifiers, string? Type, string Name, TextSpan Span, Expr? Init = null) : ClassMember(Span);
 
 /// <summary>
 /// A method declaration inside a class or module. IsEntry marks it as a thread entry point;
 /// Throws means it participates in the Result error-propagation protocol.
 /// </summary>
-internal record MethodDecl(string[] Modifiers, Annotation[] Annotations, string? ReturnType,
+internal record MethodDecl(Modifiers Modifiers, Annotation[] Annotations, string? ReturnType,
                   string Name, Param[] Params, bool IsEntry, bool Throws,
                   MethodBody Body, TextSpan Span) : ClassMember(Span);
 
 /// <summary>
 /// An operator overload inside a class. Op is the operator symbol string ("+", "==").
 /// </summary>
-internal record OperatorDecl(string Op, Param[] Params, string? ReturnType, MethodBody Body, TextSpan Span) : ClassMember(Span);
+internal record OperatorDecl(Modifiers Modifiers, string Op, Param[] Params, string? ReturnType, MethodBody Body, TextSpan Span) : ClassMember(Span);
 
 #endregion
 
@@ -209,7 +216,7 @@ internal record ThreadDecl(string Name, string? Mode, EntryFuncDecl Entry, TextS
 /// The entry function of a thread. It consists of parameters and a single block body. Not a FuncDecl
 /// because it cannot be called from Gata code, only dispatched by the runtime.
 /// </summary>
-internal record EntryFuncDecl(string[] Modifiers, string? ReturnType, Param[] Params, Block Body, TextSpan Span);
+internal record EntryFuncDecl(Modifiers Modifiers, string? ReturnType, Param[] Params, Block Body, TextSpan Span);
 
 #endregion
 
@@ -220,6 +227,141 @@ internal record EntryFuncDecl(string[] Modifiers, string? ReturnType, Param[] Pa
 /// the call site must supply an lvalue prefixed with ref.
 /// </summary>
 internal record Param(string Type, string Name, TextSpan Span, bool IsRef = false);
+
+#endregion
+
+#region Modifiers
+
+/// <summary>
+/// The access/storage modifiers accepted before a function, method, or field declaration.
+/// Combinable, eg. 'public static'.
+/// </summary>
+[Flags]
+internal enum Modifiers { None = 0, Static = 1, Public = 2, Private = 4 }
+
+#endregion
+
+#region Operators
+
+/// <summary>
+/// The kind of a binary operator, shared by BinExpr and its lowered IrBinOp form.
+/// </summary>
+internal enum BinOp { Or, And, BitOr, BitXor, BitAnd, Eq, Ne, Lt, Gt, Le, Ge, Shl, Shr, Add, Sub, Mul, Div, Mod }
+
+/// <summary>
+/// The kind of a prefix unary operator, shared by UnaryExpr and its lowered IrUnaryOp form.
+/// </summary>
+internal enum UnOp { Not, BitNot, Neg }
+
+/// <summary>
+/// The kind of a postfix operator, shared by PostfixExpr and its lowered IrPostfix form.
+/// </summary>
+internal enum PostfixOp { Inc, Dec }
+
+/// <summary>
+/// The kind of an assignment operator. Assign is plain '='; the rest are compound forms
+/// that combine a BinOp with the store, eg. AddAssign for '+='.
+/// </summary>
+internal enum AssignOp { Assign, AddAssign, SubAssign, MulAssign, DivAssign, ModAssign, AndAssign, OrAssign, XorAssign, ShlAssign, ShrAssign }
+
+/// <summary>
+/// Conversions between operator enums and their canonical Gata/C token spelling, plus the
+/// compound-assignment-to-binary-operator mapping used when desugaring '+=' and friends.
+/// </summary>
+internal static class Ops
+{
+    /// <summary>
+    /// Returns the canonical source and C token spelling for a binary operator.
+    /// </summary>
+    public static string Sym(this BinOp op) => op switch
+    {
+        BinOp.Or => "||",
+        BinOp.And => "&&",
+        BinOp.BitOr => "|",
+        BinOp.BitXor => "^",
+        BinOp.BitAnd => "&",
+        BinOp.Eq => "==",
+        BinOp.Ne => "!=",
+        BinOp.Lt => "<",
+        BinOp.Gt => ">",
+        BinOp.Le => "<=",
+        BinOp.Ge => ">=",
+        BinOp.Shl => "<<",
+        BinOp.Shr => ">>",
+        BinOp.Add => "+",
+        BinOp.Sub => "-",
+        BinOp.Mul => "*",
+        BinOp.Div => "/",
+        BinOp.Mod => "%",
+        _ => throw new ArgumentOutOfRangeException(nameof(op))
+    };
+
+    /// <summary>
+    /// Returns the canonical source and C token spelling for a prefix unary operator.
+    /// </summary>
+    public static string Sym(this UnOp op) => op switch
+    {
+        UnOp.Not => "!",
+        UnOp.BitNot => "~",
+        UnOp.Neg => "-",
+        _ => throw new ArgumentOutOfRangeException(nameof(op))
+    };
+
+    /// <summary>
+    /// Returns the canonical source and C token spelling for a postfix operator.
+    /// </summary>
+    public static string Sym(this PostfixOp op) => op switch
+    {
+        PostfixOp.Inc => "++",
+        PostfixOp.Dec => "--",
+        _ => throw new ArgumentOutOfRangeException(nameof(op))
+    };
+
+    /// <summary>
+    /// Returns the canonical source spelling for an assignment operator.
+    /// </summary>
+    public static string Sym(this AssignOp op) => op switch
+    {
+        AssignOp.Assign => "=",
+        AssignOp.AddAssign => "+=",
+        AssignOp.SubAssign => "-=",
+        AssignOp.MulAssign => "*=",
+        AssignOp.DivAssign => "/=",
+        AssignOp.ModAssign => "%=",
+        AssignOp.AndAssign => "&=",
+        AssignOp.OrAssign => "|=",
+        AssignOp.XorAssign => "^=",
+        AssignOp.ShlAssign => "<<=",
+        AssignOp.ShrAssign => ">>=",
+        _ => throw new ArgumentOutOfRangeException(nameof(op))
+    };
+
+    /// <summary>
+    /// Returns the underlying binary operator a compound assignment combines with the store,
+    /// or null for plain '='.
+    /// </summary>
+    public static BinOp? BaseOp(this AssignOp op) => op switch
+    {
+        AssignOp.Assign => null,
+        AssignOp.AddAssign => BinOp.Add,
+        AssignOp.SubAssign => BinOp.Sub,
+        AssignOp.MulAssign => BinOp.Mul,
+        AssignOp.DivAssign => BinOp.Div,
+        AssignOp.ModAssign => BinOp.Mod,
+        AssignOp.AndAssign => BinOp.BitAnd,
+        AssignOp.OrAssign => BinOp.BitOr,
+        AssignOp.XorAssign => BinOp.BitXor,
+        AssignOp.ShlAssign => BinOp.Shl,
+        AssignOp.ShrAssign => BinOp.Shr,
+        _ => throw new ArgumentOutOfRangeException(nameof(op))
+    };
+
+    /// <summary>
+    /// True for the compound assignment operators that require integer operands.
+    /// </summary>
+    public static bool IsBitwise(this AssignOp op) =>
+        op is AssignOp.AndAssign or AssignOp.OrAssign or AssignOp.XorAssign or AssignOp.ShlAssign or AssignOp.ShrAssign;
+}
 
 #endregion
 
@@ -309,9 +451,9 @@ internal record MemberAccessExpr(Expr Object, string Member, TextSpan Span) : Ex
 internal record IndexExpr(Expr Object, Expr Index, TextSpan Span) : Expr(Span);
 
 /// <summary>
-/// A binary expression. Op is the operator string.
+/// A binary expression. Op is the operator kind.
 /// </summary>
-internal record BinExpr(string Op, Expr Left, Expr Right, TextSpan Span) : Expr(Span);
+internal record BinExpr(BinOp Op, Expr Left, Expr Right, TextSpan Span) : Expr(Span);
 
 /// <summary>
 /// A ternary conditional: cond ? then : else.
@@ -319,14 +461,14 @@ internal record BinExpr(string Op, Expr Left, Expr Right, TextSpan Span) : Expr(
 internal record TernaryExpr(Expr Cond, Expr Then, Expr Else, TextSpan Span) : Expr(Span);
 
 /// <summary>
-/// A prefix unary expression. Op is the operator string.
+/// A prefix unary expression. Op is the operator kind.
 /// </summary>
-internal record UnaryExpr(string Op, Expr Operand, TextSpan Span) : Expr(Span);
+internal record UnaryExpr(UnOp Op, Expr Operand, TextSpan Span) : Expr(Span);
 
 /// <summary>
 /// A postfix unary expression, eg. x++ or x--. Op comes after the operand, unlike UnaryExpr.
 /// </summary>
-internal record PostfixExpr(string Op, Expr Operand, TextSpan Span) : Expr(Span);
+internal record PostfixExpr(PostfixOp Op, Expr Operand, TextSpan Span) : Expr(Span);
 
 /// <summary>
 /// Object construction. Args holds constructor arguments for class instantiation;
@@ -381,10 +523,10 @@ internal record NativeStmt(NativeBody Body, TextSpan Span) : Stmt(Span);
 internal record LetStmt(string? Type, string Name, Expr? Init, TextSpan Span) : Stmt(Span);
 
 /// <summary>
-/// An assignment statement. Op is the assignment operator ("=", "+=", "-=", etc.).
+/// An assignment statement. Op is the assignment operator kind (plain '=' or a compound form).
 /// Target must be an lvalue expression.
 /// </summary>
-internal record AssignStmt(Expr Target, string Op, Expr Value, TextSpan Span) : Stmt(Span);
+internal record AssignStmt(Expr Target, AssignOp Op, Expr Value, TextSpan Span) : Stmt(Span);
 
 /// <summary>
 /// An expression used as a statement, typically a call expression whose return value is discarded.
@@ -402,9 +544,10 @@ internal record IfStmt(Expr Cond, Stmt Then, Stmt? Else, TextSpan Span) : Stmt(S
 internal record WhileStmt(Expr Cond, Stmt Body, TextSpan Span) : Stmt(Span);
 
 /// <summary>
-/// A C-style for loop. Init, Cond, and Step are all optional.
+/// A C-style for loop. Init, Cond, and Step are all optional. Init and Step are statements
+/// so both clauses accept a plain or compound assignment as well as an expression.
 /// </summary>
-internal record ForStmt(Stmt? Init, Expr? Cond, Expr? Step, Block Body, TextSpan Span) : Stmt(Span);
+internal record ForStmt(Stmt? Init, Expr? Cond, Stmt? Step, Block Body, TextSpan Span) : Stmt(Span);
 
 /// <summary>
 /// A for-in loop that iterates over a collection. Var is the loop variable name.

@@ -3,7 +3,7 @@ namespace Appa;
 internal sealed record EmitOutput(string SharedHeader, string KernelPreamble, string KernelTypes,
     string KernelFwd, string KernelFuncs, string KernelBoot, string UserPreamble,
     string UserTypes, string UserFwd, string UserFuncs, IReadOnlyList<IrProcess> Processes,
-    bool HasKernelRealm, bool HasUserRealm);
+    bool HasKernelRealm, bool HasUserRealm, string? UserEntryCName);
 
 /// <summary>
 /// A named output file produced by the compiler for a single translation unit.
@@ -21,20 +21,27 @@ internal static class Layout
     /// Kernel-only builds produce kmain.c; user-only produce program.c; both produce
     /// kmain.c, uproc.c, uproc.h, and umain.c with a generated process launcher.
     /// </summary>
-    public static IReadOnlyList<OutputFile> Compose(EmitOutput o)
+    public static IReadOnlyList<OutputFile> Compose(EmitOutput o, SymbolTable sym)
     {
-        var files = new List<OutputFile> { new("gata_shared.h", SharedHeader(o)) };
+        var files = new List<OutputFile> { new("shared.h", SharedHeader(o)) };
 
         if (o.HasKernelRealm && o.HasUserRealm)
         {
             files.Add(new("kmain.c", Concat("kmain.c", o.KernelPreamble, o.KernelTypes, o.KernelFwd, o.KernelFuncs, o.KernelBoot)));
             files.Add(new("uproc.c", Concat("uproc.c", o.UserPreamble, o.UserTypes, o.UserFwd, o.UserFuncs)));
             files.Add(new("uproc.h", UprocHeader(o.Processes)));
-            files.Add(new("umain.c", Launcher(o.Processes)));
+            files.Add(new("umain.c", Launcher(o.Processes, sym)));
         }
         else if (o.HasUserRealm)
         {
-            files.Add(new("program.c", Concat("program.c", o.UserPreamble, o.UserTypes, o.UserFwd, o.UserFuncs)));
+            // Hosted (user-only) builds get a generated main() calling the single validated
+            // user-realm entry func, so program.c is actually invocable. Loose transpile mode
+            // may have no such entry func (no Hosted-specific validation ran); leave it out
+            // rather than guess.
+            string main = o.UserEntryCName is { } cname
+                ? $"int main(void) {{\n    {cname}();\n    return 0;\n}}\n"
+                : "";
+            files.Add(new("program.c", Concat("program.c", o.UserPreamble, o.UserTypes, o.UserFwd, o.UserFuncs, main)));
         }
         else if (o.HasKernelRealm)
         {
@@ -49,7 +56,7 @@ internal static class Layout
     private static string SharedHeader(EmitOutput o)
     {
         var w = new CodeWriter();
-        w.Lines(Finesse.GenerateKewlHeader("gata_shared.h"), "#pragma once", "");
+        w.Lines(Finesse.GenerateKewlHeader("shared.h"), "#pragma once", "");
         w.Line(o.SharedHeader);
         return w.ToString();
     }
@@ -97,35 +104,40 @@ internal static class Layout
     /// <summary>
     /// Builds the userspace launcher that creates processes and spawns their threads.
     /// Process and thread spawning use environment bindings, so porting the OS is an
-    /// edit to env.*.g, never to this file.
+    /// edit to env.*.g, never to this file. The C names themselves are never hardcoded
+    /// here - they come from whatever libgata's @intrinsic(env_proc_create) etc. bind to.
     /// </summary>
-    private static string Launcher(IReadOnlyList<IrProcess> procs)
+    private static string Launcher(IReadOnlyList<IrProcess> procs, SymbolTable sym)
     {
+        string procCreate = sym.IntrinsicOrNull(Roles.EnvProcCreate) ?? "_env_proc_create";
+        string procHide = sym.IntrinsicOrNull(Roles.EnvProcHide) ?? "_env_proc_hide";
+        string threadSpawn = sym.IntrinsicOrNull(Roles.EnvThreadSpawn) ?? "_env_thread_spawn";
+
         var w = new CodeWriter();
         w.Lines(
             Finesse.GenerateKewlHeader("umain.c"),
             "#include \"uproc.h\"",
             "",
             "// Topology floor provided by the environment (env.*.g).",
-            "extern void* _env_proc_create(const char* name);",
-            "extern void  _env_proc_hide(void* proc);",
-            "extern void  _env_thread_spawn(void* proc, const char* name, void (*entry)(void*), int is_user);",
+            $"extern void* {procCreate}(const char* name);",
+            $"extern void  {procHide}(void* proc);",
+            $"extern void  {threadSpawn}(void* proc, const char* name, void (*entry)(void*), int is_user);",
             "");
         using (w.Block("void uapps(void) {"))
         {
             for (int i = 0; i < procs.Count; i++)
             {
                 var proc = procs[i];
-                w.Line($"void* {proc.Name} = _env_proc_create(\"{proc.Name}\");");
+                w.Line($"void* {proc.Name} = {procCreate}(\"{proc.Name}\");");
                 if (proc.Mode == "background")
-                    w.Line($"_env_proc_hide({proc.Name});");
+                    w.Line($"{procHide}({proc.Name});");
                 for (int j = 0; j < proc.Threads.Count; j++)
                 {
                     var t = proc.Threads[j];
                     if (t.EntryFunc is { } e)
                     {
                         string isUser = e.Vis == Visibility.Kernel ? "0" : "1";
-                        w.Line($"_env_thread_spawn({proc.Name}, \"{t.Name}\", {e.CName}, {isUser});");
+                        w.Line($"{threadSpawn}({proc.Name}, \"{t.Name}\", {e.CName}, {isUser});");
                     }
                 }
             }

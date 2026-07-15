@@ -195,10 +195,21 @@ internal static class Mangler
 
     /// <summary>
     /// Returns the C operator function name for an operator overload on the given class.
+    /// 'overloaded' appends a disambiguating suffix - only 'as' can have more than one overload
+    /// per class today. A zero-parameter 'as' has no parameter to distinguish overloads by, so
+    /// it's suffixed by its return type (the cast target); a one-parameter 'as' (the static
+    /// factory form) is suffixed by its parameter type instead, the same way every other
+    /// parameterized operator or method overload already is.
     /// </summary>
-    public static string Operator(string owner, string op)
+    public static string Operator(string owner, string op, IReadOnlyList<Param> ps, string returnType, bool overloaded)
     {
-        return $"gata_{owner}_{OpSuffix(op)}";
+        string bare = $"gata_{owner}_{OpSuffix(op)}";
+        if (!overloaded) return bare;
+        
+        // Note here: A zero param overload is the unary form of a symbol that also has a binary form. 
+        // "unary" keeps it distinct from the binary overload's param type suffix.
+        string suffix = ps.Count > 0 ? OverloadSuffix(ps) : "unary";
+        return $"{bare}_{suffix}";
     }
 
     /// <summary>
@@ -225,6 +236,10 @@ internal static class Mangler
             ">>" => "shr",
             "[]" => "index_get",
             "[]=" => "index_set",
+            "!" => "not",
+            "~" => "bnot",
+            "++" => "inc",
+            "--" => "dec",
             _ => "op"
         };
     }
@@ -253,7 +268,7 @@ internal static class Mangler
     /// character becomes a separating underscore (collapsed to prevent runs); pointer
     /// stars become _p markers so distinct pointer types never collapse to the same suffix.
     /// </summary>
-    private static string MangleTypeName(string t)
+    internal static string MangleTypeName(string t)
     {
         ReadOnlySpan<char> span = t.AsSpan().Trim();
         if (span.IsEmpty) return "x";

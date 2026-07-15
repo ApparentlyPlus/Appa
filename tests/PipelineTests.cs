@@ -18,7 +18,7 @@ public class PipelineTests
     /// Each source produces at least one error diagnostic carrying the expected code.
     /// </summary>
     [Theory]
-    [InlineData("G000", "kernel { entry func Main() { let int x = 5 } }")]
+    [InlineData("G044", "kernel { entry func Main() { let int x = 5 } }")]
     [InlineData("G003", "kernel { entry func Main() { } } int func f(int x, int x) { return x; }")]
     [InlineData("G003", "kernel { entry func Main() { let int s = 10; let String s = \"hi\"; } }")]
     [InlineData("G004", "kernel { entry func Main() { let x = true + 5; } }")]
@@ -60,7 +60,7 @@ public class PipelineTests
     [InlineData("G035", "class Box { private int v; func _init(int x) { self.v = x; } } kernel { entry func Main() { let Box b = new Box(1); let int z = b.v; } }")]
     [InlineData("G035", "module M { private int func helper() { return 1; } } kernel { entry func Main() { let int z = M.helper(); } }")]
     [InlineData("G037", "void func TakesInt(int n) { } kernel { entry func Main() { let int x = 1; TakesInt(ref x); } }")]
-    [InlineData("G038", "class RO { int v; operator func [](int i) -> int { return self.v; } } kernel { entry func Main() { let RO r = new RO(); r[0] = 5; } }")]
+    [InlineData("G038", "class RO { int v; operator int func [](int i) { return self.v; } } kernel { entry func Main() { let RO r = new RO(); r[0] = 5; } }")]
     [InlineData("G040", "static int func helper() { return 1; } kernel { entry func Main() { let int x = helper(); } }")]
     [InlineData("G041", "@intrinsic(alloc) native { #kernel: int x; #user: int x; } kernel { entry func Main() { } }")]
     [InlineData("G041", "class C { @keep int func F() { return 1; } } kernel { entry func Main() { } }")]
@@ -103,8 +103,46 @@ public class PipelineTests
         var sources = new SourceSet();
         sources.Add("<test>", src);
         var diag = new DiagnosticBag(sources);
-        Pipeline.ValidateStructure(programs, diag);
+        Pipeline.ValidateStructure(programs, target: null, diag);
         Assert.Contains(diag.All, d => d.Severity == Severity.Error && d.Code == expectedCode);
+    }
+
+    /// <summary>
+    /// Hosted-target realm validation: a kernel{} block is a hard error, and exactly one
+    /// user{} block with exactly one entry func is required.
+    /// </summary>
+    [Theory]
+    [InlineData("G055", "kernel { entry func Main() { } } user { entry func Main() { } }")]
+    [InlineData("G056", "class M { }")]
+    [InlineData("G057", "user { entry func A() { } } user { entry func B() { } }")]
+    [InlineData("G058", "user { func f() { } }")]
+    [InlineData("G059", "user { entry func A() { } entry func B() { } }")]
+    public void ValidateStructureProducesExpectedHostedCode(string expectedCode, string src)
+    {
+        var prog = SingleFileCompile.Parse(src);
+        var programs = new List<(string path, Appa.Program prog)> { ("<test>", prog) };
+        var sources = new SourceSet();
+        sources.Add("<test>", src);
+        var diag = new DiagnosticBag(sources);
+        Pipeline.ValidateStructure(programs, Target.Hosted, diag);
+        Assert.Contains(diag.All, d => d.Severity == Severity.Error && d.Code == expectedCode);
+    }
+
+    /// <summary>
+    /// A well-formed Hosted program (one user{} block, one entry func, no kernel{})
+    /// passes validation cleanly.
+    /// </summary>
+    [Fact]
+    public void ValidateStructureAcceptsWellFormedHosted()
+    {
+        const string src = "user { entry func Main() { } }";
+        var prog = SingleFileCompile.Parse(src);
+        var programs = new List<(string path, Appa.Program prog)> { ("<test>", prog) };
+        var sources = new SourceSet();
+        sources.Add("<test>", src);
+        var diag = new DiagnosticBag(sources);
+        Pipeline.ValidateStructure(programs, Target.Hosted, diag);
+        Assert.False(diag.HasErrors);
     }
 
     /// <summary>
@@ -187,7 +225,7 @@ public class PipelineTests
               int x;
               int y;
               func _init(int a, int b) { self.x = a; self.y = b; }
-              operator func +(Vec other) -> Vec { return new Vec(self.x + other.x, self.y + other.y); }
+              public operator Vec func +(Vec other) { return new Vec(self.x + other.x, self.y + other.y); }
               public int func Sum() { return self.x + self.y; }
             }
             kernel { entry func Main() {

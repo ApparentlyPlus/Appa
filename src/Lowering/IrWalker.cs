@@ -59,7 +59,7 @@ internal abstract class IrWalker
             case IrFor f: 
                 if (f.Init != null) WalkStmt(f.Init);
                 if (f.Cond != null) WalkExpr(f.Cond); 
-                if (f.Step != null) WalkExpr(f.Step); 
+                if (f.Step != null) WalkStmt(f.Step);
                 WalkStmt(f.Body); 
                 break;
             case IrForIn fi: 
