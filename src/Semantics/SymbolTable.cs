@@ -198,6 +198,8 @@ internal sealed class SymbolTable
 
     /// <summary>
     /// Assigns C names to all methods and free functions once all declarations are collected.
+    /// Intrinsic bindings made during collection used a tentative (overload-unaware) name;
+    /// they are rebound here to the final CName so an overloaded intrinsic resolves correctly.
     /// </summary>
     public void AssignCNames()
     {
@@ -208,6 +210,7 @@ internal sealed class SymbolTable
             for (int i = 0; i < span.Length; i++)
             {
                 span[i].CName = Mangler.Method(key.Owner, key.Name, span[i].Sig!.Params, ov);
+                RebindIntrinsics(span[i]);
             }
         }
         foreach (var (name, list) in _funcs)
@@ -218,6 +221,7 @@ internal sealed class SymbolTable
             {
                 var s = span[i];
                 s.CName = Mangler.FreeFunc(name, s.Sig!.Params, ov, s.Sig.IsEntry, s.Sig.IsExtern);
+                RebindIntrinsics(s);
             }
         }
         foreach (var ((file, name), list) in _privateFuncs)
@@ -239,6 +243,17 @@ internal sealed class SymbolTable
                 span[i].CName = Mangler.Operator(key.Owner, key.Name, span[i].Sig!.Params, span[i].Sig!.ReturnType, ov);
             }
         }
+    }
+
+    /// <summary>
+    /// Points a symbol's @intrinsic roles at its final CName. Only roles already bound by
+    /// the collector are updated, so its validation and duplicate diagnostics still stand.
+    /// </summary>
+    private void RebindIntrinsics(Symbol s)
+    {
+        foreach (var a in s.Sig!.Annotations)
+            if (a is IntrinsicAnnotation ia && Intrinsics.ContainsKey(ia.Role))
+                Intrinsics[ia.Role] = s.CName;
     }
 
     #endregion
