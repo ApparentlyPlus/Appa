@@ -70,7 +70,7 @@ internal static class Pipeline
     /// returns the lowered module, its name sourcemap, and the scanned capability set.
     /// </summary>
     public static (IrModule Module, IReadOnlyDictionary<string, string> Sourcemap, CapabilityScan Caps) BuildModule(
-        List<(string path, Appa.Program prog)> programs,
+        List<(string path, Program prog)> programs,
         Dictionary<string, HashSet<string>> visible, Mode mode, DiagnosticBag diag)
     {
         Mangler.ResetDense();
@@ -102,13 +102,13 @@ internal static class Pipeline
     /// Parses the given entry files and follows their imports transitively, returning
     /// the parsed programs in dependency order along with the per-file import graph.
     /// </summary>
-    public static (List<(string path, Appa.Program prog)> programs, List<string> attempted,
+    public static (List<(string path, Program prog)> programs, List<string> attempted,
             Dictionary<string, List<string>> imports, DiagnosticBag diag)
         Transpile(List<string> inputFiles, string projectRoot, string libgataDir)
     {
         var sources = new SourceSet();
         var diag = new DiagnosticBag(sources);
-        var ordered = new List<(string path, Appa.Program prog)>();
+        var ordered = new List<(string path, Program prog)>();
         var attempted = new List<string>();
         var imports = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -126,9 +126,9 @@ internal static class Pipeline
             string src = File.ReadAllText(path);
             sources.Add(path, src);
 
-            Appa.Program? prog = null;
+            Program? prog = null;
             try { prog = new Parser(new Lexer(src).Tokenize()).ParseProgram(); }
-            catch (ParseException ex) { diag.Error(ex.Code, path, ex.Span, ex.Message); }
+            catch (ParseException ex) { diag.Error(ex.Code, path, ex.Span, ex.Message, ex.Hints); }
 
             var edges = new List<string>();
             if (prog != null)
@@ -173,7 +173,7 @@ internal static class Pipeline
     /// <summary>
     /// Validates that exactly one @environment file takes part in the build.
     /// </summary>
-    public static void ValidateEnvironment(List<(string path, Appa.Program prog)> programs, DiagnosticBag diag)
+    public static void ValidateEnvironment(List<(string path, Program prog)> programs, DiagnosticBag diag)
     {
         var envs = programs
             .SelectMany(t => t.prog.Items.OfType<EnvironmentDecl>().Select(e => (t.path, e.Span)))
@@ -223,7 +223,7 @@ internal static class Pipeline
     /// no target (loose --pure-transpile mode), the target-agnostic GatOS-shaped rule applies,
     /// since there's no target signal to react to.
     /// </summary>
-    public static void ValidateStructure(List<(string path, Appa.Program prog)> programs, Target? target, DiagnosticBag diag)
+    public static void ValidateStructure(List<(string path, Program prog)> programs, Target? target, DiagnosticBag diag)
     {
         if (diag.HasErrors) return;
 

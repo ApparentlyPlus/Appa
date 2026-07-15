@@ -51,7 +51,8 @@ public class ParserDiagnosticsTests
     {
         var ex = Parse(src);
         Assert.Equal(Codes.AssignInExpr, ex.Code);
-        Assert.Contains("did you mean '=='?", ex.Message);
+        Assert.DoesNotContain("did you mean", ex.Message);
+        Assert.Contains("did you mean '=='?", ex.Hints);
     }
 
     /// <summary>
@@ -185,6 +186,85 @@ public class ParserDiagnosticsTests
         Assert.Equal(Codes.BadDeclHeader, ex.Code);
         Assert.Contains("'Foo'", ex.Message);
         Assert.Contains("before 'func'", ex.Message);
+    }
+
+    /// <summary>
+    /// The trailing-return-type mistake gets the same targeted message inside a class as it
+    /// does for a free function - not the generic "expected '{'" a bare unhandled '->' would
+    /// otherwise produce.
+    /// </summary>
+    [Fact]
+    public void TrailingReturnTypeOnMethodNamesTheMethod()
+    {
+        var ex = Parse("class C { func Foo() -> int { return 1; } }");
+        Assert.Equal(Codes.BadDeclHeader, ex.Code);
+        Assert.Contains("'Foo'", ex.Message);
+        Assert.Contains("before 'func'", ex.Message);
+    }
+
+    /// <summary>
+    /// The old 'operator func +(X) -> T' spelling gets the same targeted migration message as
+    /// functions and methods do - the return type now goes between 'operator' and 'func'.
+    /// </summary>
+    [Fact]
+    public void TrailingReturnTypeOnOperatorNamesTheOperator()
+    {
+        var ex = Parse("class C { operator func +(C other) -> C { return self; } }");
+        Assert.Equal(Codes.BadDeclHeader, ex.Code);
+        Assert.Contains("'+'", ex.Message);
+        Assert.Contains("after 'operator'", ex.Message);
+    }
+
+    /// <summary>
+    /// The new leading-type operator spelling parses, and the return type lands in the AST.
+    /// </summary>
+    [Fact]
+    public void LeadingReturnTypeOnOperatorParses()
+    {
+        var prog = SingleFileCompile.Parse("class C { operator C func +(C other) { return self; } }");
+        var cls = Assert.IsType<ClassDecl>(prog.Items[0]);
+        var op = Assert.IsType<OperatorDecl>(cls.Members[0]);
+        Assert.Equal("+", op.Op);
+        Assert.Equal("C", op.ReturnType);
+    }
+
+    /// <summary>
+    /// The old '@extern func F(...) -> T;' spelling gets the same targeted migration message;
+    /// the return type now leads, like every other function's.
+    /// </summary>
+    [Fact]
+    public void TrailingReturnTypeOnExternNamesTheFunction()
+    {
+        var ex = Parse("@extern func F() -> int;");
+        Assert.Equal(Codes.BadDeclHeader, ex.Code);
+        Assert.Contains("'F'", ex.Message);
+        Assert.Contains("before 'func'", ex.Message);
+    }
+
+    /// <summary>
+    /// The new leading-type extern spelling parses, and the return type lands in the AST.
+    /// </summary>
+    [Fact]
+    public void LeadingReturnTypeOnExternParses()
+    {
+        var prog = SingleFileCompile.Parse("@extern int func F();");
+        var ext = Assert.IsType<ExternFuncDecl>(prog.Items[0]);
+        Assert.Equal("int", ext.ReturnType);
+    }
+
+    /// <summary>
+    /// An operator whose return type is itself a function-pointer type is not mistaken for the
+    /// no-return-type form - 'func(' after 'operator' is a type, 'func' followed by a symbol is
+    /// the declaration keyword.
+    /// </summary>
+    [Fact]
+    public void FunctionPointerReturnTypeOnOperatorParses()
+    {
+        var prog = SingleFileCompile.Parse("class C { operator func(int) -> int func +(C other) { return null; } }");
+        var cls = Assert.IsType<ClassDecl>(prog.Items[0]);
+        var op = Assert.IsType<OperatorDecl>(cls.Members[0]);
+        Assert.Equal("+", op.Op);
+        Assert.Equal("func(int)->int", op.ReturnType);
     }
 
     /// <summary>

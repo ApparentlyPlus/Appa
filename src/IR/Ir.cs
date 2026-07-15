@@ -701,6 +701,9 @@ internal record RawFieldBlock(string Kernel, string User);
 /// <summary>
 /// An operator overload defined on a class.
 /// Body is null for native operators; NativeKernel/NativeUser carry the C text instead.
+/// IsStatic is true only for the one parameter form of 'as' (a static factory converting its
+/// parameter to self, eg. String's 'operator String func as(char c)') - every other
+/// operator, including zero-parameter 'as', is an instance operator over self.
 /// </summary>
 internal record IrOperator(
     string Op,
@@ -712,7 +715,8 @@ internal record IrOperator(
     Visibility Vis,
     IrBlock? Body,
     string? NativeKernel,
-    string? NativeUser
+    string? NativeUser,
+    bool IsStatic = false
 );
 
 /// <summary>

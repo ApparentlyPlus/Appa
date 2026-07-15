@@ -132,17 +132,17 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Throws a ParseException with the given message at the current token's span.
     /// </summary>
-    private void Fail(string m, string code = Codes.Syntax)
+    private void Fail(string m, string code = Codes.Syntax, string[]? hints = null)
     {
-        throw new ParseException(Cur.Span, m, code);
+        throw new ParseException(Cur.Span, m, code, hints);
     }
 
     /// <summary>
     /// Throws a ParseException with the given message at an explicit span.
     /// </summary>
-    private static void FailAt(TextSpan span, string m, string code = Codes.Syntax)
+    private static void FailAt(TextSpan span, string m, string code = Codes.Syntax, string[]? hints = null)
     {
-        throw new ParseException(span, m, code);
+        throw new ParseException(span, m, code, hints);
     }
 
     /// <summary>
@@ -162,8 +162,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     private void NoAssignHere(string where, string hint)
     {
         if (IsAssignTk(Cur.Kind))
-            Fail($"assignment is a statement in Gata, not an expression, and cannot appear in {where}; {hint}",
-                Codes.AssignInExpr);
+            Fail($"assignment is a statement in Gata, not an expression, and cannot appear in {where}",
+                Codes.AssignInExpr, [hint]);
     }
 
     #endregion
@@ -194,7 +194,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     /// @keep and @builtin are the two annotations a class or module can carry; everything
     /// else rejects all of them.
     /// </summary>
-    private void RejectAnns(Annotation[] anns, string what, bool allowKeep = false, bool allowBuiltin = false)
+    private static void RejectAnns(Annotation[] anns, string what, bool allowKeep = false, bool allowBuiltin = false)
     {
         foreach (var a in anns)
         {
@@ -245,8 +245,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         bool isThrow = Try(TK.Throws);
         string? ret = ParseOptionalReturnType();
         if (ret != null && At(TK.LBrace))
-            Fail($"expected 'func', found '{{' -- did you forget 'process' before '{ret}'? " +
-                 $"(e.g. 'foreground process {ret} {{ ... }}')", Codes.BadDeclHeader);
+            Fail($"expected 'func', found '{{' -- did you forget 'process' before '{ret}'?", Codes.BadDeclHeader,
+                 [$"e.g. 'foreground process {ret} {{ ... }}'"]);
         Expect(TK.Func);
         var name = Expect(TK.Ident).Value;
         var generics = ParseGenericParamList();
@@ -341,11 +341,11 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     private ExternFuncDecl ParseExternDecl(Annotation[] anns, int s)
     {
         Advance(); // @extern
+        string? ret = ParseOptionalReturnType();
         Expect(TK.Func);
         var name = Expect(TK.Ident).Value;
         Expect(TK.LParen); var parms = ParseParamList(); Expect(TK.RParen);
-        string? ret = null;
-        if (At(TK.Arrow)) { Advance(); ret = ParseTypeSpec(); }
+        if (At(TK.Arrow)) Fail($"'{name}': return type goes before 'func', not after the parameter list", Codes.BadDeclHeader);
         Expect(TK.Semi);
         return new ExternFuncDecl(ret, name, parms, To(s), anns);
     }
@@ -673,20 +673,30 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         // fields { } block is a raw C struct fields injected verbatim into the emitted typedef.
         if (At(TK.Fields)) return new FieldsBlock(ParseNativeBody(Advance().Value), To(s));
 
-        if (At(TK.Operator))
-        {
-            Advance(); Expect(TK.Func);
-            string op = ParseOperatorSymbol();
-            Expect(TK.LParen); var parms = ParseParamList(); Expect(TK.RParen);
-            string? ret = null;
-            if (At(TK.Arrow)) { Advance(); ret = ParseTypeSpec(); }
-            return new OperatorDecl(op, parms, ret, ParseMethodBody(), To(s));
-        }
-
         var anns = ParseAnnotations();
         var mods = ParseMods();
         bool isEntry = Try(TK.Entry);
         bool isThrow = Try(TK.Throws);
+
+        if (At(TK.Operator))
+        {
+            if (anns.Length > 0) Fail("annotations have no effect on an operator", Codes.BadAnnotation);
+            if (isEntry) Fail("'entry' has no meaning on an operator", Codes.BadDeclHeader);
+            if (isThrow) Fail("'throws' has no meaning on an operator", Codes.BadDeclHeader);
+            if (mods.HasFlag(Modifiers.Static)) Fail("'static' has no meaning on an operator", Codes.BadDeclHeader);
+            // 'operator [Type] func <sym>(params)': the return type sits between 'operator' and
+            // 'func', mirroring how methods lead with theirs. '->' is function-pointer-type
+            // syntax only.
+            Advance();
+            // 'func' followed by '(' is a function-pointer *return type*, not the 'func' that
+            // introduces the operator symbol.
+            string? ret = At(TK.Func) && Peek().Kind != TK.LParen ? null : ParseTypeSpec();
+            Expect(TK.Func);
+            string op = ParseOperatorSymbol();
+            Expect(TK.LParen); var parms = ParseParamList(); Expect(TK.RParen);
+            if (At(TK.Arrow)) Fail($"'{op}': return type goes after 'operator', not after the parameter list", Codes.BadDeclHeader);
+            return new OperatorDecl(mods, op, parms, ret, ParseMethodBody(), To(s));
+        }
 
         // If we reach here, it must be either a method or a field. Fields don't support
         // entry, throws, or annotations.
@@ -697,6 +707,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
             Expect(TK.Func);
             var name = Expect(TK.Ident).Value;
             Expect(TK.LParen); var parms = ParseParamList(); Expect(TK.RParen);
+            if (At(TK.Arrow)) Fail($"'{name}': return type goes before 'func', not after the parameter list", Codes.BadDeclHeader);
             return new MethodDecl(mods, anns, ret, name, parms, isEntry, isThrow, ParseMethodBody(), To(s));
         }
 
@@ -706,9 +717,20 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         if (anns.Length > 0) Fail("annotations have no effect on a field", Codes.BadAnnotation);
         if (mods.HasFlag(Modifiers.Static)) Fail("'static' has no meaning on a field", Codes.BadDeclHeader);
 
-        string? ftype = (At(TK.Ident)
-            || IsPrim(Cur.Kind) || At(TK.LBrack) || At(TK.Func)) ? ParseTypeSpec() : null;
-        var fname = Expect(TK.Ident).Value;
+        // 'name = expr;' declares a field whose type is inferred from its initializer, same as
+        // 'let name = expr;'. Anything else starts with a type spec.
+        string? ftype;
+        string fname;
+        if (At(TK.Ident) && Peek().Kind == TK.Eq)
+        {
+            ftype = null;
+            fname = Advance().Value;
+        }
+        else
+        {
+            ftype = ParseTypeSpec();
+            fname = Expect(TK.Ident).Value;
+        }
         Expr? init = Try(TK.Eq) ? ParseExpr() : null;
         Expect(TK.Semi);
         return new FieldDecl(mods, ftype, fname, To(s), init);
@@ -723,8 +745,15 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         if (AtP("+") || AtP("-") || AtP("*") || AtP("/") || AtP("<") || AtP(">")) return Advance().Value;
         if (At(TK.EqEq) || At(TK.NotEq) || At(TK.LtEq) || At(TK.GtEq)) return Advance().Value;
         if (AtP("&") || AtP("|") || AtP("^") || At(TK.Shl) || At(TK.Shr)) return Advance().Value;
-        // operator func [](K) -> V for getter, operator func []=(K, V) for setter.
+        // Unary ('!', '~', 0-param '-') and postfix ('++', '--') operators are overloadable too.
+        if (AtP("!") || AtP("~")) return Advance().Value;
+        if (At(TK.Inc) || At(TK.Dec)) return Advance().Value;
+        // 'operator V func [](K)' for getter, 'operator func []=(K, V)' for setter.
         if (At(TK.LBrack)) { Advance(); Expect(TK.RBrack); return Try(TK.Eq) ? "[]=" : "[]"; }
+        // 'operator Target func as(Source s)': a user-defined conversion, invoked by
+        // 'value as Target'. Declared on the class being converted TO, static (no self) -
+        // it converts its one parameter to self, not the other way around.
+        if (At(TK.As)) { Advance(); return "as"; }
         Fail($"expected an operator symbol, found {Found()}");
         return "+";
     }
@@ -936,7 +965,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         }
         if (At(TK.Debug)) {
             Advance();
-            if (!At(TK.StrLit)) Fail("'debug' takes a string literal, e.g. debug \"message\";");
+            if (!At(TK.StrLit)) Fail("'debug' takes a string literal", hints: ["e.g. debug \"message\";"]);
             var raw = Advance().Value;
             Expect(TK.Semi);
             return new DebugStmt(raw, To(s));
@@ -945,15 +974,14 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         // Panic is a statement, not an expression, so it must be handled here instead of in ParseExprOrAssign.
         if (At(TK.Panic)) {
             Advance();
-            if (!At(TK.StrLit)) Fail("'panic' takes a string literal, e.g. panic \"message\";");
+            if (!At(TK.StrLit)) Fail("'panic' takes a string literal", hints: ["e.g. panic \"message\";"]);
             var raw = Advance().Value;
             Expect(TK.Semi);
             return new PanicStmt(raw, To(s));
         }
         if (LooksLikeMissingLet())
-            Fail(At(TK.Ident)
-                ? $"expected a statement -- missing 'let'? (e.g. 'let {Cur.Value} ...')"
-                : "expected a statement -- missing 'let'?", Codes.MissingLet);
+            Fail("expected a statement -- missing 'let'?", Codes.MissingLet,
+                At(TK.Ident) ? [$"e.g. 'let {Cur.Value} ...'"] : null);
         return ParseExprOrAssign(s);
     }
 

@@ -1,9 +1,6 @@
 namespace Appa;
 
-// Pre-resolution pass that stamps out concrete class bodies for each generic
-// instantiation used in the source. A `class List[T] { ... }` is a template;
-// this pass produces List_int, List_String, etc. from the recorded GenericUses.
-// Only used instantiations are emitted; uninstantiated templates are dropped.
+
 /// <summary>
 /// Rewrites generic class templates into concrete instantiated classes before
 /// symbol collection and type resolution run.
@@ -280,7 +277,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     /// <summary>
     /// Substitutes type parameters in a single class member (field, method, or operator).
     /// </summary>
-    private ClassMember SubMember(ClassMember m, SubstitutionContext ctx)
+    private static ClassMember SubMember(ClassMember m, SubstitutionContext ctx)
     {
         ClassMember r = m switch
         {
@@ -328,7 +325,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
         var newBody = SubBody(od.Body, ctx);
         if (ReferenceEquals(newParams, od.Params) && ReferenceEquals(newRet, od.ReturnType) && ReferenceEquals(newBody, od.Body))
             return od;
-        return new OperatorDecl(od.Op, newParams, newRet, newBody, od.Span);
+        return new OperatorDecl(od.Modifiers, od.Op, newParams, newRet, newBody, od.Span);
     }
 
     /// <summary>

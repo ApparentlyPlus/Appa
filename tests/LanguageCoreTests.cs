@@ -120,7 +120,7 @@ public class LanguageCoreTests
             native {
                 void* make_handle(void) { return (void*)1; }
             }
-            @extern func make_handle() -> Process;
+            @extern Process func make_handle();
 
             void func storeHandle(Process p, Process* slot) {
                 unsafe { *slot = p; }
@@ -489,7 +489,7 @@ public class LanguageCoreTests
             { "operator_index_no_setter", "G038", """
             class RO {
                 int v;
-                operator func [](int i) -> int { return self.v; }
+                operator int func [](int i) { return self.v; }
             }
             kernel { entry func Main() {
                 let RO r = new RO();

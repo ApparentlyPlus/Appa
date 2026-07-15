@@ -16,7 +16,7 @@ internal static class SingleFileCompile
     /// <summary>
     /// Parses a source string into its AST. Throws ParseException on a syntax error.
     /// </summary>
-    public static Appa.Program Parse(string src) => new Parser(Tokenize(src)).ParseProgram();
+    public static Program Parse(string src) => new Parser(Tokenize(src)).ParseProgram();
 
     /// <summary>
     /// Runs the full semantic pipeline over a single source string with no imports,
@@ -29,12 +29,12 @@ internal static class SingleFileCompile
         sources.Add(path, src);
         var diag = new DiagnosticBag(sources);
 
-        Appa.Program? prog = null;
+        Program? prog = null;
         try { prog = Parse(src); }
-        catch (ParseException ex) { diag.Error(ex.Code, path, ex.Span, ex.Message); }
+        catch (ParseException ex) { diag.Error(ex.Code, path, ex.Span, ex.Message, ex.Hints); }
         if (prog == null) return (diag, null);
 
-        var programs = new List<(string path, Appa.Program prog)> { (path, prog) };
+        var programs = new List<(string path, Program prog)> { (path, prog) };
         var visible = new Dictionary<string, HashSet<string>> { [path] = [path] };
         var (module, _, _) = Pipeline.BuildModule(programs, visible, Mode.Debug, diag);
         return (diag, module);

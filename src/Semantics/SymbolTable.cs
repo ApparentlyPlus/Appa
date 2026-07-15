@@ -92,7 +92,7 @@ internal sealed class SymbolTable
     private readonly Dictionary<MemberKey, Symbol> _fields = [];
     private readonly Dictionary<MemberKey, List<Symbol>> _methods = [];
     private readonly Dictionary<string, List<Symbol>> _funcs = [];
-    private readonly Dictionary<MemberKey, Symbol> _operators = [];
+    private readonly Dictionary<MemberKey, List<Symbol>> _operators = [];
 
     // Every accepted primitive spelling.
     public static readonly FrozenSet<string> Primitives = PrimTypes.Spellings;
@@ -168,13 +168,16 @@ internal sealed class SymbolTable
     }
 
     /// <summary>
-    /// Registers an operator overload on the named class.
+    /// Registers an operator overload on the named class. Every operator except 'as' has
+    /// exactly one declaration per (class, symbol) in a well-formed program (the caller is
+    /// responsible for rejecting duplicates); 'as' alone can have several, one per distinct
+    /// return type, since it has no parameter to distinguish overloads by. CNames are assigned
+    /// later in AssignCNames, once every overload for the bucket is known.
     /// </summary>
     public void RegisterOperator(string cls, string op, string returnType, List<Param> @params)
     {
-        _operators[new(cls, op)] = new Symbol(op, SymKind.Operator, returnType, cls,
-            new MethodSig(returnType, @params, IsStatic: false, IsThrows: false, IsEntry: false, Annotations: []))
-        { CName = Mangler.Operator(cls, op) };
+        Bucket(_operators, new(cls, op)).Add(new Symbol(op, SymKind.Operator, returnType, cls,
+            new MethodSig(returnType, @params, IsStatic: false, IsThrows: false, IsEntry: false, Annotations: [])));
     }
 
     /// <summary>
@@ -225,6 +228,15 @@ internal sealed class SymbolTable
             for (int i = 0; i < span.Length; i++)
             {
                 span[i].CName = Mangler.PrivateFreeFunc(token, name, span[i].Sig!.Params, ov);
+            }
+        }
+        foreach (var (key, list) in _operators)
+        {
+            bool ov = list.Count > 1;
+            var span = CollectionsMarshal.AsSpan(list);
+            for (int i = 0; i < span.Length; i++)
+            {
+                span[i].CName = Mangler.Operator(key.Owner, key.Name, span[i].Sig!.Params, span[i].Sig!.ReturnType, ov);
             }
         }
     }
@@ -347,11 +359,42 @@ internal sealed class SymbolTable
     }
 
     /// <summary>
-    /// Returns the operator symbol for the given class and operator token, or null if not found.
+    /// Returns the last registered overload of the given operator on the class, or null if not
+    /// found. Every operator except 'as' has at most one overload in a well-formed program, so
+    /// this is the whole answer for them; for 'as', callers that need to pick among several
+    /// return-type overloads should use OperatorOverloads instead.
     /// </summary>
     public Symbol? LookupOperator(string cls, string op)
     {
-        return _operators.GetValueOrDefault(new(cls, op));
+        return _operators.TryGetValue(new(cls, op), out var l) ? l[^1] : null;
+    }
+
+    /// <summary>
+    /// Returns the overload of the given operator with the given parameter count, or null.
+    /// Unary and binary '-' share a bucket, so arity is what tells them apart.
+    /// </summary>
+    public Symbol? LookupOperator(string cls, string op, int arity)
+    {
+        if (!_operators.TryGetValue(new(cls, op), out var l)) return null;
+        for (int i = l.Count - 1; i >= 0; i--)
+            if (l[i].Sig!.Params.Count == arity) return l[i];
+        return null;
+    }
+
+    /// <summary>
+    /// Returns all overloads of the named operator on the given class.
+    /// </summary>
+    public IReadOnlyList<Symbol> OperatorOverloads(string cls, string op)
+    {
+        return _operators.TryGetValue(new(cls, op), out var l) ? l : [];
+    }
+
+    /// <summary>
+    /// Returns true if the named operator has more than one overload on the given class.
+    /// </summary>
+    public bool IsOverloadedOperator(string cls, string op)
+    {
+        return OperatorOverloads(cls, op).Count > 1;
     }
 
     /// <summary>

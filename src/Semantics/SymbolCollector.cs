@@ -17,6 +17,7 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
     private readonly Dictionary<string, HashSet<string>> _declaredFieldNames = [];
     private readonly Dictionary<string, HashSet<string>> _declaredMethodNames = [];
     private readonly Dictionary<string, HashSet<string>> _declaredMethodSigs = [];
+    private readonly Dictionary<string, HashSet<string>> _declaredOperatorSigs = [];
     private readonly HashSet<string> _declaredFuncs = [];
     private readonly HashSet<string> _declaredFuncSigs = [];
     private readonly HashSet<(string File, string Sig)>  _declaredPrivateFuncSigs  = [];
@@ -149,6 +150,7 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
         var fieldNames = _declaredFieldNames.TryGetValue(cd.Name, out var fs)  ? fs : (_declaredFieldNames[cd.Name]  = []);
         var methodNames = _declaredMethodNames.TryGetValue(cd.Name, out var ms) ? ms : (_declaredMethodNames[cd.Name] = []);
         var methodSigs = _declaredMethodSigs.TryGetValue(cd.Name, out var ss)  ? ss : (_declaredMethodSigs[cd.Name]  = []);
+        var operatorSigs = _declaredOperatorSigs.TryGetValue(cd.Name, out var os) ? os : (_declaredOperatorSigs[cd.Name] = []);
 
         foreach (var m in cd.Members)
         {
@@ -167,7 +169,11 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
                     if (!fieldNames.Add(fd.Name) || methodNames.Contains(fd.Name))
                         diag.Error(Codes.DuplicateName, file, fd.Span,
                             $"'{Mangler.DisplayName(cd.Name)}' already declares a member '{fd.Name}'");
-                    _sym.RegisterField(cd.Name, fd.Name, fd.Type ?? "");
+                    
+                    // A typeless field infers from its literal initializer (TypeResolver emits
+                    // CannotInfer for non literal ones. "int" here just keeps later lookups sane).
+                    _sym.RegisterField(cd.Name, fd.Name,
+                        fd.Type ?? TypeResolver.InferFieldTypeSpec(fd.Init) ?? "int");
                     
                     // Private by default. A member needs an explicit 'public' to be callable
                     // from outside its declaring class or module.
@@ -184,7 +190,7 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
                     if (!methodSigs.Add(mSigKey))
                     {
                         diag.Error(Codes.DuplicateName, file, md.Span,
-                            $"'{cd.Name}' already declares '{md.Name}' with the same parameter types");
+                            $"'{Mangler.DisplayName(cd.Name)}' already declares '{md.Name}' with the same parameter types");
                         break;
                     }
 
@@ -208,11 +214,40 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
                     if (md.Throws) _sym.RegisterThrows(md.ReturnType ?? "int");
                     break;
                 case OperatorDecl od:
-                    // Register the operator in the symbol table, using the operator name as the return type if it's not specified, 
+                {
+                    // Author's Note: 'as' has exactly one shape: a static factory on the class being converted
+                    // TO, converting its one parameter to self. Its return type always defaults
+                    // to the owner class like every other operator's does (TypeResolver rejects
+                    // an explicit mismatch), and its overloads are distinguished by parameter
+                    // type - same rule as every other operator except '[]='/'[]=', just spelled
+                    // out here since 'as' is the only one with more than one legal overload.
+                    string retType = od.ReturnType ?? (od.Op == "[]=" || od.Op is "++" or "--" ? "void"
+                        : od.Op is "==" or "!=" or "<" or ">" or "<=" or ">=" or "!" ? "bool"
+                        : cd.Name);
+
+                    // The duplicate key includes arity so unary '-' (0 params) and binary '-'
+                    // (1 param) can coexist on one class without colliding.
+                    string opSigKey = od.Op == "as" && od.Params.Length == 1
+                        ? "as/param/" + od.Params[0].Type.Trim()
+                        : od.Op + "/" + od.Params.Length;
+                    if (!operatorSigs.Add(opSigKey))
+                    {
+                        diag.Error(Codes.DuplicateName, file, od.Span,
+                            od.Op == "as" && od.Params.Length == 1
+                                ? $"'{Mangler.DisplayName(cd.Name)}' already declares a conversion from '{Mangler.DisplayName(od.Params[0].Type.Trim())}'"
+                                : $"'{Mangler.DisplayName(cd.Name)}' already declares operator '{od.Op}'");
+                        break;
+                    }
+                    
+                    // Register the operator in the symbol table, using the operator name as the return type if it's not specified,
                     // and using "void" for assignment operators.
-                    _sym.RegisterOperator(cd.Name, od.Op,
-                        od.ReturnType ?? (od.Op == "[]=" ? "void" : cd.Name), [.. od.Params]);
+                    _sym.RegisterOperator(cd.Name, od.Op, retType, [.. od.Params]);
+
+                    // Private by default, same as every other member. Keyed as "operator <sym>"
+                    // - the space keeps it disjoint from any field/method identifier.
+                    if (!od.Modifiers.HasFlag(Modifiers.Public)) _sym.PrivateMembers.Add(new(cd.Name, $"operator {od.Op}"));
                     break;
+                }
             }
         }
     }

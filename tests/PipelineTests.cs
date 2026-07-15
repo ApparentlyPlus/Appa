@@ -60,7 +60,7 @@ public class PipelineTests
     [InlineData("G035", "class Box { private int v; func _init(int x) { self.v = x; } } kernel { entry func Main() { let Box b = new Box(1); let int z = b.v; } }")]
     [InlineData("G035", "module M { private int func helper() { return 1; } } kernel { entry func Main() { let int z = M.helper(); } }")]
     [InlineData("G037", "void func TakesInt(int n) { } kernel { entry func Main() { let int x = 1; TakesInt(ref x); } }")]
-    [InlineData("G038", "class RO { int v; operator func [](int i) -> int { return self.v; } } kernel { entry func Main() { let RO r = new RO(); r[0] = 5; } }")]
+    [InlineData("G038", "class RO { int v; operator int func [](int i) { return self.v; } } kernel { entry func Main() { let RO r = new RO(); r[0] = 5; } }")]
     [InlineData("G040", "static int func helper() { return 1; } kernel { entry func Main() { let int x = helper(); } }")]
     [InlineData("G041", "@intrinsic(alloc) native { #kernel: int x; #user: int x; } kernel { entry func Main() { } }")]
     [InlineData("G041", "class C { @keep int func F() { return 1; } } kernel { entry func Main() { } }")]
@@ -225,7 +225,7 @@ public class PipelineTests
               int x;
               int y;
               func _init(int a, int b) { self.x = a; self.y = b; }
-              operator func +(Vec other) -> Vec { return new Vec(self.x + other.x, self.y + other.y); }
+              public operator Vec func +(Vec other) { return new Vec(self.x + other.x, self.y + other.y); }
               public int func Sum() { return self.x + self.y; }
             }
             kernel { entry func Main() {

@@ -128,16 +128,18 @@ internal static class Suggest
     }
 
     /// <summary>
-    /// Formats a "did you mean 'X'?" suffix for a diagnostic message, or "" if typed has no
-    /// close-enough match among candidates.
+    /// Returns a one-element "did you mean 'X'?" hints array for Diagnostic's separate hints
+    /// line, or an empty array if typed has no close-enough match among candidates. Callers
+    /// pass this to diag.Error's hints parameter, not the message - it renders on its own
+    /// "= help:" line rather than appended to the error text.
     /// </summary>
-    public static string Hint(string typed, IEnumerable<string> candidates)
+    public static string[] Hints(string typed, IEnumerable<string> candidates)
     {
-        return Closest(typed, candidates) is { } best ? $" — did you mean '{best}'?" : "";
+        return Closest(typed, candidates) is { } best ? [$"did you mean '{best}'?"] : [];
     }
 
     /// <summary>
-    /// Classic iterative (two-row) Levenshtein edit distance between two strings.
+    /// Classic iterative Levenshtein edit distance between two strings.
     /// </summary>
     private static int Distance(string a, string b)
     {

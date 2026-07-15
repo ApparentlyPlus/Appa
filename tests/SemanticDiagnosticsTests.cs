@@ -134,6 +134,63 @@ public class SemanticDiagnosticsTests
 
     #endregion
 
+    #region Field-type inference
+
+    /// <summary>
+    /// A field with a literal initializer and no type infers its type from the literal, exactly
+    /// like 'let'. Each literal kind maps to its natural type, verified by using the field where
+    /// that type is required.
+    /// </summary>
+    [Theory]
+    [InlineData("v = 5;", "let int x = c.v;")]
+    [InlineData("v = -5;", "let int x = c.v;")]
+    [InlineData("v = 1.5;", "let double x = c.v;")]
+    [InlineData("v = true;", "let bool x = c.v;")]
+    [InlineData("v = 'x';", "let char x = c.v;")]
+    public void FieldTypeInfersFromLiteralInitializer(string field, string use)
+    {
+        AssertClean($$"""
+            class C { public {{field}} }
+            kernel { entry func Main() {
+                let C c = new C();
+                {{use}}
+            } }
+            """);
+    }
+
+    /// <summary>
+    /// Field inference is limited to literals - fields register their type before any expression
+    /// is resolved, so a computed initializer cannot infer and must be explicitly typed.
+    /// </summary>
+    [Fact]
+    public void FieldWithNonLiteralInitializerCannotInfer()
+    {
+        AssertError(Codes.CannotInfer, "class C { v = 1 + 2; }");
+    }
+
+    /// <summary>
+    /// The inferred field participates in the class layout and method bodies like any explicitly
+    /// typed field.
+    /// </summary>
+    [Fact]
+    public void InferredFieldIsUsableInsideItsClass()
+    {
+        AssertClean("""
+            class Counter {
+                count = 0;
+                public void func Bump() { self.count = self.count + 1; }
+                public int func Value() { return self.count; }
+            }
+            kernel { entry func Main() {
+                let Counter c = new Counter();
+                c.Bump();
+                let int v = c.Value();
+            } }
+            """);
+    }
+
+    #endregion
+
     #region Switch label hygiene
 
     /// <summary>
@@ -373,7 +430,7 @@ public class SemanticDiagnosticsTests
     class Vec {
       public int x;
       func _init(int a) { self.x = a; }
-      operator func +(Vec other) -> Vec { return new Vec(self.x + other.x); }
+      public operator Vec func +(Vec other) { return new Vec(self.x + other.x); }
     }
     """;
 
@@ -430,12 +487,48 @@ public class SemanticDiagnosticsTests
     /// two for '[]='. A wrong-arity indexer no longer crashes the resolver at use sites.
     /// </summary>
     [Theory]
-    [InlineData("class C { int v; operator func +(C a, C b) -> C { return a; } } kernel { entry func Main() { } }")]
-    [InlineData("class C { int v; operator func [](int i, int j) -> int { return 0; } } kernel { entry func Main() { let C c = new C(); let int x = c[0]; } }")]
+    [InlineData("class C { int v; operator C func +(C a, C b) { return a; } } kernel { entry func Main() { } }")]
+    [InlineData("class C { int v; operator int func [](int i, int j) { return 0; } } kernel { entry func Main() { let C c = new C(); let int x = c[0]; } }")]
     [InlineData("class C { int v; operator func []=(int i) { } } kernel { entry func Main() { let C c = new C(); c[0] = 1; } }")]
     public void OperatorArityIsEnforced(string src)
     {
         AssertError(Codes.WrongArgCount, src);
+    }
+
+    #endregion
+
+    #region Diagnostic hint placement
+
+    /// <summary>
+    /// An undefined-method "did you mean" suggestion is carried in the diagnostic's separate
+    /// Hints array (rendered on its own "= help:" line), never spliced into the message text
+    /// itself - the message states the problem outright, the hint is a distinct, optional line.
+    /// </summary>
+    [Fact]
+    public void UndefinedMethodSuggestionIsAHintNotInlineText()
+    {
+        var (diag, _) = SingleFileCompile.Check("""
+            class Console { public static void func Home() { } }
+            kernel { entry func Main() { Console.Hme(); } }
+            """);
+        var d = Assert.Single(diag.All, x => x.Code == Codes.UndefinedMethod);
+        Assert.DoesNotContain("did you mean", d.Message);
+        Assert.Contains("did you mean 'Home'?", d.Hints);
+    }
+
+    /// <summary>
+    /// With no plausible candidate, the hints array is simply empty rather than an empty
+    /// "did you mean ''?" suggestion.
+    /// </summary>
+    [Fact]
+    public void UndefinedMethodWithNoCloseCandidateHasNoHint()
+    {
+        var (diag, _) = SingleFileCompile.Check("""
+            class Console { public static void func Home() { } }
+            kernel { entry func Main() { Console.ZzzCompletelyUnrelated(); } }
+            """);
+        var d = Assert.Single(diag.All, x => x.Code == Codes.UndefinedMethod);
+        Assert.Empty(d.Hints);
     }
 
     #endregion

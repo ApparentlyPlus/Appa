@@ -538,7 +538,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Returns true if a library class is fully self-contained and can live in the shared header.
     /// </summary>
-    private bool CanLiveInSharedHeader(IrClass cls)
+    private static bool CanLiveInSharedHeader(IrClass cls)
     {
         var methods = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(cls.Methods);
         for (int i = 0; i < methods.Length; i++)
@@ -721,7 +721,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Returns the full C function signature for a method, including the implicit self parameter.
     /// </summary>
-    private string MethodSig(IrFunction m)
+    private static string MethodSig(IrFunction m)
     {
         string ret = m.IsThrows ? new IrResultType(m.ReturnType).ToCType() : m.ReturnType.ToCType();
         var sb = new System.Text.StringBuilder();
@@ -747,17 +747,26 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     }
 
     /// <summary>
-    /// Returns the full C function signature for an operator overload, including the self parameter.
+    /// Returns the full C function signature for an operator overload. Includes the self
+    /// parameter for every operator except a static "as" (a factory - self doesn't exist yet),
+    /// which takes only its explicit parameter, the same as a static method would.
     /// </summary>
-    private string OperatorSig(IrOperator o)
+    private static string OperatorSig(IrOperator o)
     {
         var sb = new System.Text.StringBuilder();
         sb.Append(o.ReturnType.ToCType()).Append(' ').Append(o.CName).Append('(');
-        sb.Append(Mangler.Class(o.OwnerClass)).Append("* self");
+        bool needsComma = false;
+        if (!o.IsStatic)
+        {
+            sb.Append(Mangler.Class(o.OwnerClass)).Append("* self");
+            needsComma = true;
+        }
         for (int i = 0; i < o.Params.Count; i++)
         {
             var p = o.Params[i];
-            sb.Append(", ").Append(ParamCType(p)).Append(' ').Append(p.Name);
+            if (needsComma) sb.Append(", ");
+            sb.Append(ParamCType(p)).Append(' ').Append(p.Name);
+            needsComma = true;
         }
         sb.Append(')');
         return sb.ToString();
@@ -766,7 +775,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Returns the C allocator signature, threading through any constructor parameters.
     /// </summary>
-    private string AllocatorSig(IrClass cls)
+    private static string AllocatorSig(IrClass cls)
     {
         var init = InitOf(cls);
         var sb = new System.Text.StringBuilder();
@@ -791,7 +800,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Returns the C signature for the destructor of a class.
     /// </summary>
-    private string DtorSig(IrClass cls)
+    private static string DtorSig(IrClass cls)
     {
         return $"void {Mangler.Dtor(cls.Name)}(void* _vp)";
     }
@@ -799,7 +808,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Returns the full C function signature for a free function.
     /// </summary>
-    private string FuncSig(IrFunction fn)
+    private static string FuncSig(IrFunction fn)
     {
         string ret = fn.IsThrows ? new IrResultType(fn.ReturnType).ToCType() : fn.ReturnType.ToCType();
         var sb = new System.Text.StringBuilder();

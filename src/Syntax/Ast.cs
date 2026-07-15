@@ -179,7 +179,7 @@ internal record MethodDecl(Modifiers Modifiers, Annotation[] Annotations, string
 /// <summary>
 /// An operator overload inside a class. Op is the operator symbol string ("+", "==").
 /// </summary>
-internal record OperatorDecl(string Op, Param[] Params, string? ReturnType, MethodBody Body, TextSpan Span) : ClassMember(Span);
+internal record OperatorDecl(Modifiers Modifiers, string Op, Param[] Params, string? ReturnType, MethodBody Body, TextSpan Span) : ClassMember(Span);
 
 #endregion
 

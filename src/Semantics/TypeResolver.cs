@@ -445,6 +445,26 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
+    /// Finds the 'as' conversion operator declared on the destination class whose parameter type
+    /// matches the cast's source type, or null if none applies. 'as' has exactly one shape - a
+    /// static factory on the type being converted TO, converting its parameter to self - so this
+    /// is the only place a match can ever come from. Only a class can declare 'as' at all, and it
+    /// only ever converts INTO itself; a class converting itself to a primitive (or to a class
+    /// that doesn't declare a matching 'as') has no 'as' path at all - that's what a named
+    /// conversion method is for instead. Never chained through a second conversion.
+    /// </summary>
+    private Symbol? FindAsOperator(string destCls, IrType from)
+    {
+        foreach (var op in sym.OperatorOverloads(destCls, "as"))
+        {
+            if (op.Sig!.Params.Count == 1 && SameType(ResolveType(op.Sig.Params[0].Type), from)
+                && SameType(ResolveType(op.Sig.ReturnType), new IrClassRef(destCls)))
+                return op;
+        }
+        return null;
+    }
+
+    /// <summary>
     /// Validates that an explicit cast is valid: numeric, enum-to-int, or pointer (unsafe only).
     /// Reports an error for void, String, or class casts.
     /// </summary>
@@ -467,7 +487,14 @@ internal sealed class TypeResolver(
         }
         Reject();
         void Reject() => diag.Error(Codes.InvalidCast, ctx.File, value.Span,
-            $"cannot cast '{Describe(from)}' to '{Describe(to)}'");
+            $"cannot cast '{Describe(from)}' to '{Describe(to)}'",
+            // 'as' can only ever be declared on the class being converted TO, so a class
+            // converting itself to a primitive has no 'as' path at all, ever - point at the
+            // actual way out instead of leaving it looking like a missing overload.
+            from is IrClassRef && to is IrPrimType or IrEnumType
+                ? [$"'as' only converts INTO a class, never out of one to a primitive - " +
+                   $"add a named conversion method on '{Describe(from)}' instead, e.g. '{Describe(to)} func ToSomething()'"]
+                : null);
     }
 
     /// <summary>
@@ -692,6 +719,17 @@ internal sealed class TypeResolver(
         if (sym.IsPrivateMember(owner, member) && ctx.CurClass != owner)
             diag.Error(Codes.PrivateMember, ctx.File, span,
                 $"'{Mangler.DisplayName(owner)}.{member}' is private and cannot be accessed from outside '{Mangler.DisplayName(owner)}'");
+    }
+
+    /// <summary>
+    /// Reports PrivateMember when a private operator overload is invoked from outside its
+    /// declaring class. Operators follow the same private-by-default rule as every other member.
+    /// </summary>
+    private void CheckOperatorAccess(string owner, string op, ResolveCtx ctx, TextSpan span)
+    {
+        if (sym.IsPrivateMember(owner, $"operator {op}") && ctx.CurClass != owner)
+            diag.Error(Codes.PrivateMember, ctx.File, span,
+                $"operator '{op}' on '{Mangler.DisplayName(owner)}' is private and cannot be used from outside '{Mangler.DisplayName(owner)}'");
     }
 
     /// <summary>
@@ -1294,8 +1332,16 @@ internal sealed class TypeResolver(
                     rawFields.Add(new RawFieldBlock(fb.Body.KernelC, fb.Body.UserC));
                     break;
                 case FieldDecl fd:
-                    CheckType(fd.Type, classCtx, fd.Span);
-                    var ft = ResolveType(fd.Type ?? "void");
+                    string? fspec = fd.Type ?? InferFieldTypeSpec(fd.Init);
+                    if (fspec == null)
+                    {
+                        diag.Error(Codes.CannotInfer, ctx.File, fd.Span,
+                            $"cannot infer a type for field '{fd.Name}'; only literal initializers " +
+                            $"can infer a field's type - give it an explicit type");
+                        fspec = "int";
+                    }
+                    CheckType(fspec, classCtx, fd.Span);
+                    var ft = ResolveType(fspec);
                     IrExpr? init = null;
                     if (fd.Init != null)
                     {
@@ -1358,16 +1404,51 @@ internal sealed class TypeResolver(
     /// </summary>
     private IrOperator ResolveOperator(string cls, OperatorDecl od, ResolveCtx ctx, bool lib, Visibility vis)
     {
-        // '[]=' takes (index, value); every other operator is binary over self and one operand.
-        int want = od.Op == "[]=" ? 2 : 1;
+        // '[]=' takes (index, value); every other operator, including 'as', takes exactly one
+        // parameter. 'as' has only one shape: a static factory converting its parameter to self
+        // ('operator String func as(char c)' is String's equivalent of a FromChar factory).
+        // Only a class can ever declare 'as' - it only ever converts INTO itself, from whatever
+        // its parameter type is - so a class converting itself to a primitive isn't expressible
+        // this way at all; that's a named method's job (e.g. 'int func ToInt()'), not a cast.
+        bool isAs = od.Op == "as";
+        // Unary '!'/'~' and postfix '++'/'--' take no parameter (self is the operand); '-' is
+        // unary when declared with none and binary with one; '[]=' takes (index, value);
+        // everything else, including 'as', takes exactly one.
+        int want = od.Op switch
+        {
+            "[]=" => 2,
+            "!" or "~" or "++" or "--" => 0,
+            "-" => od.Params.Length == 0 ? 0 : 1,
+            _ => 1
+        };
         if (od.Params.Length != want)
             diag.Error(Codes.WrongArgCount, ctx.File, od.Span,
                 $"operator '{od.Op}' must take exactly {want} parameter(s), got {od.Params.Length}");
         CheckType(od.ReturnType, ctx, od.Span, allowVoid: true);
         foreach (var p in od.Params) CheckType(p.Type, ctx, p.Span);
         CheckParams(od.Params, ctx);
-        var ret = ResolveType(od.ReturnType ?? (od.Op == "[]=" ? "void" : cls));
-        
+        bool isCmp = od.Op is "==" or "!=" or "<" or ">" or "<=" or ">=";
+        bool isMutator = od.Op is "++" or "--";
+        string retSpec = od.ReturnType ?? (od.Op == "[]=" || isMutator ? "void"
+            : isCmp || od.Op == "!" ? "bool"
+            : cls);
+        var ret = ResolveType(retSpec);
+        if (isAs && od.ReturnType != null && !SameType(ret, new IrClassRef(cls)))
+            diag.Error(Codes.TypeMismatch, ctx.File, od.Span,
+                $"'as' converts its parameter to '{Mangler.DisplayName(cls)}' " +
+                $"and must return '{Mangler.DisplayName(cls)}', not '{Describe(ret)}'");
+        // Comparisons and logical not produce truth values, and '!=' is derived from '==' (and
+        // vice versa) by negation when only one of the pair is declared - both only work if
+        // these return bool.
+        if ((isCmp || od.Op == "!") && ret is not IrPrimType { CName: "bool" })
+            diag.Error(Codes.TypeMismatch, ctx.File, od.Span,
+                $"operator '{od.Op}' must return 'bool', not '{Describe(ret)}'");
+        // '++'/'--' mutate self in place; a value-producing form would be ambiguous about
+        // pre/post semantics, so they are statements, never expressions.
+        if (isMutator && ret is not IrVoidType)
+            diag.Error(Codes.TypeMismatch, ctx.File, od.Span,
+                $"operator '{od.Op}' mutates in place and must return 'void', not '{Describe(ret)}'");
+
         var pars = new List<IrParam>(od.Params.Length);
         for (int i = 0; i < od.Params.Length; i++)
         {
@@ -1375,14 +1456,14 @@ internal sealed class TypeResolver(
             pars.Add(new IrParam(p.Name, ResolveType(p.Type), p.IsRef));
         }
 
-        string cname = Mangler.Operator(cls, od.Op);
-        var octx = ctx.WithClass(cls).WithFunc($"op_{Mangler.OpSuffix(od.Op)}").WithStatic(false).PushScope();
-        octx.Scope.Declare("self", new IrClassRef(cls));
+        string cname = Mangler.Operator(cls, od.Op, od.Params, retSpec, sym.IsOverloadedOperator(cls, od.Op));
+        var octx = ctx.WithClass(cls).WithFunc($"op_{Mangler.OpSuffix(od.Op)}").WithStatic(isAs).PushScope();
+        if (!isAs) octx.Scope.Declare("self", new IrClassRef(cls));
         foreach (var p in od.Params) octx.Scope.Declare(p.Name, ResolveType(p.Type), p.IsRef);
         var (body, nk, nu) = ResolveBodyOrNative(od.Body, octx, ret);
         CheckMissingReturn(body, ret, false, od.Span, $"operator {od.Op} on {Mangler.DisplayName(cls)}", ctx);
         if (body != null) CheckBodyQuality(body, ret, od.Span, ctx);
-        return new IrOperator(od.Op, cname, ret, pars, cls, lib, vis, body, nk, nu);
+        return new IrOperator(od.Op, cname, ret, pars, cls, lib, vis, body, nk, nu, IsStatic: isAs);
     }
 
     /// <summary>
@@ -1746,8 +1827,9 @@ internal sealed class TypeResolver(
                 }
                 string baseOp = asgn.Op.BaseOp()!.Value.Sym();
                 string? lhsClass = ClassNameOf(target.Type);
-                if (lhsClass != null && sym.LookupOperator(lhsClass, baseOp) is { } opSym)
+                if (lhsClass != null && sym.LookupOperator(lhsClass, baseOp, 1) is { } opSym)
                 {
+                    CheckOperatorAccess(lhsClass, baseOp, ctx, asgn.Span);
                     value = CheckOpArg(opSym, value, ctx);
                     var composed = new IrStaticCall(opSym.CName, ResolveType(opSym.Type), [target, value]);
                     CheckAssign(composed, target.Type, "the assignment target", ctx, Codes.TypeMismatch);
@@ -2171,12 +2253,31 @@ internal sealed class TypeResolver(
                 CheckType(ce.TargetType, ctx, ce.Span, allowVoid: true);
                 var inner = ResolveExpr(ce.Value, ctx);
                 var to = ResolveType(ce.TargetType);
+                // 'as' only ever exists on the class being converted TO - if the target isn't a
+                // class, there's structurally nowhere an 'as' conversion could be declared, so
+                // this is skipped entirely and CheckCast's ordinary rules (or its rejection) apply.
+                if (!SameType(inner.Type, to) && ClassNameOf(to) is { } destCls
+                    && FindAsOperator(destCls, inner.Type) is { } asOp)
+                {
+                    CheckOperatorAccess(destCls, "as", ctx, ce.Span);
+                    return new IrStaticCall(asOp.CName, to, [inner]) { Span = ce.Span };
+                }
                 CheckCast(inner, to, ctx);
                 return new IrCast(to, inner);
             }
             case PostfixExpr pf:
             {
                 var opnd = ResolveExpr(pf.Operand, ctx);
+
+                // A class operand dispatches to its '++'/'--' overload: a 0-param, void-returning
+                // mutator of self. Mutation happens through the reference, so lvalue-ness of the
+                // operand expression is irrelevant - same as calling a method on it.
+                if (ClassNameOf(opnd.Type) is { } pfCls && sym.LookupOperator(pfCls, pf.Op.Sym(), 0) is { } pfOp)
+                {
+                    CheckOperatorAccess(pfCls, pf.Op.Sym(), ctx, pf.Span);
+                    return new IrStaticCall(pfOp.CName, IrType.Void, [opnd]) { Span = pf.Span };
+                }
+
                 if (opnd is not (IrVar or IrFieldLoad or IrIndex or IrDeref))
                     diag.Error(Codes.NotAnLvalue, ctx.File, pf.Span,
                         $"'{pf.Op.Sym()}' needs a variable, field, or element to modify");
@@ -2254,6 +2355,15 @@ internal sealed class TypeResolver(
     private IrExpr ResolveUnary(UnaryExpr un, ResolveCtx ctx)
     {
         var operand = ResolveExpr(un.Operand, ctx);
+
+        // A class operand dispatches to its 0-param operator overload ('!', '~', or unary '-'),
+        // exactly as binary operators dispatch on the left operand's class.
+        if (ClassNameOf(operand.Type) is { } opCls && sym.LookupOperator(opCls, un.Op.Sym(), 0) is { } uop)
+        {
+            CheckOperatorAccess(opCls, un.Op.Sym(), ctx, un.Span);
+            return new IrStaticCall(uop.CName, ResolveType(uop.Type), [operand]);
+        }
+
         if (un.Op == UnOp.Not && operand.Type is not IrPrimType { CName: "bool" })
             diag.Error(Codes.TypeMismatch, ctx.File, un.Span,
                 $"operator '!' requires 'bool', got '{Describe(operand.Type)}'");
@@ -2296,15 +2406,28 @@ internal sealed class TypeResolver(
         {
             string stringClass = sym.Builtins.GetValueOrDefault(BuiltinTypes.String, BuiltinTypes.String);
             var sop = sym.LookupOperator(stringClass, "+");
-            string cn = sop?.CName ?? Mangler.Operator(stringClass, "+");
+            string cn = sop?.CName ?? Mangler.Operator(stringClass, "+", [], "String", false);
             return new IrStaticCall(cn, IrType.String, [EnsureString(left, ctx), EnsureString(right, ctx)]);
         }
 
         string? lhsClass = ClassNameOf(left.Type);
-        if (lhsClass != null && sym.LookupOperator(lhsClass, be.Op.Sym()) is { } op)
+        if (lhsClass != null && sym.LookupOperator(lhsClass, be.Op.Sym(), 1) is { } op)
         {
+            CheckOperatorAccess(lhsClass, be.Op.Sym(), ctx, be.Span);
             right = CheckOpArg(op, right, ctx);
             return new IrStaticCall(op.CName, ResolveType(op.Type), [left, right]);
+        }
+
+        // A class that overloads '==' must not silently get reference identity for '!=' (and
+        // vice versa): derive the missing one of the pair as the negation of the declared one,
+        // so both spellings always agree on what equality means for the type.
+        if (be.Op is BinOp.Eq or BinOp.Ne && lhsClass != null
+            && sym.LookupOperator(lhsClass, be.Op == BinOp.Eq ? "!=" : "==", 1) is { } eqOp
+            && ResolveType(eqOp.Type) is IrPrimType { CName: "bool" })
+        {
+            CheckOperatorAccess(lhsClass, be.Op == BinOp.Eq ? "!=" : "==", ctx, be.Span);
+            right = CheckOpArg(eqOp, right, ctx);
+            return new IrUnaryOp(UnOp.Not, new IrStaticCall(eqOp.CName, IrType.Bool, [left, right]), IrType.Bool);
         }
 
         if (left.Type is IrPtrType && be.Op is BinOp.Add or BinOp.Sub && right.Type.IsNumeric)
@@ -2408,6 +2531,26 @@ internal sealed class TypeResolver(
     private static IrPrimType FloatLitType(string raw)
     {
         return raw.Length > 0 && raw[^1] is 'f' or 'F' ? IrType.Float : IrType.Double;
+    }
+
+    /// <summary>
+    /// Infers a field's type spec from its initializer. Fields register their type in the symbol
+    /// table before any body is resolved, so inference is limited to literals (optionally under a
+    /// unary minus) - the only initializers whose type is knowable without resolving expressions.
+    /// Returns null when the initializer is absent or not a literal.
+    /// </summary>
+    internal static string? InferFieldTypeSpec(Expr? init)
+    {
+        return init switch
+        {
+            IntLitExpr il => TryParseIntLit(il.Value, out _, out var it, out _) ? ((IrPrimType)it).CName : null,
+            FloatLitExpr fl => FloatLitType(fl.Value).CName,
+            BoolLitExpr => "bool",
+            CharLitExpr => "char",
+            StrLitExpr => BuiltinTypes.String,
+            UnaryExpr { Op: UnOp.Neg, Operand: IntLitExpr or FloatLitExpr } u => InferFieldTypeSpec(u.Operand),
+            _ => null
+        };
     }
 
     /// <summary>
@@ -2579,7 +2722,8 @@ internal sealed class TypeResolver(
                 {
                     if (!IsOpaqueStruct(objName))
                         diag.Error(Codes.UndefinedMethod, ctx.File, ce.Span,
-                            $"'{Mangler.DisplayName(objName)}' has no method '{ma.Member}'{Suggest.Hint(ma.Member, sym.MethodNames(objName))}");
+                            $"'{Mangler.DisplayName(objName)}' has no method '{ma.Member}'",
+                            Suggest.Hints(ma.Member, sym.MethodNames(objName)));
                 }
                 else if (msym.Sig is { IsStatic: false })
                     diag.Error(Codes.StaticOnInstance, ctx.File, ce.Span,
@@ -2611,7 +2755,8 @@ internal sealed class TypeResolver(
                     }
                     if (!IsOpaqueStruct(cls))
                         diag.Error(Codes.UndefinedMethod, ctx.File, ce.Span,
-                            $"'{Mangler.DisplayName(cls)}' has no method '{ma.Member}'{Suggest.Hint(ma.Member, sym.MethodNames(cls))}");
+                            $"'{Mangler.DisplayName(cls)}' has no method '{ma.Member}'",
+                            Suggest.Hints(ma.Member, sym.MethodNames(cls)));
                 }
                 else if (msym.Sig is { IsStatic: true })
                     diag.Error(Codes.InstanceOnStatic, ctx.File, ce.Span,
@@ -2746,6 +2891,7 @@ internal sealed class TypeResolver(
         var idx = ResolveExpr(ix.Index, ctx);
         if (obj.Type is IrClassRef icr && sym.LookupOperator(icr.ClassName, "[]") is { Sig.Params: [_] } getOp)
         {
+            CheckOperatorAccess(icr.ClassName, "[]", ctx, ix.Span);
             var idxType = ResolveType(getOp.Sig!.Params[0].Type);
             idx = Coerce(idx, idxType, ctx);
             CheckAssign(idx, idxType, "the index", ctx, Codes.TypeMismatch);
@@ -2778,6 +2924,7 @@ internal sealed class TypeResolver(
 
         if (obj.Type is IrClassRef cr && sym.LookupOperator(cr.ClassName, "[]=") is { Sig.Params: [_, _] } setOp)
         {
+            CheckOperatorAccess(cr.ClassName, "[]=", ctx, asgn.Span);
             var idxType = ResolveType(setOp.Sig!.Params[0].Type);
             var valType = ResolveType(setOp.Sig!.Params[1].Type);
             idx = Coerce(idx, idxType, ctx);
@@ -2796,7 +2943,10 @@ internal sealed class TypeResolver(
             var getOp = sym.LookupOperator(cr.ClassName, "[]");
             IrExpr current;
             if (getOp != null)
+            {
+                CheckOperatorAccess(cr.ClassName, "[]", ctx, ixt.Span);
                 current = new IrInstanceCall(objRef, getOp.CName, ResolveType(getOp.Type), [idxRef]) { Span = ixt.Span };
+            }
             else
             {
                 diag.Error(Codes.NoIndexSetter, ctx.File, asgn.Span,
@@ -2807,8 +2957,9 @@ internal sealed class TypeResolver(
             BinOp baseOp = asgn.Op.BaseOp()!.Value;
             string? elemClass = ClassNameOf(current.Type);
             IrExpr combined;
-            if (elemClass != null && sym.LookupOperator(elemClass, baseOp.Sym()) is { } elemOp)
+            if (elemClass != null && sym.LookupOperator(elemClass, baseOp.Sym(), 1) is { } elemOp)
             {
+                CheckOperatorAccess(elemClass, baseOp.Sym(), ctx, asgn.Span);
                 rhs = CheckOpArg(elemOp, rhs, ctx);
                 combined = new IrStaticCall(elemOp.CName, ResolveType(elemOp.Type), [current, rhs]);
             }
@@ -2853,8 +3004,9 @@ internal sealed class TypeResolver(
             return new IrAssign(target, AssignOp.Assign, val);
         }
         string elemBaseOp = asgn.Op.BaseOp()!.Value.Sym();
-        if (ClassNameOf(elem) is { } elemClass2 && sym.LookupOperator(elemClass2, elemBaseOp) is { } elemOp2)
+        if (ClassNameOf(elem) is { } elemClass2 && sym.LookupOperator(elemClass2, elemBaseOp, 1) is { } elemOp2)
         {
+            CheckOperatorAccess(elemClass2, elemBaseOp, ctx, asgn.Span);
             val = CheckOpArg(elemOp2, val, ctx);
             var stmts = new List<IrStmt>();
             var objRef = HoistIfImpure(obj, "_ixo", stmts);
