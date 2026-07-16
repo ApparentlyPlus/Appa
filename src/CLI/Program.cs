@@ -243,21 +243,22 @@ static void WriteSourcemap(IReadOnlyDictionary<string, string> map, string dir)
 static void CopyDirectory(string src, string dst)
 {
     foreach (var dir in Directory.GetDirectories(src, "*", SearchOption.AllDirectories))
-        Directory.CreateDirectory(dir.Replace(src, dst));
+        Directory.CreateDirectory(Path.Combine(dst, Path.GetRelativePath(src, dir)));
     foreach (var file in Directory.GetFiles(src, "*", SearchOption.AllDirectories))
-        File.Copy(file, file.Replace(src, dst), true);
+        File.Copy(file, Path.Combine(dst, Path.GetRelativePath(src, file)), true);
 }
 
 /// <summary>
 /// Parses a timeout argument of the form "30s", "5m", or "1h" into seconds.
-/// Returns 60 if the format is not recognized.
+/// An unrecognized format is a hard error, never a silent default.
 /// </summary>
 static int ParseTimeout(string val)
 {
     var m = System.Text.RegularExpressions.Regex.Match(val, @"^(\d+)([smh])$");
-    if (!m.Success) return 60;
-    int n = int.Parse(m.Groups[1].Value);
-    return m.Groups[2].Value switch { "m" => n * 60, "h" => n * 3600, _ => n };
+    if (m.Success && int.TryParse(m.Groups[1].Value, out int n))
+        return m.Groups[2].Value switch { "m" => n * 60, "h" => n * 3600, _ => n };
+    Fail($"invalid --timeout value '{val}'; expected a duration like 30s, 5m, or 1h");
+    return 0;
 }
 
 /// <summary>
@@ -554,7 +555,7 @@ static List<string> CompileAll(List<string> cFiles, List<string> asmFiles,
 
     if (tty) Out.ClearRedraw();
     Spin.Done($"Compiled {total} files", sw.Elapsed);
-    return jobs.Select(j => j.obj).ToList();
+    return [.. jobs.Select(j => j.obj)];
 }
 
 /// <summary>

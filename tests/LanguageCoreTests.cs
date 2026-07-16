@@ -324,7 +324,7 @@ public class LanguageCoreTests
             module M { int func helper() { return 1; } }
             kernel { entry func Main() { let int z = M.helper(); } }
             """ },
-            { "defer_defer", "G004", """
+            { "defer_defer", "G062", """
             kernel { entry func Main() { defer defer { } } }
             """ },
             { "dual_return_type", "G053", """

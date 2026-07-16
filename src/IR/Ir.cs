@@ -1,24 +1,46 @@
 namespace Appa;
 
-using System.Collections.Concurrent;
 using System.Collections.Frozen;
 
 #region Primitive types
 
-// One source of truth for scalar types. Each distinct type has a single canonical
-// token stored in IrPrimType.CName; width-implicit and stdint spellings fold onto
-// it. ToC maps the canonical token to a fixed-width C type for a deterministic ABI.
+// One source of truth for scalar types: a single frozen table carrying each primitive's
+// fixed-width C spelling, family, and numeric promotion rank. Every other predicate and
+// list (spelling set, integer family, promotion ranks) is derived from this table, so
+// adding a primitive is a one-line change that cannot drift across passes.
 internal static class PrimTypes
 {
-    // Accepted Gata spellings -> canonical token. Kept as a map so future surface
-    // aliases fold here in one place.
+    internal readonly record struct PrimInfo(string CType, bool IsInt, bool IsFloatTy, int Rank);
+
+    private static readonly FrozenDictionary<string, PrimInfo> Table = FrozenDictionary.ToFrozenDictionary(
+        new Dictionary<string, PrimInfo>
+        {
+            ["bool"]    = new("bool",      IsInt: true,  IsFloatTy: false, Rank: 1),
+            ["char"]    = new("char",      IsInt: true,  IsFloatTy: false, Rank: 2),
+            ["sbyte"]   = new("int8_t",    IsInt: true,  IsFloatTy: false, Rank: 2),
+            ["byte"]    = new("uint8_t",   IsInt: true,  IsFloatTy: false, Rank: 2),
+            ["short"]   = new("int16_t",   IsInt: true,  IsFloatTy: false, Rank: 3),
+            ["ushort"]  = new("uint16_t",  IsInt: true,  IsFloatTy: false, Rank: 3),
+            ["int"]     = new("int32_t",   IsInt: true,  IsFloatTy: false, Rank: 4),
+            ["uint"]    = new("uint32_t",  IsInt: true,  IsFloatTy: false, Rank: 4),
+            ["int64"]   = new("int64_t",   IsInt: true,  IsFloatTy: false, Rank: 5),
+            ["uint64"]  = new("uint64_t",  IsInt: true,  IsFloatTy: false, Rank: 5),
+            ["usize"]   = new("size_t",    IsInt: true,  IsFloatTy: false, Rank: 5),
+            ["uintptr"] = new("uintptr_t", IsInt: true,  IsFloatTy: false, Rank: 5),
+            ["float"]   = new("float",     IsInt: false, IsFloatTy: true,  Rank: 6),
+            ["double"]  = new("double",    IsInt: false, IsFloatTy: true,  Rank: 7),
+            ["void"]    = new("void",      IsInt: false, IsFloatTy: false, Rank: 0),
+        });
+
+    private static readonly FrozenDictionary<string, PrimInfo>.AlternateLookup<ReadOnlySpan<char>> TableLookup =
+        Table.GetAlternateLookup<ReadOnlySpan<char>>();
 
     /// <summary>
     /// Returns true if the string is a recognised Gata primitive spelling.
     /// </summary>
     public static bool IsPrim(string s)
     {
-        return IsPrim(s.AsSpan());
+        return Table.ContainsKey(s);
     }
 
     /// <summary>
@@ -26,19 +48,7 @@ internal static class PrimTypes
     /// </summary>
     public static bool IsPrim(ReadOnlySpan<char> s)
     {
-        return s is
-        "int" or "int64" or "uint" or "uint64" or "short" or "ushort" or
-        "sbyte" or "byte" or "usize" or "uintptr" or "char" or "bool" or
-        "float" or "double" or "void";
-    }
-
-    /// <summary>
-    /// Returns the canonical token for a primitive spelling,
-    /// or the input unchanged if not a known alias.
-    /// </summary>
-    public static string Canon(string s)
-    {
-        return s;
+        return TableLookup.ContainsKey(s);
     }
 
     /// <summary>
@@ -46,35 +56,16 @@ internal static class PrimTypes
     /// </summary>
     public static string ToC(string s)
     {
-        return s switch
-        {
-            "int" => "int32_t",
-            "int64" => "int64_t",
-            "uint" => "uint32_t",
-            "uint64" => "uint64_t",
-            "short" => "int16_t",
-            "ushort" => "uint16_t",
-            "sbyte" => "int8_t",
-            "byte" => "uint8_t",
-            "usize" => "size_t",
-            "uintptr" => "uintptr_t",
-            "char" => "char",
-            "bool" => "bool",
-            "float" => "float",
-            "double" => "double",
-            "void" => "void",
-            _ => s
-        };
+        return Table.TryGetValue(s, out var i) ? i.CType : s;
     }
 
     /// <summary>
-    /// Returns true if the canonical token belongs to the integer family.
+    /// Returns true if the canonical token belongs to the integer family (bool included,
+    /// matching C's integral treatment).
     /// </summary>
     public static bool IsIntCanon(string canon)
     {
-        return canon is
-        "int" or "int64" or "uint" or "uint64" or "short" or "ushort" or
-        "sbyte" or "byte" or "usize" or "uintptr" or "char" or "bool";
+        return Table.TryGetValue(canon, out var i) && i.IsInt;
     }
 
     /// <summary>
@@ -82,13 +73,20 @@ internal static class PrimTypes
     /// </summary>
     public static bool IsFloat(string canon)
     {
-        return canon is "float" or "double";
+        return Table.TryGetValue(canon, out var i) && i.IsFloatTy;
+    }
+
+    /// <summary>
+    /// Returns the numeric promotion rank used to pick the wider operand type.
+    /// Unknown names take int's rank, mirroring the resolver's historical default.
+    /// </summary>
+    public static int Rank(string name)
+    {
+        return Table.TryGetValue(name, out var i) ? i.Rank : 4;
     }
 
     // Every accepted spelling - the front-end's set of primitive type names.
-    public static readonly FrozenSet<string> Spellings = FrozenSet.ToFrozenSet(
-        ["int", "int64", "uint", "uint64", "short", "ushort", "sbyte", "byte", "usize", "uintptr", "char", "bool", "float", "double", "void"]
-    );
+    public static readonly FrozenSet<string> Spellings = FrozenSet.ToFrozenSet(Table.Keys);
 }
 
 /// <summary>
@@ -167,14 +165,8 @@ internal record IrPrimType(string CName) : IrType
 /// </summary>
 internal record IrClassRef(string ClassName) : IrType
 {
-    private static readonly ConcurrentDictionary<string, IrClassRef> Cache = new();
-    public static IrClassRef Get(string className)
-    {
-        return Cache.GetOrAdd(className, name => new IrClassRef(name));
-    }
-
-    // No SymbolTable is threaded through IrType's static singletons/cache, so this
-    // still names BuiltinTypes.String directly rather than resolving a binding - the
+    // No SymbolTable is threaded through IrType's static singletons, so this
+    // still names BuiltinTypes.String directly rather than resolving a binding. The
     // constant itself is shared with everywhere else that references the same slot.
     private readonly bool _isString = ClassName == BuiltinTypes.String || ClassName == $"gata_{BuiltinTypes.String}";
     public override string ToCType()
@@ -196,15 +188,9 @@ internal record IrClassRef(string ClassName) : IrType
 /// </summary>
 internal record IrEnumType(string Name) : IrType
 {
-    private static readonly ConcurrentDictionary<string, IrEnumType> Cache = new();
-    public static IrEnumType Get(string name)
-    {
-        return Cache.GetOrAdd(name, n => new IrEnumType(n));
-    }
-
-    // Computed on every call, not cached at construction: this instance is shared
-    // via Cache/Get and may be first constructed before Densifier.SetDense runs, at
-    // which point Mangler.Enum would freeze the pre-dense name into a cached field.
+    // An instance may be
+    // constructed before Densifier.SetDense runs, at which point Mangler.Enum
+    // would freeze the pre-dense name into a cached field.
     public override string ToCType()
     {
         return Mangler.Enum(Name);
@@ -219,12 +205,6 @@ internal record IrEnumType(string Name) : IrType
 /// </summary>
 internal record IrPtrType(IrType Inner) : IrType
 {
-    private static readonly ConcurrentDictionary<IrType, IrPtrType> Cache = new();
-    public static IrPtrType Get(IrType inner)
-    {
-        return Cache.GetOrAdd(inner, i => new IrPtrType(i));
-    }
-
     // Computed on every call - see IrEnumType.ToCType for why this can't be cached.
     public override string ToCType()
     {
@@ -265,26 +245,12 @@ internal record IrArrayType(IrType Elem, int Size) : IrType
 /// </summary>
 internal record IrResultType(IrType Inner) : IrType
 {
-    private static readonly ConcurrentDictionary<IrType, IrResultType> Cache = new();
-    public static IrResultType Get(IrType inner)
-    {
-        return Cache.GetOrAdd(inner, i => new IrResultType(i));
-    }
-
     /// <summary>
     /// The C typedef name for this result type, e.g. Result_int or Result_MyClass.
-    /// Computed on every call, not cached - see IrEnumType.ToCType for why the
-    /// fallback branch's Inner.ToCType() can't be captured at construction.
+    /// Derived from MangledName so it always agrees with the typedef registered by
+    /// SymbolTable.RegisterThrows (see SymbolTable.ResultInnerName). void folds to int.
     /// </summary>
-    public string ResultName => $"Result_{(
-        Inner switch
-        {
-            IrVoidType    => "int",
-            IrClassRef cr => cr.ClassName,
-            IrPrimType p  => p.CName,
-            _             => Inner.ToCType().TrimEnd('*').Replace("gata_", "")
-        }
-    )}";
+    public string ResultName => $"Result_{(Inner is IrVoidType ? "int" : Inner.MangledName)}";
 
     public override string ToCType()
     {
@@ -391,7 +357,7 @@ internal record IrLitNull(IrType T) : IrExpr(T);
 /// <summary>
 /// A reference to a named enum member.
 /// </summary>
-internal record IrEnumConst(string EnumName, string Member) : IrExpr(IrEnumType.Get(EnumName));
+internal record IrEnumConst(string EnumName, string Member) : IrExpr(new IrEnumType(EnumName));
 
 /// <summary>
 /// A local variable or parameter reference.
@@ -401,7 +367,7 @@ internal record IrVar(string Name, IrType T, bool IsRef = false) : IrExpr(T);
 /// <summary>
 /// A reference to the implicit self object inside a method body.
 /// </summary>
-internal record IrSelfExpr(string ClassName) : IrExpr(IrClassRef.Get(ClassName));
+internal record IrSelfExpr(string ClassName) : IrExpr(new IrClassRef(ClassName));
 
 /// <summary>
 /// A field load from an object expression.
@@ -427,12 +393,12 @@ internal record IrInstanceCall(IrExpr Recv, string CName, IrType RetType, List<I
 /// <summary>
 /// A call to a throws-annotated static function. The result type wraps the inner type in Result.
 /// </summary>
-internal record IrThrowsCall(string CName, IrType InnerType, List<IrExpr> Args) : IrExpr(IrResultType.Get(InnerType));
+internal record IrThrowsCall(string CName, IrType InnerType, List<IrExpr> Args) : IrExpr(new IrResultType(InnerType));
 
 /// <summary>
 /// A call to a throws-annotated instance method. The result type wraps the inner type in Result.
 /// </summary>
-internal record IrThrowsInstanceCall(IrExpr Recv, string CName, IrType InnerType, List<IrExpr> Args) : IrExpr(IrResultType.Get(InnerType));
+internal record IrThrowsInstanceCall(IrExpr Recv, string CName, IrType InnerType, List<IrExpr> Args) : IrExpr(new IrResultType(InnerType));
 
 /// <summary>
 /// A bare reference to a free function by name, decaying to a function-pointer value.
@@ -485,14 +451,14 @@ internal record IrCast(IrType To, IrExpr Value) : IrExpr(To);
 /// <summary>
 /// A heap allocation of a named class with constructor arguments.
 /// </summary>
-internal record IrNew(string ClassName, List<IrExpr> Args) : IrExpr(IrClassRef.Get(ClassName));
+internal record IrNew(string ClassName, List<IrExpr> Args) : IrExpr(new IrClassRef(ClassName));
 
 /// <summary>
 /// A heap allocation followed by repeated Add calls to populate a collection.
 /// Lowered to a GNU statement expression by the emitter.
 /// </summary>
 internal record IrNewInit(string ClassName, List<IrExpr> Args, string AddCName, List<IrExpr> Inits)
-    : IrExpr(IrClassRef.Get(ClassName));
+    : IrExpr(new IrClassRef(ClassName));
 
 /// <summary>
 /// A fixed-array literal [e1, e2, ...] lowered to a C compound literal.
@@ -507,7 +473,7 @@ internal record IrInterp(List<IrExpr> Parts) : IrExpr(IrType.String);
 /// <summary>
 /// Takes the address of a target expression, producing a pointer.
 /// </summary>
-internal record IrAddrOf(IrExpr Target) : IrExpr(IrPtrType.Get(Target.Type));
+internal record IrAddrOf(IrExpr Target) : IrExpr(new IrPtrType(Target.Type));
 
 /// <summary>
 /// Dereferences a pointer expression to yield the pointed-to value.
@@ -746,8 +712,9 @@ internal record IrProcess(string Name, string Mode, List<IrThread> Threads);
 
 /// <summary>
 /// A single thread within a process, with a fully-qualified name and optional entry function.
+/// Deployment mode lives on the owning process; threads have none of their own.
 /// </summary>
-internal record IrThread(string Name, string Mode, string FullName, IrFunction? EntryFunc);
+internal record IrThread(string Name, string FullName, IrFunction? EntryFunc);
 
 #endregion
 

@@ -225,7 +225,7 @@ public class ParserDiagnosticsTests
         var cls = Assert.IsType<ClassDecl>(prog.Items[0]);
         var op = Assert.IsType<OperatorDecl>(cls.Members[0]);
         Assert.Equal("+", op.Op);
-        Assert.Equal("C", op.ReturnType);
+        Assert.Equal("C", op.ReturnType?.ToSpecString());
     }
 
     /// <summary>
@@ -249,7 +249,7 @@ public class ParserDiagnosticsTests
     {
         var prog = SingleFileCompile.Parse("@extern int func F();");
         var ext = Assert.IsType<ExternFuncDecl>(prog.Items[0]);
-        Assert.Equal("int", ext.ReturnType);
+        Assert.Equal("int", ext.ReturnType?.ToSpecString());
     }
 
     /// <summary>
@@ -264,7 +264,7 @@ public class ParserDiagnosticsTests
         var cls = Assert.IsType<ClassDecl>(prog.Items[0]);
         var op = Assert.IsType<OperatorDecl>(cls.Members[0]);
         Assert.Equal("+", op.Op);
-        Assert.Equal("func(int)->int", op.ReturnType);
+        Assert.Equal("func(int)->int", op.ReturnType?.ToSpecString());
     }
 
     /// <summary>

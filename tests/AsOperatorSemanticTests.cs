@@ -476,10 +476,7 @@ public class AsOperatorSemanticTests
         var cls = Assert.Single(module.Classes, c => c.Name == "Wrapper");
         var irOp = Assert.Single(cls.Operators, o => o.Op == "as");
         Assert.True(irOp.IsStatic);
-        var emitter = new Emitter(module, diag);
-        string sig = (string)typeof(Emitter)
-            .GetMethod("OperatorSig", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
-            .Invoke(emitter, [irOp])!;
+        string sig = Emitter.OperatorSig(irOp);
         Assert.DoesNotContain("self", sig);
     }
 

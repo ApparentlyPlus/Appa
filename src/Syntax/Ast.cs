@@ -62,7 +62,7 @@ internal record ContextDecl(string Kind, TopLevel[] Items, TextSpan Span) : TopL
 /// template monomorphized per call site with type arguments inferred from the argument types.
 /// IsEntry marks it as a thread entry point; Throws means it may propagate a Result error.
 /// </summary>
-internal record FuncDecl(Modifiers Modifiers, Annotation[] Annotations, string? ReturnType,
+internal record FuncDecl(Modifiers Modifiers, Annotation[] Annotations, TypeSpec? ReturnType,
                 string Name, string[] GenericParams, Param[] Params,
                 bool IsEntry, bool Throws, MethodBody Body, TextSpan Span) : TopLevel(Span);
 
@@ -76,7 +76,7 @@ internal record ProcessDecl(string Name, string Mode, ThreadDecl[] Threads, Text
 /// An extern function pre-declaration that tells the compiler a C function exists so it can
 /// be called from Gata without a Gata body. Translated to a forward prototype in the backend.
 /// </summary>
-internal record ExternFuncDecl(string? ReturnType, string Name, Param[] Params,
+internal record ExternFuncDecl(TypeSpec? ReturnType, string Name, Param[] Params,
                       TextSpan Span, Annotation[]? Annotations = null) : TopLevel(Span);
 
 /// <summary>
@@ -166,20 +166,20 @@ internal record FieldsBlock(NativeBody Body, TextSpan Span) : ClassMember(Span);
 /// A Gata field declaration. Init is the optional initializer expression; Type is null
 /// when inferred.
 /// </summary>
-internal record FieldDecl(Modifiers Modifiers, string? Type, string Name, TextSpan Span, Expr? Init = null) : ClassMember(Span);
+internal record FieldDecl(Modifiers Modifiers, TypeSpec? Type, string Name, TextSpan Span, Expr? Init = null) : ClassMember(Span);
 
 /// <summary>
 /// A method declaration inside a class or module. IsEntry marks it as a thread entry point;
 /// Throws means it participates in the Result error-propagation protocol.
 /// </summary>
-internal record MethodDecl(Modifiers Modifiers, Annotation[] Annotations, string? ReturnType,
+internal record MethodDecl(Modifiers Modifiers, Annotation[] Annotations, TypeSpec? ReturnType,
                   string Name, Param[] Params, bool IsEntry, bool Throws,
                   MethodBody Body, TextSpan Span) : ClassMember(Span);
 
 /// <summary>
 /// An operator overload inside a class. Op is the operator symbol string ("+", "==").
 /// </summary>
-internal record OperatorDecl(Modifiers Modifiers, string Op, Param[] Params, string? ReturnType, MethodBody Body, TextSpan Span) : ClassMember(Span);
+internal record OperatorDecl(Modifiers Modifiers, string Op, Param[] Params, TypeSpec? ReturnType, MethodBody Body, TextSpan Span) : ClassMember(Span);
 
 #endregion
 
@@ -216,7 +216,81 @@ internal record ThreadDecl(string Name, string? Mode, EntryFuncDecl Entry, TextS
 /// The entry function of a thread. It consists of parameters and a single block body. Not a FuncDecl
 /// because it cannot be called from Gata code, only dispatched by the runtime.
 /// </summary>
-internal record EntryFuncDecl(Modifiers Modifiers, string? ReturnType, Param[] Params, Block Body, TextSpan Span);
+internal record EntryFuncDecl(Modifiers Modifiers, TypeSpec? ReturnType, Param[] Params, Block Body, TextSpan Span);
+
+#endregion
+
+#region Type specifiers
+
+/// <summary>
+/// Structured type specifier. The parser builds it once; every later pass walks it
+/// structurally. ToSpecString() reproduces the legacy flat spelling used for mangling
+/// and duplicate-signature keys, so emitted C names stay byte identical.
+/// </summary>
+internal abstract record TypeSpec(TextSpan Span)
+{
+    public abstract string ToSpecString();
+    public sealed override string ToString() => ToSpecString();
+}
+
+/// <summary>
+/// A named type: a primitive, class, enum, union, or generic instantiation. Args holds
+/// the generic type arguments structurally (each itself a named type, since Gata type
+/// arguments cannot be pointers, arrays, or function types). Mangled flattens the name
+/// the way the rest of the compiler identifies the type: Base or Base_Arg1_Arg2.
+/// </summary>
+internal sealed record NamedSpec(string Name, NamedSpec[] Args, TextSpan Span) : TypeSpec(Span)
+{
+    public NamedSpec(string name) : this(name, [], TextSpan.None) { }
+    public NamedSpec(string name, TextSpan span) : this(name, [], span) { }
+
+    public string Mangled
+    {
+        get
+        {
+            if (Args.Length == 0) return Name;
+            var sb = new System.Text.StringBuilder(Name);
+            foreach (var a in Args) sb.Append('_').Append(a.Mangled);
+            return sb.ToString();
+        }
+    }
+
+    public override string ToSpecString() => Mangled;
+}
+
+/// <summary>
+/// A pointer type T*. Only legal to dereference inside unsafe code.
+/// </summary>
+internal sealed record PtrSpec(TypeSpec Inner, TextSpan Span) : TypeSpec(Span)
+{
+    public override string ToSpecString() => Inner.ToSpecString() + "*";
+}
+
+/// <summary>
+/// A fixed-size array type [N]T. SizeText is the literal size token as written
+/// (validated and parsed by the type resolver, like every other literal).
+/// </summary>
+internal sealed record ArraySpec(string SizeText, TypeSpec Elem, TextSpan Span) : TypeSpec(Span)
+{
+    public override string ToSpecString() => $"[{SizeText}]{Elem.ToSpecString()}";
+}
+
+/// <summary>
+/// A function-pointer type func(T1, T2) -> R.
+/// </summary>
+internal sealed record FuncSpec(TypeSpec[] Params, TypeSpec Ret, TextSpan Span) : TypeSpec(Span)
+{
+    public override string ToSpecString()
+    {
+        var sb = new System.Text.StringBuilder("func(");
+        for (int i = 0; i < Params.Length; i++)
+        {
+            if (i > 0) sb.Append(',');
+            sb.Append(Params[i].ToSpecString());
+        }
+        return sb.Append(")->").Append(Ret.ToSpecString()).ToString();
+    }
+}
 
 #endregion
 
@@ -226,7 +300,7 @@ internal record EntryFuncDecl(Modifiers Modifiers, string? ReturnType, Param[] P
 /// A function or method parameter. IsRef = true means the argument is passed by reference;
 /// the call site must supply an lvalue prefixed with ref.
 /// </summary>
-internal record Param(string Type, string Name, TextSpan Span, bool IsRef = false);
+internal record Param(TypeSpec Type, string Name, TextSpan Span, bool IsRef = false);
 
 #endregion
 
@@ -263,6 +337,56 @@ internal enum PostfixOp { Inc, Dec }
 /// that combine a BinOp with the store, eg. AddAssign for '+='.
 /// </summary>
 internal enum AssignOp { Assign, AddAssign, SubAssign, MulAssign, DivAssign, ModAssign, AndAssign, OrAssign, XorAssign, ShlAssign, ShrAssign }
+
+/// <summary>
+/// The one table of user-overloadable operator shape rules: required arity, default return
+/// type, and the bool/void return constraints. SymbolCollector (declaration keys and
+/// tentative signatures) and TypeResolver (validation) both read it, so they cannot drift.
+/// </summary>
+internal static class OperatorRules
+{
+    /// <summary>
+    /// The parameter count the operator's declaration must have. '-' alone is dual-arity:
+    /// zero parameters declares unary negation, one declares binary subtraction.
+    /// </summary>
+    public static int RequiredArity(string op, int declaredParams)
+    {
+        return op switch
+        {
+            "[]=" => 2,
+            "!" or "~" or "++" or "--" => 0,
+            "-" => declaredParams == 0 ? 0 : 1,
+            _ => 1
+        };
+    }
+
+    /// <summary>
+    /// True for the comparison operators, which must return bool (and whose '=='/'!=' pair
+    /// is derived by negation when only one is declared).
+    /// </summary>
+    public static bool IsComparison(string op)
+    {
+        return op is "==" or "!=" or "<" or ">" or "<=" or ">=";
+    }
+
+    /// <summary>
+    /// True for the in-place mutators, which must return void.
+    /// </summary>
+    public static bool IsMutator(string op)
+    {
+        return op is "++" or "--";
+    }
+
+    /// <summary>
+    /// The return type an operator defaults to when the declaration omits one.
+    /// </summary>
+    public static string DefaultReturn(string op, string ownerClass)
+    {
+        return op == "[]=" || IsMutator(op) ? "void"
+            : IsComparison(op) || op == "!" ? "bool"
+            : ownerClass;
+    }
+}
 
 /// <summary>
 /// Conversions between operator enums and their canonical Gata/C token spelling, plus the
@@ -433,7 +557,7 @@ internal record IdentExpr(string Name, TextSpan Span) : Expr(Span);
 /// <summary>
 /// An explicit type cast, eg. (int) x. TargetType is the destination type name.
 /// </summary>
-internal record CastExpr(string TargetType, Expr Value, TextSpan Span) : Expr(Span);
+internal record CastExpr(TypeSpec TargetType, Expr Value, TextSpan Span) : Expr(Span);
 
 /// <summary>
 /// A function or method call. Callee may be any expression that resolves to a callable.
@@ -474,7 +598,7 @@ internal record PostfixExpr(PostfixOp Op, Expr Operand, TextSpan Span) : Expr(Sp
 /// Object construction. Args holds constructor arguments for class instantiation;
 /// CollectionInit holds the bracketed element list for collection construction.
 /// </summary>
-internal record NewExpr(string Type, Expr[] Args, Expr[] CollectionInit, TextSpan Span) : Expr(Span);
+internal record NewExpr(TypeSpec Type, Expr[] Args, Expr[] CollectionInit, TextSpan Span) : Expr(Span);
 
 /// <summary>
 /// A fixed-size array literal, eg. [e1, e2, e3].
@@ -500,12 +624,12 @@ internal record DerefExpr(Expr Ptr, TextSpan Span) : Expr(Span);
 /// <summary>
 /// sizeof(T) expression. Evaluates to the size_t byte count of the named type.
 /// </summary>
-internal record SizeofExpr(string TypeName, TextSpan Span) : Expr(Span);
+internal record SizeofExpr(TypeSpec TypeName, TextSpan Span) : Expr(Span);
 
 /// <summary>
 /// default(T) expression. Evaluates to the zero value of the named type.
 /// </summary>
-internal record DefaultExpr(string TypeName, TextSpan Span) : Expr(Span);
+internal record DefaultExpr(TypeSpec TypeName, TextSpan Span) : Expr(Span);
 
 #endregion
 
@@ -520,7 +644,7 @@ internal record NativeStmt(NativeBody Body, TextSpan Span) : Stmt(Span);
 /// A local variable declaration. Type is null when the type is inferred from the initializer.
 /// Init is null for declarations without an initializer.
 /// </summary>
-internal record LetStmt(string? Type, string Name, Expr? Init, TextSpan Span) : Stmt(Span);
+internal record LetStmt(TypeSpec? Type, string Name, Expr? Init, TextSpan Span) : Stmt(Span);
 
 /// <summary>
 /// An assignment statement. Op is the assignment operator kind (plain '=' or a compound form).

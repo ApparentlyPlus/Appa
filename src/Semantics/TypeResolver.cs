@@ -77,38 +77,9 @@ internal sealed class TypeResolver(
 
     // Generic free-function templates; each distinct instantiation is stamped once.
     private readonly Dictionary<string, (FuncDecl Decl, string File, string Context)> _funcTemplates = [];
-    private readonly Queue<(FuncDecl Decl, string File, string Context, Dictionary<string, string> Binds, string Mangled)> _genericQueue = new();
+    private readonly Queue<(FuncDecl Decl, string File, string Context, Dictionary<string, TypeSpec> Binds, string Mangled)> _genericQueue = new();
     private readonly HashSet<string> _genericSeen = [];
     private int _labelSeq;
-
-    // Splits "func(T1,T2)->R" into its parameter type-strings and return type-string,
-    // tracking paren/bracket depth so nested types don't split at the wrong comma.
-    /// <summary>
-    /// Splits an encoded function-type string into parameter types and return type.
-    /// </summary>
-    private static bool TrySplitFuncType(ReadOnlySpan<char> t, out List<Range> ps, out ReadOnlySpan<char> rs)
-    {
-        ps = [];
-        rs = default;
-        if (!t.StartsWith("func(")) return false;
-        int depth = 0, pstart = 5, close = -1;
-        for (int i = 5; i < t.Length; i++)
-        {
-            char c = t[i];
-            if (c is '(' or '[') depth++;
-            else if (c is ')' or ']') { if (depth == 0) { close = i; break; } depth--; }
-            else if (c == ',' && depth == 0) { ps.Add(new Range(pstart, i)); pstart = i + 1; }
-        }
-        if (close < 0) return false;
-        int lastLength = close - pstart;
-        if (lastLength > 0) ps.Add(new Range(pstart, close));
-        int rstart = close + 1;
-        if (t[rstart..].StartsWith("->"))
-            rs = t[(rstart + 2)..];
-        else
-            rs = t[rstart..];
-        return true;
-    }
 
     /// <summary>
     /// Returns true when the class was declared as a native type with no Gata-visible fields.
@@ -127,65 +98,69 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Validates that the given Gata type name refers to a real, in-scope type.
-    /// Reports a diagnostic on any unknown or out-of-scope name.
+    /// Validates that a type spec refers to real, in-scope types, node by node.
+    /// Each node carries its own source span, so the caret lands on the offending part
+    /// of a compound type instead of the whole declaration.
     /// </summary>
-    private void CheckType(string? gataType, ResolveCtx ctx, TextSpan span, bool allowVoid = false)
+    private void CheckType(TypeSpec? t, ResolveCtx ctx, TextSpan span, bool allowVoid = false)
     {
-        CheckType(gataType.AsSpan(), ctx, span, allowVoid);
-    }
-
-    /// <summary>
-    /// Validates that the given Gata type name refers to a real, in-scope type.
-    /// Reports a diagnostic on any unknown or out-of-scope name.
-    /// </summary>
-    private void CheckType(ReadOnlySpan<char> gataType, ResolveCtx ctx, TextSpan span, bool allowVoid = false)
-    {
-        if (gataType.IsEmpty) return;
-        if (gataType.StartsWith("func("))
+        switch (t)
         {
-            if (TrySplitFuncType(gataType, out var ps, out var rs))
+            case null:
+                return;
+            case FuncSpec f:
+                foreach (var p in f.Params) CheckType(p, ctx, Sp(p, span));
+                CheckType(f.Ret, ctx, Sp(f.Ret, span), allowVoid: true);
+                return;
+            case ArraySpec a:
+                if (!(TryParseIntLit(a.SizeText, out var n, out _, out _) && n > 0))
+                    diag.Error(Codes.UndefinedType, ctx.File, Sp(a, span),
+                        $"invalid fixed-array size in '{a.ToSpecString()}'");
+                else
+                    CheckType(a.Elem, ctx, Sp(a.Elem, span));
+                return;
+            case PtrSpec ptr:
             {
-                foreach (var p in ps) CheckType(gataType[p], ctx, span);
-                CheckType(rs, ctx, span, allowVoid: true);
+                // Any level of pointer to void is legal; otherwise validate the pointee.
+                TypeSpec inner = ptr.Inner;
+                while (inner is PtrSpec ip) inner = ip.Inner;
+                if (inner is NamedSpec { Name: "void", Args.Length: 0 }) return;
+                CheckType(inner, ctx, Sp(inner, span));
+                return;
             }
-            else
-                diag.Error(Codes.UndefinedType, ctx.File, span, $"malformed function type '{gataType.ToString()}'");
-            return;
+            case NamedSpec nm:
+            {
+                string name = nm.Mangled;
+                if (name == "void")
+                {
+                    if (!allowVoid)
+                        diag.Error(Codes.UndefinedType, ctx.File, Sp(nm, span), "'void' is not a value type");
+                    return;
+                }
+                if (SymbolTable.Primitives.Contains(name)) return;
+                if (BuiltinTypes.All.Contains(name)) return;
+                if (sym.IsEnum(name)) return;
+                if (sym.IsUnion(name)) return;
+                if (ClassInScope(name)) return;
+                diag.Error(Codes.UndefinedType, ctx.File, Sp(nm, span),
+                    sym.IsClass(name)
+                        ? $"type '{Mangler.DisplayName(name)}' is not in scope; import its module"
+                        : $"unknown type '{Mangler.DisplayName(name)}'");
+                return;
+            }
         }
-        if (gataType.StartsWith("["))
-        {
-            int close = gataType.IndexOf(']');
-            bool ok = close > 0 && TryParseIntLit(gataType[1..close], out var n, out _, out _) && n > 0;
-            if (!ok)
-                diag.Error(Codes.UndefinedType, ctx.File, span, $"invalid fixed-array size in '{gataType.ToString()}'");
-            else
-                CheckType(gataType[(close + 1)..], ctx, span);
-            return;
-        }
-        bool hadPtr = gataType.Contains('*');
-        ReadOnlySpan<char> bSpan = gataType;
-        while (bSpan.EndsWith("*")) bSpan = bSpan[..^1];
-        bSpan = bSpan.Trim();
-        if (bSpan.Length == 0) return;
-        if (bSpan.Equals("void", StringComparison.Ordinal))
-        {
-            if (!allowVoid && !hadPtr)
-                diag.Error(Codes.UndefinedType, ctx.File, span, "'void' is not a value type");
-            return;
-        }
-        if (SymbolTable.Primitives.GetAlternateLookup<ReadOnlySpan<char>>().Contains(bSpan)) return;
-        if (BuiltinTypes.All.GetAlternateLookup<ReadOnlySpan<char>>().Contains(bSpan)) return;
-        if (sym.IsEnum(bSpan)) return;
-        if (sym.IsUnion(bSpan)) return;
-        if (ClassInScope(bSpan)) return;
-        diag.Error(Codes.UndefinedType, ctx.File, span,
-            sym.IsClass(bSpan)
-                ? $"type '{Mangler.DisplayName(bSpan.ToString())}' is not in scope; import its module"
-                : $"unknown type '{Mangler.DisplayName(bSpan.ToString())}'");
     }
 
     /// <summary>
+    /// Prefers the spec node's own span; falls back to the declaration span when the
+    /// node was synthesized without one.
+    /// </summary>
+    private static TextSpan Sp(TypeSpec t, TextSpan fallback)
+    {
+        return t.Span.IsNone ? fallback : t.Span;
+    }
+
+        /// <summary>
     /// Validates that no two parameters in the list share the same name.
     /// </summary>
     private void CheckParams(Param[] ps, ResolveCtx ctx)
@@ -277,20 +252,11 @@ internal sealed class TypeResolver(
 
     /// <summary>
     /// Returns the numeric promotion rank of the type, used to resolve binary operator widening.
+    /// Ranks live in the primitive table (PrimTypes) alongside each type's other facts.
     /// </summary>
     private static int NumRank(IrType t)
     {
-        return t is IrPrimType p ? p.CName switch
-        {
-            "bool" => 1,
-            "char" or "sbyte" or "byte" => 2,
-            "short" or "ushort" => 3,
-            "int" or "uint" => 4,
-            "int64" or "uint64" or "usize" or "uintptr" => 5,
-            "float" => 6,
-            "double" => 7,
-            _ => 4
-        } : 4;
+        return t is IrPrimType p ? PrimTypes.Rank(p.CName) : 4;
     }
 
     /// <summary>
@@ -566,6 +532,19 @@ internal sealed class TypeResolver(
             IrMatch m => m.Cases.Any(c => HasLoopBreak(c.Body)) || (m.Default != null && HasLoopBreak(m.Default)),
             _ => false
         };
+    }
+
+    /// <summary>
+    /// Rejects 'throws' return types that have no valid Result_T typedef spelling.
+    /// Pointer, fixed-array, and function-pointer inner types would produce an illegal
+    /// C typedef name, so they are compile errors, not link surprises.
+    /// </summary>
+    private void CheckThrowsReturn(IrType ret, bool isThrows, string display, ResolveCtx ctx, TextSpan span)
+    {
+        if (isThrows && ret is IrPtrType or IrArrayType or IrFuncPtrType)
+            diag.Error(Codes.BadThrowsReturnType, ctx.File, span,
+                $"'{display}': a 'throws' function cannot return '{Describe(ret)}'; " +
+                "supported 'throws' return types are void, primitives, enums, unions, String, and classes");
     }
 
     /// <summary>
@@ -1192,8 +1171,8 @@ internal sealed class TypeResolver(
                 break;
             case EnvironmentDecl ed:
                 if (ctx.Context != "none")
-                    diag.Error(Codes.TypeMismatch, ctx.File, ed.Span,
-                        "an 'environment' declaration is only valid at the top level of a file, not inside a context block");
+                    diag.Error(Codes.MisplacedEnvironment, ctx.File, ed.Span,
+                        "an '@environment' declaration is only valid at the top level of a file, not inside a context block");
                 break;
             case NativeBlock nb:
             {
@@ -1261,51 +1240,43 @@ internal sealed class TypeResolver(
 
     #region Type conversion
     /// <summary>
-    /// Converts a Gata type string to its IR type. Returns IrVoidType for null or "void".
-    /// Handles function types, fixed-array types, pointer types, primitives, enums, unions, and classes.
+    /// Converts a type spec to its IR type. Null means void (an omitted type).
     /// </summary>
-    public IrType ResolveType(string? t)
+    public IrType ResolveType(TypeSpec? t)
     {
-        return ResolveType(t.AsSpan());
-    }
-
-    /// <summary>
-    /// Converts a Gata type span to its IR type. Returns IrVoidType for null or "void".
-    /// Handles function types, fixed-array types, pointer types, primitives, enums, unions, and classes.
-    /// </summary>
-    private IrType ResolveType(ReadOnlySpan<char> t)
-    {
-        if (t.IsEmpty || t.Equals("void", StringComparison.Ordinal)) return IrType.Void;
-        if (t.StartsWith("func("))
+        switch (t)
         {
-            if (TrySplitFuncType(t, out var ps, out var rs))
+            case null:
+                return IrType.Void;
+            case FuncSpec f:
             {
-                var resolvedParams = new List<IrType>(ps.Count);
-                for (int i = 0; i < ps.Count; i++)
-                {
-                    resolvedParams.Add(ResolveType(t[ps[i]]));
-                }
-                return FnPtr(ResolveType(rs), resolvedParams);
+                var ps = new List<IrType>(f.Params.Length);
+                foreach (var p in f.Params) ps.Add(ResolveType(p));
+                return FnPtr(ResolveType(f.Ret), ps);
             }
-            return IrType.Void;
+            case ArraySpec a:
+                // CheckType reports an invalid size; resolve defensively to size 0.
+                return Arr(ResolveType(a.Elem), TryParseIntLit(a.SizeText, out var v, out _, out _) ? (int)v : 0);
+            case PtrSpec p2:
+                return new IrPtrType(ResolveType(p2.Inner));
+            case NamedSpec nm:
+            {
+                string name = nm.Mangled;
+                if (name == "void") return IrType.Void;
+                if (BuiltinTypes.All.Contains(name))
+                    return sym.ResolveBuiltinType(name)
+                        ?? (name == BuiltinTypes.String ? IrType.String : new IrPtrType(IrType.Void));
+                if (PrimTypes.IsPrim(name)) return new IrPrimType(name);
+                if (sym.IsEnum(name)) return new IrEnumType(name);
+                if (sym.IsUnion(name)) return new IrUnionType(name);
+                return new IrClassRef(name);
+            }
+            default:
+                throw new System.Diagnostics.UnreachableException($"[TypeResolver] unhandled TypeSpec: {t.GetType().Name}");
         }
-        if (t.StartsWith("["))
-        {
-            int close = t.IndexOf(']');
-            int n = TryParseIntLit(t[1..close], out var v, out _, out _) ? (int)v : 0;
-            return Arr(ResolveType(t[(close + 1)..]), n);
-        }
-        if (t.EndsWith("*")) return new IrPtrType(ResolveType(t[..^1]));
-        if (BuiltinTypes.All.GetAlternateLookup<ReadOnlySpan<char>>().TryGetValue(t, out var builtinName))
-            return sym.ResolveBuiltinType(builtinName)
-                ?? (builtinName == BuiltinTypes.String ? IrType.String : new IrPtrType(IrType.Void));
-        if (PrimTypes.IsPrim(t)) return new IrPrimType(t.ToString());
-        if (sym.IsEnum(t)) return new IrEnumType(t.ToString());
-        if (sym.IsUnion(t)) return new IrUnionType(t.ToString());
-        return new IrClassRef(t.ToString());
     }
 
-    #endregion
+        #endregion
 
     #region Declaration resolvers
 
@@ -1332,13 +1303,13 @@ internal sealed class TypeResolver(
                     rawFields.Add(new RawFieldBlock(fb.Body.KernelC, fb.Body.UserC));
                     break;
                 case FieldDecl fd:
-                    string? fspec = fd.Type ?? InferFieldTypeSpec(fd.Init);
+                    TypeSpec? fspec = fd.Type ?? InferFieldTypeSpec(fd.Init);
                     if (fspec == null)
                     {
                         diag.Error(Codes.CannotInfer, ctx.File, fd.Span,
                             $"cannot infer a type for field '{fd.Name}'; only literal initializers " +
                             $"can infer a field's type - give it an explicit type");
-                        fspec = "int";
+                        fspec = new NamedSpec("int", fd.Span);
                     }
                     CheckType(fspec, classCtx, fd.Span);
                     var ft = ResolveType(fspec);
@@ -1373,11 +1344,12 @@ internal sealed class TypeResolver(
     /// </summary>
     private IrFunction ResolveMethod(string cls, MethodDecl md, ResolveCtx ctx, bool lib, Visibility vis, bool isModule)
     {
-        bool isStatic = md.Modifiers.HasFlag(Modifiers.Static) || isModule;
+        bool isStatic = (md.Modifiers & Modifiers.Static) != 0 || isModule;
         if (!md.Throws) CheckType(md.ReturnType, ctx, md.Span, allowVoid: true);
         foreach (var p in md.Params) CheckType(p.Type, ctx, p.Span);
         CheckParams(md.Params, ctx);
-        var ret = md.Throws ? ResolveType(md.ReturnType ?? "int") : ResolveType(md.ReturnType ?? "void");
+        var ret = md.Throws && md.ReturnType is null ? IrType.Int : ResolveType(md.ReturnType);
+        CheckThrowsReturn(ret, md.Throws, $"{Mangler.DisplayName(cls)}.{md.Name}", ctx, md.Span);
         
         var pars = new List<IrParam>(md.Params.Length);
         for (int i = 0; i < md.Params.Length; i++)
@@ -1411,27 +1383,19 @@ internal sealed class TypeResolver(
         // its parameter type is - so a class converting itself to a primitive isn't expressible
         // this way at all; that's a named method's job (e.g. 'int func ToInt()'), not a cast.
         bool isAs = od.Op == "as";
-        // Unary '!'/'~' and postfix '++'/'--' take no parameter (self is the operand); '-' is
-        // unary when declared with none and binary with one; '[]=' takes (index, value);
-        // everything else, including 'as', takes exactly one.
-        int want = od.Op switch
-        {
-            "[]=" => 2,
-            "!" or "~" or "++" or "--" => 0,
-            "-" => od.Params.Length == 0 ? 0 : 1,
-            _ => 1
-        };
+
+        // Arity, comparison/mutator classification, and default return all come from the
+        // shared OperatorRules table, the same source SymbolCollector keys declarations by.
+        int want = OperatorRules.RequiredArity(od.Op, od.Params.Length);
         if (od.Params.Length != want)
             diag.Error(Codes.WrongArgCount, ctx.File, od.Span,
                 $"operator '{od.Op}' must take exactly {want} parameter(s), got {od.Params.Length}");
         CheckType(od.ReturnType, ctx, od.Span, allowVoid: true);
         foreach (var p in od.Params) CheckType(p.Type, ctx, p.Span);
         CheckParams(od.Params, ctx);
-        bool isCmp = od.Op is "==" or "!=" or "<" or ">" or "<=" or ">=";
-        bool isMutator = od.Op is "++" or "--";
-        string retSpec = od.ReturnType ?? (od.Op == "[]=" || isMutator ? "void"
-            : isCmp || od.Op == "!" ? "bool"
-            : cls);
+        bool isCmp = OperatorRules.IsComparison(od.Op);
+        bool isMutator = OperatorRules.IsMutator(od.Op);
+        TypeSpec retSpec = od.ReturnType ?? new NamedSpec(OperatorRules.DefaultReturn(od.Op, cls), od.Span);
         var ret = ResolveType(retSpec);
         if (isAs && od.ReturnType != null && !SameType(ret, new IrClassRef(cls)))
             diag.Error(Codes.TypeMismatch, ctx.File, od.Span,
@@ -1456,7 +1420,7 @@ internal sealed class TypeResolver(
             pars.Add(new IrParam(p.Name, ResolveType(p.Type), p.IsRef));
         }
 
-        string cname = Mangler.Operator(cls, od.Op, od.Params, retSpec, sym.IsOverloadedOperator(cls, od.Op));
+        string cname = Mangler.Operator(cls, od.Op, od.Params, sym.IsOverloadedOperator(cls, od.Op));
         var octx = ctx.WithClass(cls).WithFunc($"op_{Mangler.OpSuffix(od.Op)}").WithStatic(isAs).PushScope();
         if (!isAs) octx.Scope.Declare("self", new IrClassRef(cls));
         foreach (var p in od.Params) octx.Scope.Declare(p.Name, ResolveType(p.Type), p.IsRef);
@@ -1474,10 +1438,23 @@ internal sealed class TypeResolver(
     {
         bool lib = ctx.Context == "none";
         var vis = VisOf(ctx.Context);
+        if (fd.IsEntry)
+        {
+            if (fd.Params.Length > 0)
+                diag.Error(Codes.BadEntrySignature, ctx.File, fd.Span,
+                    $"'{fd.Name}': an 'entry func' takes no parameters (it is invoked by the runtime, never called with arguments)");
+            if (fd.ReturnType != null)
+                diag.Error(Codes.BadEntrySignature, ctx.File, fd.Span,
+                    $"'{fd.Name}': an 'entry func' has no return value; remove the return type");
+            if (fd.Throws)
+                diag.Error(Codes.BadEntrySignature, ctx.File, fd.Span,
+                    $"'{fd.Name}': an 'entry func' cannot be 'throws' - there is no caller to receive the error");
+        }
         if (!fd.Throws) CheckType(fd.ReturnType, ctx, fd.Span, allowVoid: true);
         foreach (var p in fd.Params) CheckType(p.Type, ctx, p.Span);
         CheckParams(fd.Params, ctx);
-        var ret = fd.Throws ? ResolveType(fd.ReturnType ?? "int") : ResolveType(fd.ReturnType ?? "void");
+        var ret = fd.Throws && fd.ReturnType is null ? IrType.Int : ResolveType(fd.ReturnType);
+        CheckThrowsReturn(ret, fd.Throws, fd.Name, ctx, fd.Span);
         
         var pars = new List<IrParam>(fd.Params.Length);
         for (int i = 0; i < fd.Params.Length; i++)
@@ -1486,7 +1463,7 @@ internal sealed class TypeResolver(
             pars.Add(new IrParam(p.Name, ResolveType(p.Type), p.IsRef));
         }
 
-        string cname = fd.Modifiers.HasFlag(Modifiers.Private)
+        string cname = (fd.Modifiers & Modifiers.Private) != 0
             ? Mangler.PrivateFreeFunc(Mangler.FileToken(ctx.File), fd.Name, fd.Params,
                 sym.PrivateFuncOverloads(ctx.File, fd.Name).Count > 1)
             : Mangler.FreeFunc(fd.Name, fd.Params, sym.IsOverloadedFunc(fd.Name), fd.IsEntry, isExtern: false);
@@ -1526,7 +1503,7 @@ internal sealed class TypeResolver(
                 diag.Error(Codes.ThreadModeNotAllowed, ctx.File, td.Span,
                     $"thread '{td.Name}' has explicit mode '{td.Mode}'; threads do not support 'foreground' or 'background' modifiers");
             string tFull = $"{pd.Name}_{td.Name}";
-            threads.Add(new IrThread(td.Name, "foreground", tFull, ResolveThreadEntry(tFull, td.Entry, ctx, vis)));
+            threads.Add(new IrThread(td.Name, tFull, ResolveThreadEntry(tFull, td.Entry, ctx, vis)));
         }
         return new IrProcess(pd.Name, pd.Mode, threads);
     }
@@ -1573,7 +1550,7 @@ internal sealed class TypeResolver(
             return new IrStaticCall(fallback, IrType.Void, args);
         }
 
-        var binds = new Dictionary<string, string>();
+        var binds = new Dictionary<string, TypeSpec>();
         for (int i = 0; i < fd.Params.Length; i++)
             if (!Monomorphizer.UnifyParam(fd.Params[i].Type, args[i].Type, fd.GenericParams, binds))
                 diag.Error(Codes.ArgTypeMismatch, ctx.File, span,
@@ -1587,14 +1564,16 @@ internal sealed class TypeResolver(
             return new IrStaticCall(fallback, IrType.Void, args);
         }
 
-        string mangled = fd.Name + "_" + string.Join("_", fd.GenericParams.Select(p => Monomorphizer.SanitizeTypeName(binds[p])));
+        string mangled = fd.Name + "_" + string.Join("_", fd.GenericParams.Select(p => Monomorphizer.SanitizeTypeName(binds[p].ToSpecString())));
         if (_genericSeen.Add(mangled))
             _genericQueue.Enqueue((fd, t.File, t.Context, binds, mangled));
 
         var concreteParams = Monomorphizer.SubParams(fd.Params, binds);
         string cname = Mangler.FreeFunc(mangled, concreteParams, overloaded: false, isEntry: false, isExtern: false);
-        var ret = ResolveType(Monomorphizer.SubType(fd.ReturnType ?? (fd.Throws ? "int" : "void"), binds));
-        CoerceArgs(args, new MethodSig(fd.ReturnType ?? "void", [..concreteParams], true, fd.Throws, false, [..fd.Annotations]), ctx, astArgs);
+        var ret = fd.ReturnType is null
+            ? (fd.Throws ? IrType.Int : IrType.Void)
+            : ResolveType(Monomorphizer.SubType(fd.ReturnType, binds));
+        CoerceArgs(args, new MethodSig(fd.ReturnType, [..concreteParams], true, fd.Throws, false, [..fd.Annotations]), ctx, astArgs);
 
         if (fd.Throws) { CheckThrowsHandled(ctx, span); return new IrThrowsCall(cname, ret, args); }
         return new IrStaticCall(cname, ret, args);
@@ -1772,6 +1751,7 @@ internal sealed class TypeResolver(
     #endregion
 
     #region Statement resolvers
+
     /// <summary>
     /// Resolves a block by pushing a new scope, resolving all statements, and warning on unreachable code.
     /// </summary>
@@ -1851,7 +1831,7 @@ internal sealed class TypeResolver(
             case ReturnStmt rs:
             {
                 if (ctx.InDefer)
-                    diag.Error(Codes.TypeMismatch, ctx.File, rs.Span, "a 'defer' body cannot 'return'");
+                    diag.Error(Codes.DeferTransfer, ctx.File, rs.Span, "a 'defer' body cannot 'return'");
                 if (rs.Value == null)
                 {
                     if (retType is not IrVoidType && retType is not IrResultType)
@@ -1914,14 +1894,14 @@ internal sealed class TypeResolver(
                 if (ctx.LoopDepth == 0)
                     diag.Error(Codes.BreakOutsideLoop, ctx.File, s.Span, "'break' is only valid inside a loop");
                 if (ctx.InDefer)
-                    diag.Error(Codes.TypeMismatch, ctx.File, s.Span, "a 'defer' body cannot 'break'");
+                    diag.Error(Codes.DeferTransfer, ctx.File, s.Span, "a 'defer' body cannot 'break'");
                 return new IrBreak();
 
             case ContinueStmt:
                 if (ctx.LoopDepth == 0)
                     diag.Error(Codes.BreakOutsideLoop, ctx.File, s.Span, "'continue' is only valid inside a loop");
                 if (ctx.InDefer)
-                    diag.Error(Codes.TypeMismatch, ctx.File, s.Span, "a 'defer' body cannot 'continue'");
+                    diag.Error(Codes.DeferTransfer, ctx.File, s.Span, "a 'defer' body cannot 'continue'");
                 return new IrContinue();
 
             case TryCatchStmt tc:
@@ -1929,15 +1909,17 @@ internal sealed class TypeResolver(
 
             case DeferStmt ds:
             {
-                if (ds.Action is DeferStmt)
-                    diag.Error(Codes.TypeMismatch, ctx.File, ds.Span, "a 'defer' body cannot itself 'defer'");
+                // InDefer catches every nesting shape, including a defer wrapped in a
+                // block inside another defer's body
+                if (ctx.InDefer)
+                    diag.Error(Codes.DeferTransfer, ctx.File, ds.Span, "a 'defer' body cannot itself 'defer'");
                 var dctx = ctx.WithDefer().PushScope();
                 return new IrDefer(ResolveStmt(ds.Action, dctx, retType));
             }
 
             case ThrowStmt:
                 if (ctx.InDefer)
-                    diag.Error(Codes.TypeMismatch, ctx.File, s.Span, "a 'defer' body cannot 'throw'");
+                    diag.Error(Codes.DeferTransfer, ctx.File, s.Span, "a 'defer' body cannot 'throw'");
                 CheckThrowsHandled(ctx, s.Span);
                 return new IrThrow();
 
@@ -1957,7 +1939,7 @@ internal sealed class TypeResolver(
                 return new IrPanic(p.Raw) { Span = s.Span };
 
             default:
-                throw new NotImplementedException($"[TypeResolver] unhandled Stmt: {s.GetType().Name} -- additional statement forms added in later commits");
+                throw new System.Diagnostics.UnreachableException($"[TypeResolver] unhandled Stmt: {s.GetType().Name}");
         }
     }
 
@@ -2208,6 +2190,11 @@ internal sealed class TypeResolver(
             if (ls.Type != null)
                 CheckAssign(init, type, $"'{ls.Name}'", ctx, Codes.TypeMismatch);
         }
+       
+        else if (init?.Type is IrResultType irt && ls.Type != null
+                 && !Assignable(new IrVar(ls.Name, irt.Inner), type))
+            diag.Error(Codes.TypeMismatch, ctx.File, init.Span,
+                $"this throwing call produces '{Describe(irt.Inner)}', which cannot initialize '{ls.Name}' of type '{Describe(type)}'");
 
         if (init != null) ForbidNestedThrows(init, ctx, allowRoot: true);
 
@@ -2345,7 +2332,7 @@ internal sealed class TypeResolver(
                 return parts.Count == 0 ? new IrLitString("\"\"") { Span = istr.Span } : new IrInterp(parts);
             }
             default:
-                throw new NotImplementedException($"[TypeResolver] unhandled Expr: {e.GetType().Name} -- additional expression forms added in later commits");
+                throw new System.Diagnostics.UnreachableException($"[TypeResolver] unhandled Expr: {e.GetType().Name}");
         }
     }
 
@@ -2406,7 +2393,10 @@ internal sealed class TypeResolver(
         {
             string stringClass = sym.Builtins.GetValueOrDefault(BuiltinTypes.String, BuiltinTypes.String);
             var sop = sym.LookupOperator(stringClass, "+");
-            string cn = sop?.CName ?? Mangler.Operator(stringClass, "+", [], "String", false);
+            if (sop == null)
+                diag.Error(Codes.MissingIntrinsic, ctx.File, be.Span,
+                    "String defines no '+' operator for concatenation");
+            string cn = sop?.CName ?? Mangler.Operator(stringClass, "+", [], false);
             return new IrStaticCall(cn, IrType.String, [EnsureString(left, ctx), EnsureString(right, ctx)]);
         }
 
@@ -2418,9 +2408,7 @@ internal sealed class TypeResolver(
             return new IrStaticCall(op.CName, ResolveType(op.Type), [left, right]);
         }
 
-        // A class that overloads '==' must not silently get reference identity for '!=' (and
-        // vice versa): derive the missing one of the pair as the negation of the declared one,
-        // so both spellings always agree on what equality means for the type.
+
         if (be.Op is BinOp.Eq or BinOp.Ne && lhsClass != null
             && sym.LookupOperator(lhsClass, be.Op == BinOp.Eq ? "!=" : "==", 1) is { } eqOp
             && ResolveType(eqOp.Type) is IrPrimType { CName: "bool" })
@@ -2539,15 +2527,15 @@ internal sealed class TypeResolver(
     /// unary minus) - the only initializers whose type is knowable without resolving expressions.
     /// Returns null when the initializer is absent or not a literal.
     /// </summary>
-    internal static string? InferFieldTypeSpec(Expr? init)
+    internal static TypeSpec? InferFieldTypeSpec(Expr? init)
     {
         return init switch
         {
-            IntLitExpr il => TryParseIntLit(il.Value, out _, out var it, out _) ? ((IrPrimType)it).CName : null,
-            FloatLitExpr fl => FloatLitType(fl.Value).CName,
-            BoolLitExpr => "bool",
-            CharLitExpr => "char",
-            StrLitExpr => BuiltinTypes.String,
+            IntLitExpr il => TryParseIntLit(il.Value, out _, out var it, out _) ? new NamedSpec(((IrPrimType)it).CName, il.Span) : null,
+            FloatLitExpr fl => new NamedSpec(FloatLitType(fl.Value).CName, fl.Span),
+            BoolLitExpr b => new NamedSpec("bool", b.Span),
+            CharLitExpr c => new NamedSpec("char", c.Span),
+            StrLitExpr sl => new NamedSpec(BuiltinTypes.String, sl.Span),
             UnaryExpr { Op: UnOp.Neg, Operand: IntLitExpr or FloatLitExpr } u => InferFieldTypeSpec(u.Operand),
             _ => null
         };
@@ -3037,62 +3025,64 @@ internal sealed class TypeResolver(
             var a = ne.Args[i];
             args.Add(ResolveExpr(a is RefArgExpr ra ? ra.Target : a, ctx));
         }
-        if (sym.Modules.Contains(ne.Type))
+
+        string typeName = ne.Type.ToSpecString();
+        if (sym.Modules.Contains(typeName))
         {
             diag.Error(Codes.NewOnNonClass, ctx.File, ne.Span,
-                $"'{Mangler.DisplayName(ne.Type)}' is a module and cannot be instantiated");
-            return new IrNew(ne.Type, args);
+                $"'{Mangler.DisplayName(typeName)}' is a module and cannot be instantiated");
+            return new IrNew(typeName, args);
         }
-        if (!ClassInScope(ne.Type))
+        if (!ClassInScope(typeName))
         {
             diag.Error(Codes.NewOnNonClass, ctx.File, ne.Span,
-                sym.IsClass(ne.Type) ? $"'{Mangler.DisplayName(ne.Type)}' is not in scope; import its module"
-                : SymbolTable.Primitives.Contains(ne.Type) ? $"'{Mangler.DisplayName(ne.Type)}' is a primitive; use 'let', not 'new'"
-                : $"'{Mangler.DisplayName(ne.Type)}' is not a class");
-            return new IrNew(ne.Type, args);
+                sym.IsClass(typeName) ? $"'{Mangler.DisplayName(typeName)}' is not in scope; import its module"
+                : SymbolTable.Primitives.Contains(typeName) ? $"'{Mangler.DisplayName(typeName)}' is a primitive; use 'let', not 'new'"
+                : $"'{Mangler.DisplayName(typeName)}' is not a class");
+            return new IrNew(typeName, args);
         }
-        var init = sym.LookupMethod(ne.Type, "_init");
+        var init = sym.LookupMethod(typeName, Lifecycle.Init);
         if (init?.Sig is { } isig && isig.Params.Count > 0)
         {
-            CheckArgCount(isig, args.Count, $"{Mangler.DisplayName(ne.Type)} constructor", ctx, ne.Span);
+            CheckArgCount(isig, args.Count, $"{Mangler.DisplayName(typeName)} constructor", ctx, ne.Span);
             CoerceArgs(args, isig, ctx, ne.Args);
         }
         else if (args.Count > 0)
             diag.Error(Codes.WrongArgCount, ctx.File, ne.Span,
-                $"'{Mangler.DisplayName(ne.Type)}' has no constructor taking arguments");
+                $"'{Mangler.DisplayName(typeName)}' has no constructor taking arguments");
         if (ne.CollectionInit.Length > 0)
-            return ResolveCollectionInit(ne, args, ctx);
-        return new IrNew(ne.Type, args);
+            return ResolveCollectionInit(ne, typeName, args, ctx);
+        return new IrNew(typeName, args);
     }
 
     /// <summary>
     /// Resolves a collection initializer by looking up an Add method and coercing each element.
     /// </summary>
-    private IrExpr ResolveCollectionInit(NewExpr ne, List<IrExpr> ctorArgs, ResolveCtx ctx)
+    private IrExpr ResolveCollectionInit(NewExpr ne, string typeName, List<IrExpr> ctorArgs, ResolveCtx ctx)
     {
-        var add = sym.LookupMethod(ne.Type, "Add");
+        var add = sym.LookupMethod(typeName, "Add");
         if (add?.Sig == null)
         {
             diag.Error(Codes.UndefinedMethod, ctx.File, ne.Span,
-                $"'{Mangler.DisplayName(ne.Type)}' has no 'Add' method for a collection initializer");
-            return new IrNew(ne.Type, ctorArgs);
+                $"'{Mangler.DisplayName(typeName)}' has no 'Add' method for a collection initializer");
+            return new IrNew(typeName, ctorArgs);
         }
         if (add.Sig.Params.Count != 1)
         {
             diag.Error(Codes.WrongArgCount, ctx.File, ne.Span,
-                $"'{Mangler.DisplayName(ne.Type)}.Add' must take exactly one argument to be used in a collection initializer");
-            return new IrNew(ne.Type, ctorArgs);
+                $"'{Mangler.DisplayName(typeName)}.Add' must take exactly one argument to be used in a collection initializer");
+            return new IrNew(typeName, ctorArgs);
         }
         var elemType = ResolveType(add.Sig.Params[0].Type);
         var inits = new List<IrExpr>(ne.CollectionInit.Length);
         foreach (var el in ne.CollectionInit)
         {
             var r = Coerce(ResolveExpr(el, ctx), elemType, ctx);
-            CheckAssign(r, elemType, $"a '{Mangler.DisplayName(ne.Type)}' element", ctx, Codes.ArgTypeMismatch);
+            CheckAssign(r, elemType, $"a '{Mangler.DisplayName(typeName)}' element", ctx, Codes.ArgTypeMismatch);
             ForbidNestedThrows(r, ctx, allowRoot: false);
             inits.Add(r);
         }
-        return new IrNewInit(ne.Type, ctorArgs, add.CName, inits);
+        return new IrNewInit(typeName, ctorArgs, add.CName, inits);
     }
 
     /// <summary>

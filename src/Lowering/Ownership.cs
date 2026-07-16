@@ -324,7 +324,7 @@ internal sealed class Ownership(IrModule module)
             case IrForIn fi: LowerForIn(fi, outs); break;
             case IrTryCatch tc: LowerTryCatch(tc, outs); break;
             case IrDefer d: LowerDefer(d); break;
-            default: throw new InvalidOperationException($"[Ownership] unhandled IrStmt: {s.GetType().Name}");
+            default: throw new System.Diagnostics.UnreachableException($"[Ownership] unhandled IrStmt: {s.GetType().Name}");
         }
     }
 
@@ -981,14 +981,6 @@ internal sealed class Ownership(IrModule module)
             _cl.RemoveRange(ecStart, ecCount);
         }
         return new IrVar(v, ct);
-    }
-
-    /// <summary>
-    /// Releases all owners in the given list, adding the release statements to outs.
-    /// </summary>
-    private void ReleaseAll(List<(string Name, IrType Type)> cl, List<IrStmt> outs)
-    {
-        foreach (var (name, type) in cl) outs.Add(ReleaseStmt(new IrVar(name, type)));
     }
 
     #endregion

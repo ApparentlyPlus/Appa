@@ -16,6 +16,11 @@ internal sealed class Dce(IrModule m) : IrWalker
     private readonly HashSet<UnitKey> _live = [];
     private readonly Queue<UnitKey> _work = new();
 
+    // Composite types actually referenced by reachable code, keyed by mangled name.
+    // ArrayTypes/FuncPtrTypes collected during resolution include entries from since-
+    // dropped functions. Only the live ones get their C typedef emitted.
+    private readonly HashSet<string> _liveComposites = [];
+
     private static int GetUnitOfCapacity(IrModule m)
     {
         int count = m.FreeFunctions.Count;
@@ -60,8 +65,10 @@ internal sealed class Dce(IrModule m) : IrWalker
 
         return m with
         {
-            Classes = m.Classes.Where(c => _live.Contains(new UnitKey(c.Name, false))).ToList(),
-            FreeFunctions = m.FreeFunctions.Where(f => f.IsEntry || _live.Contains(new UnitKey(f.CName, true))).ToList(),
+            Classes = [.. m.Classes.Where(c => _live.Contains(new UnitKey(c.Name, false)))],
+            FreeFunctions = [.. m.FreeFunctions.Where(f => f.IsEntry || _live.Contains(new UnitKey(f.CName, true)))],
+            ArrayTypes = [.. m.ArrayTypes.Where(a => _liveComposites.Contains(a.MangledName))],
+            FuncPtrTypes = [.. m.FuncPtrTypes.Where(f => _liveComposites.Contains(f.MangledName))],
         };
     }
 
@@ -114,9 +121,13 @@ internal sealed class Dce(IrModule m) : IrWalker
         {
             case IrClassRef cr: Root(new UnitKey(cr.ClassName, false)); break;
             case IrPtrType p: MarkType(p.Inner); break;
-            case IrArrayType a: MarkType(a.Elem); break;
+            case IrArrayType a: _liveComposites.Add(a.MangledName); MarkType(a.Elem); break;
             case IrResultType r: MarkType(r.Inner); break;
-            case IrFuncPtrType f: MarkType(f.Ret); foreach (var p2 in f.Params) MarkType(p2); break;
+            case IrFuncPtrType f:
+                _liveComposites.Add(f.MangledName);
+                MarkType(f.Ret);
+                foreach (var p2 in f.Params) MarkType(p2);
+                break;
         }
     }
 

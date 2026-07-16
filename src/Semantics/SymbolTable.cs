@@ -37,6 +37,15 @@ internal static class Roles
     ]);
 }
 
+// The lifecycle methods the compiler itself invokes from generated code: the allocator
+// calls _init after ObjInit, and the generated destructor calls _deinit before releasing
+// managed fields. Named here once so the collector, resolver, and emitter cannot drift.
+internal static class Lifecycle
+{
+    public const string Init   = "_init";
+    public const string Deinit = "_deinit";
+}
+
 // The closed vocabulary of compiler builtin types. A libgata class or native type
 // declaration annotated @builtin(<name>) fills the slot; the compiler resolves the
 // name from this table instead of comparing type names against a literal string.
@@ -51,9 +60,10 @@ internal static class BuiltinTypes
 
 /// <summary>
 /// The signature of a method or free function as collected from the AST.
+/// ReturnType is null for void (an omitted return type).
 /// </summary>
 internal record MethodSig(
-    string           ReturnType,
+    TypeSpec?        ReturnType,
     List<Param>      Params,
     bool             IsStatic,
     bool             IsThrows,
@@ -62,21 +72,16 @@ internal record MethodSig(
     bool             IsExtern = false
 );
 
-// Identity of a class member: its owning class plus its name. A typed key rather
-// than a "Class.name" string — owner and name are never concatenated or re-split,
-// and field/method/operator live in separate tables so kinds can't collide.
 /// <summary>
 /// Identifies a class member by its owning class and member name.
 /// </summary>
 internal readonly record struct MemberKey(string Owner, string Name);
 
-// A declared symbol. Its C name is assigned once — by the Mangler, after all
-// declarations are collected (overload-ness is known then) — and read by both the
-// definition and every call site, so they cannot disagree.
 /// <summary>
-/// A single declared symbol with its kind, type, and optionally its method signature.
+/// A single declared symbol with its kind, declared type (null for void or for symbols
+/// that are not values, like classes), and optionally its method signature.
 /// </summary>
-internal sealed record Symbol(string Name, SymKind Kind, string Type, string? Owner, MethodSig? Sig)
+internal sealed record Symbol(string Name, SymKind Kind, TypeSpec? Type, string? Owner, MethodSig? Sig)
 {
     public string CName  { get; set; } = "";
     public string Module { get; set; } = "";
@@ -140,13 +145,13 @@ internal sealed class SymbolTable
     /// </summary>
     public void RegisterClass(string name, string module)
     {
-        _classes[name] = new Symbol(name, SymKind.Class, name, null, null) { CName = Mangler.Class(name), Module = module };
+        _classes[name] = new Symbol(name, SymKind.Class, null, null, null) { CName = Mangler.Class(name), Module = module };
     }
 
     /// <summary>
     /// Registers a field on the named class.
     /// </summary>
-    public void RegisterField(string cls, string field, string type)
+    public void RegisterField(string cls, string field, TypeSpec type)
     {
         _fields[new(cls, field)] = new Symbol(field, SymKind.Field, type, cls, null);
     }
@@ -174,19 +179,37 @@ internal sealed class SymbolTable
     /// return type, since it has no parameter to distinguish overloads by. CNames are assigned
     /// later in AssignCNames, once every overload for the bucket is known.
     /// </summary>
-    public void RegisterOperator(string cls, string op, string returnType, List<Param> @params)
+    public void RegisterOperator(string cls, string op, TypeSpec returnType, List<Param> @params)
     {
         Bucket(_operators, new(cls, op)).Add(new Symbol(op, SymKind.Operator, returnType, cls,
             new MethodSig(returnType, @params, IsStatic: false, IsThrows: false, IsEntry: false, Annotations: [])));
     }
 
     /// <summary>
-    /// Records that a throws function returns the given type, ensuring a Result typedef is emitted.
+    /// Records that a throws function returns the given type, ensuring a Result typedef is
+    /// emitted. The typedef's inner-name derivation is shared with IrResultType.ResultName
+    /// (void folds to int) so a declaration and its call sites can never disagree.
     /// </summary>
-    public void RegisterThrows(string returnType)
+    public void RegisterThrows(TypeSpec? returnType)
     {
-        string c = PrimTypes.Canon(returnType);
-        ResultTypedefs.TryAdd($"Result_{c}", c);
+        string inner = ResultInnerName(returnType);
+        ResultTypedefs.TryAdd($"Result_{inner}", inner);
+    }
+
+    /// <summary>
+    /// The single source of truth for the inner-type token of a Result_T typedef name,
+    /// mirroring IrResultType.ResultName's IrType-side derivation.
+    /// </summary>
+    public static string ResultInnerName(TypeSpec? t)
+    {
+        return t switch
+        {
+            null or NamedSpec { Name: "void", Args.Length: 0 } => "int",
+            NamedSpec n => n.Mangled,
+            // Unreachable in a valid program. Non named throws returns are rejected
+            // by the resolver (BadThrowsReturnType) before anything is emitted.
+            _ => Mangler.MangleTypeName(t.ToSpecString())
+        };
     }
 
     private static List<Symbol> Bucket<K>(Dictionary<K, List<Symbol>> d, K key) where K : notnull
@@ -240,7 +263,7 @@ internal sealed class SymbolTable
             var span = CollectionsMarshal.AsSpan(list);
             for (int i = 0; i < span.Length; i++)
             {
-                span[i].CName = Mangler.Operator(key.Owner, key.Name, span[i].Sig!.Params, span[i].Sig!.ReturnType, ov);
+                span[i].CName = Mangler.Operator(key.Owner, key.Name, span[i].Sig!.Params, ov);
             }
         }
     }
@@ -457,7 +480,7 @@ internal sealed class SymbolTable
     /// <summary>
     /// Returns the declared type of the named field, or null if not found.
     /// </summary>
-    public string? FieldType(string cls, string field)
+    public TypeSpec? FieldType(string cls, string field)
     {
         return _fields.TryGetValue(new(cls, field), out var s) ? s.Type : null;
     }
@@ -523,9 +546,10 @@ internal sealed class SymbolTable
     public string CType(string t)
     {
         if (string.IsNullOrEmpty(t) || t == "void") return "void";
-        if (t.Length > 0 && t[t.Length - 1] == '*') return t;
         if (PrimTypes.IsPrim(t)) return PrimTypes.ToC(t);
         if ((t == BuiltinTypes.Process || t == BuiltinTypes.Thread) && Builtins.ContainsKey(t)) return "void*";
+        if (IsEnum(t)) return Mangler.Enum(t);
+        if (IsUnion(t)) return Mangler.Union(t);
         return $"{Mangler.Class(t)}*";
     }
 

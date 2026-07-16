@@ -51,7 +51,7 @@ public class ParserTests
         var prog = SingleFileCompile.Parse("int func Add(int a, int b) { return a + b; }");
         var func = Assert.IsType<FuncDecl>(prog.Items[0]);
         Assert.Equal("Add", func.Name);
-        Assert.Equal("int", func.ReturnType);
+        Assert.Equal("int", func.ReturnType?.ToSpecString());
         Assert.Equal(2, func.Params.Length);
         Assert.Equal("a", func.Params[0].Name);
         Assert.Equal("b", func.Params[1].Name);
@@ -195,7 +195,7 @@ public class ParserTests
         var func = (FuncDecl)prog.Items[0];
         var block = ((BlockBody)func.Body).Block;
         var let = Assert.IsType<LetStmt>(block.Stmts[0]);
-        Assert.Equal("int", let.Type);
+        Assert.Equal("int", let.Type?.ToSpecString());
         Assert.Equal("x", let.Name);
         Assert.NotNull(let.Init);
     }

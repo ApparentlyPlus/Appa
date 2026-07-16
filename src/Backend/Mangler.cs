@@ -11,21 +11,21 @@ internal static class Mangler
     public const string KernelEntry = "gata_kernelspace_main";
 
     // Step 7 dense naming. When populated by the Densifier after reachability, a
-    // class's readable C name collapses to a short machine token. Empty during
-    // resolution. Reset per build.
-    private static Dictionary<string, string> _dense = [];
+    // class's readable C name collapses to a short machine token. Empty during resolution.
+    [ThreadStatic] private static Dictionary<string, string>? _denseTls;
+    private static Dictionary<string, string> _dense => _denseTls ??= [];
 
     // Every generic instantiation the Monomorphizer stamps is recorded here so
     // diagnostics can show the user-written form instead of the mangled name.
-    // Reset per build; populated as each instantiation is processed.
-    private static readonly Dictionary<string, (string Base, List<string> Args)> _genericInfo = [];
+    [ThreadStatic] private static Dictionary<string, (string Base, List<string> Args)>? _genericInfoTls;
+    private static Dictionary<string, (string Base, List<string> Args)> _genericInfo => _genericInfoTls ??= [];
 
     /// <summary>
     /// Replaces the dense name map with the given mapping produced by the Densifier.
     /// </summary>
     public static void SetDense(Dictionary<string, string> map)
     {
-        _dense = map;
+        _denseTls = map;
     }
 
     /// <summary>
@@ -33,7 +33,7 @@ internal static class Mangler
     /// </summary>
     public static void ResetDense()
     {
-        _dense = [];
+        _denseTls = [];
     }
 
     /// <summary>
@@ -51,6 +51,23 @@ internal static class Mangler
     public static void RegisterGenericInstance(string mangled, string baseName, List<string> args)
     {
         _genericInfo[mangled] = (baseName, args);
+    }
+
+    /// <summary>
+    /// Returns the registered base name and type arguments for a mangled generic instance
+    /// name, such as Map_int_String, which yields ("Map", ["int", "String"]). Structural consumers
+    /// (generic-function type inference) use this instead of re-splitting the mangled string.
+    /// </summary>
+    public static bool TryGetGenericInstance(string mangled, out string baseName, out List<string> args)
+    {
+        if (_genericInfo.TryGetValue(mangled, out var info))
+        {
+            (baseName, args) = info;
+            return true;
+        }
+        baseName = "";
+        args = [];
+        return false;
     }
 
     /// <summary>
@@ -196,12 +213,10 @@ internal static class Mangler
     /// <summary>
     /// Returns the C operator function name for an operator overload on the given class.
     /// 'overloaded' appends a disambiguating suffix - only 'as' can have more than one overload
-    /// per class today. A zero-parameter 'as' has no parameter to distinguish overloads by, so
-    /// it's suffixed by its return type (the cast target); a one-parameter 'as' (the static
-    /// factory form) is suffixed by its parameter type instead, the same way every other
+    /// per class today, distinguished by its parameter type the same way every other
     /// parameterized operator or method overload already is.
     /// </summary>
-    public static string Operator(string owner, string op, IReadOnlyList<Param> ps, string returnType, bool overloaded)
+    public static string Operator(string owner, string op, IReadOnlyList<Param> ps, bool overloaded)
     {
         string bare = $"gata_{owner}_{OpSuffix(op)}";
         if (!overloaded) return bare;
@@ -251,14 +266,14 @@ internal static class Mangler
     public static string OverloadSuffix(IReadOnlyList<Param> ps)
     {
         if (ps.Count == 0) return "void";
-        if (ps.Count == 1) return MangleTypeName(ps[0].Type);
+        if (ps.Count == 1) return MangleTypeName(ps[0].Type.ToSpecString());
 
         var sb = new System.Text.StringBuilder();
-        sb.Append(MangleTypeName(ps[0].Type));
+        sb.Append(MangleTypeName(ps[0].Type.ToSpecString()));
         for (int i = 1; i < ps.Count; i++)
         {
             sb.Append('_');
-            sb.Append(MangleTypeName(ps[i].Type));
+            sb.Append(MangleTypeName(ps[i].Type.ToSpecString()));
         }
         return sb.ToString();
     }

@@ -1,5 +1,6 @@
 namespace Appa;
 
+using System.Collections.Frozen;
 using System.Runtime.CompilerServices;
 
 /// <summary>
@@ -29,7 +30,7 @@ internal sealed class Lexer(string src)
     private readonly List<Token> _tokens = [];
 
     // Keyword lookup table. Maps keyword strings to their corresponding token kinds.
-    private static readonly Dictionary<string, TK> kw = new()
+    private static readonly FrozenDictionary<string, TK> kw = new Dictionary<string, TK>
     {
         ["import"]      = TK.Import,
         ["kernel"]      = TK.Kernel,
@@ -95,10 +96,10 @@ internal sealed class Lexer(string src)
         ["uintptr"]     = TK.TPrim,
         ["true"]        = TK.BoolLit,
         ["false"]       = TK.BoolLit,
-    };
+    }.ToFrozenDictionary();
 
     // Alternate lookup for kw using ReadOnlySpan<char> to avoid allocations during tokenization
-    private static readonly Dictionary<string, TK>.AlternateLookup<ReadOnlySpan<char>> KeywordsLookup = 
+    private static readonly FrozenDictionary<string, TK>.AlternateLookup<ReadOnlySpan<char>> KeywordsLookup = 
         kw.GetAlternateLookup<ReadOnlySpan<char>>();
 
     // Array of keyword strings indexed by their corresponding TK enum values for quicker access
