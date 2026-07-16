@@ -2,7 +2,19 @@ namespace Appa;
 
 internal static class Finesse
 {
-    private static readonly Random _random = new();
+    // [ThreadStatic] keeps concurrent in-process builds 
+	// (parallel tests) from interleaving each other's draws.
+    [ThreadStatic] private static Random? _randomTls;
+    private static Random _random => _randomTls ??= new Random();
+
+    /// <summary>
+    /// Reseeds the header generator. Called once per build with a hash of the build's
+    /// emitted content, making rebuilds of identical input byte-identical.
+    /// </summary>
+    public static void Seed(int seed)
+    {
+        _randomTls = new Random(seed);
+    }
 
     // Taglines include their own article so templates can use them directly.
     private static readonly string[] Taglines =

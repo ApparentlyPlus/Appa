@@ -159,11 +159,11 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
                 case FieldsBlock:
                     _opaqueFieldClasses.Add(cd.Name);
                     break;
-                case FieldDecl fd when fd.Type != "__native__":
+                case FieldDecl fd:
                     if (cd.IsModule)
                     {
-                        diag.Error(Codes.UndefinedVariable, file, fd.Span,
-                            $"module '{Mangler.DisplayName(cd.Name)}' cannot declare the field '{fd.Name}'");
+                        diag.Error(Codes.ModuleField, file, fd.Span,
+                            $"module '{Mangler.DisplayName(cd.Name)}' cannot declare the field '{fd.Name}' - modules are stateless; use a class for instance state");
                         break;
                     }
                     if (!fieldNames.Add(fd.Name) || methodNames.Contains(fd.Name))
@@ -171,13 +171,13 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
                             $"'{Mangler.DisplayName(cd.Name)}' already declares a member '{fd.Name}'");
                     
                     // A typeless field infers from its literal initializer (TypeResolver emits
-                    // CannotInfer for non literal ones. "int" here just keeps later lookups sane).
+                    // CannotInfer for non literal ones. 'int' here just keeps later lookups sane).
                     _sym.RegisterField(cd.Name, fd.Name,
-                        fd.Type ?? TypeResolver.InferFieldTypeSpec(fd.Init) ?? "int");
+                        fd.Type ?? TypeResolver.InferFieldTypeSpec(fd.Init) ?? new NamedSpec("int", fd.Span));
                     
                     // Private by default. A member needs an explicit 'public' to be callable
                     // from outside its declaring class or module.
-                    if (!fd.Modifiers.HasFlag(Modifiers.Public)) _sym.PrivateMembers.Add(new(cd.Name, fd.Name));
+                    if ((fd.Modifiers & Modifiers.Public) == 0) _sym.PrivateMembers.Add(new(cd.Name, fd.Name));
                     break;
                 case MethodDecl md:
                     string mSigKey = md.Name + "/" + Mangler.OverloadSuffix(md.Params);
@@ -196,22 +196,28 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
 
                     // Register the method in the symbol table, and if it's private, add it to the private members set.
                     methodNames.Add(md.Name);
-                    var sig = new MethodSig(md.ReturnType ?? "void", [.. md.Params],
-                        md.Modifiers.HasFlag(Modifiers.Static) || cd.IsModule, md.Throws, md.IsEntry, [.. md.Annotations]);
+                    var sig = new MethodSig(md.ReturnType, [.. md.Params],
+                        (md.Modifiers & Modifiers.Static) != 0 || cd.IsModule, md.Throws, md.IsEntry, [.. md.Annotations]);
 
                     _sym.RegisterMethod(cd.Name, md.Name, sig);
 
                     // Private by default. A member needs an explicit 'public' to be callable from outside its declaring class or module.
-                    if (!md.Modifiers.HasFlag(Modifiers.Public)) _sym.PrivateMembers.Add(new(cd.Name, md.Name));
+                    if ((md.Modifiers & Modifiers.Public) == 0) _sym.PrivateMembers.Add(new(cd.Name, md.Name));
 
                     // Bind any @intrinsic annotations to the C name the method is emitted under.
                     BindIntrinsics(md.Annotations, Mangler.Method(cd.Name, md.Name, md.Params, overloaded: false), file, md.Span);
 
-                    // If the method is named "_init", add the class name to the _hasInit set so the resolver can check for missing initializers.
-                    if (md.Name == "_init") _hasInit.Add(cd.Name);
+                    // Lifecycle methods are invoked by generated code (the allocator and the
+                    // destructor), which has no way to receive a Result - throws is a hard error.
+                    if (md.Name is Lifecycle.Init or Lifecycle.Deinit && md.Throws)
+                        diag.Error(Codes.LifecycleThrows, file, md.Span,
+                            $"'{md.Name}' cannot be 'throws'; it is called by generated allocator/destructor code that cannot handle a Result");
+
+                    // Track _init so the resolver can check constructor calls.
+                    if (md.Name == Lifecycle.Init) _hasInit.Add(cd.Name);
 
                     // If the method throws, register its return type in the symbol table so the resolver can check for missing result typedefs.
-                    if (md.Throws) _sym.RegisterThrows(md.ReturnType ?? "int");
+                    if (md.Throws) _sym.RegisterThrows(md.ReturnType);
                     break;
                 case OperatorDecl od:
                 {
@@ -221,20 +227,19 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
                     // an explicit mismatch), and its overloads are distinguished by parameter
                     // type - same rule as every other operator except '[]='/'[]=', just spelled
                     // out here since 'as' is the only one with more than one legal overload.
-                    string retType = od.ReturnType ?? (od.Op == "[]=" || od.Op is "++" or "--" ? "void"
-                        : od.Op is "==" or "!=" or "<" or ">" or "<=" or ">=" or "!" ? "bool"
-                        : cd.Name);
+                    TypeSpec retType = od.ReturnType
+                        ?? new NamedSpec(OperatorRules.DefaultReturn(od.Op, cd.Name), od.Span);
 
                     // The duplicate key includes arity so unary '-' (0 params) and binary '-'
                     // (1 param) can coexist on one class without colliding.
                     string opSigKey = od.Op == "as" && od.Params.Length == 1
-                        ? "as/param/" + od.Params[0].Type.Trim()
+                        ? "as/param/" + od.Params[0].Type.ToSpecString()
                         : od.Op + "/" + od.Params.Length;
                     if (!operatorSigs.Add(opSigKey))
                     {
                         diag.Error(Codes.DuplicateName, file, od.Span,
                             od.Op == "as" && od.Params.Length == 1
-                                ? $"'{Mangler.DisplayName(cd.Name)}' already declares a conversion from '{Mangler.DisplayName(od.Params[0].Type.Trim())}'"
+                                ? $"'{Mangler.DisplayName(cd.Name)}' already declares a conversion from '{Mangler.DisplayName(od.Params[0].Type.ToSpecString())}'"
                                 : $"'{Mangler.DisplayName(cd.Name)}' already declares operator '{od.Op}'");
                         break;
                     }
@@ -245,7 +250,7 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
 
                     // Private by default, same as every other member. Keyed as "operator <sym>"
                     // - the space keeps it disjoint from any field/method identifier.
-                    if (!od.Modifiers.HasFlag(Modifiers.Public)) _sym.PrivateMembers.Add(new(cd.Name, $"operator {od.Op}"));
+                    if ((od.Modifiers & Modifiers.Public) == 0) _sym.PrivateMembers.Add(new(cd.Name, $"operator {od.Op}"));
                     break;
                 }
             }
@@ -259,14 +264,14 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
     {
         // `static` only means anything on a class/module method; it's a category
         // error on a free function, not a redundant-but-harmless spelling.
-        if (fd.Modifiers.HasFlag(Modifiers.Static))
+        if ((fd.Modifiers & Modifiers.Static) != 0)
             diag.Error(Codes.StaticOnFreeFunc, file, fd.Span,
                 $"'static' has no meaning on the free function '{fd.Name}' — it is never an instance member");
 
         if (fd.GenericParams.Length > 0) return;
 
-        var sig = new MethodSig(fd.ReturnType ?? "void", [.. fd.Params], true, fd.Throws, fd.IsEntry, [.. fd.Annotations]);
-        if (fd.Modifiers.HasFlag(Modifiers.Private))
+        var sig = new MethodSig(fd.ReturnType, [.. fd.Params], true, fd.Throws, fd.IsEntry, [.. fd.Annotations]);
+        if ((fd.Modifiers & Modifiers.Private) != 0)
         {
             if (!_declaredPrivateFuncSigs.Add((file, fd.Name + "/" + Mangler.OverloadSuffix(fd.Params))))
             {
@@ -275,7 +280,7 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
                 return;
             }
             _sym.RegisterPrivateFunc(file, fd.Name, sig);
-            if (fd.Throws) _sym.RegisterThrows(fd.ReturnType ?? "int");
+            if (fd.Throws) _sym.RegisterThrows(fd.ReturnType);
             return;
         }
 
@@ -289,7 +294,7 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
         _sym.RegisterFreeFunc(fd.Name, sig, file);
         BindIntrinsics(fd.Annotations, Mangler.FreeFunc(fd.Name, fd.Params, overloaded: false, fd.IsEntry, isExtern: false),
             file, fd.Span, allowKeep: true);
-        if (fd.Throws) _sym.RegisterThrows(fd.ReturnType ?? "int");
+        if (fd.Throws) _sym.RegisterThrows(fd.ReturnType);
     }
 
     /// <summary>
@@ -330,7 +335,7 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
             _declaredFuncs.Add(ed.Name);
             _externFuncs.Add(ed.Name);
         }
-        var sig = new MethodSig(ed.ReturnType ?? "void", [.. ed.Params], true, false, false, [], IsExtern: true);
+        var sig = new MethodSig(ed.ReturnType, [.. ed.Params], true, false, false, [], IsExtern: true);
         _sym.RegisterFreeFunc(ed.Name, sig, file);
         BindIntrinsics(ed.Annotations, ed.Name, file, ed.Span);
     }

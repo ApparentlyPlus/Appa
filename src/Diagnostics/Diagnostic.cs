@@ -2,21 +2,6 @@ namespace Appa;
 using System.Text;
 
 /// <summary>
-/// ANSI escape codes for terminal output.
-/// </summary>
-internal static class EscapeCodes
-{
-    public const string NC      = "\x1b[0m";
-    public const string GREEN   = "\x1b[1;32m";
-    public const string RED     = "\x1b[1;31m";
-    public const string YELLOW  = "\x1b[1;33m";
-    public const string BLUE    = "\x1b[1;34m";
-    public const string CYAN    = "\x1b[1;36m";
-    public const string BOLD    = "\x1b[1m";
-    public const string DIM     = "\x1b[2m";
-}
-
-/// <summary>
 /// Severity of a diagnostic, either warning or error. Warnings do not prevent compilation, but errors do.
 /// </summary>
 internal enum Severity { Warning, Error }
@@ -103,6 +88,14 @@ internal static class Codes
     public const string MissingUserEntry       = "G058";
     public const string DuplicateUserEntry     = "G059";
     public const string MissingProcessMode     = "G060";
+    public const string BadEntrySignature      = "G061";
+    public const string DeferTransfer          = "G062";
+    public const string ModuleField            = "G063";
+    public const string MisplacedEnvironment   = "G064";
+    public const string ConflictingModifiers   = "G065";
+    public const string BadThrowsReturnType    = "G066";
+    public const string LifecycleThrows        = "G067";
+    public const string EntryOutsideKernel     = "G068";
 }
 
 /// <summary>
@@ -118,12 +111,14 @@ internal static class Suggest
     {
         string? best = null;
         int bestDist = int.MaxValue;
+        int maxAllowed = Math.Max(1, typed.Length / 2);
         foreach (var c in candidates)
         {
+            // The distance is at least the length difference
+            if (Math.Abs(c.Length - typed.Length) > maxAllowed) continue;
             int d = Distance(typed, c);
             if (d < bestDist) { bestDist = d; best = c; }
         }
-        int maxAllowed = Math.Max(1, typed.Length / 2);
         return bestDist <= maxAllowed ? best : null;
     }
 
@@ -139,23 +134,25 @@ internal static class Suggest
     }
 
     /// <summary>
-    /// Classic iterative Levenshtein edit distance between two strings.
+    /// Classic iterative Levenshtein edit distance between two strings. Identifiers are
+    /// short, so the two work rows live on the stack. Absurdly long names fall back to heap.
     /// </summary>
     private static int Distance(string a, string b)
     {
-        var prev = new int[b.Length + 1];
-        var cur = new int[b.Length + 1];
-        for (int j = 0; j <= b.Length; j++) prev[j] = j;
+        int w = b.Length + 1;
+        Span<int> prev = w <= 128 ? stackalloc int[w] : new int[w];
+        Span<int> cur = w <= 128 ? stackalloc int[w] : new int[w];
+        for (int j = 0; j < w; j++) prev[j] = j;
 
         for (int i = 1; i <= a.Length; i++)
         {
             cur[0] = i;
-            for (int j = 1; j <= b.Length; j++)
+            for (int j = 1; j < w; j++)
             {
                 int cost = a[i - 1] == b[j - 1] ? 0 : 1;
                 cur[j] = Math.Min(Math.Min(cur[j - 1] + 1, prev[j] + 1), prev[j - 1] + cost);
             }
-            (prev, cur) = (cur, prev);
+            var tmp = prev; prev = cur; cur = tmp;
         }
         return prev[b.Length];
     }
@@ -217,7 +214,7 @@ internal sealed class DiagnosticBag(SourceSet sources)
     public string Render(Diagnostic d)
     {
         // Grab the label and color for the diagnostic based on its severity
-        var (label, color) = d.Severity == Severity.Error ? ("error", EscapeCodes.RED) : ("warning", EscapeCodes.YELLOW);
+        var (label, color) = d.Severity == Severity.Error ? ("error", C.RED) : ("warning", C.YELLOW);
         
         // Find the source text for the diagnostic's file, if available
         var src = sources.Get(d.Loc.File);
@@ -243,7 +240,7 @@ internal sealed class DiagnosticBag(SourceSet sources)
                 .Append('[')
                 .Append(d.Code)
                 .Append(']')
-                .Append(EscapeCodes.NC)
+                .Append(C.NC)
                 .Append(": ")
                 .Append(d.Message);
             return sb.ToString();
@@ -264,7 +261,7 @@ internal sealed class DiagnosticBag(SourceSet sources)
             .Append('[')
             .Append(d.Code)
             .Append(']')
-            .Append(EscapeCodes.NC)
+            .Append(C.NC)
             .Append(": ")
             .AppendLine(d.Message);
 
@@ -277,15 +274,15 @@ internal sealed class DiagnosticBag(SourceSet sources)
         // Draw empty gutter line
         sb.Append(' ', gutterlen)
             .Append(' ')
-            .Append(EscapeCodes.BLUE)
+            .Append(C.BLUE)
             .Append('|')
-            .AppendLine(EscapeCodes.NC);
+            .AppendLine(C.NC);
 
         // Draw source line with line number and gutter
-        sb.Append(EscapeCodes.BLUE)
+        sb.Append(C.BLUE)
             .Append(line)
             .Append(" |")
-            .Append(EscapeCodes.NC)
+            .Append(C.NC)
             .Append(' ')
             .Append(tspn)
             .AppendLine();
@@ -294,14 +291,14 @@ internal sealed class DiagnosticBag(SourceSet sources)
         int caretLen = Math.Max(1, Math.Min(d.Loc.Span.Length, Math.Max(0, tspn.Length - (col - 1))));
         sb.Append(' ', gutterlen)
             .Append(' ')
-            .Append(EscapeCodes.BLUE)
+            .Append(C.BLUE)
             .Append('|')
-            .Append(EscapeCodes.NC)
+            .Append(C.NC)
             .Append(' ')
             .Append(' ', col - 1)
             .Append(color)
             .Append('^', caretLen)
-            .Append(EscapeCodes.NC);
+            .Append(C.NC);
 
         // Render each hint as a rustc-style "= help: ..." line under a blank gutter row.
         if (d.Hints.Length > 0)
@@ -309,21 +306,21 @@ internal sealed class DiagnosticBag(SourceSet sources)
             sb.AppendLine()
                 .Append(' ', gutterlen)
                 .Append(' ')
-                .Append(EscapeCodes.BLUE)
+                .Append(C.BLUE)
                 .Append('|')
-                .Append(EscapeCodes.NC);
+                .Append(C.NC);
             for (int i = 0; i < d.Hints.Length; i++)
             {
                 sb.AppendLine()
                     .Append(' ', gutterlen)
                     .Append(' ')
-                    .Append(EscapeCodes.BLUE)
+                    .Append(C.BLUE)
                     .Append('=')
-                    .Append(EscapeCodes.NC)
+                    .Append(C.NC)
                     .Append(' ')
-                    .Append(EscapeCodes.CYAN)
+                    .Append(C.CYAN)
                     .Append("help")
-                    .Append(EscapeCodes.NC)
+                    .Append(C.NC)
                     .Append(": ")
                     .Append(d.Hints[i]);
             }

@@ -2,9 +2,6 @@ namespace Appa;
 
 using System.Diagnostics;
 
-// The semantic pipeline: source files to a fully lowered IrModule, ready to print.
-// Front-end orchestration lives here so both the CLI (Program.cs) and a test project
-// can drive a build in-process, without shelling out to the appa binary.
 /// <summary>
 /// Orchestrates the compiler's front-end: parsing, import resolution, name/type
 /// resolution, and IR lowering. Called by the CLI build command and by tests.
@@ -76,11 +73,11 @@ internal static class Pipeline
         Mangler.ResetDense();
         Mangler.ResetGenericDisplay();
         new Monomorphizer(diag).Process(programs);
-        var collected = new SymbolCollector(diag).Collect(programs.Select(t => (t.path, t.prog)).ToList());
+        var collected = new SymbolCollector(diag).Collect([.. programs.Select(t => (t.path, t.prog))]);
         var module = new TypeResolver(collected.Sym, collected.HasInit,
                                       collected.PreDefinedStructs, collected.OpaqueFieldClasses, visible,
                                       releaseMode: mode == Mode.Release, diag)
-                         .Resolve(programs.Select(t => (t.prog, t.path)).ToList());
+                         .Resolve([.. programs.Select(t => (t.prog, t.path))]);
         // The backend assumes well-typed IR. If the front-end reported any error, stop
         // here: lowering an ill-typed program would otherwise fault.
         if (diag.HasErrors)
@@ -95,9 +92,6 @@ internal static class Pipeline
         return (module, sourcemap, caps);
     }
 
-    // Parse each file once and walk the module graph from its parsed import decls.
-    // Files are returned in dependency order; imports records each file's directly-imported
-    // files for scope resolution.
     /// <summary>
     /// Parses the given entry files and follows their imports transitively, returning
     /// the parsed programs in dependency order along with the per-file import graph.
@@ -211,7 +205,7 @@ internal static class Pipeline
             .SelectMany(nb => new[] { nb.KernelC, nb.UserC })));
 
         foreach (var name in probe.Refs.OrderBy(n => n, StringComparer.Ordinal))
-            if (!System.Text.RegularExpressions.Regex.IsMatch(env, $@"\b{System.Text.RegularExpressions.Regex.Escape(name)}\b"))
+            if (!ContainsWholeWord(env, name))
                 diag.Error(Codes.MissingFloorBind, "<environment>", TextSpan.None,
                     $"the active environment's @preamble provides no definition of '{name}'; add one (the environment file, not your Gata source, is incomplete)");
     }
@@ -265,13 +259,25 @@ internal static class Pipeline
         }
 
         // GatOS, or no target (loose transpile mode): the original kernel-block rule.
+        // Every 'entry func' mangles to the single kernel entry symbol, so one inside a
+        // 'user { }' block would silently link-collide with the kernel's.
         var kernelEntryFuncs = new List<(string file, TextSpan span)>();
         foreach (var (path, prog) in programs)
             foreach (var item in prog.Items)
                 if (item is ContextDecl c && c.Kind == "kernel")
+                {
                     foreach (var inner in c.Items)
                         if (inner is FuncDecl { IsEntry: true } ef)
                             kernelEntryFuncs.Add((path, ef.Span));
+                }
+                else if (item is ContextDecl u && u.Kind == "user")
+                {
+                    foreach (var inner in u.Items)
+                        if (inner is FuncDecl { IsEntry: true } uef)
+                            diag.Error(Codes.EntryOutsideKernel, path, uef.Span,
+                                "an 'entry func' inside a 'user { }' block is only valid in a Hosted build; " +
+                                "in a GatOS build, userspace entry points are the threads of a 'process'");
+                }
 
         if (kernelBlocks.Count == 0)
         {
@@ -288,6 +294,26 @@ internal static class Pipeline
         else
             foreach (var (file, span) in kernelEntryFuncs.Skip(1))
                 diag.Error(Codes.DuplicateName, file, span, "the 'kernel { }' block declares more than one 'entry func'");
+    }
+
+    /// <summary>
+    /// True when text contains name as a whole C identifier (not a substring of a longer
+    /// one). A span scan bevause I am obsessed with speed.
+    /// </summary>
+    private static bool ContainsWholeWord(string text, string name)
+    {
+        ReadOnlySpan<char> t = text;
+        int at;
+        while ((at = t.IndexOf(name, StringComparison.Ordinal)) >= 0)
+        {
+            bool beforeOk = at == 0 || !IsIdentChar(t[at - 1]);
+            bool afterOk = at + name.Length >= t.Length || !IsIdentChar(t[at + name.Length]);
+            if (beforeOk && afterOk) return true;
+            t = t[(at + 1)..];
+        }
+        return false;
+
+        static bool IsIdentChar(char c) => char.IsAsciiLetterOrDigit(c) || c == '_';
     }
 
     /// <summary>

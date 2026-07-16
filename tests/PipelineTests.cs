@@ -27,7 +27,7 @@ public class PipelineTests
     [InlineData("G004", "kernel { entry func Main() { let x = 3 && 4; } }")]
     [InlineData("G004", "kernel { entry func Main() { let int64 a = 5; let int b = a; } }")]
     [InlineData("G004", "class Box { int v; func _init(int x) { self.v = x; } } kernel { entry func Main() { let int x = true ? 1 : new Box(2); } }")]
-    [InlineData("G004", "kernel { entry func Main() { defer defer { } } }")]
+    [InlineData("G062", "kernel { entry func Main() { defer defer { } } }")]
     [InlineData("G005", "kernel { entry func Main() { let int x = y + 1; } }")]
     [InlineData("G006", "kernel { entry func Main() { let int n = 5; n.foo(); } }")]
     [InlineData("G006", "class C { int x; func f() { let y = self.x(); } } kernel { entry func Main() { } }")]

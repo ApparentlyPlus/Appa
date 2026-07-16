@@ -9,27 +9,22 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
 {
     private sealed record Template(ClassDecl Decl, string[] Params, string BaseName);
 
-    internal sealed class SubstitutionContext(Dictionary<string, string> g, Dictionary<string, string>? c)
+    internal sealed class SubstitutionContext(Dictionary<string, TypeSpec> g, Dictionary<string, string>? c)
     {
-        public readonly Dictionary<string, string> GataMap = g;
+        public readonly Dictionary<string, TypeSpec> SpecMap = g;
         public readonly Dictionary<string, string> CMap = c ?? [];
-        public readonly string[] Params = [.. g.Keys];
 
         /// <summary>
-        /// Substitutes type parameters in a string, replacing whole words that match type parameters with their concrete types. 
-        /// If `isCMap` is true, uses the C-type mapping; otherwise, uses the Gata-type mapping.
+        /// Substitutes type parameters in raw native C text, replacing whole words that match
+        /// a type parameter with its concrete C type. Native bodies are the one place where
+        /// substitution is genuinely textual. Everything else is rewritten structurally.
         /// </summary>
-        public string SubWords(string text, bool isCMap)
+        public string SubWords(string text)
         {
-            var map = isCMap ? CMap : GataMap;
             bool containsParam = false;
-            for (int i = 0; i < Params.Length; i++)
+            foreach (var key in CMap.Keys)
             {
-                if (text.Contains(Params[i], StringComparison.Ordinal))
-                {
-                    containsParam = true;
-                    break;
-                }
+                if (text.Contains(key, StringComparison.Ordinal)) { containsParam = true; break; }
             }
             if (!containsParam) return text;
 
@@ -46,14 +41,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
                         idx++;
                     }
                     string word = text[start..idx];
-                    if (map.TryGetValue(word, out var replacement))
-                    {
-                        sb.Append(replacement);
-                    }
-                    else
-                    {
-                        sb.Append(word);
-                    }
+                    sb.Append(CMap.TryGetValue(word, out var replacement) ? replacement : word);
                 }
                 else
                 {
@@ -65,60 +53,76 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
         }
 
         /// <summary>
-        /// Substitutes type parameters in a Gata type string, handling both word-boundary and non-word-boundary occurrences.
+        /// Structurally substitutes type parameters in a type spec tree. Returns the same
+        /// reference when nothing changed so callers can cheaply detect no-ops.
         /// </summary>
-        public string? SubType(string? t)
+        public TypeSpec? SubType(TypeSpec? t)
         {
-            if (t is null) return null;
-            bool containsParam = false;
-            for (int i = 0; i < Params.Length; i++)
+            switch (t)
             {
-                if (t.Contains(Params[i], StringComparison.Ordinal))
+                case null:
+                    return null;
+                case NamedSpec { Args.Length: 0 } n:
+                    return SpecMap.TryGetValue(n.Name, out var bound) ? bound : t;
+                case NamedSpec n:
                 {
-                    containsParam = true;
-                    break;
-                }
-            }
-            if (!containsParam) return t;
-
-            string text = SubWords(t, false);
-            
-            var sb = new System.Text.StringBuilder(text.Length);
-            int idx = 0;
-            while (idx < text.Length)
-            {
-                if (text[idx] == '_')
-                {
-                    bool matched = false;
-                    foreach (var (from, to) in GataMap)
+                    NamedSpec[]? newArgs = null;
+                    for (int i = 0; i < n.Args.Length; i++)
                     {
-                        int len = from.Length;
-                        if (idx + 1 + len <= text.Length && text.AsSpan(idx + 1, len).Equals(from, StringComparison.Ordinal))
+                        var na = SubArg(n.Args[i]);
+                        if (!ReferenceEquals(na, n.Args[i]) && newArgs == null)
                         {
-                            int nextIdx = idx + 1 + len;
-                            if (nextIdx == text.Length || text[nextIdx] == '_')
-                            {
-                                sb.Append('_');
-                                sb.Append(to);
-                                idx = nextIdx;
-                                matched = true;
-                                break;
-                            }
+                            newArgs = new NamedSpec[n.Args.Length];
+                            Array.Copy(n.Args, newArgs, i);
                         }
+                        if (newArgs != null) newArgs[i] = na;
                     }
-                    if (!matched)
-                    {
-                        sb.Append('_');
-                        idx++;
-                    }
+                    return newArgs == null ? t : n with { Args = newArgs };
                 }
-                else
+                case PtrSpec p:
                 {
-                    sb.Append(text[idx]);
-                    idx++;
+                    var inner = SubType(p.Inner)!;
+                    return ReferenceEquals(inner, p.Inner) ? t : p with { Inner = inner };
                 }
+                case ArraySpec a:
+                {
+                    var elem = SubType(a.Elem)!;
+                    return ReferenceEquals(elem, a.Elem) ? t : a with { Elem = elem };
+                }
+                case FuncSpec f:
+                {
+                    TypeSpec[]? newPs = null;
+                    for (int i = 0; i < f.Params.Length; i++)
+                    {
+                        var np = SubType(f.Params[i])!;
+                        if (!ReferenceEquals(np, f.Params[i]) && newPs == null)
+                        {
+                            newPs = new TypeSpec[f.Params.Length];
+                            Array.Copy(f.Params, newPs, i);
+                        }
+                        if (newPs != null) newPs[i] = np;
+                    }
+                    var nr = SubType(f.Ret)!;
+                    if (newPs == null && ReferenceEquals(nr, f.Ret)) return t;
+                    return f with { Params = newPs ?? f.Params, Ret = nr };
+                }
+                default:
+                    return t;
             }
-            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Substitutes one generic argument slot. Argument slots hold named types only, so a
+        /// binding to a non named spec (like a pointer bound by generic-function inference)
+        /// folds to its sanitized mangled fragment to stay a valid slot.
+        /// </summary>
+        private NamedSpec SubArg(NamedSpec a)
+        {
+            return SubType(a) switch
+            {
+                NamedSpec ns => ns,
+                var sub => new NamedSpec(SanitizeTypeName(sub!.ToSpecString()), a.Span)
+            };
         }
     }
 
@@ -148,8 +152,26 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
         foreach (var (path, prog) in programs)
         {
             var ownersInFile = templates.Values.Where(t => prog.Items.Contains(t.Decl)).ToList();
+            // Generic *function* templates also own uses whose args are their own type
+            // parameters (e.g. 'Pair[T, T]' in 'func GetFirst[T](Pair[T, T] p)'). Those are
+            // not instantiable here - ResolveGenericCall stamps the function against concrete
+            // types during resolution - so they must not become bogus Pair_T_T requests.
+            var funcOwners = new List<FuncDecl>();
+            void CollectFuncOwners(TopLevel[] items)
+            {
+                foreach (var item in items)
+                {
+                    if (item is FuncDecl { GenericParams.Length: > 0 } fdt) funcOwners.Add(fdt);
+                    else if (item is ContextDecl cdt) CollectFuncOwners(cdt.Items);
+                }
+            }
+            CollectFuncOwners(prog.Items);
             foreach (var use in prog.GenericUses)
             {
+                if (funcOwners.Any(fd =>
+                        use.Span.Start >= fd.Span.Start && use.Span.End <= fd.Span.End &&
+                        use.Args.Any(a => Array.IndexOf(fd.GenericParams, a) >= 0)))
+                    continue;
                 var owner = ownersInFile.FirstOrDefault(t =>
                     t.BaseName != use.Base &&
                     use.Span.Start >= t.Decl.Span.Start && use.Span.End <= t.Decl.Span.End &&
@@ -249,14 +271,17 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
         Template tmpl, string[] args, string mangled)
     {
         var gataMap = new Dictionary<string, string>(tmpl.Params.Length);
+        var specMap = new Dictionary<string, TypeSpec>(tmpl.Params.Length);
         var cMap = new Dictionary<string, string>(tmpl.Params.Length);
         for (int i = 0; i < tmpl.Params.Length; i++)
         {
             string p = tmpl.Params[i];
             gataMap[p] = args[i];
-            cMap[p] = CTypeOf(args[i]);
+            var spec = new NamedSpec(args[i]);
+            specMap[p] = spec;
+            cMap[p] = CTypeOf(spec);
         }
-        var ctx = new SubstitutionContext(gataMap, cMap);
+        var ctx = new SubstitutionContext(specMap, cMap);
 
         var members = new ClassMember[tmpl.Decl.Members.Length];
         bool changed = false;
@@ -331,7 +356,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     /// <summary>
     /// Substitutes type parameters in a parameter list and returns the rewritten array.
     /// </summary>
-    internal static Param[] SubParams(Param[] ps, Dictionary<string, string> g)
+    internal static Param[] SubParams(Param[] ps, Dictionary<string, TypeSpec> g)
     {
         var ctx = new SubstitutionContext(g, null);
         return SubParams(ps, ctx);
@@ -361,7 +386,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     /// Substitutes type parameters in a method body, dispatching to the native or block form.
     /// </summary>
     internal static MethodBody SubBody(
-        MethodBody b, Dictionary<string, string> g, Dictionary<string, string> c)
+        MethodBody b, Dictionary<string, TypeSpec> g, Dictionary<string, string> c)
     {
         var ctx = new SubstitutionContext(g, c);
         return SubBody(b, ctx);
@@ -385,18 +410,17 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     /// </summary>
     private static NativeBody SubNative(NativeBody nb, SubstitutionContext ctx)
     {
-        var newKernel = ctx.SubWords(nb.KernelC, true);
-        var newUser = ctx.SubWords(nb.UserC, true);
+        var newKernel = ctx.SubWords(nb.KernelC);
+        var newUser = ctx.SubWords(nb.UserC);
         if (ReferenceEquals(newKernel, nb.KernelC) && ReferenceEquals(newUser, nb.UserC))
             return nb;
         return new NativeBody(newKernel, newUser);
     }
 
     /// <summary>
-    /// Substitutes type parameters in a Gata type string, handling both word-boundary
-    /// replacement and the mangled generic-suffix pattern (e.g. List_T becomes List_int).
+    /// Structurally substitutes type parameters in a type spec using the given bindings.
     /// </summary>
-    internal static string? SubType(string? t, Dictionary<string, string> g)
+    internal static TypeSpec? SubType(TypeSpec? t, Dictionary<string, TypeSpec> g)
     {
         var ctx = new SubstitutionContext(g, null);
         return ctx.SubType(t);
@@ -406,17 +430,25 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     /// Returns the C-type spelling for a Gata type argument, used when substituting
     /// type parameters inside native struct fields and native bodies.
     /// </summary>
-    internal static string CTypeOf(string t)
+    internal static string CTypeOf(TypeSpec t)
     {
-        if (t.EndsWith('*')) return t;
-        if (PrimTypes.IsPrim(t)) return PrimTypes.ToC(t);
-        // Monomorphization runs before symbol collection (Pipeline.cs), so no
-        // SymbolTable/@builtin binding exists yet to resolve against here - these
-        // three names are sourced from the same BuiltinTypes constants everywhere
-        // else uses, rather than being independently re-typed as literals.
-        if (t == BuiltinTypes.String) return $"{Mangler.Class(BuiltinTypes.String)}*";
-        if (t is BuiltinTypes.Process or BuiltinTypes.Thread) return "void*";
-        return $"{Mangler.Class(t)}*";
+        switch (t)
+        {
+            case PtrSpec p:
+                return CTypeOf(p.Inner) + "*";
+            case NamedSpec n:
+            {
+                string name = n.Mangled;
+                if (name == "void") return "void";
+                if (PrimTypes.IsPrim(name)) return PrimTypes.ToC(name);
+                if (name == BuiltinTypes.String) return $"{Mangler.Class(BuiltinTypes.String)}*";
+                if (name is BuiltinTypes.Process or BuiltinTypes.Thread) return "void*";
+                return $"{Mangler.Class(name)}*";
+            }
+            default:
+                // Array/function specs cannot appear as generic type arguments.
+                return t.ToSpecString();
+        }
     }
 
     /// <summary>
@@ -795,51 +827,62 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     /// <summary>
     /// Tries to bind a type parameter inferred from one argument position.
     /// Returns false only on a conflicting re-bind; a concrete (non-parameter) type returns true.
+    /// A generic-class parameter (e.g. Map[K, V]) unifies against the argument's registered
+    /// instantiation record, so multi-parameter generics and underscore-containing class
+    /// names infer correctly instead of being split at the first underscore.
     /// </summary>
-    internal static bool UnifyParam(string paramType, IrType argType,
-        string[] gparams, Dictionary<string, string> binds)
+    internal static bool UnifyParam(TypeSpec paramType, IrType argType,
+        string[] gparams, Dictionary<string, TypeSpec> binds)
     {
-        string pt = paramType.Trim();
-        if (Array.IndexOf(gparams, pt) >= 0) return Bind(pt, GataNameOf(argType), binds);
-        if (pt.EndsWith('*'))
+        switch (paramType)
         {
-            string inner = pt[..^1];
-            if (Array.IndexOf(gparams, inner) >= 0 && argType is IrPtrType ptr)
-                return Bind(inner, GataNameOf(ptr.Inner), binds);
-        }
-        if (argType is IrClassRef cr)
-            foreach (var g in gparams)
+            case NamedSpec { Args.Length: 0 } n when Array.IndexOf(gparams, n.Name) >= 0:
+                return Bind(n.Name, SpecOf(argType), binds);
+
+            case PtrSpec { Inner: NamedSpec { Args.Length: 0 } pn }
+                when Array.IndexOf(gparams, pn.Name) >= 0 && argType is IrPtrType ptr:
+                return Bind(pn.Name, SpecOf(ptr.Inner), binds);
+
+            case NamedSpec gn when gn.Args.Length > 0 && argType is IrClassRef cr
+                && Mangler.TryGetGenericInstance(cr.ClassName, out var instBase, out var instArgs)
+                && instBase == gn.Name && instArgs.Count == gn.Args.Length:
             {
-                string suffix = "_" + g;
-                if (!pt.EndsWith(suffix)) continue;
-                string ptBase = pt[..^suffix.Length];
-                int us = cr.ClassName.IndexOf('_');
-                if (us < 0) continue;
-                if (cr.ClassName[..us] == ptBase) return Bind(g, cr.ClassName[(us + 1)..], binds);
+                for (int i = 0; i < gn.Args.Length; i++)
+                    if (gn.Args[i] is { Args.Length: 0 } an && Array.IndexOf(gparams, an.Name) >= 0
+                        && !Bind(an.Name, new NamedSpec(instArgs[i]), binds))
+                        return false;
+                return true;
             }
-        return true;
+
+            default:
+                return true;
+        }
     }
 
-    private static bool Bind(string param, string name, Dictionary<string, string> binds)
+    private static bool Bind(string param, TypeSpec spec, Dictionary<string, TypeSpec> binds)
     {
-        if (binds.TryGetValue(param, out var prev)) return prev == name;
-        binds[param] = name;
+        if (binds.TryGetValue(param, out var prev)) return prev.ToSpecString() == spec.ToSpecString();
+        binds[param] = spec;
         return true;
     }
 
     /// <summary>
-    /// Returns the Gata type spelling for a resolved IR type, used as the binding value
+    /// Returns the type spec for a resolved IR type, used as the binding value
     /// when inferring type arguments from call-site argument types.
     /// </summary>
-    internal static string GataNameOf(IrType t)
+    internal static TypeSpec SpecOf(IrType t)
     {
         return t switch
         {
-            IrPrimType p => p.CName,
-            IrClassRef c => c.ClassName,
-            IrPtrType pt => GataNameOf(pt.Inner) + "*",
-            IrVoidType => "void",
-            _ => t.ToCType()
+            IrPrimType p => new NamedSpec(p.CName),
+            IrClassRef c => new NamedSpec(c.ClassName),
+            IrEnumType e => new NamedSpec(e.Name),
+            IrUnionType u => new NamedSpec(u.Name),
+            IrPtrType pt => new PtrSpec(SpecOf(pt.Inner), TextSpan.None),
+            IrVoidType => new NamedSpec("void"),
+            IrArrayType a => new ArraySpec(a.Size.ToString(), SpecOf(a.Elem), TextSpan.None),
+            IrFuncPtrType f => new FuncSpec([.. f.Params.Select(SpecOf)], SpecOf(f.Ret), TextSpan.None),
+            _ => new NamedSpec(t.MangledName)
         };
     }
 

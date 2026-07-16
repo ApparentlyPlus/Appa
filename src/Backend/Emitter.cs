@@ -1,5 +1,7 @@
 namespace Appa;
 
+using System.Runtime.InteropServices;
+
 internal sealed class Emitter(IrModule module, DiagnosticBag diag)
 {
     private readonly DiagnosticBag _diag = diag;
@@ -70,23 +72,23 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         EmitIntrinsicProtos();
         EmitResultTypedefs();
 
-        var nativeBlocks = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(module.NativeBlocks);
+        var nativeBlocks = CollectionsMarshal.AsSpan(module.NativeBlocks);
         for (int i = 0; i < nativeBlocks.Length; i++) EmitNativeBlock(nativeBlocks[i]);
 
-        var nativeTypes = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(module.NativeTypes);
+        var nativeTypes = CollectionsMarshal.AsSpan(module.NativeTypes);
         for (int i = 0; i < nativeTypes.Length; i++) EmitNativeType(nativeTypes[i]);
 
-        var classes = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(module.Classes);
+        var classes = CollectionsMarshal.AsSpan(module.Classes);
         for (int i = 0; i < classes.Length; i++) EmitClass(classes[i]);
 
-        var freeFuncs = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(module.FreeFunctions);
+        var freeFuncs = CollectionsMarshal.AsSpan(module.FreeFunctions);
         for (int i = 0; i < freeFuncs.Length; i++) EmitFreeFunc(freeFuncs[i]);
 
-        var processes = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(module.Processes);
+        var processes = CollectionsMarshal.AsSpan(module.Processes);
         for (int i = 0; i < processes.Length; i++)
         {
             var proc = processes[i];
-            var threads = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(proc.Threads);
+            var threads = CollectionsMarshal.AsSpan(proc.Threads);
             for (int j = 0; j < threads.Length; j++)
             {
                 EmitThread(threads[j]);
@@ -131,13 +133,13 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// </summary>
     private void EmitEnums()
     {
-        var enums = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(module.Enums);
+        var enums = CollectionsMarshal.AsSpan(module.Enums);
         for (int i = 0; i < enums.Length; i++)
         {
             var e = enums[i];
             var sb = new System.Text.StringBuilder();
             sb.Append("typedef enum { ");
-            var members = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(e.Members);
+            var members = CollectionsMarshal.AsSpan(e.Members);
             for (int j = 0; j < members.Length; j++)
             {
                 if (j > 0) sb.Append(", ");
@@ -160,7 +162,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// </summary>
     private void EmitUnions()
     {
-        var unions = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(module.Unions);
+        var unions = CollectionsMarshal.AsSpan(module.Unions);
         for (int i = 0; i < unions.Length; i++)
         {
             var u = unions[i];
@@ -169,7 +171,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
                 _sharedH.Line("int __tag;");
                 
                 bool hasFields = false;
-                var variants = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(u.Variants);
+                var variants = CollectionsMarshal.AsSpan(u.Variants);
                 for (int j = 0; j < variants.Length; j++)
                 {
                     if (variants[j].Fields.Count > 0) { hasFields = true; break; }
@@ -186,7 +188,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
                             
                             var sb = new System.Text.StringBuilder();
                             sb.Append("struct { ");
-                            var fields = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(v.Fields);
+                            var fields = CollectionsMarshal.AsSpan(v.Fields);
                             for (int k = 0; k < fields.Length; k++)
                             {
                                 var f = fields[k];
@@ -224,7 +226,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         list.Sort(new ArrayTypeDepthComparer());
 
         bool any = false;
-        var span = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(list);
+        var span = CollectionsMarshal.AsSpan(list);
         for (int i = 0; i < span.Length; i++)
         {
             var a = span[i];
@@ -299,7 +301,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     private void EmitFuncPtrTypedefs()
     {
         bool any = false;
-        var funcPtrs = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(module.FuncPtrTypes);
+        var funcPtrs = CollectionsMarshal.AsSpan(module.FuncPtrTypes);
         for (int i = 0; i < funcPtrs.Length; i++)
         {
             var f = funcPtrs[i];
@@ -535,40 +537,37 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Returns true if a library class is fully self-contained and can live in the shared header.
     /// </summary>
-    /// <summary>
-    /// Returns true if a library class is fully self-contained and can live in the shared header.
-    /// </summary>
     private static bool CanLiveInSharedHeader(IrClass cls)
     {
-        var methods = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(cls.Methods);
+        var methods = CollectionsMarshal.AsSpan(cls.Methods);
         for (int i = 0; i < methods.Length; i++)
         {
             var m = methods[i];
             if (m.Body != null || m.NativeKernel != m.NativeUser) return false;
             if (ReferencesRuntime(m.ReturnType) || MentionsString(m.NativeKernel)) return false;
             
-            var ps = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(m.Params);
+            var ps = CollectionsMarshal.AsSpan(m.Params);
             for (int j = 0; j < ps.Length; j++)
             {
                 if (ReferencesRuntime(ps[j].Type)) return false;
             }
         }
         
-        var operators = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(cls.Operators);
+        var operators = CollectionsMarshal.AsSpan(cls.Operators);
         for (int i = 0; i < operators.Length; i++)
         {
             var o = operators[i];
             if (o.Body != null || o.NativeKernel != o.NativeUser) return false;
             if (ReferencesRuntime(o.ReturnType) || MentionsString(o.NativeKernel)) return false;
             
-            var ps = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(o.Params);
+            var ps = CollectionsMarshal.AsSpan(o.Params);
             for (int j = 0; j < ps.Length; j++)
             {
                 if (ReferencesRuntime(ps[j].Type)) return false;
             }
         }
         
-        var rawFields = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(cls.RawFields);
+        var rawFields = CollectionsMarshal.AsSpan(cls.RawFields);
         for (int i = 0; i < rawFields.Length; i++)
         {
             var rf = rawFields[i];
@@ -577,7 +576,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         
         if (cls.FieldInits.Count > 0) return false;
         
-        var fields = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(cls.Fields);
+        var fields = CollectionsMarshal.AsSpan(cls.Fields);
         for (int i = 0; i < fields.Length; i++)
         {
             if (ReferencesRuntime(fields[i].Type)) return false;
@@ -661,7 +660,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     private bool NeedsDtor(IrClass cls)
     {
         if (DeinitOf(cls) != null) return true;
-        var span = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(cls.Fields);
+        var span = CollectionsMarshal.AsSpan(cls.Fields);
         for (int i = 0; i < span.Length; i++)
         {
             if (IsManaged(span[i].Type)) return true;
@@ -674,10 +673,10 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// </summary>
     private static IrFunction? DeinitOf(IrClass cls)
     {
-        var span = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(cls.Methods);
+        var span = CollectionsMarshal.AsSpan(cls.Methods);
         for (int i = 0; i < span.Length; i++)
         {
-            if (span[i].Name == "_deinit") return span[i];
+            if (span[i].Name == Lifecycle.Deinit) return span[i];
         }
         return null;
     }
@@ -687,10 +686,10 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// </summary>
     private static IrFunction? InitOf(IrClass cls)
     {
-        var span = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(cls.Methods);
+        var span = CollectionsMarshal.AsSpan(cls.Methods);
         for (int i = 0; i < span.Length; i++)
         {
-            if (span[i].Name == "_init") return span[i];
+            if (span[i].Name == Lifecycle.Init) return span[i];
         }
         return null;
     }
@@ -715,9 +714,6 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         return p.IsRef ? $"{p.Type.ToCType()}*" : p.Type.ToCType();
     }
 
-    /// <summary>
-    /// Returns the full C function signature for a method, including the implicit self parameter.
-    /// </summary>
     /// <summary>
     /// Returns the full C function signature for a method, including the implicit self parameter.
     /// </summary>
@@ -750,8 +746,9 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// Returns the full C function signature for an operator overload. Includes the self
     /// parameter for every operator except a static "as" (a factory - self doesn't exist yet),
     /// which takes only its explicit parameter, the same as a static method would.
+    /// Internal so tests can assert the emitted signature shape directly.
     /// </summary>
-    private static string OperatorSig(IrOperator o)
+    internal static string OperatorSig(IrOperator o)
     {
         var sb = new System.Text.StringBuilder();
         sb.Append(o.ReturnType.ToCType()).Append(' ').Append(o.CName).Append('(');
@@ -976,7 +973,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             case IrIf ifs:        EmitIf(ifs, w); break;
             case IrWhile ws:      w.Line($"while ({EmitExpr(ws.Cond)})"); EmitBlock(ws.Body, w); break;
             case IrFor fr:        EmitFor(fr, w); break;
-            default: throw new InvalidOperationException($"[Emitter] unhandled IrStmt: {s.GetType().Name}");
+            default: throw new System.Diagnostics.UnreachableException($"[Emitter] unhandled IrStmt: {s.GetType().Name}");
         }
     }
 
@@ -1054,25 +1051,41 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             IrIndex ix => ix.Obj.Type is IrArrayType
                                 ? $"({EmitExpr(ix.Obj)})._[{EmitExpr(ix.Idx)}]"
                                 : $"{EmitExpr(ix.Obj)}[{EmitExpr(ix.Idx)}]",
-            IrStaticCall sc => $"{sc.CName}({string.Join(", ", sc.Args.Select(EmitExpr))})",
-            IrInstanceCall ic => $"{ic.CName}({string.Join(", ", new[] { EmitExpr(ic.Recv) }.Concat(ic.Args.Select(EmitExpr)))})",
+            IrStaticCall sc => $"{sc.CName}({EmitArgs(sc.Args)})",
+            IrInstanceCall ic => $"{ic.CName}({EmitArgs(ic.Args, EmitExpr(ic.Recv))})",
             IrBinOp bo => $"({EmitExpr(bo.Left)} {bo.Op.Sym()} {EmitExpr(bo.Right)})",
             IrTernary tn => $"({EmitExpr(tn.Cond)} ? {EmitExpr(tn.Then)} : {EmitExpr(tn.Else)})",
             IrUnaryOp uo => $"{uo.Op.Sym()}{EmitExpr(uo.Operand)}",
             IrPostfix pf => $"{EmitExpr(pf.Operand)}{pf.Op.Sym()}",
             IrCast c => $"(({c.To.ToCType()}){EmitExpr(c.Value)})",
-            IrNew n => $"{Mangler.Allocator(n.ClassName)}({string.Join(", ", n.Args.Select(EmitExpr))})",
-            IrArrayLit al => $"({al.ArrType.ToCType()}){{ {{ {string.Join(", ", al.Elems.Select(EmitExpr))} }} }}",
+            IrNew n => $"{Mangler.Allocator(n.ClassName)}({EmitArgs(n.Args)})",
+            IrArrayLit al => $"({al.ArrType.ToCType()}){{ {{ {EmitArgs(al.Elems)} }} }}",
             IrAddrOf ao => $"(&{EmitExpr(ao.Target)})",
             IrDeref dr => $"(*{EmitExpr(dr.Ptr)})",
             IrSizeof so => $"sizeof({so.Of.ToCType()})",
             IrDefault df => $"(({df.Of.ToCType()})0)",
             IrFuncRef fr => fr.CName,
-            IrIndirectCall ic2 => $"({EmitExpr(ic2.Target)})({string.Join(", ", ic2.Args.Select(EmitExpr))})",
+            IrIndirectCall ic2 => $"({EmitExpr(ic2.Target)})({EmitArgs(ic2.Args)})",
             IrUnionConstruct uc => EmitUnionConstruct(uc),
             IrUnionField uf => $"{EmitExpr(uf.Union)}.payload.{UnionVariantName(uf.Union.Type, uf.VariantIndex)}.{uf.Field}",
-            _ => throw new InvalidOperationException($"[Emitter] Unhandled IrExpr: {e.GetType().Name}")
+            _ => throw new System.Diagnostics.UnreachableException($"[Emitter] unhandled IrExpr: {e.GetType().Name}")
         };
+    }
+
+    /// <summary>
+    /// Renders a comma-separated argument list, with an optional leading receiver,
+    /// without LINQ enumerator or intermediate array allocations.
+    /// </summary>
+    private string EmitArgs(List<IrExpr> args, string? first = null)
+    {
+        var sb = new System.Text.StringBuilder();
+        if (first != null) sb.Append(first);
+        for (int i = 0; i < args.Count; i++)
+        {
+            if (sb.Length > 0) sb.Append(", ");
+            sb.Append(EmitExpr(args[i]));
+        }
+        return sb.ToString();
     }
 
     /// <summary>
@@ -1107,13 +1120,13 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     private void EmitIntrinsicProtos()
     {
         bool any = false;
-        var funcs = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(module.FreeFunctions);
+        var funcs = CollectionsMarshal.AsSpan(module.FreeFunctions);
         for (int i = 0; i < funcs.Length; i++)
         {
             var fn = funcs[i];
             
             bool hasIntrinsic = false;
-            var anns = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(fn.Annotations);
+            var anns = CollectionsMarshal.AsSpan(fn.Annotations);
             for (int j = 0; j < anns.Length; j++)
             {
                 if (anns[j] is IntrinsicAnnotation)

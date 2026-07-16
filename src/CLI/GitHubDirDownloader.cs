@@ -37,7 +37,7 @@ internal static class GitHubDirDownloader
         {
             IReadOnlyList<TreeEntry> matches = truncated
                 ? await WalkContentsApiAsync(owner, repo, @ref, prefix.TrimEnd('/'), client, ct)
-                : entries.Where(e => e.Type == "blob" && e.Path.StartsWith(prefix, StringComparison.Ordinal)).ToList();
+                : [.. entries.Where(e => e.Type == "blob" && e.Path.StartsWith(prefix, StringComparison.Ordinal))];
 
             foreach (var entry in matches)
                 files.Add((entry, Path.Combine(localDir, entry.Path[prefix.Length..].Replace('/', Path.DirectorySeparatorChar))));

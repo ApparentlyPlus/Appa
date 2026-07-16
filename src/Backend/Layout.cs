@@ -23,6 +23,8 @@ internal static class Layout
     /// </summary>
     public static IReadOnlyList<OutputFile> Compose(EmitOutput o, SymbolTable sym)
     {
+        // Seed the header generator with a static hash of the content
+        Finesse.Seed(ContentSeed(o));
         var files = new List<OutputFile> { new("shared.h", SharedHeader(o)) };
 
         if (o.HasKernelRealm && o.HasUserRealm)
@@ -35,9 +37,7 @@ internal static class Layout
         else if (o.HasUserRealm)
         {
             // Hosted (user-only) builds get a generated main() calling the single validated
-            // user-realm entry func, so program.c is actually invocable. Loose transpile mode
-            // may have no such entry func (no Hosted-specific validation ran); leave it out
-            // rather than guess.
+            // user-realm entry func, so program.c is actually invocable.
             string main = o.UserEntryCName is { } cname
                 ? $"int main(void) {{\n    {cname}();\n    return 0;\n}}\n"
                 : "";
@@ -48,6 +48,29 @@ internal static class Layout
             files.Add(new("kmain.c", Concat("kmain.c", o.KernelPreamble, o.KernelTypes, o.KernelFwd, o.KernelFuncs, o.KernelBoot)));
         }
         return files;
+    }
+
+    /// <summary>
+    /// A stable SHA hash of the emitted content, used to seed the decorative header generator.
+    /// </summary>
+    private static int ContentSeed(EmitOutput o)
+    {
+        string st = o.SharedHeader + o.KernelPreamble + o.KernelTypes + o.KernelFwd + o.KernelFuncs +
+                    o.KernelBoot + o.UserPreamble + o.UserTypes + o.UserFwd + o.UserFuncs;
+        
+        int byteCount = System.Text.Encoding.UTF8.GetByteCount(st);
+        
+        // we can rent a temporary buffer or use stackalloc if the file is small
+        byte[]? rentedArray = null;
+        Span<byte> byteBuffer = byteCount <= 128 * 1024 ? stackalloc byte[byteCount] 
+            : (rentedArray = System.Buffers.ArrayPool<byte>.Shared.Rent(byteCount));
+
+        // We also need a buffer for the hash itself
+        Span<byte> hashBuffer = stackalloc byte[32];
+
+        System.Text.Encoding.UTF8.GetBytes(st, byteBuffer);
+        System.Security.Cryptography.SHA256.HashData(byteBuffer[..byteCount], hashBuffer);
+        return BitConverter.ToInt32(hashBuffer[..4]);
     }
 
     /// <summary>
