@@ -39,7 +39,8 @@ internal record EnvironmentDecl(TextSpan Span) : TopLevel(Span);
 
 /// <summary>
 /// A native { … } block containing raw C source captured verbatim. Routed to the
-/// kernel or user translation unit by NativeC based on the block's section marker.
+/// kernel and/or user translation unit(s) by its enclosing context (top-level, or
+/// nested in a kernel { } / user { } block).
 /// </summary>
 internal record NativeBlock(NativeBody Body, TextSpan Span, Annotation[]? Annotations = null) : TopLevel(Span);
 
@@ -112,10 +113,9 @@ internal record UnionVariant(string Name, Param[] Fields, TextSpan Span);
 #region Native body and annotations
 
 /// <summary>
-/// The captured C source of a native block, split into the kernel-side and user-side portions
-/// by NativeC. Either string may be empty if the block had no content for that side.
+/// The captured raw C source of a native block.
 /// </summary>
-internal record NativeBody(string KernelC, string UserC);
+internal record NativeBody(string C);
 
 /// <summary>
 /// Base class for all annotations (@intrinsic, @preamble, @keep).

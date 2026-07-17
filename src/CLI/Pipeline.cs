@@ -202,7 +202,7 @@ internal static class Pipeline
 
         string env = NativeC.Mask(string.Join("\n", module.NativeBlocks
             .Where(nb => nb.Section == NativeSection.Preamble)
-            .SelectMany(nb => new[] { nb.KernelC, nb.UserC })));
+            .Select(nb => nb.C)));
 
         foreach (var name in probe.Refs.OrderBy(n => n, StringComparer.Ordinal))
             if (!ContainsWholeWord(env, name))

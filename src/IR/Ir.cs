@@ -506,9 +506,9 @@ internal abstract record IrStmt { public TextSpan Span { get; init; } = TextSpan
 internal record IrBlock(List<IrStmt> Stmts) : IrStmt;
 
 /// <summary>
-/// A native C statement with separate kernel and user variants.
+/// A native C statement, spliced verbatim.
 /// </summary>
-internal record IrNativeStmt(string KernelC, string UserC) : IrStmt;
+internal record IrNativeStmt(string C) : IrStmt;
 
 // Verbatim C produced by a lowering pass (Result branches, gotos/labels). Printed as-is.
 /// <summary>
@@ -635,7 +635,7 @@ internal record IrParam(string Name, IrType Type, bool IsRef = false);
 
 /// <summary>
 /// An IR function - either a free function or a class method.
-/// Body is null for native functions; NativeKernel/NativeUser carry the C text instead.
+/// Body is null for native functions; Native carries the C text instead.
 /// </summary>
 internal record IrFunction(
     string Name,
@@ -649,8 +649,7 @@ internal record IrFunction(
     Visibility Vis,
     string? OwnerClass,
     IrBlock? Body,
-    string? NativeKernel,
-    string? NativeUser,
+    string? Native,
     List<Annotation> Annotations
 );
 
@@ -660,13 +659,13 @@ internal record IrFunction(
 internal record IrField(string Name, IrType Type, IrExpr? Init);
 
 /// <summary>
-/// A raw native struct-field block with separate kernel and user C variants.
+/// A raw native struct-field block.
 /// </summary>
-internal record RawFieldBlock(string Kernel, string User);
+internal record RawFieldBlock(string C);
 
 /// <summary>
 /// An operator overload defined on a class.
-/// Body is null for native operators; NativeKernel/NativeUser carry the C text instead.
+/// Body is null for native operators; Native carries the C text instead.
 /// IsStatic is true only for the one parameter form of 'as' (a static factory converting its
 /// parameter to self, eg. String's 'operator String func as(char c)') - every other
 /// operator, including zero-parameter 'as', is an instance operator over self.
@@ -680,8 +679,7 @@ internal record IrOperator(
     bool IsLib,
     Visibility Vis,
     IrBlock? Body,
-    string? NativeKernel,
-    string? NativeUser,
+    string? Native,
     bool IsStatic = false
 );
 
@@ -725,9 +723,9 @@ internal record IrThread(string Name, string FullName, IrFunction? EntryFunc);
 internal enum NativeSection { Types, Preamble, Boot }
 
 /// <summary>
-/// A native C block with separate kernel and user variants and a target output section.
+/// A native C block with a target output section.
 /// </summary>
-internal record IrNativeBlock(string KernelC, string UserC, Visibility Vis,
+internal record IrNativeBlock(string C, Visibility Vis,
                      NativeSection Section = NativeSection.Types);
 
 /// <summary>
@@ -736,8 +734,7 @@ internal record IrNativeBlock(string KernelC, string UserC, Visibility Vis,
 internal record IrNativeType(
     string Name,
     string CName,
-    string KernelC,
-    string UserC,
+    string C,
     Visibility Vis
 );
 

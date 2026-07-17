@@ -278,7 +278,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         if (At(TK.AtEnvironment)) { int es = Cur.Span.Start; Advance(); return new EnvironmentDecl(To(es)); }
         int s = Cur.Span.Start;
         var anns = ParseAnnotations();
-        if (At(TK.NativeContent)) return new NativeBlock(ParseNativeBody(Advance().Value), To(s), anns);
+        if (At(TK.NativeContent)) return new NativeBlock(ParseNativeBody(Advance()), To(s), anns);
         if (At(TK.NativeTypeDecl)) return ParseNativeType(anns, s);
 
         // The order of these checks matters. Class and module keywords are valid type names,
@@ -315,12 +315,11 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Wraps a raw native block string into a NativeBody, splitting on #kernel:/#user: markers.
+    /// Wraps a raw native block token into a NativeBody.
     /// </summary>
-    private static NativeBody ParseNativeBody(string raw)
+    private static NativeBody ParseNativeBody(Token tok)
     {
-        var (kc, uc) = NativeC.Split(raw);
-        return new NativeBody(kc, uc);
+        return new NativeBody(tok.Value);
     }
 
     /// <summary>
@@ -371,7 +370,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         if (At(TK.Kernel) || At(TK.User)) Fail("contexts cannot be nested", Codes.InvalidNesting);
         int s = Cur.Span.Start;
         var anns = ParseAnnotations();
-        if (At(TK.NativeContent)) return new NativeBlock(ParseNativeBody(Advance().Value), To(s), anns);
+        if (At(TK.NativeContent)) return new NativeBlock(ParseNativeBody(Advance()), To(s), anns);
         if (At(TK.NativeTypeDecl)) return ParseNativeType(anns, s);
         if (At(TK.AtExtern)) return ParseExternDecl(anns, s);
         if (At(TK.Enum)) { RejectAnns(anns, "an enum"); return ParseEnumDecl(anns, s); }
@@ -661,7 +660,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         if (At(TK.Kernel) || At(TK.User)) Fail("context blocks cannot appear inside a class", Codes.InvalidNesting);
 
         // fields { } block is a raw C struct fields injected verbatim into the emitted typedef.
-        if (At(TK.Fields)) return new FieldsBlock(ParseNativeBody(Advance().Value), To(s));
+        if (At(TK.Fields)) return new FieldsBlock(ParseNativeBody(Advance()), To(s));
 
         var anns = ParseAnnotations();
         var mods = ParseMods();
@@ -769,7 +768,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     /// </summary>
     private MethodBody ParseMethodBody()
     {
-        if (At(TK.NativeContent)) return new NativeMethodBody(ParseNativeBody(Advance().Value));
+        if (At(TK.NativeContent)) return new NativeMethodBody(ParseNativeBody(Advance()));
         return new BlockBody(ParseBlock());
     }
 
@@ -939,7 +938,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     private Stmt ParseStmtInner()
     {
         int s = Cur.Span.Start;
-        if (At(TK.NativeContent)) return new NativeStmt(ParseNativeBody(Advance().Value), To(s));
+        if (At(TK.NativeContent)) return new NativeStmt(ParseNativeBody(Advance()), To(s));
         if (At(TK.LBrace)) return ParseBlock();
         if (At(TK.Let)) return ParseLetStmt(s);
         if (At(TK.If)) return ParseIfStmt(s);

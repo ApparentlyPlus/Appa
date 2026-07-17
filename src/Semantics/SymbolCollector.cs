@@ -100,8 +100,7 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
                         if (a is IntrinsicAnnotation)
                             diag.Error(Codes.WrongAnnotationKind, file, nb.Span, "only '@preamble' is valid here, not '@intrinsic'");
                 }
-                ScanNativeForStructs(nb.Body.KernelC);
-                ScanNativeForStructs(nb.Body.UserC);
+                ScanNativeForStructs(nb.Body.C);
                 break;
             case NativeTypeDecl nd:
                 P1NativeType(nd, file);

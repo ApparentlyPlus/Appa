@@ -2,12 +2,6 @@ namespace Appa;
 
 using System.Text.RegularExpressions;
 
-// Helpers for the raw C inside `native { }` blocks. The `#kernel:` / `#user:`
-// section markers and the struct scan must see only real code — a marker or a
-// `struct gata_X {` sitting inside a C comment or string literal must NOT be
-// matched. We do this by computing a same-length "masked" copy of the text with
-// every comment and string/char-literal body blanked to spaces, locating things
-// in the masked copy, then slicing the ORIGINAL text at the same offsets.
 internal static partial class NativeC
 {
     /// <summary>
@@ -49,24 +43,6 @@ internal static partial class NativeC
             }
         }
         return new string(a);
-    }
-
-    /// <summary>
-    /// Split a native body into (kernelC, userC) on #kernel:/#user: markers found in
-    /// real code only. With no markers, both variants are the whole body.
-    /// </summary>
-    public static (string KernelC, string UserC) Split(string raw)
-    {
-        string masked = Mask(raw);
-        int ki = masked.IndexOf("#kernel:", StringComparison.Ordinal);
-        int ui = masked.IndexOf("#user:",   StringComparison.Ordinal);
-        if (ki < 0 && ui < 0) return (raw, raw);
-        string kc = "", uc = "";
-        if (ki >= 0) { int s = ki + 8; int e = ui >= 0 && ui > ki ? ui : raw.Length; kc = raw[s..e].Trim(); }
-        if (ui >= 0) { int s = ui + 6; int e = ki >= 0 && ki > ui ? ki : raw.Length; uc = raw[s..e].Trim(); }
-        if (kc == "") kc = uc;
-        if (uc == "") uc = kc;
-        return (kc, uc);
     }
 
     /// <summary>

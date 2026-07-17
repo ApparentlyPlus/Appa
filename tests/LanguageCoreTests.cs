@@ -414,7 +414,7 @@ public class LanguageCoreTests
             """ },
             { "intrinsic_on_native_block", "G041", """
             @intrinsic(alloc)
-            native { #kernel: int x; #user: int x; }
+            native { int x; }
             kernel { entry func Main() { } }
             """ },
             { "keep_on_enum", "G048", """

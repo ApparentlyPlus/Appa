@@ -406,15 +406,12 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     }
 
     /// <summary>
-    /// Substitutes type parameters in a native method body, replacing type parameters in the kernel and user code strings.
+    /// Substitutes type parameters in a native method body's code string.
     /// </summary>
     private static NativeBody SubNative(NativeBody nb, SubstitutionContext ctx)
     {
-        var newKernel = ctx.SubWords(nb.KernelC);
-        var newUser = ctx.SubWords(nb.UserC);
-        if (ReferenceEquals(newKernel, nb.KernelC) && ReferenceEquals(newUser, nb.UserC))
-            return nb;
-        return new NativeBody(newKernel, newUser);
+        var newC = ctx.SubWords(nb.C);
+        return ReferenceEquals(newC, nb.C) ? nb : new NativeBody(newC);
     }
 
     /// <summary>

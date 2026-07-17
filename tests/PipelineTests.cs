@@ -62,7 +62,7 @@ public class PipelineTests
     [InlineData("G037", "void func TakesInt(int n) { } kernel { entry func Main() { let int x = 1; TakesInt(ref x); } }")]
     [InlineData("G038", "class RO { int v; operator int func [](int i) { return self.v; } } kernel { entry func Main() { let RO r = new RO(); r[0] = 5; } }")]
     [InlineData("G040", "static int func helper() { return 1; } kernel { entry func Main() { let int x = helper(); } }")]
-    [InlineData("G041", "@intrinsic(alloc) native { #kernel: int x; #user: int x; } kernel { entry func Main() { } }")]
+    [InlineData("G041", "@intrinsic(alloc) native { int x; } kernel { entry func Main() { } }")]
     [InlineData("G041", "class C { @keep int func F() { return 1; } } kernel { entry func Main() { } }")]
     [InlineData("G041", "@preamble(user) int func Foo() { return 1; } kernel { entry func Main() { } }")]
     [InlineData("G043", "kernel { entry func Main() {} } user { foreground process App { background thread Worker { entry func Run() {} } } }")]

@@ -339,7 +339,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// </summary>
     private void EmitNativeBlock(IrNativeBlock nb)
     {
-        string kt = TrimC(nb.KernelC), ut = TrimC(nb.UserC);
+        string t = TrimC(nb.C);
         var (kw, uw) = nb.Section switch
         {
             NativeSection.Preamble => (_kPre, _uPre),
@@ -349,16 +349,15 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         static void Put(CodeWriter? w, string body) { if (w != null) { w.Line(body); w.Line(""); } }
         switch (nb.Vis)
         {
-            case Visibility.Kernel: Put(kw, kt); break;
-            case Visibility.User: Put(uw, ut); break;
-            default: Put(kw, kt); Put(uw, ut); break;
+            case Visibility.Kernel: Put(kw, t); break;
+            case Visibility.User: Put(uw, t); break;
+            default: Put(kw, t); Put(uw, t); break;
         }
     }
 
     /// <summary>
-    /// Emits a native type struct and typedef into the appropriate writer. When kernel and
-    /// user bodies are identical the type goes to the shared header; otherwise each realm
-    /// gets its own copy. Duplicate emission within a writer is suppressed via FirstInto.
+    /// Emits a native type struct and typedef into the appropriate writer. Duplicate emission
+    /// within a writer is suppressed via FirstInto.
     /// </summary>
     private void EmitNativeType(IrNativeType nt)
     {
@@ -372,17 +371,9 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         }
         switch (nt.Vis)
         {
-            case Visibility.Kernel: EmitTo(_kTypes, nt.KernelC); break;
-            case Visibility.User: EmitTo(_uTypes, nt.UserC);   break;
-            default:
-                if (nt.KernelC == nt.UserC)
-                    EmitTo(_sharedH, nt.KernelC);
-                else
-                {
-                    EmitTo(_kTypes, nt.KernelC);
-                    EmitTo(_uTypes, nt.UserC);
-                }
-                break;
+            case Visibility.Kernel: EmitTo(_kTypes, nt.C); break;
+            case Visibility.User: EmitTo(_uTypes, nt.C);   break;
+            default: EmitTo(_sharedH, nt.C); break;
         }
     }
 
@@ -402,7 +393,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             bool isKernel = cls.Vis == Visibility.Kernel;
             EmitConcreteClass(cls, isKernel ? _kTypes : _uTypes,
                                     isKernel ? _kFwd   : _uFwd,
-                                    isKernel ? _kFuncs : _uFunc, isKernel, isLib: false);
+                                    isKernel ? _kFuncs : _uFunc, isLib: false);
             return;
         }
 
@@ -413,8 +404,8 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             EmitLibClass(cls);
         else
         {
-            if (toKernel) EmitConcreteClass(cls, _kTypes, _kFwd, _kFuncs, isKernel: true,  isLib: true);
-            if (toUser)   EmitConcreteClass(cls, _uTypes, _uFwd, _uFunc,  isKernel: false, isLib: true);
+            if (toKernel) EmitConcreteClass(cls, _kTypes, _kFwd, _kFuncs, isLib: true);
+            if (toUser)   EmitConcreteClass(cls, _uTypes, _uFwd, _uFunc,  isLib: true);
         }
     }
 
@@ -425,18 +416,18 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     {
         bool toKernel = cls.Vis != Visibility.User;
         bool toUser   = cls.Vis != Visibility.Kernel;
-        if (toKernel) EmitModuleInto(cls, _kTypes, _kFuncs, isKernel: true);
-        if (toUser)   EmitModuleInto(cls, _uTypes, _uFunc,  isKernel: false);
+        if (toKernel) EmitModuleInto(cls, _kTypes, _kFuncs);
+        if (toUser)   EmitModuleInto(cls, _uTypes, _uFunc);
     }
 
     /// <summary>
     /// Emits forward declarations and method bodies for a module into the given writers.
     /// </summary>
-    private void EmitModuleInto(IrClass cls, CodeWriter types, CodeWriter funcs, bool isKernel)
+    private void EmitModuleInto(IrClass cls, CodeWriter types, CodeWriter funcs)
     {
         foreach (var m in cls.Methods) types.Line($"static inline {MethodSig(m)};");
         types.Line("");
-        foreach (var m in cls.Methods) EmitFunctionBody(m, funcs, isLib: true, isKernel);
+        foreach (var m in cls.Methods) EmitFunctionBody(m, funcs, isLib: true);
     }
 
     /// <summary>
@@ -444,7 +435,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// functions; context classes use regular linkage with separate forward declarations.
     /// </summary>
     private void EmitConcreteClass(IrClass cls, CodeWriter types, CodeWriter fwd,
-                           CodeWriter funcs, bool isKernel, bool isLib)
+                           CodeWriter funcs, bool isLib)
     {
         string prefix = isLib ? "static inline " : "";
 
@@ -459,7 +450,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             using (types.Block($"struct {cls.CName} {{", "};"))
             {
                 EmitObjHeader(types);
-                foreach (var rf in cls.RawFields) types.Line(TrimC(isKernel ? rf.Kernel : rf.User));
+                foreach (var rf in cls.RawFields) types.Line(TrimC(rf.C));
                 foreach (var f in cls.Fields)
                     types.Line($"{f.Type.ToCType()} {f.Name}; /* field */");
             }
@@ -487,12 +478,12 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         foreach (var m in cls.Methods)
         {
             if (!isLib) fwd.Line($"{MethodSig(m)};");
-            EmitFunctionBody(m, funcs, isLib, isKernel);
+            EmitFunctionBody(m, funcs, isLib);
         }
         foreach (var o in cls.Operators)
         {
             if (!isLib) fwd.Line($"{OperatorSig(o)};");
-            EmitOperatorBody(o, funcs, isLib, isKernel);
+            EmitOperatorBody(o, funcs, isLib);
         }
         EmitDtor(cls, funcs, isLib);
     }
@@ -515,7 +506,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             using (w.Block($"struct {cls.CName} {{", "};"))
             {
                 EmitObjHeader(w);
-                foreach (var rf in cls.RawFields) w.Line(rf.Kernel);
+                foreach (var rf in cls.RawFields) w.Line(rf.C);
                 foreach (var f in cls.Fields)
                     w.Line($"{f.Type.ToCType()} {f.Name}; /* field */");
             }
@@ -528,8 +519,8 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         w.Line($"static inline {AllocatorSig(cls)};");
         w.Line("");
 
-        foreach (var m in cls.Methods)   EmitFunctionBody(m, w, isLib: true, isKernel: true);
-        foreach (var o in cls.Operators) EmitOperatorBody(o, w, isLib: true, isKernel: true);
+        foreach (var m in cls.Methods)   EmitFunctionBody(m, w, isLib: true);
+        foreach (var o in cls.Operators) EmitOperatorBody(o, w, isLib: true);
         EmitDtor(cls, w, isLib: true);
         EmitAllocator(cls, w, isLib: true);
     }
@@ -543,8 +534,8 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         for (int i = 0; i < methods.Length; i++)
         {
             var m = methods[i];
-            if (m.Body != null || m.NativeKernel != m.NativeUser) return false;
-            if (ReferencesRuntime(m.ReturnType) || MentionsString(m.NativeKernel)) return false;
+            if (m.Body != null) return false;
+            if (ReferencesRuntime(m.ReturnType) || MentionsString(m.Native)) return false;
             
             var ps = CollectionsMarshal.AsSpan(m.Params);
             for (int j = 0; j < ps.Length; j++)
@@ -557,8 +548,8 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         for (int i = 0; i < operators.Length; i++)
         {
             var o = operators[i];
-            if (o.Body != null || o.NativeKernel != o.NativeUser) return false;
-            if (ReferencesRuntime(o.ReturnType) || MentionsString(o.NativeKernel)) return false;
+            if (o.Body != null) return false;
+            if (ReferencesRuntime(o.ReturnType) || MentionsString(o.Native)) return false;
             
             var ps = CollectionsMarshal.AsSpan(o.Params);
             for (int j = 0; j < ps.Length; j++)
@@ -571,7 +562,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         for (int i = 0; i < rawFields.Length; i++)
         {
             var rf = rawFields[i];
-            if (rf.Kernel != rf.User || MentionsString(rf.Kernel)) return false;
+            if (MentionsString(rf.C)) return false;
         }
         
         if (cls.FieldInits.Count > 0) return false;
@@ -849,8 +840,8 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             _uFwd.Line($"static inline {FuncSig(fn)};");
             if (fn.Body == null)
             {
-                EmitLibFreeFuncNative(fn, _kFuncs, isKernel: true);
-                EmitLibFreeFuncNative(fn, _uFunc,  isKernel: false);
+                EmitLibFreeFuncNative(fn, _kFuncs);
+                EmitLibFreeFuncNative(fn, _uFunc);
             }
             else
             {
@@ -868,7 +859,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         fwd.Line($"{FuncSig(fn)};");
         if (fn.Body == null)
         {
-            string body = TrimC(isKernel ? fn.NativeKernel ?? "" : fn.NativeUser ?? "");
+            string body = TrimC(fn.Native ?? "");
             funcs.Line($"{FuncSig(fn)}");
             using (funcs.Braces()) funcs.Line(body); funcs.Blank();
         }
@@ -881,11 +872,11 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     }
 
     /// <summary>
-    /// Emits a native library free function into the given writer for the given realm.
+    /// Emits a native library free function into the given writer.
     /// </summary>
-    private void EmitLibFreeFuncNative(IrFunction fn, CodeWriter w, bool isKernel)
+    private void EmitLibFreeFuncNative(IrFunction fn, CodeWriter w)
     {
-        string body = TrimC(isKernel ? fn.NativeKernel ?? "" : fn.NativeUser ?? "");
+        string body = TrimC(fn.Native ?? "");
         w.Line($"static inline {FuncSig(fn)}");
         using (w.Braces()) w.Line(body); w.Blank();
     }
@@ -909,12 +900,12 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Emits a function body — native C text or a lowered IR block — into the given writer.
     /// </summary>
-    private void EmitFunctionBody(IrFunction m, CodeWriter w, bool isLib, bool isKernel)
+    private void EmitFunctionBody(IrFunction m, CodeWriter w, bool isLib)
     {
         string prefix = isLib ? "static inline " : "";
         if (m.Body == null)
         {
-            string body = TrimC(isKernel ? m.NativeKernel ?? "" : m.NativeUser ?? "");
+            string body = TrimC(m.Native ?? "");
             w.Line($"{prefix}{MethodSig(m)}");
             using (w.Braces()) w.Line(body); w.Blank();
             return;
@@ -927,12 +918,12 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Emits an operator body — native C text or a lowered IR block — into the given writer.
     /// </summary>
-    private void EmitOperatorBody(IrOperator o, CodeWriter w, bool isLib, bool isKernel)
+    private void EmitOperatorBody(IrOperator o, CodeWriter w, bool isLib)
     {
         string prefix = isLib ? "static inline " : "";
         if (o.Body == null)
         {
-            string body = TrimC(isKernel ? o.NativeKernel ?? "" : o.NativeUser ?? "");
+            string body = TrimC(o.Native ?? "");
             w.Line($"{prefix}{OperatorSig(o)}");
             using (w.Braces()) w.Line(body); w.Blank();
             return;
@@ -959,7 +950,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         switch (s)
         {
             case IrRaw r:         w.Line(r.Code); break;
-            case IrNativeStmt ns: w.Line(TrimC(ns.KernelC)); break;
+            case IrNativeStmt ns: w.Line(TrimC(ns.C)); break;
             case IrBlock b:       EmitBlock(b, w); break;
             case IrUnsafeBlock u: EmitBlock(u.Body, w); break;
             case IrDeclVar dv:    EmitDeclVar(dv, w); break;
