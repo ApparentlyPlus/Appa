@@ -18,6 +18,7 @@ try
         case "update": await RunSetup(isUpdate: true); break;
         case "init": RunInit(args[1..]); break;
         case "build": RunBuild(args[1..]); break;
+        case "check": RunCheck(args[1..]); break;
         case "--help":
         case "-h": PrintHelp(); break;
         case "--version":
@@ -130,34 +131,9 @@ static void RunBuild(string[] args)
         }
 
     bool looseTranspile = pureTranspile && envOverride != null && entryOverride != null;
-    Manifest? manifest = null;
-    if (!looseTranspile)
-    {
-        try
-        {
-            string? manifestPath =
-                manifestArg == null ? ManifestReader.Discover(Directory.GetCurrentDirectory())
-                : Directory.Exists(manifestArg) ? ManifestReader.Discover(manifestArg)
-                : manifestArg;
-            if (manifestPath != null) manifest = ManifestReader.Load(manifestPath);
-        }
-        catch (ManifestError e) { Fail(e.Message); }
-        if (manifest == null)
-            Fail("no <project>.gconf found - run 'appa init', or use --pure-transpile --env <file> --entry <file>");
-    }
-    else if (manifestArg != null)
-        Log.Warn($"project argument '{manifestArg}' is ignored with --pure-transpile --env --entry (loose-file mode discovers nothing from a project)");
-
-    string? envPath = envOverride ?? (manifest != null ? Pipeline.DiscoverEnv(manifest.Dir) : null);
-    string? entryPath = entryOverride ?? (manifest != null ? Pipeline.DiscoverEntry(manifest.Dir) : null);
-    if (envPath == null) Fail("no environment found - mark one project file @environment, or pass --env");
-    if (entryPath == null) Fail("no entry point - expected src/main.g, or pass --entry");
-
-    string projectRoot = manifest?.Dir ?? Path.GetDirectoryName(Path.GetFullPath(entryPath))!;
-    string? stdlibDir = stdlibOverride ?? Pipeline.FindLibgata();
-    if (stdlibDir == null) Fail("cannot find libgata - run 'appa setup' or pass --stdlib <dir>");
-    foreach (var p in new[] { envPath, entryPath })
-        if (!File.Exists(p)) Fail($"file not found: {p}");
+    var (manifest, envPath, entryPath, projectRoot, stdlibDir) = ResolveInputs(
+        manifestArg, envOverride, entryOverride, stdlibOverride, looseTranspile,
+        "--pure-transpile --env <file> --entry <file>", "--pure-transpile --env --entry");
 
     if (manifest != null)
         Console.WriteLine($"{C.BOLD}Building{C.NC} {manifest.ProjectName} {C.DIM}({manifest.Target}, {manifest.Mode.ToString().ToLowerInvariant()}){C.NC}");
@@ -166,7 +142,7 @@ static void RunBuild(string[] args)
     Console.WriteLine();
 
     var inputFiles = new List<string> { Path.GetFullPath(envPath), Path.GetFullPath(entryPath) };
-    var (programs, attempted, imports, diag) = Pipeline.Transpile(inputFiles, projectRoot, stdlibDir!);
+    var (programs, attempted, imports, diag) = Pipeline.Transpile(inputFiles, projectRoot, stdlibDir);
     var visible = Pipeline.VisibleModules(imports);
     var (module, sourcemap, caps) = Pipeline.BuildModule(programs, visible, manifest?.Mode ?? Mode.Debug, diag);
 
@@ -209,7 +185,105 @@ static void RunBuild(string[] args)
 
 #endregion
 
+#region appa check
+
+/// <summary>
+/// Parses check arguments and runs the compiler front end only, reporting diagnostics
+/// without ever reaching emission.
+/// </summary>
+static void RunCheck(string[] args)
+{
+    string? manifestArg = null, envOverride = null, entryOverride = null, stdlibOverride = null;
+    bool warnAsError = false;
+
+    for (int i = 0; i < args.Length; i++)
+        switch (args[i])
+        {
+            case "--env" when i + 1 < args.Length: envOverride = args[++i]; break;
+            case "--entry" when i + 1 < args.Length: entryOverride = args[++i]; break;
+            case "--stdlib" when i + 1 < args.Length: stdlibOverride = args[++i]; break;
+            case "--werror": warnAsError = true; break;
+            default:
+                if (args[i].StartsWith("--")) Fail($"unknown option '{args[i]}'");
+                else manifestArg = args[i];
+                break;
+        }
+
+    bool loose = envOverride != null && entryOverride != null;
+    var (manifest, envPath, entryPath, projectRoot, stdlibDir) = ResolveInputs(
+        manifestArg, envOverride, entryOverride, stdlibOverride, loose,
+        "--env <file> --entry <file>", "--env --entry");
+
+    if (manifest != null)
+        Console.WriteLine($"{C.BOLD}Checking{C.NC} {manifest.ProjectName} {C.DIM}({manifest.Target}, {manifest.Mode.ToString().ToLowerInvariant()}){C.NC}");
+    else
+        Console.WriteLine($"{C.BOLD}Checking{C.NC} {C.DIM}(--env/--entry){C.NC}");
+    Console.WriteLine();
+
+    var inputFiles = new List<string> { Path.GetFullPath(envPath), Path.GetFullPath(entryPath) };
+    var (programs, attempted, imports, diag) = Pipeline.Transpile(inputFiles, projectRoot, stdlibDir);
+    var visible = Pipeline.VisibleModules(imports);
+    var (module, _, _) = Pipeline.BuildModule(programs, visible, manifest?.Mode ?? Mode.Debug, diag);
+
+    Pipeline.ValidateEnvironment(programs, diag);
+    Pipeline.ValidateFloor(module, diag);
+    Pipeline.ValidateStructure(programs, manifest?.Target, diag);
+    if (manifest?.Target == Target.Hosted && module.HasKernelRealm)
+        diag.Error(Codes.KernelBlockInHosted, "<environment>", TextSpan.None,
+            "the active environment declares a kernel preamble, which is not allowed for a Hosted build");
+    if (!diag.HasErrors) Pipeline.WarnReferenceCycles(module);
+
+    Pipeline.ReportGataFiles(attempted, diag, warnAsError);
+}
+
+#endregion
+
 #region Utilities
+
+/// <summary>
+/// Resolves the environment file, entry file, project root, and libgata directory for a
+/// build or check invocation. Shared between 'appa build' and 'appa check', since both
+/// resolve identically: a project .gconf (auto-discovered, or given explicitly), or a
+/// loose --env/--entry pair with no project directory at all. loose bypasses manifest
+/// discovery entirely; looseHint/manifestHint fill in the two command-specific phrases
+/// ('--pure-transpile --env --entry' for build, '--env --entry' for check) in the
+/// resulting error/warning text.
+/// </summary>
+static (Manifest? manifest, string envPath, string entryPath, string projectRoot, string stdlibDir) ResolveInputs(
+    string? manifestArg, string? envOverride, string? entryOverride, string? stdlibOverride,
+    bool loose, string manifestHint, string looseHint)
+{
+    Manifest? manifest = null;
+    if (!loose)
+    {
+        try
+        {
+            string? manifestPath =
+                manifestArg == null ? ManifestReader.Discover(Directory.GetCurrentDirectory())
+                : Directory.Exists(manifestArg) ? ManifestReader.Discover(manifestArg)
+                : manifestArg;
+            if (manifestPath != null) manifest = ManifestReader.Load(manifestPath);
+        }
+        catch (ManifestError e) { Fail(e.Message); }
+        if (manifest == null)
+            Fail($"no <project>.gconf found - run 'appa init', or use {manifestHint}");
+    }
+    else if (manifestArg != null)
+        Log.Warn($"project argument '{manifestArg}' is ignored with {looseHint} (loose-file mode discovers nothing from a project)");
+
+    string? envPath = envOverride ?? (manifest != null ? Pipeline.DiscoverEnv(manifest.Dir) : null);
+    string? entryPath = entryOverride ?? (manifest != null ? Pipeline.DiscoverEntry(manifest.Dir) : null);
+    if (envPath == null) Fail("no environment found - mark one project file @environment, or pass --env");
+    if (entryPath == null) Fail("no entry point - expected src/main.g, or pass --entry");
+
+    string projectRoot = manifest?.Dir ?? Path.GetDirectoryName(Path.GetFullPath(entryPath))!;
+    string? stdlibDir = stdlibOverride ?? Pipeline.FindLibgata();
+    if (stdlibDir == null) Fail("cannot find libgata - run 'appa setup' or pass --stdlib <dir>");
+    foreach (var p in new[] { envPath, entryPath })
+        if (!File.Exists(p)) Fail($"file not found: {p}");
+
+    return (manifest, envPath, entryPath, projectRoot, stdlibDir);
+}
 
 /// <summary>
 /// Writes all output files to a directory, creating it if necessary.
@@ -282,6 +356,7 @@ static void PrintHelp() => Console.WriteLine($$"""
   appa update                     Re-download and overwrite the installed GatOS bundle
   appa init [project]             Create a GatOS project
   appa build [project|.gconf]     Build the project described by its .gconf
+  appa check [project|.gconf]     Lex, parse, and type-check only - reports errors, emits nothing
   appa --version / -v             Print the appa version
 
 {{C.YELLOW}}Build options:{{C.NC}}
@@ -296,10 +371,16 @@ static void PrintHelp() => Console.WriteLine($$"""
   A project build auto-discovers its environment (the @environment file in the
   project dir) and entry (src/main.g) - no --env/--entry needed.
 
+{{C.YELLOW}}Check options:{{C.NC}}
+  --stdlib <dir> / --werror / --env <env.g> / --entry <file.g>   Same meaning as for build
+  (no --pure-transpile needed for --env/--entry: check never emits, loose or not)
+
 {{C.BLUE}}Examples:{{C.NC}}
   appa setup
   appa init myos && cd myos && appa build --run
   appa build --pure-transpile --env env.g --entry src/main.g
+  appa check myos
+  appa check --env env.g --entry src/main.g
 """);
 
 #endregion
