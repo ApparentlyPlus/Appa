@@ -7,12 +7,14 @@ namespace Appa;
 /// MEM: any reachable new expression or call to the heap allocator (_env_alloc).
 /// INPUT: any reachable call to _env_read.
 /// THREADS: the module declares at least one process or thread.
+/// TIME: any reachable call to the time source (_env_time_ns).
 /// </summary>
 internal sealed class CapabilityScan(IrModule m) : IrWalker
 {
     public bool Mem;
     public bool Input;
     public bool Threads;
+    public bool Time;
 
     private readonly Dictionary<string, IrFunction> _funcs = new(GetFuncsCapacity(m));
     private readonly Dictionary<string, IrOperator> _ops = new(GetOpsCapacity(m));
@@ -79,6 +81,7 @@ internal sealed class CapabilityScan(IrModule m) : IrWalker
     {
         if (cname == (m.Symbols.IntrinsicOrNull(Roles.EnvRead) ?? "_env_read")) Input = true;
         if (cname == (m.Symbols.IntrinsicOrNull(Roles.EnvAlloc) ?? "_env_alloc")) Mem = true;
+        if (cname == (m.Symbols.IntrinsicOrNull(Roles.EnvTime) ?? "_env_time_ns")) Time = true;
         if (_funcs.TryGetValue(cname, out var f)) Enter(cname, f.Body);
         else if (_ops.TryGetValue(cname, out var o)) Enter(cname, o.Body);
     }

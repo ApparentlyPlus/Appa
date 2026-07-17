@@ -88,12 +88,25 @@ internal sealed class Desugar(SymbolTable sym, DiagnosticBag diag) : IrRewriter
     }
 
     /// <summary>
-    /// Folds the parts of an interpolated string into a left-associative concat chain.
-    /// Each part is already String-typed so every fold is String's '+' operator.
+    /// Lowers an interpolated string. One part passes through and two parts fold into a single
+    /// '+' call, but three or more parts build through one StringBuilder instead of a concat
+    /// chain - a chain allocates (and copies into) a fresh String per fold, O(n^2) in the total
+    /// length, where the builder is one growable buffer plus one final String. The builder class
+    /// is resolved through @builtin(StringBuilder), never by name; if the active stdlib doesn't
+    /// bind one (or lacks Put/ToString), the concat chain remains as the fallback.
     /// </summary>
     private IrExpr LowerInterp(IrInterp ip)
     {
         if (ip.Parts.Count == 0) return new IrLitString("\"\"") { Span = ip.Span };
+        if (ip.Parts.Count >= 3 && sym.Builtins.TryGetValue(BuiltinTypes.StringBuilder, out var sbClass)
+            && sym.LookupMethod(sbClass, "Put") is { } put
+            && sym.LookupMethod(sbClass, "ToString") is { } toStr)
+        {
+            IrExpr sb = new IrNew(sbClass, []) { Span = ip.Span };
+            foreach (var part in ip.Parts)
+                sb = new IrInstanceCall(sb, put.CName, new IrClassRef(sbClass), [part]) { Span = ip.Span };
+            return new IrInstanceCall(sb, toStr.CName, IrType.String, []) { Span = ip.Span };
+        }
         var acc = ip.Parts[0];
         for (int i = 1; i < ip.Parts.Count; i++)
             acc = new IrStaticCall(Concat(ip.Span), IrType.String, [acc, ip.Parts[i]]) { Span = ip.Span };

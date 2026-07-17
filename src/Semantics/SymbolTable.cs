@@ -28,12 +28,13 @@ internal static class Roles
     public const string EnvThreadSpawn = "env_thread_spawn";
     public const string EnvRead        = "env_read";
     public const string EnvAlloc       = "env_alloc";
+    public const string EnvTime        = "env_time";
 
     public static readonly FrozenSet<string> All = FrozenSet.ToFrozenSet(
     [
         Alloc, Retain, Release, ObjHeader, ObjInit,
         StringifyInt, StringifyFloat, StringifyChar,
-        EnvDebug, EnvPanic, EnvProcCreate, EnvProcHide, EnvThreadSpawn, EnvRead, EnvAlloc
+        EnvDebug, EnvPanic, EnvProcCreate, EnvProcHide, EnvThreadSpawn, EnvRead, EnvAlloc, EnvTime
     ]);
 }
 
@@ -51,11 +52,12 @@ internal static class Lifecycle
 // name from this table instead of comparing type names against a literal string.
 internal static class BuiltinTypes
 {
-    public const string String  = "String";
-    public const string Process = "Process";
-    public const string Thread  = "Thread";
+    public const string String        = "String";
+    public const string StringBuilder = "StringBuilder";
+    public const string Process       = "Process";
+    public const string Thread        = "Thread";
 
-    public static readonly FrozenSet<string> All = FrozenSet.ToFrozenSet([String, Process, Thread]);
+    public static readonly FrozenSet<string> All = FrozenSet.ToFrozenSet([String, StringBuilder, Process, Thread]);
 }
 
 /// <summary>
@@ -125,6 +127,9 @@ internal sealed class SymbolTable
         return name switch
         {
             BuiltinTypes.String => IrType.String,
+            // StringBuilder is an ordinary managed class - the binding only exists so the
+            // interpolation lowering (Desugar) can find it without hardcoding the name.
+            BuiltinTypes.StringBuilder => new IrClassRef(Builtins[name]),
             BuiltinTypes.Process or BuiltinTypes.Thread => new IrPtrType(IrType.Void),
             _ => null
         };

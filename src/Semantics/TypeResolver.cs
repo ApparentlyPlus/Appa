@@ -1265,7 +1265,9 @@ internal sealed class TypeResolver(
                 if (name == "void") return IrType.Void;
                 if (BuiltinTypes.All.Contains(name))
                     return sym.ResolveBuiltinType(name)
-                        ?? (name == BuiltinTypes.String ? IrType.String : new IrPtrType(IrType.Void));
+                        ?? (name == BuiltinTypes.String ? IrType.String
+                          : name == BuiltinTypes.StringBuilder ? new IrClassRef(name)
+                          : new IrPtrType(IrType.Void));
                 if (PrimTypes.IsPrim(name)) return new IrPrimType(name);
                 if (sym.IsEnum(name)) return new IrEnumType(name);
                 if (sym.IsUnion(name)) return new IrUnionType(name);
@@ -2398,6 +2400,19 @@ internal sealed class TypeResolver(
                     "String defines no '+' operator for concatenation");
             string cn = sop?.CName ?? Mangler.Operator(stringClass, "+", [], false);
             return new IrStaticCall(cn, IrType.String, [EnsureString(left, ctx), EnsureString(right, ctx)]);
+        }
+
+        // A null-literal comparison is always pointer identity, never operator dispatch.
+        // "Is this reference absent" is a different question from value equality, and a
+        // class's own 'operator ==' must be free to null-guard its operand with '== null'
+        // without recursing into itself. 'null == x' already resolved to identity (a null
+        // literal has no class for dispatch); this makes 'x == null' agree with it.
+        if (be.Op is BinOp.Eq or BinOp.Ne && (left is IrLitNull || right is IrLitNull))
+        {
+            if (!ComparableEq(left, right))
+                diag.Error(Codes.TypeMismatch, ctx.File, be.Span,
+                    $"'{be.Op.Sym()}' operands are not comparable: '{Describe(left.Type)}' and '{Describe(right.Type)}'");
+            return new IrBinOp(be.Op, left, right, IrType.Bool);
         }
 
         string? lhsClass = ClassNameOf(left.Type);
