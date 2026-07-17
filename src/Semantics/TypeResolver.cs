@@ -1193,7 +1193,7 @@ internal sealed class TypeResolver(
                         "user" => (NativeSection.Preamble, Visibility.User),
                         _ => Unknown(pre.Target, ctx, nb.Span),
                     };
-                module.NativeBlocks.Add(new IrNativeBlock(nb.Body.KernelC, nb.Body.UserC, vis, section));
+                module.NativeBlocks.Add(new IrNativeBlock(nb.Body.C, vis, section));
                 break;
             }
             case ClassDecl cd:
@@ -1208,8 +1208,7 @@ internal sealed class TypeResolver(
                 module.FreeFunctions.Add(ResolveFreeFunc(fd, ctx));
                 break;
             case NativeTypeDecl nd:
-                var (kc, uc) = NativeC.Split(nd.CBody);
-                module.NativeTypes.Add(new IrNativeType(nd.Name, Mangler.Class(nd.Name), kc, uc, VisOf(ctx.Context)));
+                module.NativeTypes.Add(new IrNativeType(nd.Name, Mangler.Class(nd.Name), nd.CBody, VisOf(ctx.Context)));
                 break;
             case EnumDecl ed:
                 module.Enums.Add(ResolveEnum(ed, ctx));
@@ -1302,7 +1301,7 @@ internal sealed class TypeResolver(
             switch (m)
             {
                 case FieldsBlock fb:
-                    rawFields.Add(new RawFieldBlock(fb.Body.KernelC, fb.Body.UserC));
+                    rawFields.Add(new RawFieldBlock(fb.Body.C));
                     break;
                 case FieldDecl fd:
                     TypeSpec? fspec = fd.Type ?? InferFieldTypeSpec(fd.Init);
@@ -1365,11 +1364,11 @@ internal sealed class TypeResolver(
             .WithThrowsFunc(md.Throws).PushScope();
         if (!isStatic) mctx.Scope.Declare("self", new IrClassRef(cls));
         foreach (var p in md.Params) mctx.Scope.Declare(p.Name, ResolveType(p.Type), p.IsRef);
-        var (body, nk, nu) = ResolveBodyOrNative(md.Body, mctx, ret);
+        var (body, native) = ResolveBodyOrNative(md.Body, mctx, ret);
         CheckMissingReturn(body, ret, md.Throws, md.Span, $"{Mangler.DisplayName(cls)}.{md.Name}", ctx);
         if (body != null) CheckBodyQuality(body, ret, md.Span, ctx);
         return new IrFunction(md.Name, cname, ret, pars, isStatic, md.IsEntry, md.Throws, lib, vis,
-            cls, body, nk, nu, [..md.Annotations]);
+            cls, body, native, [..md.Annotations]);
     }
 
     /// <summary>
@@ -1403,12 +1402,14 @@ internal sealed class TypeResolver(
             diag.Error(Codes.TypeMismatch, ctx.File, od.Span,
                 $"'as' converts its parameter to '{Mangler.DisplayName(cls)}' " +
                 $"and must return '{Mangler.DisplayName(cls)}', not '{Describe(ret)}'");
+        
         // Comparisons and logical not produce truth values, and '!=' is derived from '==' (and
         // vice versa) by negation when only one of the pair is declared - both only work if
         // these return bool.
         if ((isCmp || od.Op == "!") && ret is not IrPrimType { CName: "bool" })
             diag.Error(Codes.TypeMismatch, ctx.File, od.Span,
                 $"operator '{od.Op}' must return 'bool', not '{Describe(ret)}'");
+        
         // '++'/'--' mutate self in place; a value-producing form would be ambiguous about
         // pre/post semantics, so they are statements, never expressions.
         if (isMutator && ret is not IrVoidType)
@@ -1426,10 +1427,10 @@ internal sealed class TypeResolver(
         var octx = ctx.WithClass(cls).WithFunc($"op_{Mangler.OpSuffix(od.Op)}").WithStatic(isAs).PushScope();
         if (!isAs) octx.Scope.Declare("self", new IrClassRef(cls));
         foreach (var p in od.Params) octx.Scope.Declare(p.Name, ResolveType(p.Type), p.IsRef);
-        var (body, nk, nu) = ResolveBodyOrNative(od.Body, octx, ret);
+        var (body, native) = ResolveBodyOrNative(od.Body, octx, ret);
         CheckMissingReturn(body, ret, false, od.Span, $"operator {od.Op} on {Mangler.DisplayName(cls)}", ctx);
         if (body != null) CheckBodyQuality(body, ret, od.Span, ctx);
-        return new IrOperator(od.Op, cname, ret, pars, cls, lib, vis, body, nk, nu, IsStatic: isAs);
+        return new IrOperator(od.Op, cname, ret, pars, cls, lib, vis, body, native, IsStatic: isAs);
     }
 
     /// <summary>
@@ -1471,23 +1472,23 @@ internal sealed class TypeResolver(
             : Mangler.FreeFunc(fd.Name, fd.Params, sym.IsOverloadedFunc(fd.Name), fd.IsEntry, isExtern: false);
         var fctx = ctx.WithFunc(fd.Name).WithStatic(true).WithThrowsFunc(fd.Throws).PushScope();
         foreach (var p in fd.Params) fctx.Scope.Declare(p.Name, ResolveType(p.Type), p.IsRef);
-        var (body, nk, nu) = ResolveBodyOrNative(fd.Body, fctx, ret);
+        var (body, native) = ResolveBodyOrNative(fd.Body, fctx, ret);
         CheckMissingReturn(body, ret, fd.Throws, fd.Span, fd.Name, ctx);
         if (body != null) CheckBodyQuality(body, ret, fd.Span, ctx);
         return new IrFunction(fd.Name, cname, ret, pars, true, fd.IsEntry, fd.Throws, lib, vis,
-            null, body, nk, nu, [..fd.Annotations]);
+            null, body, native, [..fd.Annotations]);
     }
 
     /// <summary>
-    /// Resolves a method body or native block, returning the IR block and raw C kernel/user strings.
+    /// Resolves a method body or native block, returning the IR block and raw C string.
     /// </summary>
-    private (IrBlock? Body, string? Kernel, string? User) ResolveBodyOrNative(MethodBody b, ResolveCtx ctx, IrType ret)
+    private (IrBlock? Body, string? Native) ResolveBodyOrNative(MethodBody b, ResolveCtx ctx, IrType ret)
     {
         return b switch
         {
-            NativeMethodBody nmb => (null, nmb.Native.KernelC, nmb.Native.UserC),
-            BlockBody bb => (ResolveBlock(bb.Block, ctx, ret), null, null),
-            _ => (null, null, null)
+            NativeMethodBody nmb => (null, nmb.Native.C),
+            BlockBody bb => (ResolveBlock(bb.Block, ctx, ret), null),
+            _ => (null, null)
         };
     }
 
@@ -1531,7 +1532,7 @@ internal sealed class TypeResolver(
         var body = ResolveBlock(ef.Body, fctx, IrType.Void);
         CheckBodyQuality(body, IrType.Void, ef.Span, ctx);
         return new IrFunction(fullName, Mangler.ThreadEntry(fullName), IrType.Void, pars, true, true, false,
-            false, vis, null, body, null, null, []);
+            false, vis, null, body, null, []);
     }
 
     /// <summary>
@@ -1788,7 +1789,7 @@ internal sealed class TypeResolver(
     {
         switch (s)
         {
-            case NativeStmt ns: return new IrNativeStmt(ns.Body.KernelC, ns.Body.UserC);
+            case NativeStmt ns: return new IrNativeStmt(ns.Body.C);
             case Block b: return ResolveBlock(b, ctx, retType);
             case LetStmt ls: return ResolveLet(ls, ctx);
 
