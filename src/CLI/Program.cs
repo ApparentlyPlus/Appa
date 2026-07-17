@@ -345,10 +345,11 @@ static (int ExitCode, string Stdout, string Stderr) Exec(
 /// Resolves the final Mem/Input/Threads/Discover capability set for a build,
 /// combining the scanned capabilities with the manifest's discovery setting.
 /// </summary>
-static (bool Mem, bool Input, bool Threads, bool Discover) ResolveCaps(CapabilityScan caps, Manifest m)
+static (bool Mem, bool Input, bool Threads, bool Time, bool Discover) ResolveCaps(CapabilityScan caps, Manifest m)
 {
     bool discover = m.CapabilityDiscovery == CapabilityDiscovery.On;
     bool mem = !discover || caps.Mem, input = !discover || caps.Input, threads = !discover || caps.Threads;
+    bool time = !discover || caps.Time;
 
     // Threads pull in the whole multitasking stack, which allocates internally.
     mem = mem || threads;
@@ -367,7 +368,11 @@ static (bool Mem, bool Input, bool Threads, bool Discover) ResolveCaps(Capabilit
     // (INPUT) needs IRQ routing; all three map tables/MMIO through the VMM.
     if (threads || input) mem = mem || threads || input;
 
-    return (mem, input, threads, discover);
+    // The time source (get_uptime_ns) is the timer subsystem, which only ticks when
+    // the interrupt subsystem is up - TIME implies the same ACPI/APIC/heap floor.
+    if (time) mem = true;
+
+    return (mem, input, threads, time, discover);
 }
 
 /// <summary>
@@ -382,6 +387,7 @@ static List<string> CapabilityDefines(CapabilityScan caps, Manifest m)
     if (r.Mem) d.Add("-DGATA_CAP_MEM");
     if (r.Input) d.Add("-DGATA_CAP_INPUT");
     if (r.Threads) d.Add("-DGATA_CAP_THREADS");
+    if (r.Time) d.Add("-DGATA_CAP_TIME");
     d.Add(m.Output == Output.Serial ? "-DGATA_OUTPUT_SERIAL" : "-DGATA_CAP_FRAMEBUFFER");
     d.Add(m.Keyboard switch
     {
@@ -401,7 +407,7 @@ static string CapabilitiesNote(CapabilityScan caps, Manifest m)
     var r = ResolveCaps(caps, m);
 
     var on = new List<string>();
-    if (r.Mem) on.Add("mem"); if (r.Input) on.Add("input"); if (r.Threads) on.Add("threads");
+    if (r.Mem) on.Add("mem"); if (r.Input) on.Add("input"); if (r.Threads) on.Add("threads"); if (r.Time) on.Add("time");
     on.Add(m.Output == Output.Serial ? "serial" : "framebuffer");
     string suffix = r.Discover ? "" : " (discovery off: assumed, not inferred)";
     return $"Capabilities: {string.Join(" ", on)}{suffix} (keyboard={m.Keyboard.ToString().ToLowerInvariant()})";
