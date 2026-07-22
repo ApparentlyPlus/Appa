@@ -98,7 +98,8 @@ static class AppaPaths
         Path.Combine(GrubDir, RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? tool + ".exe" : tool);
 
     public static string XorrisoExe => RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-        ? "" : Path.Combine(PlatformToolchain, "xorriso", "xorriso");
+        ? Path.Combine(PlatformToolchain, "xorriso", "xorriso.exe")
+        : Path.Combine(PlatformToolchain, "xorriso", "xorriso");
 }
 
 #endregion

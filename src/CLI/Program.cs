@@ -691,10 +691,12 @@ static string MakeIso(string kernelBin, string isoDir, string distDir, string bu
     if (r1.ExitCode != 0) { Log.Error($"grub-mkstandalone failed:\n{r1.Stderr}"); Environment.Exit(1); }
 
     string isoOut = Path.Combine(distDir, "GatOS.iso");
-    bool isWin = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
-    string mkrescueArgs = isWin
-        ? $"-d \"{AppaPaths.GrubDir}\" -o \"{isoOut}\" \"{isoDir}\""
-        : $"--xorriso=\"{AppaPaths.XorrisoExe}\" --fonts=unicode --themes= -o \"{isoOut}\" \"{isoDir}\"";
+    // Uniform grub-mkrescue invocation across every platform, run from the grub
+    // dir - the same command GatOS's run.py uses. The Windows toolchain bundle now
+    // ships its own xorriso + mtools, so Windows no longer needs the old
+    // `-d "{GrubDir}"` fallback (which mislocated the module dir and broke BIOS boot).
+    string mkrescueArgs =
+        $"--xorriso=\"{AppaPaths.XorrisoExe}\" --fonts=unicode --themes= -o \"{isoOut}\" \"{isoDir}\"";
 
     var r2 = Exec(AppaPaths.GrubTool("grub-mkrescue"), mkrescueArgs,
         AppaPaths.GrubDir, capture: true, spinner: "Creating ISO image");
