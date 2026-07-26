@@ -842,6 +842,16 @@ static async Task RunSetup(bool isUpdate)
     if (wantsPath && Environment.IsPrivilegedProcess)
         AddToPath(isWin);
 
+    if (!isWin)
+    {
+        string? sudoUser = Environment.GetEnvironmentVariable("SUDO_USER");
+        if (!string.IsNullOrEmpty(sudoUser))
+        {
+            Log.Step($"Restoring ownership of installation files to {sudoUser}...");
+            Exec("chown", $"-R {sudoUser}: \"{AppaPaths.Root}\"", null, silent: true);
+        }
+    }
+
     Log.Ok(isUpdate
         ? "Update complete. Toolchain, libgata, template, and appa are now up to date."
         : "Setup complete. Run 'appa init <project>' to create a new project.");

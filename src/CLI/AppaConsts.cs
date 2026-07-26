@@ -60,8 +60,47 @@ static class AppaVersion
 // which is always cleaned up after use and must never hold persistent installs.
 static class AppaPaths
 {
+    private static string GetUserHomeUnix(string username)
+    {
+        try
+        {
+            if (File.Exists("/etc/passwd"))
+            {
+                foreach (var line in File.ReadLines("/etc/passwd"))
+                {
+                    var parts = line.Split(':');
+                    if (parts.Length >= 6 && parts[0] == username)
+                    {
+                        return parts[5];
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Ignore and fall back
+        }
+        return RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? $"/Users/{username}" : $"/home/{username}";
+    }
+
+    private static string GetLocalSharePath()
+    {
+        string? sudoUser = Environment.GetEnvironmentVariable("SUDO_USER");
+        if (!string.IsNullOrEmpty(sudoUser) && !RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            string homeDir = GetUserHomeUnix(sudoUser);
+            if (Directory.Exists(homeDir))
+            {
+                return RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
+                    ? Path.Combine(homeDir, "Library", "Application Support")
+                    : Path.Combine(homeDir, ".local", "share");
+            }
+        }
+        return Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+    }
+
     public static readonly string Root = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "appa");
+        GetLocalSharePath(), "appa");
 
     public static string ToolchainDir => Path.Combine(Root, "toolchain");
     public static string LibgataDir => Path.Combine(Root, "libgata");
