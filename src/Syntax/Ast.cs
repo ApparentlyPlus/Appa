@@ -170,10 +170,11 @@ internal record FieldDecl(Modifiers Modifiers, TypeSpec? Type, string Name, Text
 
 /// <summary>
 /// A method declaration inside a class or module. IsEntry marks it as a thread entry point;
-/// Throws means it participates in the Result error-propagation protocol.
+/// Throws means it participates in the Result error-propagation protocol. GenericParams empty =
+/// ordinary method; non-empty = generic, monomorphized per call site like a generic free function.
 /// </summary>
 internal record MethodDecl(Modifiers Modifiers, Annotation[] Annotations, TypeSpec? ReturnType,
-                  string Name, Param[] Params, bool IsEntry, bool Throws,
+                  string Name, string[] GenericParams, Param[] Params, bool IsEntry, bool Throws,
                   MethodBody Body, TextSpan Span) : ClassMember(Span);
 
 /// <summary>

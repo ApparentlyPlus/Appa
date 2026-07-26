@@ -1,5 +1,7 @@
-import LibGata;
-import Collections;
+import List;
+import Console;
+import Int;
+import Math;
 
 // overloaded free functions (selective mangling)
 int func combine(int a, int b) { return a + b; }

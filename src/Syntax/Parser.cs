@@ -245,8 +245,9 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         bool isThrow = Try(TK.Throws);
         TypeSpec? ret = ParseOptionalReturnType();
         if (ret != null && At(TK.LBrace))
-            Fail($"expected 'func', found '{{' -- did you forget 'process' before '{ret}'?", Codes.BadDeclHeader,
-                 [$"e.g. 'foreground process {ret} {{ ... }}'"]);
+            Fail("expected 'func', found '{'", Codes.BadDeclHeader,
+                 [$"did you forget 'process' before '{ret}'?",
+                  $"e.g. 'foreground process {ret} {{ ... }}'"]);
         Expect(TK.Func);
         var name = Expect(TK.Ident).Value;
         var generics = ParseGenericParamList();
@@ -257,7 +258,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
 
     /// <summary>
     /// Parses an optional generic parameter list like [T, U]. Returns an empty array if there
-    /// is no leading bracket. Used by both class declarations and free function declarations.
+    /// is no leading bracket. Used by class declarations, free function declarations, and
+    /// class/module method declarations.
     /// </summary>
     private string[] ParseGenericParamList()
     {
@@ -690,9 +692,10 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
             TypeSpec? ret = ParseOptionalReturnType();
             Expect(TK.Func);
             var name = Expect(TK.Ident).Value;
+            var generics = ParseGenericParamList();
             Expect(TK.LParen); var parms = ParseParamList(); Expect(TK.RParen);
             if (At(TK.Arrow)) Fail($"'{name}': return type goes before 'func', not after the parameter list", Codes.BadDeclHeader);
-            return new MethodDecl(mods, anns, ret, name, parms, isEntry, isThrow, ParseMethodBody(), To(s));
+            return new MethodDecl(mods, anns, ret, name, generics, parms, isEntry, isThrow, ParseMethodBody(), To(s));
         }
 
         // Field. Entry, throws, annotations, and static are all meaningless here.
@@ -826,8 +829,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
             else Fail($"expected 'foreground' or 'background' after ':', found {Found()}", Codes.BadDeclHeader);
         }
         if (!modeExplicit)
-            Fail($"'{name}': process declaration is missing a foreground/background mode -- " +
-                 $"write 'foreground process {name}' or 'background process {name}'", Codes.MissingProcessMode);
+            Fail($"'{name}': process declaration is missing a foreground/background mode", Codes.MissingProcessMode,
+                 [$"write 'foreground process {name}' or 'background process {name}'"]);
         Expect(TK.LBrace);
         List<ThreadDecl> threads = [];
         while (!At(TK.RBrace) && !At(TK.EOF)) threads.Add(ParseThreadDecl());
@@ -976,8 +979,10 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
             return new PanicStmt(raw, To(s));
         }
         if (LooksLikeMissingLet())
-            Fail("expected a statement -- missing 'let'?", Codes.MissingLet,
-                At(TK.Ident) ? [$"e.g. 'let {Cur.Value} ...'"] : null);
+            Fail("expected a statement", Codes.MissingLet,
+                At(TK.Ident)
+                    ? ["missing 'let'?", $"e.g. 'let {Cur.Value} ...'"]
+                    : ["missing 'let'?"]);
         return ParseExprOrAssign(s);
     }
 

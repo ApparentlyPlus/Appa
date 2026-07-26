@@ -1,0 +1,253 @@
+namespace Appa.Tests;
+
+using Appa;
+
+/// <summary>
+/// Regression coverage for generic methods on classes/modules (including real instance
+/// methods with `self`), the AmbiguousCall diagnostic for a generic free function silently
+/// shadowing an equally plausible sibling, and the file-basename-qualified call syntax that
+/// disambiguates it when no class/module qualifier applies.
+/// </summary>
+public class GenericMethodsAndAmbiguityTests
+{
+    private static void AssertError(string code, string src, string path = "<test>")
+    {
+        var (diag, _) = SingleFileCompile.Check(src, path);
+        Assert.True(diag.HasErrors, $"expected {code} but no errors were produced");
+        Assert.Contains(diag.All, d => d.Severity == Severity.Error && d.Code == code);
+    }
+
+    private static void AssertClean(string src, string path = "<test>")
+    {
+        var (diag, _) = SingleFileCompile.Check(src, path);
+        Assert.False(diag.HasErrors, "expected no errors but got: " +
+            string.Join("; ", diag.All.Where(d => d.Severity == Severity.Error)
+                                      .Select(d => $"{d.Code} {d.Message}")));
+    }
+
+    /// <summary>
+    /// Compiles each file's source with every other file mutually visible, mirroring how
+    /// Pipeline.BuildModule is driven once real import resolution has already produced a
+    /// visibility map - the exact mechanism SingleFileCompile.Check uses for one file.
+    /// </summary>
+    private static (DiagnosticBag Diag, IrModule? Module) CheckMulti(params (string Path, string Src)[] files)
+    {
+        var sources = new SourceSet();
+        foreach (var (path, src) in files) sources.Add(path, src);
+        var diag = new DiagnosticBag(sources);
+
+        var programs = new List<(string path, Program prog)>();
+        foreach (var (path, src) in files)
+        {
+            Program? prog = null;
+            try { prog = SingleFileCompile.Parse(src); }
+            catch (ParseException ex) { diag.Error(ex.Code, path, ex.Span, ex.Message, ex.Hints); }
+            if (prog == null) return (diag, null);
+            programs.Add((path, prog));
+        }
+
+        var allPaths = files.Select(f => f.Path).ToHashSet();
+        var visible = files.ToDictionary(f => f.Path, _ => allPaths);
+        var (module, _, _) = Pipeline.BuildModule(programs, visible, Mode.Debug, diag);
+        return (diag, module);
+    }
+
+    #region Generic methods
+
+    /// <summary>
+    /// A generic method on a module is monomorphized per call site, callable as an ordinary
+    /// qualified module call - the shape Algorithms.g now uses for Min/Max.
+    /// </summary>
+    [Fact]
+    public void GenericModuleMethodCompilesForMultipleInstantiations()
+    {
+        AssertClean("""
+            module Foo {
+                public T func Id[T](T x) { return x; }
+            }
+            kernel { entry func Main() {
+                let int a = Foo.Id(5);
+                let String b = Foo.Id("hi");
+            } }
+            """);
+    }
+
+    /// <summary>
+    /// A generic method on a class can be static, resolved the same way as a module method.
+    /// </summary>
+    [Fact]
+    public void GenericStaticClassMethodCompiles()
+    {
+        AssertClean("""
+            class Foo {
+                public static T func Id[T](T x) { return x; }
+            }
+            kernel { entry func Main() {
+                let int a = Foo.Id(5);
+            } }
+            """);
+    }
+
+    /// <summary>
+    /// A generic INSTANCE method has a real 'self', usable inside the instantiated body to
+    /// call an ordinary sibling instance method - the full "self instantiation" fix, not just
+    /// the static/module case.
+    /// </summary>
+    [Fact]
+    public void GenericInstanceMethodWithSelfCompiles()
+    {
+        var (diag, module) = SingleFileCompile.Check("""
+            class Box {
+                int tag;
+                func _init(int t) { self.tag = t; }
+                public int func Tag() { return self.tag; }
+                public U func Combine[U](U seed) {
+                    let int t = self.Tag();
+                    return seed;
+                }
+            }
+            kernel { entry func Main() {
+                let Box b = new Box(7);
+                let int r1 = b.Combine(5);
+                let String r2 = b.Combine("hi");
+            } }
+            """);
+        Assert.False(diag.HasErrors, "expected no errors but got: " +
+            string.Join("; ", diag.All.Where(d => d.Severity == Severity.Error).Select(d => $"{d.Code} {d.Message}")));
+        Assert.NotNull(module);
+        // Two distinct instantiations (Combine[int], Combine[String]) should each be a
+        // real class method with self, not free functions - confirming the drain path
+        // attaches generic instance-method instantiations to the owning IrClass.
+        var box = module!.Classes.Single(c => c.Name == "Box");
+        Assert.Equal(2, box.Methods.Count(m => m.Name.StartsWith("Combine_")));
+        Assert.All(box.Methods.Where(m => m.Name.StartsWith("Combine_")),
+            m => Assert.False(m.IsStatic));
+    }
+
+    /// <summary>
+    /// A generic method can call a same-module/class generic sibling unqualified, mirroring
+    /// how ordinary sibling methods are already callable bare from inside their own class.
+    /// </summary>
+    [Fact]
+    public void GenericModuleMethodCallsGenericSiblingUnqualified()
+    {
+        AssertClean("""
+            module Foo {
+                public T func Id[T](T x) { return x; }
+                public T func Wrap[T](T x) { return Id(x); }
+            }
+            kernel { entry func Main() {
+                let int a = Foo.Wrap(5);
+            } }
+            """);
+    }
+
+    #endregion
+
+    #region AmbiguousCall (G069)
+
+    /// <summary>
+    /// A generic free function and a same-named sibling module method are equally plausible
+    /// bare-call candidates; silently picking the generic (the pre-fix behavior) is now an error.
+    /// </summary>
+    [Fact]
+    public void AmbiguousCallBetweenGenericFreeFunctionAndSiblingMethodIsRejected()
+    {
+        AssertError(Codes.AmbiguousCall, """
+            T func Min[T](T a, T b) { if (a < b) { return a; } return b; }
+            module Foo {
+                public double func Min(double a, double b) { return Min(a, b); }
+            }
+            kernel { entry func Main() { } }
+            """);
+    }
+
+    /// <summary>
+    /// Qualifying through the module's own name resolves the ambiguity cleanly.
+    /// </summary>
+    [Fact]
+    public void AmbiguousCallResolvedByQualifyingThroughModuleIsClean()
+    {
+        AssertClean("""
+            T func Min[T](T a, T b) { if (a < b) { return a; } return b; }
+            module Foo {
+                public double func Min(double a, double b) { return Foo.Min(a, b); }
+            }
+            kernel { entry func Main() { } }
+            """, path: "collide.g");
+    }
+
+    /// <summary>
+    /// Qualifying by the declaring file's basename resolves it too, for the case where no
+    /// module/self qualifier applies (the general escape hatch).
+    /// </summary>
+    [Fact]
+    public void AmbiguousCallResolvedByQualifyingThroughFileNameIsClean()
+    {
+        AssertClean("""
+            T func Min[T](T a, T b) { if (a < b) { return a; } return b; }
+            module Foo {
+                public double func Min(double a, double b) { return collide.Min(a, b); }
+            }
+            kernel { entry func Main() { } }
+            """, path: "collide.g");
+    }
+
+    /// <summary>
+    /// Two different in-scope files each publicly declaring a same-named generic free
+    /// function is a genuine cross-file ambiguity (previously silent last-write-wins).
+    /// </summary>
+    [Fact]
+    public void AmbiguousCallAcrossTwoFilesPubliclyDeclaringSameGenericIsRejected()
+    {
+        var (diag, _) = CheckMulti(
+            ("a.g", "T func Pick[T](T a, T b) { return a; }"),
+            ("b.g", "T func Pick[T](T a, T b) { return b; }"),
+            ("main.g", "kernel { entry func Main() { let int x = Pick(1, 2); } }"));
+        Assert.Contains(diag.All, d => d.Severity == Severity.Error && d.Code == Codes.AmbiguousCall);
+    }
+
+    /// <summary>
+    /// Qualifying by file name still resolves the cross-file collision.
+    /// </summary>
+    [Fact]
+    public void FileNamespaceQualifiedCallResolvesCrossFileCollision()
+    {
+        var (diag, _) = CheckMulti(
+            ("a.g", "T func Pick[T](T a, T b) { return a; }"),
+            ("b.g", "T func Pick[T](T a, T b) { return b; }"),
+            ("main.g", "kernel { entry func Main() { let int x = a.Pick(1, 2); let int y = b.Pick(1, 2); } }"));
+        Assert.False(diag.HasErrors, "expected no errors but got: " +
+            string.Join("; ", diag.All.Where(d => d.Severity == Severity.Error).Select(d => $"{d.Code} {d.Message}")));
+    }
+
+    #endregion
+
+    #region Privacy/scope gating for generic templates
+
+    /// <summary>
+    /// Two files each declaring their own private generic under the same name must not
+    /// clobber one another - each file's bare call resolves to its own version.
+    /// </summary>
+    [Fact]
+    public void PrivateGenericFunctionsInDifferentFilesDoNotClobberEachOther()
+    {
+        var (diag, module) = CheckMulti(
+            ("a.g", """
+                private T func Pick[T](T x, T y) { return x; }
+                int func UseA() { return Pick(1, 2); }
+                """),
+            ("b.g", """
+                private T func Pick[T](T x, T y) { return y; }
+                int func UseB() { return Pick(1, 2); }
+                """),
+            ("main.g", """
+                kernel { entry func Main() { } }
+                """));
+        Assert.False(diag.HasErrors, "expected no errors but got: " +
+            string.Join("; ", diag.All.Where(d => d.Severity == Severity.Error).Select(d => $"{d.Code} {d.Message}")));
+        Assert.NotNull(module);
+    }
+
+    #endregion
+}

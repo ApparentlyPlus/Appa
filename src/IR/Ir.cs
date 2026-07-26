@@ -85,6 +85,22 @@ internal static class PrimTypes
         return Table.TryGetValue(name, out var i) ? i.Rank : 4;
     }
 
+    /// <summary>
+    /// Returns the width in bits of an integer primitive, or 0 for anything else.
+    /// </summary>
+    public static int IntBits(string canon)
+    {
+        return canon switch
+        {
+            "bool" => 1,
+            "char" or "sbyte" or "byte" => 8,
+            "short" or "ushort" => 16,
+            "int" or "uint" => 32,
+            "int64" or "uint64" => 64,
+            _ => 0
+        };
+    }
+
     // Every accepted spelling - the front-end's set of primitive type names.
     public static readonly FrozenSet<string> Spellings = FrozenSet.ToFrozenSet(Table.Keys);
 }

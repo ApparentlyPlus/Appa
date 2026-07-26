@@ -111,8 +111,12 @@ public class ParserDiagnosticsTests
         var ex = Parse("user { process App { thread T { entry func Run() { } } } }");
         Assert.Equal(Codes.MissingProcessMode, ex.Code);
         Assert.Contains("missing a foreground/background mode", ex.Message);
-        Assert.Contains("foreground process App", ex.Message);
-        Assert.Contains("background process App", ex.Message);
+        // The suggested spellings are hints, rendered on their own "= help:" lines, not
+        // crammed into the message text.
+        var hint = Assert.Single(ex.Hints);
+        Assert.Contains("foreground process App", hint);
+        Assert.Contains("background process App", hint);
+        Assert.DoesNotContain("foreground process App", ex.Message);
     }
 
     /// <summary>
@@ -125,8 +129,9 @@ public class ParserDiagnosticsTests
         var ex = Parse("user { TicTacToe { thread T { entry func Run() { } } } }");
         Assert.Equal(Codes.BadDeclHeader, ex.Code);
         Assert.Contains("expected 'func'", ex.Message);
-        Assert.Contains("forget 'process'", ex.Message);
-        Assert.Contains("TicTacToe", ex.Message);
+        Assert.DoesNotContain("forget 'process'", ex.Message);
+        Assert.Contains(ex.Hints, h => h.Contains("forget 'process'"));
+        Assert.Contains(ex.Hints, h => h.Contains("TicTacToe"));
     }
 
     /// <summary>
@@ -149,7 +154,10 @@ public class ParserDiagnosticsTests
     {
         var ex = Parse("func F() { MyType x = 1; }");
         Assert.Equal(Codes.MissingLet, ex.Code);
-        Assert.Contains("missing 'let'", ex.Message);
+        Assert.Contains("expected a statement", ex.Message);
+        Assert.DoesNotContain("missing 'let'", ex.Message);
+        Assert.Contains(ex.Hints, h => h.Contains("missing 'let'"));
+        Assert.Contains(ex.Hints, h => h.Contains("let MyType"));
     }
 
     /// <summary>

@@ -96,6 +96,18 @@ internal static class Codes
     public const string BadThrowsReturnType    = "G066";
     public const string LifecycleThrows        = "G067";
     public const string EntryOutsideKernel     = "G068";
+    public const string AmbiguousCall          = "G069";
+    public const string ShadowedVariable       = "G070";
+    public const string SelfAssignment         = "G071";
+    public const string NoEffect               = "G072";
+    public const string ConstantCondition      = "G073";
+    public const string RedundantCast          = "G074";
+    public const string DivisionByZero         = "G075";
+    public const string UnusedParameter        = "G076";
+    public const string UnreachableCase        = "G077";
+    public const string SelfComparison         = "G078";
+    public const string BadShiftCount          = "G079";
+    public const string MissingInterpolation   = "G080";
 }
 
 /// <summary>

@@ -337,7 +337,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
         var newBody = SubBody(md.Body, ctx);
         if (ReferenceEquals(newRet, md.ReturnType) && ReferenceEquals(newParams, md.Params) && ReferenceEquals(newBody, md.Body))
             return md;
-        return new MethodDecl(md.Modifiers, md.Annotations, newRet, md.Name, newParams, md.IsEntry, md.Throws, newBody, md.Span);
+        return new MethodDecl(md.Modifiers, md.Annotations, newRet, md.Name, md.GenericParams, newParams, md.IsEntry, md.Throws, newBody, md.Span);
     }
 
     /// <summary>

@@ -24,7 +24,9 @@ try
         case "--version":
         case "-v": Console.WriteLine($"appa {AppaVersion.Current}"); break;
         default:
-            Log.Error($"Unknown command '{args[0]}'");
+            Log.Error($"Unknown command '{args[0]}'",
+                Suggest.Closest(args[0], ["init", "setup", "update", "build", "check", "--help", "--version"]) is { } near
+                    ? $"did you mean '{near}'?" : null);
             PrintHelp();
             Environment.Exit(1);
             break;
@@ -271,9 +273,15 @@ static (Manifest? manifest, string envPath, string entryPath, string projectRoot
     else if (manifestArg != null)
         Log.Warn($"project argument '{manifestArg}' is ignored with {looseHint} (loose-file mode discovers nothing from a project)");
 
-    string? envPath = envOverride ?? (manifest != null ? Pipeline.DiscoverEnv(manifest.Dir) : null);
+    var unreadableEnvCandidates = new List<string>();
+    string? envPath = envOverride
+        ?? (manifest != null ? Pipeline.DiscoverEnv(manifest.Dir, unreadableEnvCandidates) : null);
     string? entryPath = entryOverride ?? (manifest != null ? Pipeline.DiscoverEntry(manifest.Dir) : null);
-    if (envPath == null) Fail("no environment found - mark one project file @environment, or pass --env");
+    if (envPath == null)
+        Fail("no environment found - mark one project file @environment, or pass --env",
+             unreadableEnvCandidates.Count > 0
+                 ? $"could not parse {string.Join(", ", unreadableEnvCandidates)}; if the environment is declared there, fix the syntax error first"
+                 : null);
     if (entryPath == null) Fail("no entry point - expected src/main.g, or pass --entry");
 
     string projectRoot = manifest?.Dir ?? Path.GetDirectoryName(Path.GetFullPath(entryPath))!;
@@ -339,7 +347,7 @@ static int ParseTimeout(string val)
 /// Reports a fatal configuration error and exits.
 /// </summary>
 [DoesNotReturn]
-static void Fail(string message) { Log.Error(message); Environment.Exit(1); }
+static void Fail(string message, string? hint = null) { Log.Error(message, hint); Environment.Exit(1); }
 
 #endregion
 
@@ -1026,8 +1034,8 @@ static class Templates
     /// Returns the src/main.g starter file content for a new GatOS project.
     /// </summary>
     public static string GatOSMain(string name) => $$"""
-import LibGata;
-import Collections;
+import Misc;
+import Console;
 
 kernel {
     entry func Main() {
@@ -1114,6 +1122,6 @@ static class Log
     public static void Error(string m, string? hint = null)
     {
         Console.Error.WriteLine($"{C.RED}error:{C.NC} {m}");
-        if (hint != null) Console.Error.WriteLine($"  hint: {hint}");
+        if (hint != null) Console.Error.WriteLine($"{C.BLUE}={C.NC} {C.CYAN}help{C.NC}: {hint}");
     }
 }

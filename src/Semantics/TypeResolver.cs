@@ -36,6 +36,73 @@ internal sealed class TypeResolver(
         return f != null && _scope.Contains(f.Module);
     }
 
+    /// <summary>
+    /// Picks the generic free-function template a bare call to <paramref name="name"/> should
+    /// resolve to from <paramref name="ctxFile"/>: an own-file private template always wins
+    /// unambiguously; otherwise the first in-scope public template is chosen.
+    /// </summary>
+    private (FuncDecl Decl, string File, string Context)? ResolveFuncTemplate(
+        string name, string ctxFile, out List<string> collidingFiles)
+    {
+        collidingFiles = [];
+        if (!_funcTemplates.TryGetValue(name, out var bucket) || bucket.Count == 0) return null;
+
+        var ownPrivate = bucket.Find(e => e.IsPrivate && e.File == ctxFile);
+        if (ownPrivate.Decl != null) return (ownPrivate.Decl, ownPrivate.File, ownPrivate.Context);
+
+        var publicInScope = bucket.FindAll(e => !e.IsPrivate && _scope.Contains(e.File));
+        if (publicInScope.Count == 0) return null;
+        if (publicInScope.Count > 1)
+            collidingFiles = [.. publicInScope.Select(e => e.File).Distinct()];
+
+        var chosen = publicInScope[0];
+        return (chosen.Decl, chosen.File, chosen.Context);
+    }
+
+    /// <summary>
+    /// Resolves a qualified call whose left-hand side isn't a real class/module: `ns.name(...)`
+    /// where `ns` is the basename of some in-scope file that declares a free function `name` -
+    /// the disambiguation escape hatch for a name collision that can't be qualified through a
+    /// class/module (e.g. two unrelated files each declaring a same-named generic). Returns null
+    /// if nothing matches, so the caller falls through to the ordinary instance-receiver path.
+    /// </summary>
+    private IrExpr? TryResolveFileNamespacedCall(string ns, string name, List<IrExpr> args, ResolveCtx ctx, CallExpr ce)
+    {
+        if (_funcTemplates.TryGetValue(name, out var bucket))
+        {
+            var match = bucket.Find(e => Path.GetFileNameWithoutExtension(e.File) == ns
+                && (e.File == ctx.File || (!e.IsPrivate && _scope.Contains(e.File))));
+            if (match.Decl != null)
+                return ResolveGenericCall((match.Decl, match.File, match.Context), args, ctx, ce.Span, ce.Args);
+        }
+
+        var priv = sym.LookupPrivateFunc(ctx.File, name);
+        if (priv != null && Path.GetFileNameWithoutExtension(ctx.File) == ns)
+        {
+            var pchosen = ChooseOverload(sym.PrivateFuncOverloads(ctx.File, name), priv, args, name, ctx, ce.Span);
+            string pcn = pchosen?.CName ?? Mangler.PrivateFreeFunc(Mangler.FileToken(ctx.File), name, [], false);
+            var pret = pchosen != null ? ResolveType(pchosen.Type) : IrType.Void;
+            CoerceArgs(args, pchosen?.Sig, ctx, ce.Args);
+            if (pchosen?.Sig?.IsThrows == true)
+                { CheckThrowsHandled(ctx, ce.Span); return new IrThrowsCall(pcn, pret, args); }
+            return new IrStaticCall(pcn, pret, args);
+        }
+
+        var fsym = sym.LookupFreeFunc(name);
+        if (fsym != null && Path.GetFileNameWithoutExtension(fsym.Module) == ns && _scope.Contains(fsym.Module))
+        {
+            var chosen = ChooseOverload(sym.FuncOverloads(name), fsym, args, name, ctx, ce.Span);
+            string cn = chosen?.CName ?? Mangler.FreeFunc(name, [], false, false, false);
+            var ret = chosen != null ? ResolveType(chosen.Type) : IrType.Void;
+            CoerceArgs(args, chosen?.Sig, ctx, ce.Args);
+            if (chosen?.Sig?.IsThrows == true)
+                { CheckThrowsHandled(ctx, ce.Span); return new IrThrowsCall(cn, ret, args); }
+            return new IrStaticCall(cn, ret, args);
+        }
+
+        return null;
+    }
+
     // Every fixed-array (T, N) pair used; the emitter stamps one struct per pair.
     private readonly List<IrArrayType> _arrays = [];
     private int _tmpSeq;
@@ -75,11 +142,21 @@ internal sealed class TypeResolver(
         return f;
     }
 
-    // Generic free-function templates; each distinct instantiation is stamped once.
-    private readonly Dictionary<string, (FuncDecl Decl, string File, string Context)> _funcTemplates = [];
+    // Generic free function templates, bucketed by name (several files may each declare their
+    // own private generic under the same name without clobbering one another); each distinct
+    // instantiation is stamped once.
+    private readonly Dictionary<string, List<(FuncDecl Decl, string File, string Context, bool IsPrivate)>> _funcTemplates = [];
+    // Generic method templates on classes/modules, keyed by owner+name; mirrors _funcTemplates.
+    private readonly Dictionary<MemberKey, (MethodDecl Decl, string File, string Context)> _methodTemplates = [];
     private readonly Queue<(FuncDecl Decl, string File, string Context, Dictionary<string, TypeSpec> Binds, string Mangled)> _genericQueue = new();
+    private readonly Queue<(MethodDecl Decl, string Owner, string File, string Context, Dictionary<string, TypeSpec> Binds, string Mangled)> _genericMethodQueue = new();
     private readonly HashSet<string> _genericSeen = [];
     private int _labelSeq;
+
+    // Generic templates that at least one call site instantiated, so the never-used ones can
+    // be told apart. Free functions key on (declaring file, name); methods on owner+name.
+    private readonly HashSet<(string File, string Name)> _usedFuncTemplates = [];
+    private readonly HashSet<MemberKey> _usedMethodTemplates = [];
 
     /// <summary>
     /// Returns true when the class was declared as a native type with no Gata-visible fields.
@@ -374,14 +451,52 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Validates that the expression is bool-typed for use as a branch condition.
+    /// Warns when an expression used as a statement computes a value and then throws it away
+    /// without doing anything else. IsPure is exactly the right test for the lowered form:
+    /// every shape it accepts is side-effect-free, so evaluating it for its own sake is dead
+    /// work.
     /// </summary>
-    private void CheckCondition(IrExpr c, ResolveCtx ctx)
+    private void WarnIfNoEffect(Expr src, IrExpr e, ResolveCtx ctx)
+    {
+        if (src is CallExpr or NewExpr) return;
+        if (!IsPure(e)) return;
+        diag.Warn(Codes.NoEffect, ctx.File, e.Span,
+            "this expression is computed as a statement but its value is never used",
+            e is IrBinOp { Op: BinOp.Eq or BinOp.Ne }
+                ? ["'==' compares two values; use '=' to assign"]
+                : ["remove it, or use its result"]);
+    }
+
+    /// <summary>
+    /// Validates that the expression is bool typed for use as a branch condition.
+    /// </summary>
+    private void CheckCondition(IrExpr c, ResolveCtx ctx, bool allowConst = false)
     {
         if (c.Type is IrResultType) return;
         if (c.Type is not IrPrimType { CName: "bool" })
+        {
             diag.Error(Codes.ConditionNotBool, ctx.File, c.Span,
                 $"condition must be 'bool', got '{Describe(c.Type)}'");
+            return;
+        }
+        WarnConstCondition(c, ctx, allowConst);
+    }
+
+    /// <summary>
+    /// Warns when a condition is a compile-time constant, or compares a value against itself.
+    /// Both mean the branch is decided before it is ever evaluated.
+    /// </summary>
+    private void WarnConstCondition(IrExpr c, ResolveCtx ctx, bool allowConst)
+    {
+        if (c is IrLitBool lb && !allowConst)
+            diag.Warn(Codes.ConstantCondition, ctx.File, c.Span,
+                $"this condition is always {(lb.Value ? "true" : "false")}",
+                [lb.Value ? "the branch always runs" : "the branch is never taken"]);
+        else if (c is IrBinOp { Op: BinOp.Eq or BinOp.Ne or BinOp.Lt or BinOp.Le or BinOp.Gt or BinOp.Ge } b
+                 && SameStorage(b.Left, b.Right))
+            diag.Warn(Codes.SelfComparison, ctx.File, c.Span,
+                "this compares a value against itself, so the result is constant",
+                ["did you mean to compare against a different value?"]);
     }
 
     /// <summary>
@@ -437,7 +552,20 @@ internal sealed class TypeResolver(
     private void CheckCast(IrExpr value, IrType to, ResolveCtx ctx)
     {
         var from = value.Type;
-        if (SameType(from, to)) return;
+        if (SameType(from, to))
+        {
+            // Casting to the type a value already has converts nothing. It is usually left
+            // over from an earlier signature, and it hides a later real type change.
+            
+            // A cast on a literal is exempt: '0x00100000 as int' pins the width of a bit
+            // pattern at the point it is written, which is deliberate documentation in
+            // bit-manipulation code even when inference would have picked the same type.
+            if (from is not IrVoidType && !IsLiteral(value))
+                diag.Warn(Codes.RedundantCast, ctx.File, value.Span,
+                    $"this cast is redundant: the value is already '{Describe(to)}'",
+                    ["remove the cast"]);
+            return;
+        }
         if (value is IrLitNull && to is IrClassRef or IrPtrType) return;
         bool numeric = IsNum(from) && IsNum(to);
         bool enumInt = (from is IrEnumType && IsInteger(to)) || (IsInteger(from) && to is IrEnumType);
@@ -454,13 +582,48 @@ internal sealed class TypeResolver(
         Reject();
         void Reject() => diag.Error(Codes.InvalidCast, ctx.File, value.Span,
             $"cannot cast '{Describe(from)}' to '{Describe(to)}'",
-            // 'as' can only ever be declared on the class being converted TO, so a class
-            // converting itself to a primitive has no 'as' path at all, ever - point at the
-            // actual way out instead of leaving it looking like a missing overload.
             from is IrClassRef && to is IrPrimType or IrEnumType
                 ? [$"'as' only converts INTO a class, never out of one to a primitive - " +
                    $"add a named conversion method on '{Describe(from)}' instead, e.g. '{Describe(to)} func ToSomething()'"]
                 : null);
+    }
+
+    /// <summary>
+    /// Warns when a plain string literal contains '{name}' and 'name' is a variable actually in
+    /// scope - the signature of a '$' dropped from an interpolated string, which otherwise fails
+    /// silently by printing the braces verbatim.
+    /// </summary>
+    private void WarnIfLooksInterpolated(StrLitExpr sl, ResolveCtx ctx)
+    {
+        var raw = sl.Value.AsSpan();
+        for (int i = 0; i < raw.Length; i++)
+        {
+            if (raw[i] != '{') continue;
+            int close = raw[(i + 1)..].IndexOf('}');
+            if (close < 0) return;
+            var inner = raw.Slice(i + 1, close);
+            i += close;
+            if (inner.Length == 0 || !(char.IsLetter(inner[0]) || inner[0] == '_')) continue;
+            bool ident = true;
+            for (int j = 1; j < inner.Length && ident; j++)
+                ident = char.IsLetterOrDigit(inner[j]) || inner[j] == '_';
+            if (!ident) continue;
+            string name = inner.ToString();
+            if (ctx.Scope.Lookup(name) == null) continue;
+            diag.Warn(Codes.MissingInterpolation, ctx.File, sl.Span,
+                $"this string contains '{{{name}}}' and '{name}' is a variable in scope, but the string is not interpolated",
+                [$"write $\"...\" to substitute the value, or escape the brace if the text is literal"]);
+            return;
+        }
+    }
+
+    /// <summary>
+    /// Returns true for a bare constant, the one place a same-type cast is written on purpose
+    /// (to pin a literal's width where inference would otherwise decide it).
+    /// </summary>
+    private static bool IsLiteral(IrExpr e)
+    {
+        return e is IrLitInt or IrLitFloat or IrLitChar or IrLitBool or IrLitString or IrLitNull or IrEnumConst;
     }
 
     /// <summary>
@@ -561,22 +724,43 @@ internal sealed class TypeResolver(
     /// Checks for a redundant trailing 'return;' in a void function, and warns about
     /// unused local variables by walking the body.
     /// </summary>
-    private void CheckBodyQuality(IrBlock body, IrType ret, TextSpan span, ResolveCtx ctx)
+    private void CheckBodyQuality(IrBlock body, IrType ret, TextSpan span, ResolveCtx ctx,
+                                  Param[]? pars = null, TextSpan parSpan = default)
     {
         if (ret is IrVoidType && body.Stmts.Count > 0 && body.Stmts[^1] is IrReturn { Value: null })
             diag.Warn(Codes.RedundantReturn, ctx.File, span, "redundant trailing 'return;'");
 
         var visitor = new BodyQualityVisitor();
         visitor.St(body);
+
+        // A native body is opaque C: it can read anything by name, so neither locals nor
+        // parameters can be proven unused.
         if (visitor.Native) return;
         var seen = new HashSet<string>();
         for (int i = 0; i < visitor.Decls.Count; i++)
         {
             var (name, sp) = visitor.Decls[i];
-            if (seen.Add(name) && !visitor.Used.Contains(name))
+            if (seen.Add(name) && !DeliberatelyUnused(name) && !visitor.Used.Contains(name))
                 diag.Warn(Codes.UnusedVariable, ctx.File, sp, $"unused variable '{name}'");
         }
+        if (pars == null) return;
+        for (int i = 0; i < pars.Length; i++)
+        {
+            var p = pars[i];
+            if (DeliberatelyUnused(p.Name)) continue;
+            // only warn when the name is never mentioned anywhere in the body at all
+            if (visitor.Used.Contains(p.Name) || seen.Contains(p.Name)) continue;
+            diag.Warn(Codes.UnusedParameter, ctx.File, p.Span.IsNone ? parSpan : p.Span,
+                $"unused parameter '{p.Name}'",
+                ["remove it, or prefix the name with '_' if it is deliberately ignored"]);
+        }
     }
+
+    /// <summary>
+    /// A leading underscore is the conventional marker for a binding that exists only to
+    /// satisfy a shape and is not meant to be read. Such names opt out of unused warnings.
+    /// </summary>
+    private static bool DeliberatelyUnused(string name) => name.Length > 0 && name[0] == '_';
 
     /// <summary>
     /// Stack-allocated visitor that collects variable declarations and usages in a function body,
@@ -593,7 +777,7 @@ internal sealed class TypeResolver(
         /// <summary>
         /// Records variable usages in the expression and recurses into sub-expressions.
         /// </summary>
-        public void Ex(IrExpr? e)
+        public readonly void Ex(IrExpr? e)
         {
             if (e == null) return;
             if (e is IrVar v) Used.Add(v.Name);
@@ -690,6 +874,7 @@ internal sealed class TypeResolver(
     #endregion
 
     #region Access and throws validation
+
     /// <summary>
     /// Reports PrivateMember when a private member is accessed from outside its declaring class.
     /// </summary>
@@ -801,6 +986,28 @@ internal sealed class TypeResolver(
             IrCast c => IsPure(c.Value),
             IrAddrOf a => IsPure(a.Target),
             IrDeref d => IsPure(d.Ptr),
+            _ => false
+        };
+    }
+
+    /// <summary>
+    /// Structural equality for the pure expression forms that can name the same storage
+    /// twice: locals, self, fields, constant-indexed elements, and derefs.
+    /// </summary>
+    private static bool SameStorage(IrExpr a, IrExpr b)
+    {
+        return (a, b) switch
+        {
+            (IrVar x, IrVar y) => x.Name == y.Name,
+            (IrSelfExpr x, IrSelfExpr y) => x.ClassName == y.ClassName,
+            (IrFieldLoad x, IrFieldLoad y) => x.Field == y.Field && SameStorage(x.Obj, y.Obj),
+            (IrDeref x, IrDeref y) => SameStorage(x.Ptr, y.Ptr),
+            (IrUnionField x, IrUnionField y) => x.Field == y.Field && x.VariantIndex == y.VariantIndex
+                                                && SameStorage(x.Union, y.Union),
+            
+            // Only a literal index is safe to compare: a[i()] == a[i()] need not match.
+            (IrIndex x, IrIndex y) => SameStorage(x.Obj, y.Obj)
+                                      && x.Idx is IrLitInt xi && y.Idx is IrLitInt yi && xi.Value == yi.Value,
             _ => false
         };
     }
@@ -967,6 +1174,18 @@ internal sealed class TypeResolver(
         }
 
         /// <summary>
+        /// Returns true when the name is declared in an enclosing scope but not in this one,
+        /// i.e. declaring it here would shadow the outer binding.
+        /// </summary>
+        public bool ShadowsOuter(string name)
+        {
+            if (_vars.ContainsKey(name)) return false;
+            for (var s = _parent; s != null; s = s._parent)
+                if (s._vars.ContainsKey(name)) return true;
+            return false;
+        }
+
+        /// <summary>
         /// Searches this scope and all parent scopes for the named variable.
         /// Returns its type, or null when not found.
         /// </summary>
@@ -1112,6 +1331,7 @@ internal sealed class TypeResolver(
     #endregion
 
     #region Module resolution
+
     /// <summary>
     /// Resolves all programs in the compilation unit and returns the fully typed IrModule.
     /// Generic template instances discovered during resolution are stamped after the main pass.
@@ -1133,7 +1353,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Scans top-level items for generic function templates and registers them for on-demand instantiation.
+    /// Scans top-level items for generic function/method templates and registers them for
+    /// on-demand instantiation.
     /// </summary>
     private void CollectFuncTemplates(TopLevel[] items, string context, string file)
     {
@@ -1141,10 +1362,17 @@ internal sealed class TypeResolver(
             switch (item)
             {
                 case FuncDecl fd when fd.GenericParams.Length > 0:
-                    _funcTemplates[fd.Name] = (fd, file, context);
+                    if (!_funcTemplates.TryGetValue(fd.Name, out var bucket))
+                        _funcTemplates[fd.Name] = bucket = [];
+                    bucket.Add((fd, file, context, (fd.Modifiers & Modifiers.Private) != 0));
                     break;
                 case ContextDecl cd:
                     CollectFuncTemplates(cd.Items, cd.Kind, file);
+                    break;
+                case ClassDecl cls:
+                    foreach (var m in cls.Members)
+                        if (m is MethodDecl md && md.GenericParams.Length > 0)
+                            _methodTemplates[new MemberKey(cls.Name, md.Name)] = (md, file, context);
                     break;
             }
     }
@@ -1323,6 +1551,8 @@ internal sealed class TypeResolver(
                     }
                     fields.Add(new IrField(fd.Name, ft, init));
                     break;
+                case MethodDecl md when md.GenericParams.Length > 0:
+                    break; // stamped on demand per call site
                 case MethodDecl md:
                     methods.Add(ResolveMethod(cd.Name, md, classCtx, lib, vis, cd.IsModule));
                     break;
@@ -1366,7 +1596,7 @@ internal sealed class TypeResolver(
         foreach (var p in md.Params) mctx.Scope.Declare(p.Name, ResolveType(p.Type), p.IsRef);
         var (body, native) = ResolveBodyOrNative(md.Body, mctx, ret);
         CheckMissingReturn(body, ret, md.Throws, md.Span, $"{Mangler.DisplayName(cls)}.{md.Name}", ctx);
-        if (body != null) CheckBodyQuality(body, ret, md.Span, ctx);
+        if (body != null) CheckBodyQuality(body, ret, md.Span, ctx, md.Params, md.Span);
         return new IrFunction(md.Name, cname, ret, pars, isStatic, md.IsEntry, md.Throws, lib, vis,
             cls, body, native, [..md.Annotations]);
     }
@@ -1377,16 +1607,11 @@ internal sealed class TypeResolver(
     /// </summary>
     private IrOperator ResolveOperator(string cls, OperatorDecl od, ResolveCtx ctx, bool lib, Visibility vis)
     {
-        // '[]=' takes (index, value); every other operator, including 'as', takes exactly one
-        // parameter. 'as' has only one shape: a static factory converting its parameter to self
-        // ('operator String func as(char c)' is String's equivalent of a FromChar factory).
-        // Only a class can ever declare 'as' - it only ever converts INTO itself, from whatever
-        // its parameter type is - so a class converting itself to a primitive isn't expressible
-        // this way at all; that's a named method's job (e.g. 'int func ToInt()'), not a cast.
         bool isAs = od.Op == "as";
 
         // Arity, comparison/mutator classification, and default return all come from the
-        // shared OperatorRules table, the same source SymbolCollector keys declarations by.
+        // shared OperatorRules table, the same source SymbolCollector keys declarations by
+
         int want = OperatorRules.RequiredArity(od.Op, od.Params.Length);
         if (od.Params.Length != want)
             diag.Error(Codes.WrongArgCount, ctx.File, od.Span,
@@ -1410,7 +1635,7 @@ internal sealed class TypeResolver(
             diag.Error(Codes.TypeMismatch, ctx.File, od.Span,
                 $"operator '{od.Op}' must return 'bool', not '{Describe(ret)}'");
         
-        // '++'/'--' mutate self in place; a value-producing form would be ambiguous about
+        // ++/-- mutate self in place. A value-producing form would be ambiguous about
         // pre/post semantics, so they are statements, never expressions.
         if (isMutator && ret is not IrVoidType)
             diag.Error(Codes.TypeMismatch, ctx.File, od.Span,
@@ -1429,7 +1654,8 @@ internal sealed class TypeResolver(
         foreach (var p in od.Params) octx.Scope.Declare(p.Name, ResolveType(p.Type), p.IsRef);
         var (body, native) = ResolveBodyOrNative(od.Body, octx, ret);
         CheckMissingReturn(body, ret, false, od.Span, $"operator {od.Op} on {Mangler.DisplayName(cls)}", ctx);
-        if (body != null) CheckBodyQuality(body, ret, od.Span, ctx);
+        if (body != null) CheckBodyQuality(body, ret, od.Span, ctx, od.Params, od.Span);
+
         return new IrOperator(od.Op, cname, ret, pars, cls, lib, vis, body, native, IsStatic: isAs);
     }
 
@@ -1474,7 +1700,8 @@ internal sealed class TypeResolver(
         foreach (var p in fd.Params) fctx.Scope.Declare(p.Name, ResolveType(p.Type), p.IsRef);
         var (body, native) = ResolveBodyOrNative(fd.Body, fctx, ret);
         CheckMissingReturn(body, ret, fd.Throws, fd.Span, fd.Name, ctx);
-        if (body != null) CheckBodyQuality(body, ret, fd.Span, ctx);
+        if (body != null) CheckBodyQuality(body, ret, fd.Span, ctx, fd.Params, fd.Span);
+
         return new IrFunction(fd.Name, cname, ret, pars, true, fd.IsEntry, fd.Throws, lib, vis,
             null, body, native, [..fd.Annotations]);
     }
@@ -1530,7 +1757,7 @@ internal sealed class TypeResolver(
         var fctx = ctx.WithStatic(true).PushScope();
         foreach (var p in ef.Params) fctx.Scope.Declare(p.Name, ResolveType(p.Type));
         var body = ResolveBlock(ef.Body, fctx, IrType.Void);
-        CheckBodyQuality(body, IrType.Void, ef.Span, ctx);
+        CheckBodyQuality(body, IrType.Void, ef.Span, ctx, ef.Params, ef.Span);
         return new IrFunction(fullName, Mangler.ThreadEntry(fullName), IrType.Void, pars, true, true, false,
             false, vis, null, body, null, []);
     }
@@ -1568,11 +1795,16 @@ internal sealed class TypeResolver(
         }
 
         string mangled = fd.Name + "_" + string.Join("_", fd.GenericParams.Select(p => Monomorphizer.SanitizeTypeName(binds[p].ToSpecString())));
+        _usedFuncTemplates.Add((t.File, fd.Name));
         if (_genericSeen.Add(mangled))
             _genericQueue.Enqueue((fd, t.File, t.Context, binds, mangled));
 
         var concreteParams = Monomorphizer.SubParams(fd.Params, binds);
-        string cname = Mangler.FreeFunc(mangled, concreteParams, overloaded: false, isEntry: false, isExtern: false);
+
+        string cname = (fd.Modifiers & Modifiers.Private) != 0
+            ? Mangler.PrivateFreeFunc(Mangler.FileToken(t.File), mangled, concreteParams,
+                sym.PrivateFuncOverloads(t.File, mangled).Count > 1)
+            : Mangler.FreeFunc(mangled, concreteParams, overloaded: false, isEntry: false, isExtern: false);
         var ret = fd.ReturnType is null
             ? (fd.Throws ? IrType.Int : IrType.Void)
             : ResolveType(Monomorphizer.SubType(fd.ReturnType, binds));
@@ -1583,10 +1815,75 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
+    /// Resolves a call to a generic method (on a module or a class, static or instance) by
+    /// inferring type arguments from the supplied argument types, mangling the name, and
+    /// queuing the instantiation for resolution after the main pass completes.
+    /// </summary>
+    private IrExpr ResolveGenericMethodCall(
+        (MethodDecl Decl, string File, string Context) t, string owner, bool isStatic,
+        List<IrExpr> args, ResolveCtx ctx, TextSpan span, IrExpr? recv = null, Expr[]? astArgs = null)
+    {
+        var md = t.Decl;
+        string fallback = Mangler.Method(owner, md.Name, [], false);
+        IrExpr FallbackCall() => recv != null
+            ? new IrInstanceCall(recv, fallback, IrType.Void, args)
+            : new IrStaticCall(fallback, IrType.Void, args);
+
+        if (md.Params.Length != args.Count)
+        {
+            diag.Error(Codes.WrongArgCount, ctx.File, span,
+                $"generic '{Mangler.DisplayName(owner)}.{md.Name}' expects {md.Params.Length} argument(s), got {args.Count}");
+            return FallbackCall();
+        }
+
+        var binds = new Dictionary<string, TypeSpec>();
+        for (int i = 0; i < md.Params.Length; i++)
+            if (!Monomorphizer.UnifyParam(md.Params[i].Type, args[i].Type, md.GenericParams, binds))
+                diag.Error(Codes.ArgTypeMismatch, ctx.File, span,
+                    $"in call to generic '{Mangler.DisplayName(owner)}.{md.Name}', argument {i + 1} ('{Describe(args[i].Type)}') conflicts with an earlier binding of the same type parameter");
+
+        var missing = md.GenericParams.Where(p => !binds.ContainsKey(p)).ToList();
+        if (missing.Count > 0)
+        {
+            diag.Error(Codes.UndefinedType, ctx.File, span,
+                $"cannot infer type argument {string.Join(", ", missing.Select(m => $"'{m}'"))} for generic '{Mangler.DisplayName(owner)}.{md.Name}' from its arguments");
+            return FallbackCall();
+        }
+
+        string mangled = md.Name + "_" + string.Join("_", md.GenericParams.Select(p => Monomorphizer.SanitizeTypeName(binds[p].ToSpecString())));
+        string seenKey = owner + "::" + mangled;
+        _usedMethodTemplates.Add(new MemberKey(owner, md.Name));
+        if (_genericSeen.Add(seenKey))
+            _genericMethodQueue.Enqueue((md, owner, t.File, t.Context, binds, mangled));
+
+        var concreteParams = Monomorphizer.SubParams(md.Params, binds);
+        string cname = Mangler.Method(owner, mangled, concreteParams, overloaded: false);
+        var ret = md.ReturnType is null
+            ? (md.Throws ? IrType.Int : IrType.Void)
+            : ResolveType(Monomorphizer.SubType(md.ReturnType, binds));
+        CoerceArgs(args, new MethodSig(md.ReturnType, [..concreteParams], isStatic, md.Throws, false, [..md.Annotations]), ctx, astArgs);
+
+        if (md.Throws)
+        {
+            CheckThrowsHandled(ctx, span);
+            return recv != null ? new IrThrowsInstanceCall(recv, cname, ret, args) : new IrThrowsCall(cname, ret, args);
+        }
+        return recv != null ? new IrInstanceCall(recv, cname, ret, args) : new IrStaticCall(cname, ret, args);
+    }
+
+    /// <summary>
     /// Resolves every generic free-function instantiation queued during the main pass,
     /// substituting concrete type bindings and registering the result in the module.
     /// </summary>
     private void DrainGenericInstances(IrModule module)
+    {
+        DrainGenericInstancesCore(module);
+    }
+
+    /// <summary>
+    /// The body of DrainGenericInstances, run with instantiation collection suppressed.
+    /// </summary>
+    private void DrainGenericInstancesCore(IrModule module)
     {
         while (_genericQueue.Count > 0)
         {
@@ -1599,6 +1896,23 @@ internal sealed class TypeResolver(
             _scope = visible.GetValueOrDefault(file, [file]);
             var ctx = new ResolveCtx(file, context, "", null, false, false, false, false, "", 0, new ScopeStack());
             module.FreeFunctions.Add(ResolveFreeFunc(inst, ctx));
+        }
+
+        while (_genericMethodQueue.Count > 0)
+        {
+            var (md, owner, file, context, binds, mangled) = _genericMethodQueue.Dequeue();
+            var cMap = binds.ToDictionary(kv => kv.Key, kv => Monomorphizer.CTypeOf(kv.Value));
+            var inst = new MethodDecl(md.Modifiers, md.Annotations,
+                Monomorphizer.SubType(md.ReturnType, binds), mangled, [],
+                [..Monomorphizer.SubParams(md.Params, binds)], md.IsEntry, md.Throws,
+                Monomorphizer.SubBody(md.Body, binds, cMap), md.Span);
+            _scope = visible.GetValueOrDefault(file, [file]);
+            bool isModule = sym.Modules.Contains(owner);
+            var ctx = new ResolveCtx(file, context, "", null, false, false, false, false, "", 0, new ScopeStack());
+            var lib = context == "none";
+            var fn = ResolveMethod(owner, inst, ctx.WithClass(owner), lib, VisOf(context), isModule);
+            var cls = module.Classes.Find(c => c.Name == owner);
+            cls?.Methods.Add(fn);
         }
     }
 
@@ -1803,6 +2117,11 @@ internal sealed class TypeResolver(
                 CheckLValue(target, ctx);
                 if (asgn.Op == AssignOp.Assign)
                 {
+                    if (SameStorage(target, value))
+                        diag.Warn(Codes.SelfAssignment, ctx.File, asgn.Span,
+                            "this assignment stores a value into itself and has no effect",
+                            ["did you mean to assign a different value, or to write 'self." +
+                             $"{(target is IrVar tv ? tv.Name : "field")}' on one side?"]);
                     value = Coerce(value, target.Type, ctx);
                     CheckAssign(value, target.Type, "the assignment target", ctx, Codes.TypeMismatch);
                     ForbidNestedThrows(value, ctx, allowRoot: false);
@@ -1828,6 +2147,7 @@ internal sealed class TypeResolver(
             {
                 var e = ResolveExpr(es.E, ctx);
                 ForbidNestedThrows(e, ctx, allowRoot: true);
+                WarnIfNoEffect(es.E, e, ctx);
                 return new IrExprStmt(e);
             }
 
@@ -1864,7 +2184,7 @@ internal sealed class TypeResolver(
             {
                 var cond = ResolveExpr(ws.Cond, ctx);
                 ForbidNestedThrows(cond, ctx, allowRoot: false);
-                CheckCondition(cond, ctx);
+                CheckCondition(cond, ctx, allowConst: true);
                 var body = WrapBlock(ws.Body, ctx with { LoopDepth = ctx.LoopDepth + 1 }, retType);
                 WarnIfEmpty(body, "while", ctx, ws.Span);
                 return new IrWhile(cond, body);
@@ -1929,13 +2249,13 @@ internal sealed class TypeResolver(
             case DebugStmt d:
                 if (releaseMode)
                     diag.Error(Codes.DiagInRelease, ctx.File, s.Span,
-                        "'debug' is not allowed in a release build -- remove it before shipping");
+                        "'debug' is not allowed in a release build", ["remove it before shipping"]);
                 return new IrDebug(d.Raw) { Span = s.Span };
 
             case PanicStmt p:
                 if (releaseMode)
                     diag.Error(Codes.DiagInRelease, ctx.File, s.Span,
-                        "'panic' is not allowed in a release build -- remove it before shipping");
+                        "'panic' is not allowed in a release build", ["remove it before shipping"]);
                 if (ctx.Context != "kernel")
                     diag.Error(Codes.PanicOutsideKernel, ctx.File, s.Span,
                         "'panic' is only valid in the kernel realm");
@@ -1962,13 +2282,13 @@ internal sealed class TypeResolver(
     /// clauses in a new scope with the loop depth incremented. Both clauses go through
     /// the full statement resolver so assignments get lvalue, type, and throws checking.
     /// </summary>
-    private IrStmt ResolveFor(ForStmt fs, ResolveCtx ctx, IrType retType)
+    private IrFor ResolveFor(ForStmt fs, ResolveCtx ctx, IrType retType)
     {
         var fctx = ctx.PushScope() with { LoopDepth = ctx.LoopDepth + 1 };
         IrStmt? init = fs.Init != null ? ResolveStmt(fs.Init, fctx, retType) : null;
         IrExpr? cond = fs.Cond != null ? ResolveExpr(fs.Cond, fctx) : null;
         ForbidNestedThrows(cond, fctx, allowRoot: false);
-        if (cond != null) CheckCondition(cond, fctx);
+        if (cond != null) CheckCondition(cond, fctx, allowConst: true);
         IrStmt? step = fs.Step != null ? ResolveStmt(fs.Step, fctx, retType) : null;
         var body = ResolveBlock(fs.Body, fctx, retType);
         WarnIfEmpty(body, "for", fctx, fs.Span);
@@ -1978,7 +2298,7 @@ internal sealed class TypeResolver(
     /// <summary>
     /// Resolves a for-in statement over a fixed array or any class with Length and Get methods.
     /// </summary>
-    private IrStmt ResolveForIn(ForInStmt fi, ResolveCtx ctx, IrType retType)
+    private IrForIn ResolveForIn(ForInStmt fi, ResolveCtx ctx, IrType retType)
     {
         var collection = ResolveExpr(fi.Collection, ctx);
         ForbidNestedThrows(collection, ctx, allowRoot: false);
@@ -2027,7 +2347,7 @@ internal sealed class TypeResolver(
     /// Resolves a switch statement on an integer or enum scrutinee,
     /// validating that each case label is comparable to the scrutinee type.
     /// </summary>
-    private IrStmt ResolveSwitch(SwitchStmt sw, ResolveCtx ctx, IrType retType)
+    private IrSwitch ResolveSwitch(SwitchStmt sw, ResolveCtx ctx, IrType retType)
     {
         var scrut = ResolveExpr(sw.Scrutinee, ctx);
         ForbidNestedThrows(scrut, ctx, allowRoot: false);
@@ -2079,7 +2399,7 @@ internal sealed class TypeResolver(
     /// Resolves a match statement on a union scrutinee, binding each variant's fields
     /// into scope and checking exhaustiveness unless a default case is present.
     /// </summary>
-    private IrStmt ResolveMatch(MatchStmt ms, ResolveCtx ctx, IrType retType)
+    private IrMatch ResolveMatch(MatchStmt ms, ResolveCtx ctx, IrType retType)
     {
         var scrut = ResolveExpr(ms.Scrutinee, ctx);
         ForbidNestedThrows(scrut, ctx, allowRoot: false);
@@ -2124,6 +2444,11 @@ internal sealed class TypeResolver(
             cases.Add(new IrMatchCase(idx, binds, ResolveBlock(c.Body, caseCtx, retType)));
         }
         var def = ms.Default == null ? null : ResolveBlock(ms.Default, ctx, retType);
+
+        if (def != null && covered.Count == variants.Count && variants.Count > 0)
+            diag.Warn(Codes.UnreachableCase, ctx.File, ms.Span,
+                $"this 'default' can never run: all {variants.Count} variant(s) of '{ut.Name}' are already matched",
+                ["remove the 'default' so a new variant becomes a compile error instead of silently falling through"]);
         if (def == null && covered.Count < variants.Count)
         {
             var missingList = new List<string>();
@@ -2141,7 +2466,7 @@ internal sealed class TypeResolver(
     /// Resolves a try/catch statement, giving the try block a catch label so
     /// throwing calls inside it know where to jump on failure.
     /// </summary>
-    private IrStmt ResolveTryCatch(TryCatchStmt tc, ResolveCtx ctx, IrType retType)
+    private IrTryCatch ResolveTryCatch(TryCatchStmt tc, ResolveCtx ctx, IrType retType)
     {
         int seq = _labelSeq++;
         var tctx = ctx.WithTry($"_catch_{seq}");
@@ -2203,6 +2528,10 @@ internal sealed class TypeResolver(
 
         if (ctx.Scope.DeclaredHere(ls.Name))
             diag.Error(Codes.DuplicateName, ctx.File, ls.Span, $"'{ls.Name}' is already declared in this scope");
+        else if (ctx.Scope.ShadowsOuter(ls.Name))
+            diag.Warn(Codes.ShadowedVariable, ctx.File, ls.Span,
+                $"'{ls.Name}' shadows a variable of the same name from an enclosing scope",
+                ["rename this one if the outer variable was meant to stay reachable"]);
         ctx.Scope.Declare(ls.Name, type);
         return new IrDeclVar(ls.Name, type, init);
     }
@@ -2235,7 +2564,9 @@ internal sealed class TypeResolver(
             case CharLitExpr cl: return new IrLitChar(cl.Value);
             case FloatLitExpr fl: return new IrLitFloat(fl.Value, FloatLitType(fl.Value));
             case BoolLitExpr bl: return new IrLitBool(bl.Value == "true");
-            case StrLitExpr sl: return new IrLitString(sl.Value);
+            case StrLitExpr sl:
+                WarnIfLooksInterpolated(sl, ctx);
+                return new IrLitString(sl.Value);
             case NullExpr: return new IrLitNull(IrType.Void);
             case IdentExpr ie: return ResolveIdent(ie, ctx);
             case CastExpr ce:
@@ -2243,9 +2574,8 @@ internal sealed class TypeResolver(
                 CheckType(ce.TargetType, ctx, ce.Span, allowVoid: true);
                 var inner = ResolveExpr(ce.Value, ctx);
                 var to = ResolveType(ce.TargetType);
-                // 'as' only ever exists on the class being converted TO - if the target isn't a
-                // class, there's structurally nowhere an 'as' conversion could be declared, so
-                // this is skipped entirely and CheckCast's ordinary rules (or its rejection) apply.
+
+                // as should be a static call to the destination class's as operator if it exists, otherwise a normal cast
                 if (!SameType(inner.Type, to) && ClassNameOf(to) is { } destCls
                     && FindAsOperator(destCls, inner.Type) is { } asOp)
                 {
@@ -2259,9 +2589,6 @@ internal sealed class TypeResolver(
             {
                 var opnd = ResolveExpr(pf.Operand, ctx);
 
-                // A class operand dispatches to its '++'/'--' overload: a 0-param, void-returning
-                // mutator of self. Mutation happens through the reference, so lvalue-ness of the
-                // operand expression is irrelevant - same as calling a method on it.
                 if (ClassNameOf(opnd.Type) is { } pfCls && sym.LookupOperator(pfCls, pf.Op.Sym(), 0) is { } pfOp)
                 {
                     CheckOperatorAccess(pfCls, pf.Op.Sym(), ctx, pf.Span);
@@ -2391,7 +2718,7 @@ internal sealed class TypeResolver(
         var left = ResolveExpr(be.Left, ctx);
         var right = ResolveExpr(be.Right, ctx);
 
-        // String concatenation: '+' with a String operand stringifies the other side.
+        // + with a String operand stringifies the other side
         if (be.Op == BinOp.Add && (left.Type.IsString || right.Type.IsString))
         {
             string stringClass = sym.Builtins.GetValueOrDefault(BuiltinTypes.String, BuiltinTypes.String);
@@ -2403,11 +2730,6 @@ internal sealed class TypeResolver(
             return new IrStaticCall(cn, IrType.String, [EnsureString(left, ctx), EnsureString(right, ctx)]);
         }
 
-        // A null-literal comparison is always pointer identity, never operator dispatch.
-        // "Is this reference absent" is a different question from value equality, and a
-        // class's own 'operator ==' must be free to null-guard its operand with '== null'
-        // without recursing into itself. 'null == x' already resolved to identity (a null
-        // literal has no class for dispatch); this makes 'x == null' agree with it.
         if (be.Op is BinOp.Eq or BinOp.Ne && (left is IrLitNull || right is IrLitNull))
         {
             if (!ComparableEq(left, right))
@@ -2470,6 +2792,16 @@ internal sealed class TypeResolver(
             if (!(IsInteger(left.Type) && IsInteger(right.Type)))
                 diag.Error(Codes.TypeMismatch, ctx.File, be.Span,
                     $"operator '{be.Op.Sym()}' requires integer operands, got '{Describe(left.Type)}' and '{Describe(right.Type)}'");
+
+            // Shifts are undefined behaviour if the count is negative or >= the bit width of the left operand
+            if (be.Op is BinOp.Shl or BinOp.Shr && right is IrLitInt sh
+                && left.Type is IrPrimType lp && PrimTypes.IntBits(lp.CName) is var bits and > 0
+                && (sh.Value < 0 || sh.Value >= bits))
+                diag.Error(Codes.BadShiftCount, ctx.File, be.Right.Span,
+                    $"shift count {sh.Value} is out of range for '{Describe(left.Type)}' ({bits} bits)",
+                    [sh.Value < 0
+                        ? "a negative shift count is undefined behaviour"
+                        : $"the count must be between 0 and {bits - 1}"]);
             IrType bt = be.Op is BinOp.Shl or BinOp.Shr ? left.Type
                       : NumRank(left.Type) >= NumRank(right.Type) ? left.Type : right.Type;
             return new IrBinOp(be.Op, left, right, bt);
@@ -2478,6 +2810,13 @@ internal sealed class TypeResolver(
         if (!(IsArith(left.Type) && IsArith(right.Type)))
             diag.Error(Codes.TypeMismatch, ctx.File, be.Span,
                 $"operator '{be.Op.Sym()}' cannot be applied to '{Describe(left.Type)}' and '{Describe(right.Type)}'");
+
+        // An integer divisor that is literally zero traps at runtime on every target, so
+        // there is no program for which this is correct. Reject it at compile time.
+        if (be.Op is BinOp.Div or BinOp.Mod && IsInteger(right.Type) && right is IrLitInt { Value: 0 })
+            diag.Error(Codes.DivisionByZero, ctx.File, be.Right.Span,
+                $"integer {(be.Op == BinOp.Div ? "division" : "remainder")} by a literal zero",
+                ["this traps at runtime; guard the divisor or use a non-zero constant"]);
         IrType t = NumRank(left.Type) >= NumRank(right.Type) ? left.Type : right.Type;
         return new IrBinOp(be.Op, left, right, t);
     }
@@ -2721,6 +3060,15 @@ internal sealed class TypeResolver(
 
             if (!string.IsNullOrEmpty(objName) && ClassInScope(objName.AsSpan()) && ctx.Scope.Lookup(objName) == null)
             {
+                if (_methodTemplates.TryGetValue(new MemberKey(objName, ma.Member), out var mtmpl))
+                {
+                    bool tIsStatic = sym.LookupMethod(objName, ma.Member)?.Sig?.IsStatic ?? true;
+                    if (!tIsStatic)
+                        diag.Error(Codes.StaticOnInstance, ctx.File, ce.Span,
+                            $"'{Mangler.DisplayName(objName)}.{ma.Member}' is an instance method; call it on a value");
+                    CheckMemberAccess(objName, ma.Member, ctx, ce.Span);
+                    return ResolveGenericMethodCall(mtmpl, objName, tIsStatic, args, ctx, ce.Span, null, ce.Args);
+                }
                 var msym = sym.LookupMethod(objName, ma.Member);
                 if (msym == null)
                 {
@@ -2743,10 +3091,23 @@ internal sealed class TypeResolver(
                 return new IrStaticCall(cn, ret, args);
             }
 
+            if (!string.IsNullOrEmpty(objName) && ctx.Scope.Lookup(objName) == null && !ClassInScope(objName.AsSpan())
+                && TryResolveFileNamespacedCall(objName, ma.Member, args, ctx, ce) is { } nsCall)
+                return nsCall;
+
             var recv = ResolveExpr(ma.Object, ctx);
             string? cls = ClassNameOf(recv.Type);
             if (cls != null)
             {
+                if (_methodTemplates.TryGetValue(new MemberKey(cls, ma.Member), out var imtmpl))
+                {
+                    bool iIsStatic = sym.LookupMethod(cls, ma.Member)?.Sig?.IsStatic ?? false;
+                    if (iIsStatic)
+                        diag.Error(Codes.InstanceOnStatic, ctx.File, ce.Span,
+                            $"'{Mangler.DisplayName(cls)}.{ma.Member}' is static; call it as '{Mangler.DisplayName(cls)}.{ma.Member}(...)'");
+                    CheckMemberAccess(cls, ma.Member, ctx, ce.Span);
+                    return ResolveGenericMethodCall(imtmpl, cls, iIsStatic, args, ctx, ce.Span, recv, ce.Args);
+                }
                 var msym = sym.LookupMethod(cls, ma.Member);
                 if (msym == null)
                 {
@@ -2791,8 +3152,36 @@ internal sealed class TypeResolver(
 
             if (TryResolveArcIntrinsic(id.Name, args, ctx, ce.Span) is { } arc) return arc;
 
-            if (_funcTemplates.TryGetValue(id.Name, out var tmpl))
+            if (ResolveFuncTemplate(id.Name, ctx.File, out var collidingFiles) is { } tmpl)
+            {
+                if (collidingFiles.Count > 1)
+                {
+                    diag.Error(Codes.AmbiguousCall, ctx.File, ce.Span,
+                        $"'{id.Name}' is ambiguous: a public generic function named '{id.Name}' is declared in more than one imported file ({string.Join(", ", collidingFiles.Select(f => Path.GetFileNameWithoutExtension(f)))}); qualify with '<FileName>.{id.Name}(...)'");
+                    return new IrStaticCall(Mangler.FreeFunc(id.Name, [], false, false, false), IrType.Void, args);
+                }
+
+                // Peek at the lower precedence candidates a bare call would otherwise reach, so a
+                // generic template can't silently shadow something equally plausible.
+                var otherPf = sym.LookupPrivateFunc(ctx.File, id.Name);
+                var otherFsym = sym.LookupFreeFunc(id.Name);
+                bool otherFsymInScope = FuncInScope(otherFsym);
+                bool hasMethodCandidate = !string.IsNullOrEmpty(ctx.CurClass) &&
+                    (sym.LookupMethod(ctx.CurClass, id.Name) != null || _methodTemplates.ContainsKey(new MemberKey(ctx.CurClass, id.Name)));
+
+                if (otherPf != null || otherFsymInScope || hasMethodCandidate)
+                {
+                    string otherDesc = otherPf != null ? $"a private free function in '{Path.GetFileNameWithoutExtension(ctx.File)}'"
+                        : otherFsymInScope ? $"a free function in '{Path.GetFileNameWithoutExtension(otherFsym!.Module)}'"
+                        : $"a method of '{Mangler.DisplayName(ctx.CurClass)}'";
+                    diag.Error(Codes.AmbiguousCall, ctx.File, ce.Span,
+                        $"'{id.Name}' is ambiguous between the generic function declared in '{Path.GetFileNameWithoutExtension(tmpl.File)}' and {otherDesc}; qualify with '{Path.GetFileNameWithoutExtension(tmpl.File)}.{id.Name}(...)'" +
+                        (hasMethodCandidate ? $", 'self.{id.Name}(...)', or '{Mangler.DisplayName(ctx.CurClass)}.{id.Name}(...)' as appropriate" : ""));
+                    return new IrStaticCall(Mangler.FreeFunc(id.Name, [], false, false, false), IrType.Void, args);
+                }
+
                 return ResolveGenericCall(tmpl, args, ctx, ce.Span, ce.Args);
+            }
 
             // file-local private free functions take priority over globals
             var pfsym = sym.LookupPrivateFunc(ctx.File, id.Name);
@@ -2825,6 +3214,17 @@ internal sealed class TypeResolver(
             // sibling method of the current class
             if (!string.IsNullOrEmpty(ctx.CurClass))
             {
+                if (_methodTemplates.TryGetValue(new MemberKey(ctx.CurClass, id.Name), out var smtmpl))
+                {
+                    bool sIsStatic = sym.LookupMethod(ctx.CurClass, id.Name)?.Sig?.IsStatic ?? true;
+                    if (!sIsStatic)
+                    {
+                        diag.Error(Codes.UndefinedMethod, ctx.File, ce.Span,
+                            $"'{id.Name}' is an instance method; call it as 'self.{id.Name}(...)'");
+                        return ResolveGenericMethodCall(smtmpl, ctx.CurClass, false, args, ctx, ce.Span, new IrSelfExpr(ctx.CurClass), ce.Args);
+                    }
+                    return ResolveGenericMethodCall(smtmpl, ctx.CurClass, true, args, ctx, ce.Span, null, ce.Args);
+                }
                 var msym = sym.LookupMethod(ctx.CurClass, id.Name);
                 if (msym != null)
                 {

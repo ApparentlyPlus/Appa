@@ -14,7 +14,7 @@ internal static class Pipeline
     /// Finds the project file marked @environment in the project root.
     /// Parses the top-level *.g files and returns the first one carrying the marker.
     /// </summary>
-    public static string? DiscoverEnv(string projectRoot)
+    public static string? DiscoverEnv(string projectRoot, List<string>? unreadable = null)
     {
         foreach (var f in Directory.GetFiles(projectRoot, "*.g").OrderBy(x => x, StringComparer.Ordinal))
             try
@@ -22,7 +22,9 @@ internal static class Pipeline
                 var prog = new Parser(new Lexer(File.ReadAllText(f)).Tokenize()).ParseProgram();
                 if (prog.Items.OfType<EnvironmentDecl>().Any()) return Path.GetFullPath(f);
             }
-            catch (ParseException) { }
+            catch (ParseException) { unreadable?.Add(Path.GetFileName(f)); }
+            catch (IOException) { unreadable?.Add(Path.GetFileName(f)); }
+            catch (UnauthorizedAccessException) { unreadable?.Add(Path.GetFileName(f)); }
         return null;
     }
 
