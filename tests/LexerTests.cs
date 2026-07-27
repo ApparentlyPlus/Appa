@@ -8,9 +8,6 @@ using Appa;
 /// </summary>
 public class LexerTests
 {
-    /// <summary>
-    /// Tokenizing always ends with a single EOF token, even for empty input.
-    /// </summary>
     [Fact]
     public void AlwaysEndsWithEof()
     {
@@ -18,9 +15,6 @@ public class LexerTests
         Assert.Equal(TK.EOF, tokens[^1].Kind);
     }
 
-    /// <summary>
-    /// Line and block comments are skipped entirely and produce no tokens.
-    /// </summary>
     [Theory]
     [InlineData("// a line comment\nlet")]
     [InlineData("/* a block\n   comment */ let")]
@@ -30,9 +24,6 @@ public class LexerTests
         Assert.Equal(TK.Let, tokens[0].Kind);
     }
 
-    /// <summary>
-    /// Keyword spellings map to their expected token kind.
-    /// </summary>
     [Theory]
     [InlineData("import", nameof(TK.Import))]
     [InlineData("kernel", nameof(TK.Kernel))]
@@ -86,10 +77,6 @@ public class LexerTests
         Assert.Equal(Enum.Parse<TK>(expectedKind), tokens[0].Kind);
     }
 
-    /// <summary>
-    /// The width-explicit primitive family (uint, byte, usize, ...) all lex as TPrim,
-    /// carrying their real spelling in the token value.
-    /// </summary>
     [Theory]
     [InlineData("int64")]
     [InlineData("uint")]
@@ -106,9 +93,6 @@ public class LexerTests
         Assert.Equal(spelling, tokens[0].Value);
     }
 
-    /// <summary>
-    /// true/false lex as BoolLit, carrying their spelling in the token value.
-    /// </summary>
     [Theory]
     [InlineData("true")]
     [InlineData("false")]
@@ -119,9 +103,6 @@ public class LexerTests
         Assert.Equal(spelling, tokens[0].Value);
     }
 
-    /// <summary>
-    /// A plain identifier that is not a keyword lexes as Ident.
-    /// </summary>
     [Fact]
     public void PlainIdentifierLexesAsIdent()
     {
@@ -130,10 +111,6 @@ public class LexerTests
         Assert.Equal("myVariable_1", tokens[0].Value);
     }
 
-    /// <summary>
-    /// Multi-character operators lex as one token each, not as their constituent
-    /// single characters.
-    /// </summary>
     [Theory]
     [InlineData("+=", nameof(TK.PlusEq), 2)]
     [InlineData("-=", nameof(TK.MinusEq), 2)]
@@ -163,9 +140,6 @@ public class LexerTests
         Assert.Equal(length, tokens[0].Span.Length);
     }
 
-    /// <summary>
-    /// Structural punctuation lexes to its own dedicated token kind.
-    /// </summary>
     [Theory]
     [InlineData("(", nameof(TK.LParen))]
     [InlineData(")", nameof(TK.RParen))]
@@ -184,10 +158,6 @@ public class LexerTests
         Assert.Equal(Enum.Parse<TK>(expectedKind), tokens[0].Kind);
     }
 
-    /// <summary>
-    /// A single-character operator with no compound form falls through to the Punct
-    /// catch-all kind, carrying the raw character as its value.
-    /// </summary>
     [Theory]
     [InlineData("~")]
     [InlineData("?")]
@@ -198,10 +168,6 @@ public class LexerTests
         Assert.Equal(src, tokens[0].Value);
     }
 
-    /// <summary>
-    /// Decimal, hex, and float literals (with e-notation and suffixes) lex with the
-    /// full lexeme preserved verbatim in the token value.
-    /// </summary>
     [Theory]
     [InlineData("42", nameof(TK.IntLit), "42")]
     [InlineData("0xFF", nameof(TK.IntLit), "0xFF")]
@@ -216,9 +182,6 @@ public class LexerTests
         Assert.Equal(value, tokens[0].Value);
     }
 
-    /// <summary>
-    /// A plain string literal lexes as one StrLit token carrying the quotes verbatim.
-    /// </summary>
     [Fact]
     public void StringLiteralLexesWithQuotes()
     {
@@ -227,9 +190,6 @@ public class LexerTests
         Assert.Equal("\"hello\"", tokens[0].Value);
     }
 
-    /// <summary>
-    /// A recognized escape sequence inside a string literal does not throw.
-    /// </summary>
     [Theory]
     [InlineData("\"a\\nb\"")]
     [InlineData("\"tab\\ttab\"")]
@@ -240,27 +200,18 @@ public class LexerTests
         Assert.Equal(TK.StrLit, tokens[0].Kind);
     }
 
-    /// <summary>
-    /// An unrecognized escape sequence in a string literal is a lex-time error.
-    /// </summary>
     [Fact]
     public void UnrecognizedStringEscapeThrows()
     {
         Assert.Throws<ParseException>(() => SingleFileCompile.Tokenize("\"bad\\qescape\""));
     }
 
-    /// <summary>
-    /// An unterminated string literal is a lex-time error.
-    /// </summary>
     [Fact]
     public void UnterminatedStringThrows()
     {
         Assert.Throws<ParseException>(() => SingleFileCompile.Tokenize("\"never closed"));
     }
 
-    /// <summary>
-    /// A character literal decodes to its single Unicode codepoint value.
-    /// </summary>
     [Fact]
     public void CharLiteralDecodesToCodepoint()
     {
@@ -269,20 +220,12 @@ public class LexerTests
         Assert.Equal("97", tokens[0].Value);
     }
 
-    /// <summary>
-    /// A char literal holding more than one character is a lex-time error.
-    /// </summary>
     [Fact]
     public void MultiCharLiteralThrows()
     {
         Assert.Throws<ParseException>(() => SingleFileCompile.Tokenize("'ab'"));
     }
 
-    /// <summary>
-    /// An interpolated string with an embedded expression lexes into a
-    /// InterpStrStart, string segment, brace-delimited expression tokens, then
-    /// InterpStrEnd - not a single opaque token.
-    /// </summary>
     [Fact]
     public void InterpolatedStringSplitsIntoSegmentsAndExprTokens()
     {
@@ -299,11 +242,6 @@ public class LexerTests
         Assert.Equal(TK.InterpStrEnd, tokens[5].Kind);
     }
 
-    /// <summary>
-    /// Doubled braces inside an interpolated string are a literal-brace escape and
-    /// collapse to a single brace in the emitted string segment, rather than opening
-    /// an expression hole.
-    /// </summary>
     [Fact]
     public void DoubledBracesInInterpolationAreLiteral()
     {
@@ -327,20 +265,12 @@ public class LexerTests
         Assert.Equal("\"line1\\nline2\"", tokens[1].Value);
     }
 
-    /// <summary>
-    /// An unrecognized escape inside an interpolated string's literal segment is a
-    /// lex-time error, same as a plain string literal.
-    /// </summary>
     [Fact]
     public void UnrecognizedEscapeInsideInterpolationThrows()
     {
         Assert.Throws<ParseException>(() => SingleFileCompile.Tokenize("$\"bad\\qescape\""));
     }
 
-    /// <summary>
-    /// @intrinsic/@preamble annotations carry their parenthesized argument in the
-    /// token value; @extern/@environment/@keep carry no argument.
-    /// </summary>
     [Theory]
     [InlineData("@intrinsic(arc_retain)", nameof(TK.AtIntrinsic), "arc_retain")]
     [InlineData("@preamble(kernel)", nameof(TK.AtPreamble), "kernel")]
@@ -354,9 +284,6 @@ public class LexerTests
         Assert.Equal(value, tokens[0].Value);
     }
 
-    /// <summary>
-    /// An unrecognized @ annotation is a lex-time error.
-    /// </summary>
     [Fact]
     public void UnknownAnnotationThrows()
     {

@@ -86,7 +86,7 @@ public static class MultiFileCorpus
 
     private static IEnumerable<MultiFileCase> Cases()
     {
-        // --- import resolution ------------------------------------------------
+        #region import resolution
         yield return new("import/basic",
         [
             F("src/lib.g", "public int func Helper() { return 7; }"),
@@ -148,7 +148,9 @@ public static class MultiFileCorpus
             F("src/main.g", Main("import \"src\";", "")),
         ], Expect.Rejected);
 
-        // --- visibility across files -----------------------------------------
+        #endregion
+
+        #region visibility across files
         yield return new("visible/transitive",
         [
             F("src/deep.g", "public int func Deep() { return 1; }"),
@@ -189,7 +191,9 @@ public static class MultiFileCorpus
                                  "let Widget w = new Widget(); let int v = w.hidden;")),
         ], Expect.Rejected, Codes.PrivateMember);
 
-        // --- duplicate top-level names across files ---------------------------
+        #endregion
+
+        #region duplicate top-level names across files
         yield return new("dup/class-two-files",
         [
             F("src/a.g", "class Widget { public int n; }"),
@@ -248,7 +252,9 @@ public static class MultiFileCorpus
             F("src/main.g", Main("import \"src/a.g\";", "let Widget w = new Widget();")),
         ], Expect.Any);
 
-        // --- realm blocks split across files ---------------------------------
+        #endregion
+
+        #region realm blocks split across files
         yield return new("realm/entry-in-imported-file",
         [
             F("src/lib.g", "user { entry func Main() { } }"),
@@ -279,7 +285,9 @@ public static class MultiFileCorpus
             F("src/main.g", "import \"src/lib.g\";\nuser { void func NotEntry() { } }\n"),
         ], Expect.Rejected);
 
-        // --- environment declarations ----------------------------------------
+        #endregion
+
+        #region environment declarations
         yield return new("env/second-environment-file",
         [
             F("src/extra.g", "@environment\n"),
@@ -292,7 +300,9 @@ public static class MultiFileCorpus
             F("src/main.g", Main("", "")),
         ], Expect.Rejected);
 
-        // --- cross-file type and generic use ---------------------------------
+        #endregion
+
+        #region cross-file type and generic use
         yield return new("cross/generic-class",
         [
             F("src/box.g", "class Box[T] { public T v; }"),
@@ -349,7 +359,9 @@ public static class MultiFileCorpus
                                  "let func(int) -> int f = Twice; let int v = f(2);")),
         ], Expect.Accepted);
 
-        // --- native and annotation placement across files ---------------------
+        #endregion
+
+        #region native and annotation placement across files
         yield return new("native/block-in-imported-file",
         [
             F("src/n.g", "native { static int shared_counter = 0; }"),
@@ -368,7 +380,9 @@ public static class MultiFileCorpus
             F("src/main.g", Main("import \"src/e.g\";", "")),
         ], Expect.Any);
 
-        // --- file-level edge cases -------------------------------------------
+        #endregion
+
+        #region file-level edge cases
         yield return new("file/empty-imported",
         [
             F("src/empty.g", ""),
@@ -409,7 +423,10 @@ public static class MultiFileCorpus
     /// </summary>
     private static IEnumerable<MultiFileCase> MoreCases()
     {
-        // --- collisions between different kinds of declaration ----------------
+
+        #endregion
+
+        #region collisions between different kinds of declaration
         yield return new("kind/class-vs-enum",
         [
             F("src/a.g", "class Color { public int n; }"),
@@ -454,7 +471,9 @@ public static class MultiFileCorpus
             F("src/main.g", Main("import \"src/a.g\";\nimport \"src/b.g\";", "")),
         ], Expect.Any);
 
-        // --- private free-function mangling across files ----------------------
+        #endregion
+
+        #region private free-function mangling across files
         yield return new("private/three-files-same-name",
         [
             F("src/a.g", "private int func Shared() { return 1; }\npublic int func A() { return Shared(); }"),
@@ -487,7 +506,9 @@ public static class MultiFileCorpus
             F("src/main.g", Main("import \"src/a.g\";\nimport \"src/b.g\";", "")),
         ], Expect.Rejected, Codes.DuplicateName);
 
-        // --- processes and threads declared away from the entry ---------------
+        #endregion
+
+        #region processes and threads declared away from the entry
         yield return new("proc/in-imported-file",
         [
             F("src/p.g", "kernel { foreground process Worker { thread T { entry func Run() { } } } }"),
@@ -501,7 +522,9 @@ public static class MultiFileCorpus
             F("src/main.g", "import \"src/a.g\";\nimport \"src/b.g\";\nkernel { entry func Main() { } }\n"),
         ], Expect.Rejected, Codes.DuplicateName);
 
-        // --- generics instantiated from several files -------------------------
+        #endregion
+
+        #region generics instantiated from several files
         yield return new("gen/three-files-same-instantiation",
         [
             F("src/box.g", "class Box[T] { public T v; }"),
@@ -542,7 +565,9 @@ public static class MultiFileCorpus
             F("src/main.g", Main("import \"src/a.g\";\nimport \"src/b.g\";", "let int v = A() + B();")),
         ], Expect.Rejected, Codes.DuplicateName);
 
-        // --- intrinsics and builtins across files -----------------------------
+        #endregion
+
+        #region intrinsics and builtins across files
         yield return new("intrinsic/two-builtin-string",
         [
             F("src/s.g", "@builtin(String)\nclass MyString { public int n; }"),
@@ -555,7 +580,9 @@ public static class MultiFileCorpus
             F("src/main.g", Main("import \"src/r.g\";", "")),
         ], Expect.Any);
 
-        // --- import path shapes ------------------------------------------------
+        #endregion
+
+        #region import path shapes
         yield return new("path/dot-slash",
         [
             F("src/lib.g", "public int func Helper() { return 7; }"),
@@ -594,7 +621,9 @@ public static class MultiFileCorpus
             F("src/main.g", Main("import \"src/lib.g\";", "let int v = Helper();")),
         ], Expect.Any);
 
-        // --- fan-out and depth --------------------------------------------------
+        #endregion
+
+        #region fan-out and depth
         yield return new("scale/wide-fan-out",
         [
             F("src/m0.g", "public int func M0() { return 0; }"),
@@ -617,5 +646,7 @@ public static class MultiFileCorpus
             F("src/b.g", "import \"src/a.g\";\nimport \"src/dep.g\";\npublic int func B() { return Dep(); }"),
             F("src/main.g", Main("import \"src/a.g\";\nimport \"src/b.g\";", "let int v = A() + B();")),
         ], Expect.Accepted);
+
+        #endregion
     }
 }

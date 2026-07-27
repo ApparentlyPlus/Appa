@@ -17,9 +17,6 @@ using Appa;
 /// </summary>
 public class PipelineTests
 {
-    /// <summary>
-    /// Each source produces at least one error diagnostic carrying the expected code.
-    /// </summary>
     [Theory]
     [InlineData("G044", "kernel { entry func Main() { let int x = 5 } }")]
     [InlineData("G003", "kernel { entry func Main() { } } int func f(int x, int x) { return x; }")]
@@ -76,10 +73,6 @@ public class PipelineTests
         Assert.Contains(diag.All, d => d.Severity == Severity.Error && d.Code == expectedCode);
     }
 
-    /// <summary>
-    /// Each source produces at least one warning diagnostic carrying the expected
-    /// code, with no errors (a warning alone never fails a build).
-    /// </summary>
     [Theory]
     [InlineData("G023", "kernel { entry func Main() { let int x = 5; } }")]
     [InlineData("G024", "int func F() { return 1; let int x = 2; } kernel { entry func Main() { let int y = F(); } }")]
@@ -92,10 +85,6 @@ public class PipelineTests
         Assert.Contains(diag.All, d => d.Severity == Severity.Warning && d.Code == expectedCode);
     }
 
-    /// <summary>
-    /// Pipeline.ValidateStructure enforces exactly one kernel block with exactly
-    /// one entry func - these codes only surface through that pass, not BuildModule.
-    /// </summary>
     [Theory]
     [InlineData("G002", "module M { }")]
     [InlineData("G001", "kernel { entry func Main() { } } kernel { entry func Main2() { } }")]
@@ -110,10 +99,6 @@ public class PipelineTests
         Assert.Contains(diag.All, d => d.Severity == Severity.Error && d.Code == expectedCode);
     }
 
-    /// <summary>
-    /// Hosted-target realm validation: a kernel{} block is a hard error, and exactly one
-    /// user{} block with exactly one entry func is required.
-    /// </summary>
     [Theory]
     [InlineData("G055", "kernel { entry func Main() { } } user { entry func Main() { } }")]
     [InlineData("G056", "class M { }")]
@@ -131,10 +116,6 @@ public class PipelineTests
         Assert.Contains(diag.All, d => d.Severity == Severity.Error && d.Code == expectedCode);
     }
 
-    /// <summary>
-    /// A well-formed Hosted program (one user{} block, one entry func, no kernel{})
-    /// passes validation cleanly.
-    /// </summary>
     [Fact]
     public void ValidateStructureAcceptsWellFormedHosted()
     {
@@ -216,10 +197,6 @@ public class PipelineTests
         Assert.NotNull(module);
     }
 
-    /// <summary>
-    /// A user-defined operator overload dispatches on the declared operator and
-    /// type-checks the operand types against its signature.
-    /// </summary>
     [Fact]
     public void OperatorOverloadDispatchesOnDeclaredOperator()
     {

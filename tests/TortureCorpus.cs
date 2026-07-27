@@ -57,7 +57,6 @@ public static class TortureCorpus
                   .. AssignmentMatrix(), .. MemberAccessMatrix(), .. IdentifierMatrix()];
 
     #region Statement matrix
-
     /// <summary>
     /// Every syntactic position that can hold a statement. "%S%" is the hole.
     /// Each template is otherwise a complete, valid program, so any diagnostic
@@ -138,7 +137,6 @@ public static class TortureCorpus
     #endregion
 
     #region Expression matrix
-
     /// <summary>Every syntactic position that can hold an expression. "%E%" is the hole.</summary>
     private static readonly (string Name, string Template)[] ExprPositions =
     [
@@ -225,7 +223,6 @@ public static class TortureCorpus
     #endregion
 
     #region Declaration matrix
-
     /// <summary>
     /// Every container a declaration can syntactically appear in. "%D%" is the hole.
     /// Containers differ in which declaration forms they accept, and the rules are
@@ -283,7 +280,6 @@ public static class TortureCorpus
     #endregion
 
     #region Type matrix
-
     /// <summary>
     /// Every position that takes a type specifier. "%T%" is the hole. Types reach the
     /// checker through several different paths (ResolveType, CheckType, the parser's
@@ -355,7 +351,6 @@ public static class TortureCorpus
     #endregion
 
     #region Binary operator matrix
-
     /// <summary>
     /// Every binary operator crossed with every pair drawn from a set of operand
     /// expressions covering each type family. Most combinations are type errors; the
@@ -387,7 +382,6 @@ public static class TortureCorpus
     #endregion
 
     #region Assignment matrix
-
     /// <summary>
     /// Every assignment operator crossed with every kind of assignment target. Plain '=' and
     /// the compound forms take different resolver paths (the compound ones hoist, re-read the
@@ -436,7 +430,6 @@ public static class TortureCorpus
     #endregion
 
     #region Member access matrix
-
     /// <summary>
     /// Field reads, method calls, and static-vs-instance access crossed with every kind of
     /// receiver. Member resolution has one path per receiver shape (enum name, module name,
@@ -481,7 +474,6 @@ public static class TortureCorpus
     #endregion
 
     #region Identifier matrix
-
     /// <summary>
     /// Awkward identifiers placed in every kind of declaration.
     ///
@@ -526,14 +518,13 @@ public static class TortureCorpus
     #endregion
 
     #region Curated cases
-
     /// <summary>
     /// Hand-written cases, each pinning exactly one rule. Unlike the matrices these
     /// carry a real expectation, and where the diagnostic identity matters, the code.
     /// </summary>
     private static IEnumerable<TortureCase> Curated()
     {
-        // --- 'assign' outside a catch handler ---------------------------------
+        #region 'assign' outside a catch handler
         yield return new("assign/bare-entry",
             "kernel { entry func Main() { assign 1; } }", Expect.Rejected, Codes.AssignOutsideCatch);
         yield return new("assign/in-try-block",
@@ -549,7 +540,9 @@ public static class TortureCorpus
             "throws int func T() { throw; } void func H() { assign 1; } kernel { entry func Main() { H(); } }",
             Expect.Rejected, Codes.AssignOutsideCatch);
 
-        // --- catch handlers ---------------------------------------------------
+        #endregion
+
+        #region catch handlers
         yield return new("catch/no-assign",
             "throws int func T() { throw; } kernel { entry func Main() { let int v = T() catch { }; } }",
             Expect.Rejected, Codes.CatchHandlerNoAssign);
@@ -579,7 +572,9 @@ public static class TortureCorpus
             "throws int func T() { throw; } kernel { entry func Main() { while (true) { let int v = T() catch { break; }; } } }",
             Expect.Any);
 
-        // --- try/catch --------------------------------------------------------
+        #endregion
+
+        #region try/catch
         yield return new("try/catch-missing",
             "throws void func T() { throw; } kernel { entry func Main() { try { T(); } } }", Expect.Rejected);
         yield return new("try/empty-both",
@@ -599,7 +594,9 @@ public static class TortureCorpus
         yield return new("throw/outside-throws-func",
             "void func H() { throw; } kernel { entry func Main() { H(); } }", Expect.Rejected);
 
-        // --- defer ------------------------------------------------------------
+        #endregion
+
+        #region defer
         yield return new("defer/return", "void func H() { defer return; } kernel { entry func Main() { H(); } }",
             Expect.Rejected, Codes.DeferTransfer);
         yield return new("defer/break", "kernel { entry func Main() { while (true) { defer break; } } }",
@@ -614,7 +611,9 @@ public static class TortureCorpus
         yield return new("defer/nested-defer-in-block",
             "void func H() { } kernel { entry func Main() { defer { defer H(); } } }", Expect.Any);
 
-        // --- switch -----------------------------------------------------------
+        #endregion
+
+        #region switch
         yield return new("switch/dup-label",
             "kernel { entry func Main() { switch (1) { case 1 { } case 1 { } } } }", Expect.Rejected);
         yield return new("switch/no-cases",
@@ -632,7 +631,9 @@ public static class TortureCorpus
         yield return new("switch/break-in-case",
             "kernel { entry func Main() { switch (1) { case 1 { break; } } } }", Expect.Any);
 
-        // --- match ------------------------------------------------------------
+        #endregion
+
+        #region match
         yield return new("match/non-union",
             "kernel { entry func Main() { match (1) { case A { } } } }", Expect.Rejected);
         yield return new("match/unknown-variant",
@@ -652,7 +653,9 @@ public static class TortureCorpus
         yield return new("match/no-cases",
             "union U { A } kernel { entry func Main() { let U u = U.A(); match (u) { } } }", Expect.Any);
 
-        // --- enum / union declarations ---------------------------------------
+        #endregion
+
+        #region enum / union declarations
         yield return new("enum/empty", "enum E { } kernel { entry func Main() { } }", Expect.Rejected);
         yield return new("enum/dup-member", "enum E { A, A } kernel { entry func Main() { } }", Expect.Rejected);
         yield return new("enum/non-constant-value",
@@ -665,7 +668,9 @@ public static class TortureCorpus
         yield return new("union/self-payload", "union U { A(U u) } kernel { entry func Main() { } }", Expect.Any);
         yield return new("union/dup-field", "union U { A(int x, int x) } kernel { entry func Main() { } }", Expect.Rejected);
 
-        // --- classes ----------------------------------------------------------
+        #endregion
+
+        #region classes
         yield return new("class/dup-field", "class C { int n; int n; } kernel { entry func Main() { } }", Expect.Rejected);
         yield return new("class/dup-method",
             "class C { public void func M() { } public void func M() { } } kernel { entry func Main() { } }", Expect.Rejected);
@@ -686,7 +691,9 @@ public static class TortureCorpus
         yield return new("module/new",
             "module M { public static void func F() { } } kernel { entry func Main() { let M m = new M(); } }", Expect.Rejected);
 
-        // --- operators --------------------------------------------------------
+        #endregion
+
+        #region operators
         yield return new("operator/wrong-arity",
             "class C { public operator C func +(C a, C b) { return a; } } kernel { entry func Main() { } }", Expect.Rejected);
         yield return new("operator/no-return",
@@ -702,7 +709,9 @@ public static class TortureCorpus
         yield return new("operator/on-module",
             "module M { public operator int func +(int a) { return a; } } kernel { entry func Main() { } }", Expect.Any);
 
-        // --- generics ---------------------------------------------------------
+        #endregion
+
+        #region generics
         yield return new("generic/unknown-param",
             "class Box[T] { T v; public void func Set(U x) { } } kernel { entry func Main() { let Box[int] b = new Box[int](); } }",
             Expect.Rejected);
@@ -715,7 +724,9 @@ public static class TortureCorpus
         yield return new("generic/recursive-instantiation",
             "class Box[T] { T v; } kernel { entry func Main() { let Box[Box[int]] b = new Box[Box[int]](); } }", Expect.Any);
 
-        // --- control flow -----------------------------------------------------
+        #endregion
+
+        #region control flow
         yield return new("cf/break-outside-loop",
             "kernel { entry func Main() { break; } }", Expect.Rejected, Codes.BreakOutsideLoop);
         yield return new("cf/continue-outside-loop",
@@ -735,7 +746,9 @@ public static class TortureCorpus
         yield return new("cf/entry-call",
             "kernel { entry func Main() { Main(); } }", Expect.Rejected, Codes.CallToEntry);
 
-        // --- realms / structure ----------------------------------------------
+        #endregion
+
+        #region realms / structure
         yield return new("struct/no-entry", "void func H() { }", Expect.Rejected);
         yield return new("struct/two-entries",
             "kernel { entry func A() { } entry func B() { } }", Expect.Rejected);
@@ -747,7 +760,9 @@ public static class TortureCorpus
         yield return new("struct/panic-in-user",
             "kernel { entry func Main() { } } user { void func H() { panic \"x\"; } }", Expect.Any);
 
-        // --- process / thread -------------------------------------------------
+        #endregion
+
+        #region process / thread
         yield return new("proc/no-mode", "kernel { process P { thread T { entry func R() { } } } entry func Main() { } }",
             Expect.Rejected, Codes.MissingProcessMode);
         yield return new("proc/mode-twice",
@@ -763,7 +778,9 @@ public static class TortureCorpus
             "kernel { foreground process P { thread T { entry func R() { } } thread T { entry func R() { } } } entry func Main() { } }",
             Expect.Rejected);
 
-        // --- unsafe / pointers ------------------------------------------------
+        #endregion
+
+        #region unsafe / pointers
         yield return new("unsafe/deref-outside",
             "kernel { entry func Main() { let int n = 1; let int* p = &n; let int v = *p; } }",
             Expect.Rejected, Codes.UnsafeRequired);
@@ -776,7 +793,9 @@ public static class TortureCorpus
         yield return new("unsafe/addrof-literal",
             "kernel { entry func Main() { unsafe { let int* p = &1; } } }", Expect.Rejected);
 
-        // --- casts ------------------------------------------------------------
+        #endregion
+
+        #region casts
         yield return new("cast/int-to-bool", "kernel { entry func Main() { let bool b = 1 as bool; } }", Expect.Any);
         yield return new("cast/to-void", "kernel { entry func Main() { let v = 1 as void; } }", Expect.Rejected);
         yield return new("cast/class-to-int",
@@ -785,7 +804,9 @@ public static class TortureCorpus
             "kernel { entry func Main() { unsafe { let int n = 1; let int* p = &n; let int v = (int)*p; } } }", Expect.Any);
         yield return new("cast/redundant", "kernel { entry func Main() { let int v = 1 as int; } }", Expect.Any);
 
-        // --- literals / lexer edges ------------------------------------------
+        #endregion
+
+        #region literals / lexer edges
         yield return new("lit/int-overflow", "kernel { entry func Main() { let int v = 99999999999999999999; } }", Expect.Rejected);
         yield return new("lit/hex", "kernel { entry func Main() { let int v = 0xFF; } }", Expect.Accepted);
         yield return new("lit/bad-hex", "kernel { entry func Main() { let int v = 0xZZ; } }", Expect.Rejected);
@@ -797,7 +818,9 @@ public static class TortureCorpus
         yield return new("lit/interp-empty-hole", "kernel { entry func Main() { let s = $\"{}\"; } }", Expect.Rejected);
         yield return new("lit/interp-unclosed-hole", "kernel { entry func Main() { let s = $\"{1\"; } }", Expect.Rejected);
 
-        // --- trailing commas (each list form) ---------------------------------
+        #endregion
+
+        #region trailing commas (each list form)
         yield return new("comma/enum", "enum E { A, } kernel { entry func Main() { } }", Expect.Rejected, Codes.TrailingComma);
         yield return new("comma/union", "union U { A, } kernel { entry func Main() { } }", Expect.Rejected, Codes.TrailingComma);
         yield return new("comma/union-fields", "union U { A(int x,) } kernel { entry func Main() { } }", Expect.Rejected, Codes.TrailingComma);
@@ -810,7 +833,9 @@ public static class TortureCorpus
             "union U { A(int x) } kernel { entry func Main() { let U u = U.A(1); match (u) { case A(x,) { } } } }", Expect.Rejected);
         yield return new("comma/switch-labels", "kernel { entry func Main() { switch (1) { case 1, { } } } }", Expect.Rejected);
 
-        // --- declaration headers ---------------------------------------------
+        #endregion
+
+        #region declaration headers
         yield return new("decl/dup-modifier", "kernel { entry func Main() { } } public public void func H() { }", Expect.Rejected);
         yield return new("decl/public-private", "class C { public private void func M() { } } kernel { entry func Main() { } }", Expect.Rejected);
         yield return new("decl/static-free-func", "static void func H() { } kernel { entry func Main() { } }",
@@ -822,7 +847,9 @@ public static class TortureCorpus
         yield return new("decl/func-ptr-ptr", "kernel { entry func Main() { let func(int) -> int* f = null; } }", Expect.Any);
         yield return new("decl/nested-class", "class A { class B { } } kernel { entry func Main() { } }", Expect.Rejected);
 
-        // --- annotations ------------------------------------------------------
+        #endregion
+
+        #region annotations
         yield return new("ann/on-enum", "@keep enum E { A } kernel { entry func Main() { } }", Expect.Rejected, Codes.BadAnnotation);
         yield return new("ann/on-field", "class C { @keep int n; } kernel { entry func Main() { } }", Expect.Rejected);
         yield return new("ann/unknown-intrinsic",
@@ -830,12 +857,16 @@ public static class TortureCorpus
         yield return new("ann/env-misplaced",
             "kernel { entry func Main() { } @environment }", Expect.Rejected);
 
-        // --- warnings that must not be errors ---------------------------------
+        #endregion
+
+        #region warnings that must not be errors
         yield return new("warn/unused-var", "kernel { entry func Main() { let int unused = 1; } }", Expect.Accepted);
         yield return new("warn/self-assign", "kernel { entry func Main() { let int v = 1; v = v; } }", Expect.Accepted);
         yield return new("warn/const-cond", "kernel { entry func Main() { if (true) { VoidH(); } } void func VoidH() { } }", Expect.Any);
 
-        // --- deep but bounded nesting ----------------------------------------
+        #endregion
+
+        #region deep but bounded nesting
         yield return new("depth/parens", "kernel { entry func Main() { let int v = " +
             new string('(', 300) + "1" + new string(')', 300) + "; } }", Expect.Rejected);
         yield return new("depth/blocks", "kernel { entry func Main() { " +
@@ -846,7 +877,9 @@ public static class TortureCorpus
             "kernel { entry func Main() { let " + string.Concat(Enumerable.Repeat("Box[", 300)) + "int" +
             new string(']', 300) + " b = null; } }", Expect.Rejected);
 
-        // --- truncation / unbalanced input -----------------------------------
+        #endregion
+
+        #region truncation / unbalanced input
         yield return new("trunc/open-brace", "kernel { entry func Main() {", Expect.Rejected);
         yield return new("trunc/open-paren", "kernel { entry func Main() { VoidH(", Expect.Rejected);
         yield return new("trunc/empty", "", Expect.Rejected);
@@ -865,7 +898,10 @@ public static class TortureCorpus
     /// </summary>
     private static IEnumerable<TortureCase> Curated2()
     {
-        // --- ref parameters ---------------------------------------------------
+
+        #endregion
+
+        #region ref parameters
         yield return new("ref/basic",
             "void func Bump(ref int n) { n = n + 1; } kernel { entry func Main() { let int v = 1; Bump(ref v); } }",
             Expect.Accepted);
@@ -897,7 +933,9 @@ public static class TortureCorpus
         yield return new("ref/in-operator",
             "class C { public operator C func +(ref C o) { return o; } } kernel { entry func Main() { } }", Expect.Any);
 
-        // --- for..in protocol -------------------------------------------------
+        #endregion
+
+        #region for..in protocol
         yield return new("forin/array", "kernel { entry func Main() { for x in [1, 2] { } } }", Expect.Any);
         yield return new("forin/int", "kernel { entry func Main() { for x in 1 { } } }",
             Expect.Rejected, Codes.NotIterable);
@@ -920,7 +958,9 @@ public static class TortureCorpus
         yield return new("forin/nested-same-name",
             "kernel { entry func Main() { for x in [1, 2] { for x in [3, 4] { } } } }", Expect.Any);
 
-        // --- interpolation ----------------------------------------------------
+        #endregion
+
+        #region interpolation
         yield return new("interp/class-operand",
             "class C { } kernel { entry func Main() { let C c = new C(); let s = $\"{c}\"; } }", Expect.Any);
         yield return new("interp/void-operand",
@@ -938,7 +978,9 @@ public static class TortureCorpus
         yield return new("interp/plain-string-no-dollar",
             "kernel { entry func Main() { let s = \"{1}\"; } }", Expect.Any);
 
-        // --- scoping and shadowing -------------------------------------------
+        #endregion
+
+        #region scoping and shadowing
         yield return new("scope/redeclare-same-block",
             "kernel { entry func Main() { let int v = 1; let int v = 2; } }", Expect.Any);
         yield return new("scope/shadow-param",
@@ -958,7 +1000,9 @@ public static class TortureCorpus
         yield return new("scope/name-shadows-func",
             "void func H() { } kernel { entry func Main() { let int H = 1; } }", Expect.Any);
 
-        // --- throws x generics x catch ---------------------------------------
+        #endregion
+
+        #region throws x generics x catch
         yield return new("throws/generic-func",
             "throws T func Pick[T](T v) { return v; } kernel { entry func Main() { let int x = Pick(1) catch { assign 0; }; } }",
             Expect.Any);
@@ -996,7 +1040,9 @@ public static class TortureCorpus
             "throws int func T() { throw; } kernel { entry func Main() { try { T(); } catch { let int v = T() catch { assign 0; }; } } }",
             Expect.Any);
 
-        // --- operator overload interactions ----------------------------------
+        #endregion
+
+        #region operator overload interactions
         yield return new("op/compound-uses-binary",
             "class C { public operator C func +(C o) { return o; } } kernel { entry func Main() { let C a = new C(); a += a; } }",
             Expect.Any);
@@ -1022,7 +1068,9 @@ public static class TortureCorpus
         yield return new("op/eq-returns-int",
             "class C { public operator int func ==(C o) { return 1; } } kernel { entry func Main() { } }", Expect.Any);
 
-        // --- generics stress --------------------------------------------------
+        #endregion
+
+        #region generics stress
         yield return new("gen/method-on-generic-class",
             "class Box[T] { T v; public U func Map[U](U seed) { return seed; } } kernel { entry func Main() { let Box[int] b = new Box[int](); let int r = b.Map(1); } }",
             Expect.Any);
@@ -1043,7 +1091,9 @@ public static class TortureCorpus
         yield return new("gen/unused-param",
             "class Box[T] { int n; } kernel { entry func Main() { let Box[int] b = new Box[int](); } }", Expect.Any);
 
-        // --- native blocks and fields ----------------------------------------
+        #endregion
+
+        #region native blocks and fields
         yield return new("native/top-level", "native { int x; } kernel { entry func Main() { } }", Expect.Any);
         yield return new("native/method-body",
             "class C { public int func M() native { return 1; } } kernel { entry func Main() { } }", Expect.Any);
@@ -1055,7 +1105,9 @@ public static class TortureCorpus
             "kernel { entry func Main() { } } native { if (1) { }", Expect.Rejected);
         yield return new("native/empty", "native { } kernel { entry func Main() { } }", Expect.Any);
 
-        // --- compound and unary numeric edges --------------------------------
+        #endregion
+
+        #region compound and unary numeric edges
         yield return new("num/bitwise-on-double",
             "kernel { entry func Main() { let double d = 1.5; let v = d & 1; } }", Expect.Rejected);
         yield return new("num/mod-on-double",
@@ -1079,12 +1131,16 @@ public static class TortureCorpus
         yield return new("num/int-div-zero-const",
             "kernel { entry func Main() { let v = 1 / 0; } }", Expect.Any);
 
-        // --- import edges -----------------------------------------------------
+        #endregion
+
+        #region import edges
         yield return new("import/unknown", "import NoSuchModule; kernel { entry func Main() { } }", Expect.Any);
         yield return new("import/empty-path", "import \"\"; kernel { entry func Main() { } }", Expect.Any);
         yield return new("import/after-decls", "kernel { entry func Main() { } } import gata;", Expect.Any);
         yield return new("import/duplicate", "import gata; import gata; kernel { entry func Main() { } }", Expect.Any);
         yield return new("import/inside-kernel", "kernel { import gata; entry func Main() { } }", Expect.Rejected);
+
+        #endregion
     }
 
     #endregion

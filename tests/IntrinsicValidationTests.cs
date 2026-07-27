@@ -87,10 +87,6 @@ public class IntrinsicValidationTests
             """));
     }
 
-    /// <summary>
-    /// A module is a stateless namespace, never instantiated and never reference-counted,
-    /// so a module-only program does not pull in the ARC runtime either.
-    /// </summary>
     [Fact]
     public void ModuleOnlyProgramIsClean()
     {
@@ -100,10 +96,6 @@ public class IntrinsicValidationTests
             """));
     }
 
-    /// <summary>
-    /// An enum is a plain integer value type with no object header, so it does not require
-    /// the runtime any more than an int does.
-    /// </summary>
     [Fact]
     public void EnumOnlyProgramIsClean()
     {
@@ -143,10 +135,6 @@ public class IntrinsicValidationTests
         Assert.DoesNotContain("@intrinsic(obj_header)", d.Message);
     }
 
-    /// <summary>
-    /// With the whole contract bound, nothing is reported - the positive control for the
-    /// cases above.
-    /// </summary>
     [Fact]
     public void FullyBoundArcContractIsClean()
     {

@@ -125,47 +125,40 @@ public class HostedEndToEndTests
         var cc = FindCompiler();
         if (cc == null) { Assert.Skip("no host C compiler (cc/gcc/clang) found; skipping hosted end-to-end"); return; }
 
-        var work = Directory.CreateTempSubdirectory("appa-hosted-e2e-").FullName;
-        try
-        {
-            Directory.CreateDirectory(Path.Combine(work, "src"));
-            File.WriteAllText(Path.Combine(work, "src", "main.g"), ProgramSource);
-            File.Copy(Path.Combine(gata, "envs", "env.hosted.g"), Path.Combine(work, "env.g"));
-            File.WriteAllText(Path.Combine(work, "host.gconf"), """
-                <appa>
-                    <ProjectName>host</ProjectName>
-                    <TargetBackend>Hosted</TargetBackend>
-                    <BuildMode>Debug</BuildMode>
-                </appa>
-                """);
+        using var work = TempDir.Create("appa-hosted-e2e-");
+        Directory.CreateDirectory(work.Combine("src"));
+        File.WriteAllText(work.Combine("src", "main.g"), ProgramSource);
+        File.Copy(Path.Combine(gata, "envs", "env.hosted.g"), work.Combine("env.g"));
+        File.WriteAllText(work.Combine("host.gconf"), """
+            <appa>
+                <ProjectName>host</ProjectName>
+                <TargetBackend>Hosted</TargetBackend>
+                <BuildMode>Debug</BuildMode>
+            </appa>
+            """);
 
-            // Transpile through the real CLI so manifest handling and import resolution are
-            // covered too, not just the parts SingleFileCompile reaches.
-            var appaDll = Path.Combine(AppContext.BaseDirectory, "Appa.dll");
-            var (buildCode, buildOut) = Run("dotnet",
-                $"\"{appaDll}\" build \"{work}\" --stdlib \"{Path.Combine(gata, "libgata")}\"", work);
-            Assert.True(buildCode == 0, $"appa build failed:\n{buildOut}");
+        // Transpile through the real CLI so manifest handling and import resolution are
+        // covered too, not just the parts SingleFileCompile reaches.
+        var appaDll = Path.Combine(AppContext.BaseDirectory, "Appa.dll");
+        var (buildCode, buildOut) = Run("dotnet",
+            $"\"{appaDll}\" build \"{work.Path}\" --stdlib \"{Path.Combine(gata, "libgata")}\"", work.Path);
+        Assert.True(buildCode == 0, $"appa build failed:\n{buildOut}");
 
-            var outDir = Path.Combine(work, "transpilation");
-            Assert.True(File.Exists(Path.Combine(outDir, "program.c")),
-                $"expected transpilation/program.c, got: {string.Join(", ", Directory.GetFiles(outDir).Select(Path.GetFileName))}");
+        var outDir = work.Combine("transpilation");
+        Assert.True(File.Exists(Path.Combine(outDir, "program.c")),
+            $"expected transpilation/program.c, got: {string.Join(", ", Directory.GetFiles(outDir).Select(Path.GetFileName))}");
 
-            // -Werror is the point: libgata's emitted C must be clean, not merely accepted.
-            // A few warnings are about C style the emitter deliberately does not chase.
-            var exe = Path.Combine(work, "prog");
-            var (ccCode, ccOut) = Run(cc,
-                $"-std=c11 -I. -Wall -Wextra -Werror -Wno-unused-parameter -Wno-unused-function " +
-                $"-Wno-unused-variable -Wno-missing-field-initializers -o \"{exe}\" program.c -lm", outDir);
-            Assert.True(ccCode == 0, $"{cc} rejected the emitted C:\n{ccOut}");
+        // -Werror is the point: libgata's emitted C must be clean, not merely accepted.
+        // A few warnings are about C style the emitter deliberately does not chase.
+        var exe = work.Combine("prog");
+        var (ccCode, ccOut) = Run(cc,
+            $"-std=c11 -I. -Wall -Wextra -Werror -Wno-unused-parameter -Wno-unused-function " +
+            $"-Wno-unused-variable -Wno-missing-field-initializers -o \"{exe}\" program.c -lm", outDir);
+        Assert.True(ccCode == 0, $"{cc} rejected the emitted C:\n{ccOut}");
 
-            var (runCode, runOut) = Run(exe, "", work);
-            Assert.True(runCode == 0, $"the compiled program exited {runCode}:\n{runOut}");
-            Assert.Equal(ExpectedOutput, runOut.Replace("\r\n", "\n"));
-        }
-        finally
-        {
-            try { Directory.Delete(work, recursive: true); } catch { /* best effort */ }
-        }
+        var (runCode, runOut) = Run(exe, "", work.Path);
+        Assert.True(runCode == 0, $"the compiled program exited {runCode}:\n{runOut}");
+        Assert.Equal(ExpectedOutput, runOut.Replace("\r\n", "\n"));
     }
 
     /// <summary>Runs a process to completion, returning its exit code and combined output.</summary>

@@ -10,7 +10,7 @@ using Appa;
 /// </summary>
 public sealed class BootFixture : IAsyncLifetime
 {
-    private string? _root;
+    private TempDir? _root;
 
     /// <summary>The downloaded envs/ directory, or null if the toolchain wasn't installed.</summary>
     public string? EnvsDir { get; private set; }
@@ -22,9 +22,9 @@ public sealed class BootFixture : IAsyncLifetime
     {
         if (!ToolchainProbe.HasGatOSToolchain()) return;
 
-        _root = Directory.CreateTempSubdirectory("appa-boot-fixture-").FullName;
-        EnvsDir = Path.Combine(_root, "envs");
-        LibgataDir = Path.Combine(_root, "libgata");
+        _root = TempDir.Create("appa-boot-fixture-");
+        EnvsDir = _root.Combine("envs");
+        LibgataDir = _root.Combine("libgata");
 
         using var client = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromMinutes(2) };
         await GitHubDirDownloader.DownloadDirectoriesAsync(
@@ -35,7 +35,7 @@ public sealed class BootFixture : IAsyncLifetime
 
     public ValueTask DisposeAsync()
     {
-        if (_root != null) try { Directory.Delete(_root, recursive: true); } catch { }
+        _root?.Dispose();
         return ValueTask.CompletedTask;
     }
 }

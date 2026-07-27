@@ -55,24 +55,20 @@ public class GitHubDirDownloaderTests
         handler.On(u => u.Contains("raw.githubusercontent.com") && u.EndsWith("String.g"), _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("string-content") });
 
         using var client = new HttpClient(handler);
-        string root = Path.Combine(Path.GetTempPath(), "appa-ghdl-test-" + Guid.NewGuid());
-        string envsDir = Path.Combine(root, "envs");
-        string libgataDir = Path.Combine(root, "libgata");
+        using var root = TempDir.Create("appa-ghdl-");
+        string envsDir = root.Combine("envs");
+        string libgataDir = root.Combine("libgata");
 
-        try
-        {
-            await GitHubDirDownloader.DownloadDirectoriesAsync("Owner", "Repo", "main",
-                new Dictionary<string, string> { ["envs/"] = envsDir, ["libgata/"] = libgataDir }, client);
+        await GitHubDirDownloader.DownloadDirectoriesAsync("Owner", "Repo", "main",
+            new Dictionary<string, string> { ["envs/"] = envsDir, ["libgata/"] = libgataDir }, client);
 
-            Assert.Equal("gatos-env-content", await File.ReadAllTextAsync(Path.Combine(envsDir, "env.GatOS.g")));
-            Assert.Equal("hosted-env-content", await File.ReadAllTextAsync(Path.Combine(envsDir, "env.hosted.g")));
-            Assert.Equal("string-content", await File.ReadAllTextAsync(Path.Combine(libgataDir, "String.g")));
-            // The unrelated editors/ tree entries must not be pulled in.
-            Assert.False(Directory.Exists(Path.Combine(root, "editors")));
-            // One tree fetch shared across both requested directories, not one per directory.
-            Assert.Single(handler.RequestedUrls, u => u.Contains("/git/trees/"));
-        }
-        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+        Assert.Equal("gatos-env-content", await File.ReadAllTextAsync(Path.Combine(envsDir, "env.GatOS.g")));
+        Assert.Equal("hosted-env-content", await File.ReadAllTextAsync(Path.Combine(envsDir, "env.hosted.g")));
+        Assert.Equal("string-content", await File.ReadAllTextAsync(Path.Combine(libgataDir, "String.g")));
+        // The unrelated editors/ tree entries must not be pulled in.
+        Assert.False(Directory.Exists(root.Combine("editors")));
+        // One tree fetch shared across both requested directories, not one per directory.
+        Assert.Single(handler.RequestedUrls, u => u.Contains("/git/trees/"));
     }
 
     [Fact]
@@ -90,17 +86,13 @@ public class GitHubDirDownloaderTests
         handler.On(u => u.Contains("raw.githubusercontent.com") && u.EndsWith("nested.g"), _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("nested") });
 
         using var client = new HttpClient(handler);
-        string root = Path.Combine(Path.GetTempPath(), "appa-ghdl-test-" + Guid.NewGuid());
+        using var root = TempDir.Create("appa-ghdl-");
 
-        try
-        {
-            await GitHubDirDownloader.DownloadDirectoriesAsync("Owner", "Repo", "main",
-                new Dictionary<string, string> { ["envs/"] = root }, client);
+        await GitHubDirDownloader.DownloadDirectoriesAsync("Owner", "Repo", "main",
+            new Dictionary<string, string> { ["envs/"] = root.Path }, client);
 
-            Assert.Equal("top-level", await File.ReadAllTextAsync(Path.Combine(root, "env.GatOS.g")));
-            Assert.Equal("nested", await File.ReadAllTextAsync(Path.Combine(root, "sub", "nested.g")));
-        }
-        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+        Assert.Equal("top-level", await File.ReadAllTextAsync(root.Combine("env.GatOS.g")));
+        Assert.Equal("nested", await File.ReadAllTextAsync(root.Combine("sub", "nested.g")));
     }
 
     [Fact]
@@ -116,16 +108,12 @@ public class GitHubDirDownloaderTests
         handler.On(u => u.Contains("media.githubusercontent.com"), _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("real-binary-content") });
 
         using var client = new HttpClient(handler);
-        string root = Path.Combine(Path.GetTempPath(), "appa-ghdl-test-" + Guid.NewGuid());
+        using var root = TempDir.Create("appa-ghdl-");
 
-        try
-        {
-            await GitHubDirDownloader.DownloadDirectoriesAsync("Owner", "Repo", "main",
-                new Dictionary<string, string> { ["envs/"] = root }, client);
+        await GitHubDirDownloader.DownloadDirectoriesAsync("Owner", "Repo", "main",
+            new Dictionary<string, string> { ["envs/"] = root.Path }, client);
 
-            Assert.Equal("real-binary-content", await File.ReadAllTextAsync(Path.Combine(root, "big.bin")));
-        }
-        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+        Assert.Equal("real-binary-content", await File.ReadAllTextAsync(root.Combine("big.bin")));
     }
 
     [Fact]
@@ -134,13 +122,15 @@ public class GitHubDirDownloaderTests
         var handler = new FakeGitHubHandler();
         handler.On(u => u.Contains("/git/trees/"), _ => new HttpResponseMessage(HttpStatusCode.NotFound) { Content = new StringContent("""{"message":"Not Found"}""") });
         using var client = new HttpClient(handler);
-        string root = Path.Combine(Path.GetTempPath(), "appa-ghdl-test-" + Guid.NewGuid());
+        using var root = TempDir.Create("appa-ghdl-");
+        string dest = root.Combine("envs");
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             GitHubDirDownloader.DownloadDirectoriesAsync("Owner", "Repo", "main",
-                new Dictionary<string, string> { ["envs/"] = root }, client));
+                new Dictionary<string, string> { ["envs/"] = dest }, client));
         Assert.Contains("not found", ex.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.False(Directory.Exists(root));
+        // A failed fetch leaves nothing half-written behind.
+        Assert.False(Directory.Exists(dest));
     }
 
     [Fact]
@@ -149,11 +139,13 @@ public class GitHubDirDownloaderTests
         var handler = new FakeGitHubHandler();
         handler.On(u => u.Contains("/git/trees/"), _ => new HttpResponseMessage(HttpStatusCode.Unauthorized));
         using var client = new HttpClient(handler);
-        string root = Path.Combine(Path.GetTempPath(), "appa-ghdl-test-" + Guid.NewGuid());
+        using var root = TempDir.Create("appa-ghdl-");
+        string dest = root.Combine("envs");
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             GitHubDirDownloader.DownloadDirectoriesAsync("Owner", "Repo", "main",
-                new Dictionary<string, string> { ["envs/"] = root }, client));
+                new Dictionary<string, string> { ["envs/"] = dest }, client));
         Assert.Contains("token", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(Directory.Exists(dest));
     }
 }

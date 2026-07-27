@@ -202,90 +202,84 @@ public class GrammarFuzzTests
     public void GeneratedProgramsCompileToValidC()
     {
         var cc = FindCompiler();
-        var work = Directory.CreateTempSubdirectory("appa-gfuzz-").FullName;
+        using var work = TempDir.Create("appa-gfuzz-");
         var failures = new List<string>();
         int accepted = 0;
 
-        try
+        for (int seed = 1; seed <= Seeds; seed++)
         {
-            for (int seed = 1; seed <= Seeds; seed++)
+            var src = Generate(seed);
+
+            DiagnosticBag diag;
+            IrModule module;
+            try
             {
-                var src = Generate(seed);
+                var sources = new SourceSet();
+                sources.Add("<fuzz>", src);
+                diag = new DiagnosticBag(sources);
 
-                DiagnosticBag diag;
-                IrModule module;
-                try
+                Program prog;
+                try { prog = SingleFileCompile.Parse(src); }
+                catch (ParseException ex)
                 {
-                    var sources = new SourceSet();
-                    sources.Add("<fuzz>", src);
-                    diag = new DiagnosticBag(sources);
-
-                    Program prog;
-                    try { prog = SingleFileCompile.Parse(src); }
-                    catch (ParseException ex)
-                    {
-                        // The generator only builds valid syntax, so this is a parser bug.
-                        failures.Add($"[seed {seed}] parse failed: {ex.Message}\n{src}");
-                        continue;
-                    }
-
-                    var programs = new List<(string path, Program prog)> { ("<fuzz>", prog) };
-                    var visible = new Dictionary<string, HashSet<string>> { ["<fuzz>"] = ["<fuzz>"] };
-                    var (m, _, _) = Pipeline.BuildModule(programs, visible, Mode.Debug, diag);
-                    Pipeline.ValidateIntrinsics(m, diag);
-                    Pipeline.ValidateStructure(programs, null, diag);
-                    if (diag.HasErrors)
-                    {
-                        var errs = diag.All.Where(d => d.Severity == Severity.Error)
-                                           .Select(d => $"{d.Code} {d.Message}");
-                        failures.Add($"[seed {seed}] rejected a valid program: {string.Join("; ", errs)}\n{src}");
-                        continue;
-                    }
-                    module = m;
-                }
-                catch (Exception ex)
-                {
-                    failures.Add($"[seed {seed}] front end threw: {ex.GetType().Name}: {ex.Message}\n{src}");
+                    // The generator only builds valid syntax, so this is a parser bug.
+                    failures.Add($"[seed {seed}] parse failed: {ex.Message}\n{src}");
                     continue;
                 }
 
-                IReadOnlyList<OutputFile> files;
-                try { files = Layout.Compose(new Emitter(module, diag).Build(), module.Symbols); }
-                catch (Exception ex)
+                var programs = new List<(string path, Program prog)> { ("<fuzz>", prog) };
+                var visible = new Dictionary<string, HashSet<string>> { ["<fuzz>"] = ["<fuzz>"] };
+                var (m, _, _) = Pipeline.BuildModule(programs, visible, Mode.Debug, diag);
+                Pipeline.ValidateIntrinsics(m, diag);
+                Pipeline.ValidateStructure(programs, null, diag);
+                if (diag.HasErrors)
                 {
-                    failures.Add($"[seed {seed}] emitter threw: {ex.GetType().Name}: {ex.Message}\n{src}");
+                    var errs = diag.All.Where(d => d.Severity == Severity.Error)
+                                       .Select(d => $"{d.Code} {d.Message}");
+                    failures.Add($"[seed {seed}] rejected a valid program: {string.Join("; ", errs)}\n{src}");
                     continue;
                 }
-                accepted++;
-                if (cc == null) continue;
-
-                var dir = Path.Combine(work, "s" + seed);
-                Directory.CreateDirectory(dir);
-                foreach (var f in files) File.WriteAllText(Path.Combine(dir, f.Name), f.Content);
-
-                foreach (var unit in files.Where(f => f.Name.EndsWith(".c", StringComparison.Ordinal)))
-                {
-                    var psi = new ProcessStartInfo(cc, $"-fsyntax-only -std=c11 -I. {unit.Name}")
-                    { WorkingDirectory = dir, RedirectStandardError = true, UseShellExecute = false };
-                    using var p = Process.Start(psi)!;
-                    var err = p.StandardError.ReadToEnd();
-                    p.WaitForExit();
-                    if (p.ExitCode == 0) continue;
-
-                    var first = err.Split('\n').FirstOrDefault(l => l.Contains(": error:", StringComparison.Ordinal)) ?? err;
-                    failures.Add($"[seed {seed}] emitted invalid C: {first.Trim()}\n{src}");
-                }
+                module = m;
             }
-        }
-        finally
-        {
-            try { Directory.Delete(work, recursive: true); } catch { /* best effort */ }
+            catch (Exception ex)
+            {
+                failures.Add($"[seed {seed}] front end threw: {ex.GetType().Name}: {ex.Message}\n{src}");
+                continue;
+            }
+
+            IReadOnlyList<OutputFile> files;
+            try { files = Layout.Compose(new Emitter(module, diag).Build(), module.Symbols); }
+            catch (Exception ex)
+            {
+                failures.Add($"[seed {seed}] emitter threw: {ex.GetType().Name}: {ex.Message}\n{src}");
+                continue;
+            }
+            accepted++;
+            if (cc == null) continue;
+
+            var dir = work.Combine("s" + seed);
+            Directory.CreateDirectory(dir);
+            foreach (var f in files) File.WriteAllText(Path.Combine(dir, f.Name), f.Content);
+
+            foreach (var unit in files.Where(f => f.Name.EndsWith(".c", StringComparison.Ordinal)))
+            {
+                var psi = new ProcessStartInfo(cc, $"-fsyntax-only -std=c11 -I. {unit.Name}")
+                { WorkingDirectory = dir, RedirectStandardError = true, UseShellExecute = false };
+                using var p = Process.Start(psi)!;
+                var err = p.StandardError.ReadToEnd();
+                p.WaitForExit();
+                if (p.ExitCode == 0) continue;
+
+                var first = err.Split('\n').FirstOrDefault(l => l.Contains(": error:", StringComparison.Ordinal)) ?? err;
+                failures.Add($"[seed {seed}] emitted invalid C: {first.Trim()}\n{src}");
+            }
         }
 
         if (failures.Count > 0)
         {
-            var shown = string.Join("\n\n", failures.Take(3));
-            var more = failures.Count > 5 ? $"\n\n... and {failures.Count - 5} more" : "";
+            const int shownCount = 3;
+            var shown = string.Join("\n\n", failures.Take(shownCount));
+            var more = failures.Count > shownCount ? $"\n\n... and {failures.Count - shownCount} more" : "";
             Assert.Fail($"{failures.Count} of {Seeds} generated programs failed:\n\n{shown}{more}");
         }
 

@@ -13,18 +13,14 @@ using Appa;
 /// </summary>
 public class WarningDiagnosticsTests
 {
-    /// <summary>
-    /// Checks the source and returns every diagnostic carrying the given code.
-    /// </summary>
+    /// <summary>Checks the source and returns every diagnostic carrying the given code.</summary>
     private static Diagnostic[] Of(string code, string src)
     {
         var (diag, _) = SingleFileCompile.Check(src);
         return [.. diag.All.Where(d => d.Code == code)];
     }
 
-    /// <summary>
-    /// Asserts the source produces exactly one warning with the code, and returns it.
-    /// </summary>
+    /// <summary>Asserts the source produces exactly one warning with the code, and returns it.</summary>
     private static Diagnostic AssertWarns(string code, string src)
     {
         var hits = Of(code, src);
@@ -35,9 +31,7 @@ public class WarningDiagnosticsTests
         return hits[0];
     }
 
-    /// <summary>
-    /// Asserts the source produces no diagnostic at all with the given code.
-    /// </summary>
+    /// <summary>Asserts the source produces no diagnostic at all with the given code.</summary>
     private static void AssertNoWarn(string code, string src)
     {
         var hits = Of(code, src);
@@ -45,9 +39,7 @@ public class WarningDiagnosticsTests
             $"expected no {code}, got: " + string.Join("; ", hits.Select(h => h.Message)));
     }
 
-    /// <summary>
-    /// Asserts the source produces at least one error with the code.
-    /// </summary>
+    /// <summary>Asserts the source produces at least one error with the code.</summary>
     private static void AssertError(string code, string src)
     {
         var hits = Of(code, src);
@@ -57,9 +49,6 @@ public class WarningDiagnosticsTests
 
     #region G070 shadowed variable
 
-    /// <summary>
-    /// A local declared in a nested block that hides an outer local of the same name warns.
-    /// </summary>
     [Fact]
     public void ShadowingAnOuterLocalWarns()
     {
@@ -87,9 +76,6 @@ public class WarningDiagnosticsTests
 
     #region G071 self-assignment
 
-    /// <summary>
-    /// Assigning a variable to itself is reported; assigning a different one is not.
-    /// </summary>
     [Fact]
     public void SelfAssignmentWarns()
     {
@@ -99,10 +85,6 @@ public class WarningDiagnosticsTests
             "kernel { entry func Main() { let x = 1; let y = 2; x = y; } }");
     }
 
-    /// <summary>
-    /// Field self-assignment is caught through the receiver, and a field assigned from the
-    /// same-named parameter - the shape 'self.n = n' is written to avoid - is not.
-    /// </summary>
     [Fact]
     public void FieldSelfAssignmentIsDistinguishedFromParameterAssignment()
     {
@@ -114,13 +96,11 @@ public class WarningDiagnosticsTests
             "kernel { entry func Main() { let c = new C(); c.M(1); } }");
     }
 
-    /// <summary>
-    /// An index self-assignment only warns when both indices are the same literal; a
-    /// computed index may denote a different element on each side.
-    /// </summary>
     [Fact]
     public void IndexSelfAssignmentRequiresLiteralIndices()
     {
+        // Computed indices may denote different elements on each side, so only two identical
+        // literal subscripts are enough to call it a self-assignment.
         AssertNoWarn(Codes.SelfAssignment,
             "kernel { entry func Main() { let int[4] a; let i = 0; let j = 1; a[i] = a[j]; } }");
     }
@@ -129,9 +109,6 @@ public class WarningDiagnosticsTests
 
     #region G072 statement with no effect
 
-    /// <summary>
-    /// A pure expression evaluated as a statement discards its result and warns.
-    /// </summary>
     [Theory]
     [InlineData("kernel { entry func Main() { let a = 1; a + 1; } }")]
     [InlineData("kernel { entry func Main() { let a = 1; a; } }")]
@@ -141,10 +118,6 @@ public class WarningDiagnosticsTests
         AssertWarns(Codes.NoEffect, src);
     }
 
-    /// <summary>
-    /// '==' written where '=' was meant gets a targeted hint, since that is the mistake
-    /// this shape almost always represents.
-    /// </summary>
     [Fact]
     public void ComparisonStatementHintsAtAssignment()
     {
@@ -153,10 +126,6 @@ public class WarningDiagnosticsTests
         Assert.Contains(d.Hints, h => h.Contains("'='"));
     }
 
-    /// <summary>
-    /// Discarding a call's return value is deliberate and stays silent - a call is never
-    /// pure, so it cannot be proven dead here.
-    /// </summary>
     [Fact]
     public void DiscardedCallResultDoesNotWarn()
     {
@@ -164,9 +133,6 @@ public class WarningDiagnosticsTests
             "int func F() { return 1; } kernel { entry func Main() { F(); } }");
     }
 
-    /// <summary>
-    /// An assignment and a postfix increment both mutate, so neither is effect-free.
-    /// </summary>
     [Fact]
     public void MutatingStatementsDoNotWarn()
     {
@@ -178,9 +144,6 @@ public class WarningDiagnosticsTests
 
     #region G073 / G078 constant and self-comparing conditions
 
-    /// <summary>
-    /// A literal 'if' condition decides the branch before it runs.
-    /// </summary>
     [Fact]
     public void LiteralIfConditionWarns()
     {
@@ -193,10 +156,6 @@ public class WarningDiagnosticsTests
         Assert.Contains("always false", f.Message);
     }
 
-    /// <summary>
-    /// 'while true' and a for-loop with no condition are the idiomatic infinite loops and
-    /// must never warn - this is the exemption that makes G073 usable at all.
-    /// </summary>
     [Fact]
     public void InfiniteLoopFormsDoNotWarn()
     {
@@ -206,10 +165,6 @@ public class WarningDiagnosticsTests
             "kernel { entry func Main() { for (let i = 0; ; i = i + 1) { break; } } }");
     }
 
-    /// <summary>
-    /// Comparing a value against itself is constant regardless of the operator, and is
-    /// reported even in a loop condition, where a constant literal would be allowed.
-    /// </summary>
     [Fact]
     public void SelfComparisonWarnsIncludingInLoops()
     {
@@ -225,9 +180,6 @@ public class WarningDiagnosticsTests
 
     #region G074 redundant cast
 
-    /// <summary>
-    /// Casting a value to the type it already has converts nothing.
-    /// </summary>
     [Fact]
     public void SameTypeCastOnAValueWarns()
     {
@@ -246,9 +198,6 @@ public class WarningDiagnosticsTests
             "kernel { entry func Main() { let a = (0x00100000 as int); let b = a; } }");
     }
 
-    /// <summary>
-    /// A cast that actually changes the type is not redundant.
-    /// </summary>
     [Fact]
     public void WideningCastDoesNotWarn()
     {
@@ -260,10 +209,6 @@ public class WarningDiagnosticsTests
 
     #region G075 division by a literal zero
 
-    /// <summary>
-    /// Integer division and remainder by a literal zero trap on every target, so they are
-    /// errors rather than warnings.
-    /// </summary>
     [Theory]
     [InlineData("kernel { entry func Main() { let a = 1; let b = a / 0; } }")]
     [InlineData("kernel { entry func Main() { let a = 1; let b = a % 0; } }")]
@@ -289,9 +234,6 @@ public class WarningDiagnosticsTests
 
     #region G076 unused parameter
 
-    /// <summary>
-    /// A parameter the body never reads is reported the way an unused local is.
-    /// </summary>
     [Fact]
     public void UnusedParameterWarns()
     {
@@ -301,10 +243,6 @@ public class WarningDiagnosticsTests
         Assert.Contains("'b'", d.Message);
     }
 
-    /// <summary>
-    /// A leading underscore marks a binding as deliberately ignored and silences the warning,
-    /// for both parameters and locals.
-    /// </summary>
     [Fact]
     public void UnderscorePrefixOptsOutOfUnusedWarnings()
     {
@@ -315,10 +253,6 @@ public class WarningDiagnosticsTests
             "kernel { entry func Main() { let _scratch = 1; } }");
     }
 
-    /// <summary>
-    /// A native body is opaque C that may reference any parameter by name, so nothing in it
-    /// can be proven unused.
-    /// </summary>
     [Fact]
     public void NativeBodiesSuppressUnusedParameterWarnings()
     {
@@ -327,9 +261,6 @@ public class WarningDiagnosticsTests
             "kernel { entry func Main() { let r = F(1); } }");
     }
 
-    /// <summary>
-    /// A parameter read only inside an interpolated string is used.
-    /// </summary>
     [Fact]
     public void InterpolatedUseCountsAsUse()
     {
@@ -342,9 +273,6 @@ public class WarningDiagnosticsTests
 
     #region G077 unreachable default arm
 
-    /// <summary>
-    /// A 'default' on a match that already covers every variant can never run.
-    /// </summary>
     [Fact]
     public void DefaultOnAFullyCoveredMatchWarns()
     {
@@ -355,10 +283,6 @@ public class WarningDiagnosticsTests
         Assert.Contains("never run", d.Message);
     }
 
-    /// <summary>
-    /// A default that covers a variant with no arm of its own is doing real work, and the
-    /// mirror case - no default and a missing variant - stays a hard exhaustiveness error.
-    /// </summary>
     [Fact]
     public void NeededDefaultIsSilentAndMissingOneStaysAnError()
     {
@@ -376,10 +300,6 @@ public class WarningDiagnosticsTests
 
     #region G080 shift count out of range
 
-    /// <summary>
-    /// A shift count at or beyond the width of the left operand, or a negative one, is
-    /// undefined in C and is rejected here where the literal makes it decidable.
-    /// </summary>
     [Theory]
     [InlineData("kernel { entry func Main() { let int a = 1; let b = a << 32; } }")]
     [InlineData("kernel { entry func Main() { let int a = 1; let b = a >> 99; } }")]
@@ -407,9 +327,6 @@ public class WarningDiagnosticsTests
 
     #region G080 string that looks interpolated
 
-    /// <summary>
-    /// A plain string containing '{name}' where 'name' is a local in scope is a dropped '$'.
-    /// </summary>
     [Fact]
     public void PlainStringNamingAnInScopeVariableWarns()
     {
@@ -418,10 +335,6 @@ public class WarningDiagnosticsTests
         Assert.Contains(d.Hints, h => h.Contains("$\""));
     }
 
-    /// <summary>
-    /// The in-scope requirement is the whole safety margin: braces around a name that is not
-    /// a variable, and a properly interpolated string, both stay silent.
-    /// </summary>
     [Fact]
     public void BracesThatCannotBeInterpolationAreSilent()
     {
@@ -437,10 +350,6 @@ public class WarningDiagnosticsTests
 
     #region Hint rendering
 
-    /// <summary>
-    /// Hints live in the Hints array, never inside the message, and the renderer puts each on
-    /// its own '= help:' line below the caret rather than appending it to the error text.
-    /// </summary>
     [Fact]
     public void HintsRenderOnTheirOwnLinesBelowTheCaret()
     {
@@ -461,9 +370,6 @@ public class WarningDiagnosticsTests
         Assert.Contains(lines[(msgLine + 1)..helpLine], l => l.Contains('^'));
     }
 
-    /// <summary>
-    /// Every hint gets its own line, not one concatenated line.
-    /// </summary>
     [Fact]
     public void MultipleHintsEachGetTheirOwnLine()
     {
@@ -479,8 +385,6 @@ public class WarningDiagnosticsTests
     }
 
     #endregion
-
-
 
     #region Regression guard
 

@@ -8,17 +8,12 @@ using Appa;
 /// </summary>
 public class LexerDiagnosticsTests
 {
-    /// <summary>
-    /// Tokenizes and returns the ParseException the source must produce.
-    /// </summary>
+    /// <summary>Tokenizes and returns the ParseException the source must produce.</summary>
     private static ParseException Lex(string src)
     {
         return Assert.Throws<ParseException>(() => SingleFileCompile.Tokenize(src));
     }
 
-    /// <summary>
-    /// A block comment that never closes is an error instead of silently swallowing the file.
-    /// </summary>
     [Fact]
     public void UnterminatedBlockCommentIsAnError()
     {
@@ -27,9 +22,6 @@ public class LexerDiagnosticsTests
         Assert.Contains("block comment", ex.Message);
     }
 
-    /// <summary>
-    /// A properly closed block comment still lexes cleanly.
-    /// </summary>
     [Theory]
     [InlineData("/**/let")]
     [InlineData("/* x */let")]
@@ -39,9 +31,6 @@ public class LexerDiagnosticsTests
         Assert.Equal(TK.Let, SingleFileCompile.Tokenize(src)[0].Kind);
     }
 
-    /// <summary>
-    /// A hex prefix with no digits is a malformed number, not an IntLit "0x".
-    /// </summary>
     [Fact]
     public void BareHexPrefixIsAnError()
     {
@@ -49,9 +38,6 @@ public class LexerDiagnosticsTests
         Assert.Equal(Codes.BadNumber, ex.Code);
     }
 
-    /// <summary>
-    /// An identifier glued to a numeric literal is a malformed number, not two tokens.
-    /// </summary>
     [Theory]
     [InlineData("123abc")]
     [InlineData("0xFFg")]
@@ -62,10 +48,6 @@ public class LexerDiagnosticsTests
         Assert.Equal(Codes.BadNumber, Lex(src).Code);
     }
 
-    /// <summary>
-    /// A dot after an integer that does not start a fraction stays a separate token,
-    /// so method calls on literals still lex.
-    /// </summary>
     [Fact]
     public void DotAfterIntegerIsNotPartOfTheNumber()
     {
@@ -75,9 +57,6 @@ public class LexerDiagnosticsTests
         Assert.Equal(TK.Ident, tokens[2].Kind);
     }
 
-    /// <summary>
-    /// @intrinsic and @preamble require a parenthesized, non-empty, closed argument.
-    /// </summary>
     [Theory]
     [InlineData("@intrinsic")]
     [InlineData("@intrinsic()")]
@@ -88,18 +67,12 @@ public class LexerDiagnosticsTests
         Assert.Equal(Codes.BadAnnotation, Lex(src).Code);
     }
 
-    /// <summary>
-    /// An unknown annotation name carries the annotation code.
-    /// </summary>
     [Fact]
     public void UnknownAnnotationCarriesBadAnnotationCode()
     {
         Assert.Equal(Codes.BadAnnotation, Lex("@bogus").Code);
     }
 
-    /// <summary>
-    /// Unterminated literals of every flavor carry the unterminated-literal code.
-    /// </summary>
     [Theory]
     [InlineData("\"never closed")]
     [InlineData("'a")]
@@ -113,9 +86,6 @@ public class LexerDiagnosticsTests
         Assert.Equal(Codes.UnterminatedLiteral, Lex(src).Code);
     }
 
-    /// <summary>
-    /// Unrecognized escapes in every string-like context carry the bad-escape code.
-    /// </summary>
     [Theory]
     [InlineData("\"bad\\qescape\"")]
     [InlineData("'\\q'")]
@@ -125,10 +95,6 @@ public class LexerDiagnosticsTests
         Assert.Equal(Codes.BadEscape, Lex(src).Code);
     }
 
-    /// <summary>
-    /// A literal segment inside an interpolated string carries its own span,
-    /// not the span of the token lexed before it.
-    /// </summary>
     [Fact]
     public void InterpolationSegmentSpanPointsAtTheSegment()
     {

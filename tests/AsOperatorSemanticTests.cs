@@ -32,10 +32,6 @@ public class AsOperatorSemanticTests
 
     #region Good programs
 
-    /// <summary>
-    /// A primitive converting to a class via 'as' type-checks and transpiles cleanly - the only
-    /// way to express something like String's FromChar factory.
-    /// </summary>
     [Fact]
     public void PrimitiveToClassConversionIsClean()
     {
@@ -91,10 +87,6 @@ public class AsOperatorSemanticTests
             """);
     }
 
-    /// <summary>
-    /// A class may declare several 'as' overloads distinguished by parameter (source) type, and
-    /// each is independently selectable by the cast's source expression's type.
-    /// </summary>
     [Fact]
     public void MultipleOverloadsDistinguishedByParameterTypeAreEachSelectable()
     {
@@ -153,10 +145,6 @@ public class AsOperatorSemanticTests
             """);
     }
 
-    /// <summary>
-    /// A class-typed source uses a destination-declared 'as' just like a primitive source does -
-    /// there's only one shape now, so there's nothing special about the source being a class.
-    /// </summary>
     [Fact]
     public void ClassSourceUsesDestinationDeclaredConversion()
     {
@@ -173,10 +161,6 @@ public class AsOperatorSemanticTests
             """);
     }
 
-    /// <summary>
-    /// 'as' conversions are not implicitly invoked - a plain assignment across unrelated types
-    /// still requires the explicit cast syntax, exactly like every other cast in the language.
-    /// </summary>
     [Fact]
     public void ConversionNeverFiresImplicitly()
     {
@@ -211,9 +195,6 @@ public class AsOperatorSemanticTests
             """);
     }
 
-    /// <summary>
-    /// 'as' takes exactly one parameter, never two or more.
-    /// </summary>
     [Fact]
     public void AsOperatorWithTwoParametersIsRejected()
     {
@@ -225,10 +206,6 @@ public class AsOperatorSemanticTests
             """);
     }
 
-    /// <summary>
-    /// Two 'as' operators converting from the same source (parameter) type on the same class
-    /// collide.
-    /// </summary>
     [Fact]
     public void DuplicateAsOverloadForSameSourceIsRejected()
     {
@@ -241,10 +218,6 @@ public class AsOperatorSemanticTests
             """);
     }
 
-    /// <summary>
-    /// Declaring the same non-'as' operator twice on one class is now caught explicitly instead
-    /// of silently colliding on the same C name at codegen time.
-    /// </summary>
     [Fact]
     public void DuplicateRegularOperatorIsRejected()
     {
@@ -273,10 +246,6 @@ public class AsOperatorSemanticTests
             """);
     }
 
-    /// <summary>
-    /// Without a matching 'as' operator, casting between unrelated class types is still rejected
-    /// exactly as it was before this feature existed.
-    /// </summary>
     [Fact]
     public void CastWithNoMatchingAsOperatorIsStillRejected()
     {
@@ -290,10 +259,6 @@ public class AsOperatorSemanticTests
             """);
     }
 
-    /// <summary>
-    /// A destination class's 'as' overload for the wrong source type does not apply - having an
-    /// 'as' that doesn't match the cast's source is exactly as if it had none at all.
-    /// </summary>
     [Fact]
     public void AsOnDestinationForAnUnrelatedSourceDoesNotApply()
     {
@@ -311,10 +276,6 @@ public class AsOperatorSemanticTests
             """);
     }
 
-    /// <summary>
-    /// Without a matching 'as', casting a primitive to an unrelated class is still rejected
-    /// exactly as it was before this feature existed.
-    /// </summary>
     [Fact]
     public void PrimitiveSourceWithNoMatchingAsOperatorIsStillRejected()
     {
@@ -343,10 +304,6 @@ public class AsOperatorSemanticTests
             """);
     }
 
-    /// <summary>
-    /// The class -> primitive rejection carries a hint steering the author toward a named
-    /// conversion method instead of leaving it looking like a missing/misspelled overload.
-    /// </summary>
     [Fact]
     public void ClassToPrimitiveRejectionHasAGuidingHint()
     {
@@ -451,10 +408,6 @@ public class AsOperatorSemanticTests
         Assert.NotEqual(intCall.CName, boolCall.CName);
     }
 
-    /// <summary>
-    /// An 'as' operator's emitted C signature has no 'self' parameter - only its explicit
-    /// parameter - since no instance exists yet at the point of conversion.
-    /// </summary>
     [Fact]
     public void AsOperatorSignatureOmitsSelf()
     {

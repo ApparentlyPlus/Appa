@@ -9,9 +9,7 @@ using Appa;
 /// </summary>
 public class SemanticDiagnosticsTests
 {
-    /// <summary>
-    /// Checks the source and asserts it produces at least one error with the code.
-    /// </summary>
+    /// <summary>Checks the source and asserts it produces at least one error with the code.</summary>
     private static void AssertError(string code, string src)
     {
         var (diag, _) = SingleFileCompile.Check(src);
@@ -19,9 +17,7 @@ public class SemanticDiagnosticsTests
         Assert.Contains(diag.All, d => d.Severity == Severity.Error && d.Code == code);
     }
 
-    /// <summary>
-    /// Checks the source and asserts it produces no errors at all.
-    /// </summary>
+    /// <summary>Checks the source and asserts it produces no errors at all.</summary>
     private static void AssertClean(string src)
     {
         var (diag, _) = SingleFileCompile.Check(src);
@@ -32,9 +28,6 @@ public class SemanticDiagnosticsTests
 
     #region Postfix operand validation
 
-    /// <summary>
-    /// '++'/'--' on a non-lvalue is rejected instead of emitting broken C.
-    /// </summary>
     [Theory]
     [InlineData("kernel { entry func Main() { 5++; } }")]
     [InlineData("int func F() { return 1; } kernel { entry func Main() { F()++; } }")]
@@ -44,9 +37,6 @@ public class SemanticDiagnosticsTests
         AssertError(Codes.NotAnLvalue, src);
     }
 
-    /// <summary>
-    /// '++' on a non-numeric operand is a type error.
-    /// </summary>
     [Fact]
     public void PostfixOnNonNumericIsRejected()
     {
@@ -54,9 +44,6 @@ public class SemanticDiagnosticsTests
             "kernel { entry func Main() { let bool b = true; b++; } }");
     }
 
-    /// <summary>
-    /// Pointer '++' requires an unsafe block; inside one it is accepted.
-    /// </summary>
     [Fact]
     public void PointerPostfixRequiresUnsafe()
     {
@@ -66,9 +53,6 @@ public class SemanticDiagnosticsTests
             "kernel { entry func Main() { unsafe { let int x = 1; let int* p = &x; p++; } } }");
     }
 
-    /// <summary>
-    /// '++' on variables, fields, and elements remains valid.
-    /// </summary>
     [Fact]
     public void PostfixOnLvaluesStillChecks()
     {
@@ -86,27 +70,18 @@ public class SemanticDiagnosticsTests
 
     #region Let-type inference
 
-    /// <summary>
-    /// A let with neither type nor initializer no longer silently becomes 'int'.
-    /// </summary>
     [Fact]
     public void LetWithoutTypeOrInitIsRejected()
     {
         AssertError(Codes.CannotInfer, "kernel { entry func Main() { let x; } }");
     }
 
-    /// <summary>
-    /// A let initialized from 'null' has no inferable type.
-    /// </summary>
     [Fact]
     public void LetFromNullIsRejected()
     {
         AssertError(Codes.CannotInfer, "kernel { entry func Main() { let x = null; } }");
     }
 
-    /// <summary>
-    /// A let initialized from a void call no longer silently declares a void local.
-    /// </summary>
     [Fact]
     public void LetFromVoidCallIsRejected()
     {
@@ -114,18 +89,12 @@ public class SemanticDiagnosticsTests
             "void func V() { } kernel { entry func Main() { let x = V(); } }");
     }
 
-    /// <summary>
-    /// A typed let without an initializer remains valid.
-    /// </summary>
     [Fact]
     public void TypedLetWithoutInitStillChecks()
     {
         AssertClean("kernel { entry func Main() { let int x; x = 5; if (x == 5) { } } }");
     }
 
-    /// <summary>
-    /// A typed let initialized from 'null' remains valid for reference types.
-    /// </summary>
     [Fact]
     public void TypedLetFromNullStillChecks()
     {
@@ -158,20 +127,12 @@ public class SemanticDiagnosticsTests
             """);
     }
 
-    /// <summary>
-    /// Field inference is limited to literals - fields register their type before any expression
-    /// is resolved, so a computed initializer cannot infer and must be explicitly typed.
-    /// </summary>
     [Fact]
     public void FieldWithNonLiteralInitializerCannotInfer()
     {
         AssertError(Codes.CannotInfer, "class C { v = 1 + 2; }");
     }
 
-    /// <summary>
-    /// The inferred field participates in the class layout and method bodies like any explicitly
-    /// typed field.
-    /// </summary>
     [Fact]
     public void InferredFieldIsUsableInsideItsClass()
     {
@@ -193,10 +154,6 @@ public class SemanticDiagnosticsTests
 
     #region Switch label hygiene
 
-    /// <summary>
-    /// The same constant handled by two case arms is a duplicate, whether spelled
-    /// as the same literal, split across arms, or as an equal char/int pair.
-    /// </summary>
     [Theory]
     [InlineData("kernel { entry func Main() { let int x = 1; switch (x) { case 1 { } case 1 { } } } }")]
     [InlineData("kernel { entry func Main() { let int x = 1; switch (x) { case 1, 2, 1 { } } } }")]
@@ -207,9 +164,6 @@ public class SemanticDiagnosticsTests
         AssertError(Codes.DuplicateName, src);
     }
 
-    /// <summary>
-    /// Distinct labels across arms remain valid.
-    /// </summary>
     [Fact]
     public void DistinctSwitchLabelsStillCheck()
     {
@@ -220,9 +174,6 @@ public class SemanticDiagnosticsTests
 
     #region Enum and union hygiene
 
-    /// <summary>
-    /// A negative integer literal is a valid explicit enum value.
-    /// </summary>
     [Fact]
     public void NegativeEnumValueChecks()
     {
@@ -232,9 +183,6 @@ public class SemanticDiagnosticsTests
         """);
     }
 
-    /// <summary>
-    /// A non-constant enum value is rejected.
-    /// </summary>
     [Fact]
     public void NonConstEnumValueIsStillRejected()
     {
@@ -242,9 +190,6 @@ public class SemanticDiagnosticsTests
             "enum E { A = \"str\" } kernel { entry func Main() { } }");
     }
 
-    /// <summary>
-    /// Duplicate enum member names are rejected instead of collapsing silently.
-    /// </summary>
     [Fact]
     public void DuplicateEnumMemberIsRejected()
     {
@@ -252,9 +197,6 @@ public class SemanticDiagnosticsTests
             "enum E { A, B, A } kernel { entry func Main() { } }");
     }
 
-    /// <summary>
-    /// Duplicate union variant names are rejected.
-    /// </summary>
     [Fact]
     public void DuplicateUnionVariantIsRejected()
     {
@@ -266,10 +208,6 @@ public class SemanticDiagnosticsTests
 
     #region Control-flow divergence
 
-    /// <summary>
-    /// A loop with no exit counts as diverging, so a non-void function ending in
-    /// one is not flagged for a missing return.
-    /// </summary>
     [Theory]
     [InlineData("int func F() { for (;;) { } } kernel { entry func Main() { let int x = F(); } }")]
     [InlineData("int func F() { while (true) { } } kernel { entry func Main() { let int x = F(); } }")]
@@ -278,10 +216,6 @@ public class SemanticDiagnosticsTests
         AssertClean(src);
     }
 
-    /// <summary>
-    /// A 'while (true)' that can break out does not count as diverging, so the
-    /// missing return is still reported.
-    /// </summary>
     [Fact]
     public void BreakableInfiniteLoopStillNeedsReturn()
     {
@@ -289,10 +223,6 @@ public class SemanticDiagnosticsTests
             "int func F() { while (true) { break; } } kernel { entry func Main() { let int x = F(); } }");
     }
 
-    /// <summary>
-    /// A break buried in a nested loop does not escape the outer loop, so the
-    /// outer 'while (true)' still diverges.
-    /// </summary>
     [Fact]
     public void BreakInNestedLoopDoesNotEscapeOuter()
     {
@@ -306,9 +236,6 @@ public class SemanticDiagnosticsTests
 
     #region Match diagnostics
 
-    /// <summary>
-    /// Match-arm errors point at the offending case, not the whole match statement.
-    /// </summary>
     [Fact]
     public void UnknownVariantErrorPointsAtTheCase()
     {
@@ -328,9 +255,6 @@ public class SemanticDiagnosticsTests
 
     #region For-step assignment
 
-    /// <summary>
-    /// A for-step assignment resolves, lowers, and emits as an inline C step expression.
-    /// </summary>
     [Fact]
     public void ForStepAssignmentEmitsInline()
     {
@@ -347,10 +271,6 @@ public class SemanticDiagnosticsTests
         Assert.Contains(files, f => f.Content.Contains("i = (i + 1))"));
     }
 
-    /// <summary>
-    /// A for-step assignment goes through full statement checking: bad types and
-    /// non-lvalue targets are rejected the same as anywhere else.
-    /// </summary>
     [Theory]
     [InlineData("kernel { entry func Main() { for (let int i = 0; i < 5; i = \"x\") { } } }")]
     [InlineData("kernel { entry func Main() { for (let int i = 0; i < 5; i &= 1.5) { } } }")]
@@ -363,10 +283,6 @@ public class SemanticDiagnosticsTests
 
     #region Enum const folding
 
-    /// <summary>
-    /// Constant expressions in enum values fold at compile time, including
-    /// references to earlier members of the same enum.
-    /// </summary>
     [Fact]
     public void EnumConstExprsFold()
     {
@@ -394,10 +310,6 @@ public class SemanticDiagnosticsTests
         Assert.Equal("15", ValueOf("Masked"));
     }
 
-    /// <summary>
-    /// Implicit members count from the previous folded value, so a later reference
-    /// to an implicit member folds to the right number.
-    /// </summary>
     [Fact]
     public void ImplicitEnumMembersFoldFromPreviousValue()
     {
@@ -409,10 +321,6 @@ public class SemanticDiagnosticsTests
         Assert.Equal("16", module!.Enums.Single().Members.Single(m => m.Item1 == "C").Item2);
     }
 
-    /// <summary>
-    /// Non-constant enum values are still rejected: unknown names, forward
-    /// references, and division by zero.
-    /// </summary>
     [Theory]
     [InlineData("enum E { A = x + 1 } kernel { entry func Main() { } }")]
     [InlineData("enum E { A = B + 1, B } kernel { entry func Main() { } }")]
@@ -434,10 +342,6 @@ public class SemanticDiagnosticsTests
     }
     """;
 
-    /// <summary>
-    /// The right operand of a user-defined operator is checked against the
-    /// operator's declared parameter type.
-    /// </summary>
     [Theory]
     [InlineData("let Vec c = a + 5;")]
     [InlineData("let Vec c = a + true;")]
@@ -451,9 +355,6 @@ public class SemanticDiagnosticsTests
         """);
     }
 
-    /// <summary>
-    /// Compound assignment through an operator overload checks the operand too.
-    /// </summary>
     [Fact]
     public void CompoundOperatorOperandTypeIsChecked()
     {
@@ -465,9 +366,6 @@ public class SemanticDiagnosticsTests
         """);
     }
 
-    /// <summary>
-    /// A well-typed operand still resolves cleanly.
-    /// </summary>
     [Fact]
     public void MatchingOperatorOperandStillChecks()
     {
@@ -516,10 +414,6 @@ public class SemanticDiagnosticsTests
         Assert.Contains("did you mean 'Home'?", d.Hints);
     }
 
-    /// <summary>
-    /// With no plausible candidate, the hints array is simply empty rather than an empty
-    /// "did you mean ''?" suggestion.
-    /// </summary>
     [Fact]
     public void UndefinedMethodWithNoCloseCandidateHasNoHint()
     {

@@ -38,9 +38,6 @@ public class CatchCallTests
 
     #region Accepted forms
 
-    /// <summary>
-    /// The base case: a handler supplying a fallback satisfies the throws rule with no try block.
-    /// </summary>
     [Fact]
     public void CatchHandlerSatisfiesTheThrowsRule()
     {
@@ -82,9 +79,6 @@ public class CatchCallTests
             """);
     }
 
-    /// <summary>
-    /// `return` is an equally valid way out of a handler for a non-throws function.
-    /// </summary>
     [Fact]
     public void HandlerMayGiveUpByReturning()
     {
@@ -98,10 +92,6 @@ public class CatchCallTests
             """);
     }
 
-    /// <summary>
-    /// Definite-assignment is path-sensitive, not syntactic: an if/else that assigns on both
-    /// arms is accepted even though no single statement is an `assign`.
-    /// </summary>
     [Fact]
     public void BranchingHandlerAssigningOnEveryPathIsAccepted()
     {
@@ -115,10 +105,6 @@ public class CatchCallTests
             """);
     }
 
-    /// <summary>
-    /// Handlers nest: the inner `assign` belongs to the inner declaration and the outer to the
-    /// outer, so a handler can itself recover from a second failing call.
-    /// </summary>
     [Fact]
     public void HandlersNest()
     {
@@ -133,10 +119,6 @@ public class CatchCallTests
             """);
     }
 
-    /// <summary>
-    /// In statement position the result is discarded, so the handler is recovery-only and needs
-    /// no `assign` - there is nothing to assign to.
-    /// </summary>
     [Fact]
     public void StatementPositionNeedsNoAssign()
     {
@@ -144,10 +126,6 @@ public class CatchCallTests
             "kernel { entry func Main() { P(-1) catch { let int logged = 1; }; } }");
     }
 
-    /// <summary>
-    /// The handler's value is coerced to the declared type like any other initializer, so a
-    /// narrower `assign` widens rather than failing.
-    /// </summary>
     [Fact]
     public void AssignWidensToTheDeclaredType()
     {
@@ -159,9 +137,6 @@ public class CatchCallTests
 
     #region Rejected forms
 
-    /// <summary>
-    /// A handler that can fall out of its own end would leave the declaration unset.
-    /// </summary>
     [Fact]
     public void HandlerFallingThroughIsRejected()
     {
@@ -169,9 +144,6 @@ public class CatchCallTests
             "kernel { entry func Main() { let int a = P(1) catch { let int z = 0; }; } }");
     }
 
-    /// <summary>
-    /// An if with no else is not exhaustive, so the fall-through path still reaches the end.
-    /// </summary>
     [Fact]
     public void HandlerAssigningOnOnlyOnePathIsRejected()
     {
@@ -183,10 +155,6 @@ public class CatchCallTests
             """);
     }
 
-    /// <summary>
-    /// `assign` is meaningless with no handler around it, and must not be mistaken for a way to
-    /// return from the enclosing function.
-    /// </summary>
     [Fact]
     public void AssignOutsideAnyHandlerIsRejected()
     {
@@ -194,9 +162,6 @@ public class CatchCallTests
             "kernel { entry func Main() { assign 5; } }");
     }
 
-    /// <summary>
-    /// In statement position there is no declaration behind the handler, so `assign` has no target.
-    /// </summary>
     [Fact]
     public void AssignInStatementPositionIsRejected()
     {
@@ -204,10 +169,6 @@ public class CatchCallTests
             "kernel { entry func Main() { P(1) catch { assign 3; }; } }");
     }
 
-    /// <summary>
-    /// A call that cannot fail has nothing for a handler to do; silently allowing it would let a
-    /// handler rot in place after the callee stopped being `throws`.
-    /// </summary>
     [Fact]
     public void CatchOnNonThrowingCallIsRejected()
     {
@@ -218,10 +179,6 @@ public class CatchCallTests
             """);
     }
 
-    /// <summary>
-    /// Only a call can throw, so `catch` after anything else is a syntax error rather than a
-    /// type error discovered later.
-    /// </summary>
     [Fact]
     public void CatchOnNonCallIsRejected()
     {
@@ -229,9 +186,6 @@ public class CatchCallTests
             "kernel { entry func Main() { let int a = 5 catch { assign 0; }; } }");
     }
 
-    /// <summary>
-    /// The assigned value is type-checked against what the declaration expects.
-    /// </summary>
     [Fact]
     public void AssignOfWrongTypeIsRejected()
     {
@@ -239,10 +193,6 @@ public class CatchCallTests
             "kernel { entry func Main() { let int a = P(1) catch { assign \"nope\"; }; } }");
     }
 
-    /// <summary>
-    /// A handler on the outer call does not cover a throwing call buried in its arguments: that
-    /// inner call fails before the outer one is ever entered, so it needs handling of its own.
-    /// </summary>
     [Fact]
     public void CatchDoesNotCoverThrowingArguments()
     {
@@ -267,10 +217,6 @@ public class CatchCallTests
             "kernel { entry func Main() { let B b = new B(); } }");
     }
 
-    /// <summary>
-    /// Same reasoning for a constructor argument and a collection-initializer element: both are
-    /// evaluated inside a larger expression with no statement boundary to branch at.
-    /// </summary>
     [Theory]
     [InlineData("class B { int v; func _init(int x) { self.v = x; } }\nkernel { entry func Main() { let B b = new B(P(1) catch { assign 0; }); } }")]
     [InlineData("class L { public void func Add(int x) { } }\nkernel { entry func Main() { let L l = new L { P(1) catch { assign 0; } }; } }")]
@@ -324,10 +270,6 @@ public class CatchCallTests
             """);
     }
 
-    /// <summary>
-    /// The same substitution has to reach a generic class's members, which are stamped per
-    /// instantiation rather than per call site.
-    /// </summary>
     [Fact]
     public void TypeParametersAreSubstitutedInsideAGenericClassMethodHandler()
     {
@@ -345,10 +287,6 @@ public class CatchCallTests
             """);
     }
 
-    /// <summary>
-    /// Handlers are not limited to free functions: a method body and an operator body are
-    /// ordinary bodies and get the same treatment.
-    /// </summary>
     [Fact]
     public void CatchWorksInMethodAndOperatorBodies()
     {
@@ -414,9 +352,6 @@ public class CatchCallTests
         Assert.Equal("b", Assert.IsType<IrDeclVar>(body[3]).Name);
     }
 
-    /// <summary>
-    /// `assign` becomes an ordinary store into that same variable, on the failure arm.
-    /// </summary>
     [Fact]
     public void AssignLowersToAStoreIntoTheDeclaration()
     {

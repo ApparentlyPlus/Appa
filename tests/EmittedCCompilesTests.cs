@@ -80,42 +80,34 @@ public class EmittedCCompilesTests
             return;
         }
 
-        var work = Directory.CreateTempSubdirectory("appa-torture-c-").FullName;
+        using var work = TempDir.Create("appa-torture-c-");
         var failures = new List<string>();
         int compiled = 0;
 
-        try
+        foreach (var c in TortureCorpus.All)
         {
-            foreach (var c in TortureCorpus.All)
+            var src = StubEnvironment + c.Source;
+            var files = FrontEnd(src);
+            if (files == null) continue;
+
+            var dir = work.Combine("u" + compiled);
+            Directory.CreateDirectory(dir);
+            foreach (var f in files) File.WriteAllText(Path.Combine(dir, f.Name), f.Content);
+
+            foreach (var unit in files.Where(f => f.Name.EndsWith(".c", StringComparison.Ordinal)))
             {
-                var src = StubEnvironment + c.Source;
-                var files = FrontEnd(src);
-                if (files == null) continue;
+                compiled++;
+                var psi = new ProcessStartInfo(cc, $"-fsyntax-only -std=c11 -I. {unit.Name}")
+                { WorkingDirectory = dir, RedirectStandardError = true, UseShellExecute = false };
+                using var p = Process.Start(psi)!;
+                var err = p.StandardError.ReadToEnd();
+                p.WaitForExit();
+                if (p.ExitCode == 0 || IsStubArtifact(err)) continue;
 
-                var dir = Path.Combine(work, "u" + compiled);
-                Directory.CreateDirectory(dir);
-                foreach (var f in files) File.WriteAllText(Path.Combine(dir, f.Name), f.Content);
-
-                foreach (var unit in files.Where(f => f.Name.EndsWith(".c", StringComparison.Ordinal)))
-                {
-                    compiled++;
-                    var psi = new ProcessStartInfo(cc, $"-fsyntax-only -std=c11 -I. {unit.Name}")
-                    { WorkingDirectory = dir, RedirectStandardError = true, UseShellExecute = false };
-                    using var p = Process.Start(psi)!;
-                    var err = p.StandardError.ReadToEnd();
-                    p.WaitForExit();
-                    if (p.ExitCode == 0) continue;
-
-                    var first = err.Split('\n').FirstOrDefault(l => l.Contains(": error:", StringComparison.Ordinal))
-                                ?? err.Split('\n').FirstOrDefault() ?? "<no diagnostic>";
-                    if (IsStubArtifact(err)) continue;
-                    failures.Add($"[{c.Name}] {unit.Name}: {first.Trim()}\n{c.Source}");
-                }
+                var first = err.Split('\n').FirstOrDefault(l => l.Contains(": error:", StringComparison.Ordinal))
+                            ?? err.Split('\n').FirstOrDefault() ?? "<no diagnostic>";
+                failures.Add($"[{c.Name}] {unit.Name}: {first.Trim()}\n{c.Source}");
             }
-        }
-        finally
-        {
-            try { Directory.Delete(work, recursive: true); } catch { /* best effort */ }
         }
 
         Assert.True(compiled > 0, "no translation units were produced; the stub environment stopped working");

@@ -2,12 +2,9 @@
 //
 // Every section ends in a `debug` marker, and the test asserts each marker reaches the serial
 // log. That distinguishes "the ISO booted" from "the ISO booted and every construct actually
-// ran": a section that is silently skipped, optimised away, or that faults partway leaves its
-// marker missing, which no amount of checking the final answer would reveal.
-//
-// The constructs here are chosen to be the ones whose lowering is most likely to break the
-// target specifically -- ARC across early exits, the throws/Result machinery, aggregate type
-// emission order, and cross-file generic instantiation.
+// ran": a section that is silently skipped or faults partway leaves its marker missing, which
+// checking only the final answers would never reveal. Kernel-realm markers land on COM1,
+// user-realm ones on COM3; the harness reads both.
 
 import List;
 import Console;
@@ -186,13 +183,13 @@ user {
     foreground process App {
         thread T {
             entry func Run() {
-                // Console, not debug: a user-realm 'debug' goes to COM3, a separate serial
-                // channel from the kernel's COM2, and the boot harness only captures one.
-                Console.PrintLine("M:user-thread");
+                debug "M:user-thread";
                 let double p = Math.Pi();
                 let Payload load = new Payload();
                 load.Add(2);
+                debug "M:user-arc";
                 Console.PrintLine($"pi*2={Math.Round(p + p) as int} load={load.weight}");
+                debug "M:user-done";
             }
         }
     }

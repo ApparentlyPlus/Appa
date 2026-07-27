@@ -8,9 +8,6 @@ using Appa;
 /// </summary>
 public class ParserTests
 {
-    /// <summary>
-    /// A bare-name import (no quotes) parses as a non-path ImportDecl.
-    /// </summary>
     [Fact]
     public void BareImportIsNotAPath()
     {
@@ -20,9 +17,6 @@ public class ParserTests
         Assert.False(import.IsPath);
     }
 
-    /// <summary>
-    /// A quoted import parses as a path ImportDecl, with the surrounding quotes stripped.
-    /// </summary>
     [Fact]
     public void QuotedImportIsAPath()
     {
@@ -32,9 +26,6 @@ public class ParserTests
         Assert.True(import.IsPath);
     }
 
-    /// <summary>
-    /// @environment parses as a marker EnvironmentDecl with no payload.
-    /// </summary>
     [Fact]
     public void EnvironmentAnnotationParsesAsMarkerDecl()
     {
@@ -42,9 +33,6 @@ public class ParserTests
         Assert.IsType<EnvironmentDecl>(prog.Items[0]);
     }
 
-    /// <summary>
-    /// A free function declaration captures its name, parameters, and return type.
-    /// </summary>
     [Fact]
     public void FreeFuncDeclCapturesNameParamsAndReturnType()
     {
@@ -57,9 +45,6 @@ public class ParserTests
         Assert.Equal("b", func.Params[1].Name);
     }
 
-    /// <summary>
-    /// entry func marks a function as a thread entry point.
-    /// </summary>
     [Fact]
     public void EntryFuncSetsIsEntry()
     {
@@ -68,10 +53,6 @@ public class ParserTests
         Assert.True(func.IsEntry);
     }
 
-    /// <summary>
-    /// A generic function declaration collects its type parameters between the name
-    /// and the parameter list.
-    /// </summary>
     [Fact]
     public void GenericFuncDeclCollectsGenericParams()
     {
@@ -80,9 +61,6 @@ public class ParserTests
         Assert.Equal(["T"], func.GenericParams);
     }
 
-    /// <summary>
-    /// A class declaration collects its name and member declarations.
-    /// </summary>
     [Fact]
     public void ClassDeclCollectsNameAndMembers()
     {
@@ -94,9 +72,6 @@ public class ParserTests
         Assert.All(cls.Members, m => Assert.IsType<FieldDecl>(m));
     }
 
-    /// <summary>
-    /// A module declaration is a class with IsModule set - members are implicitly static.
-    /// </summary>
     [Fact]
     public void ModuleDeclSetsIsModule()
     {
@@ -105,9 +80,6 @@ public class ParserTests
         Assert.True(cls.IsModule);
     }
 
-    /// <summary>
-    /// A kernel { } block groups its contents into a ContextDecl with Kind "kernel".
-    /// </summary>
     [Fact]
     public void KernelBlockGroupsItsItems()
     {
@@ -118,10 +90,6 @@ public class ParserTests
         Assert.IsType<FuncDecl>(ctx.Items[0]);
     }
 
-    /// <summary>
-    /// A user { } block with a process/thread topology parses into nested
-    /// ProcessDecl/ThreadDecl nodes.
-    /// </summary>
     [Fact]
     public void UserBlockParsesProcessAndThreadTopology()
     {
@@ -144,9 +112,6 @@ public class ParserTests
         Assert.NotNull(proc.Threads[0].Entry);
     }
 
-    /// <summary>
-    /// An if/else statement carries both branches.
-    /// </summary>
     [Fact]
     public void IfElseCarriesBothBranches()
     {
@@ -157,9 +122,6 @@ public class ParserTests
         Assert.NotNull(ifStmt.Else);
     }
 
-    /// <summary>
-    /// A C-style for loop parses its init/cond/step trio into a ForStmt.
-    /// </summary>
     [Fact]
     public void CStyleForLoopParsesInitCondStep()
     {
@@ -172,9 +134,6 @@ public class ParserTests
         Assert.NotNull(forStmt.Step);
     }
 
-    /// <summary>
-    /// A for-in loop over a collection parses as a ForInStmt binding the loop variable.
-    /// </summary>
     [Fact]
     public void ForInLoopBindsLoopVariable()
     {
@@ -185,9 +144,6 @@ public class ParserTests
         Assert.Equal("x", forIn.Var);
     }
 
-    /// <summary>
-    /// A let statement with an explicit type and initializer parses both fields.
-    /// </summary>
     [Fact]
     public void LetStmtWithTypeAndInitializer()
     {
@@ -200,9 +156,6 @@ public class ParserTests
         Assert.NotNull(let.Init);
     }
 
-    /// <summary>
-    /// A binary expression captures the operator and both operands.
-    /// </summary>
     [Fact]
     public void BinExprCapturesOperatorAndOperands()
     {
@@ -215,9 +168,6 @@ public class ParserTests
         Assert.IsType<IntLitExpr>(bin.Right);
     }
 
-    /// <summary>
-    /// A try/catch statement carries both the try block and the catch block.
-    /// </summary>
     [Fact]
     public void TryCatchCarriesBothBlocks()
     {
@@ -227,9 +177,6 @@ public class ParserTests
         Assert.IsType<TryCatchStmt>(block.Stmts[0]);
     }
 
-    /// <summary>
-    /// A defer statement wraps its action statement.
-    /// </summary>
     [Fact]
     public void DeferStmtWrapsAction()
     {
@@ -240,10 +187,6 @@ public class ParserTests
         Assert.IsType<ExprStmt>(defer.Action);
     }
 
-    /// <summary>
-    /// An interpolated string expression alternates literal segments and embedded
-    /// expressions in source order.
-    /// </summary>
     [Fact]
     public void InterpolatedStringAlternatesLiteralAndExprParts()
     {
@@ -256,10 +199,6 @@ public class ParserTests
         Assert.IsType<IdentExpr>(interp.Parts[1]);
     }
 
-    /// <summary>
-    /// A syntax error (missing semicolon) throws ParseException rather than
-    /// producing a malformed tree.
-    /// </summary>
     [Fact]
     public void MissingSemicolonThrowsParseException()
     {

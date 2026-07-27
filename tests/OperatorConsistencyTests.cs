@@ -26,9 +26,7 @@ public class OperatorConsistencyTests
         Assert.Contains(diag.All, d => d.Severity == Severity.Error && d.Code == code);
     }
 
-    /// <summary>
-    /// Finds the initializer of 'let <paramref name="name"/> = ...' in the entry function.
-    /// </summary>
+    /// <summary>Finds the initializer of 'let <paramref name="name"/> = ...' in the entry function.</summary>
     private static IrExpr EntryDeclInit(IrModule module, string name)
     {
         var entry = module.FreeFunctions.Single(f => f.IsEntry);
@@ -67,10 +65,6 @@ public class OperatorConsistencyTests
         Assert.IsType<IrStaticCall>(init.Operand);
     }
 
-    /// <summary>
-    /// Symmetrically, a class that declares '!=' but not '==' gets '==' as the negation of its
-    /// declared '!='.
-    /// </summary>
     [Fact]
     public void EqDerivesFromDeclaredNotEq()
     {
@@ -93,10 +87,6 @@ public class OperatorConsistencyTests
         Assert.IsType<IrStaticCall>(init.Operand);
     }
 
-    /// <summary>
-    /// When both are declared, each dispatches to its own declaration directly - no negation
-    /// wrapper on either.
-    /// </summary>
     [Fact]
     public void DeclaringBothUsesEachDirectly()
     {
@@ -120,10 +110,6 @@ public class OperatorConsistencyTests
         Assert.IsType<IrStaticCall>(EntryDeclInit(module!, "ne"));
     }
 
-    /// <summary>
-    /// A class with neither declared keeps the existing reference-identity comparison for both -
-    /// derivation only kicks in when there's a declared operator to derive from.
-    /// </summary>
     [Fact]
     public void NoDeclarationKeepsReferenceIdentity()
     {
@@ -143,10 +129,6 @@ public class OperatorConsistencyTests
         Assert.IsType<IrBinOp>(EntryDeclInit(module!, "ne"));
     }
 
-    /// <summary>
-    /// The derived operator type-checks its argument against the declared operator's parameter,
-    /// same as a direct call would.
-    /// </summary>
     [Fact]
     public void DerivedNotEqChecksArgumentType()
     {
@@ -168,10 +150,6 @@ public class OperatorConsistencyTests
 
     #region Comparison operators return bool
 
-    /// <summary>
-    /// A comparison operator with an explicit non-bool return type is rejected - comparisons
-    /// produce truth values, and the '=='/'!=' derivation is only sound over bool.
-    /// </summary>
     [Theory]
     [InlineData("==")]
     [InlineData("!=")]
@@ -189,10 +167,6 @@ public class OperatorConsistencyTests
             """);
     }
 
-    /// <summary>
-    /// A comparison operator with no return type defaults to bool, not to the owner class the
-    /// way value-producing operators do.
-    /// </summary>
     [Fact]
     public void ComparisonOperatorReturnTypeDefaultsToBool()
     {
@@ -213,10 +187,6 @@ public class OperatorConsistencyTests
 
     #region Unary and postfix operator overloading
 
-    /// <summary>
-    /// '!', '~', and unary '-' dispatch to a class's 0-param operator overload, same as binary
-    /// operators dispatch on the left operand's class.
-    /// </summary>
     [Theory]
     [InlineData("public operator func !() { return self.v == 0; }", "let bool r = !a;")]
     [InlineData("public operator Box func ~() { return new Box(); }", "let Box r = ~a;")]
@@ -241,10 +211,6 @@ public class OperatorConsistencyTests
         Assert.IsType<IrStaticCall>(stmts.OfType<IrDeclVar>().Single(d => d.Name == "r").Init);
     }
 
-    /// <summary>
-    /// A class may declare unary '-' (0 params) and binary '-' (1 param) side by side; each use
-    /// site picks by arity.
-    /// </summary>
     [Fact]
     public void UnaryAndBinaryMinusCoexist()
     {
@@ -263,9 +229,6 @@ public class OperatorConsistencyTests
             """);
     }
 
-    /// <summary>
-    /// '++'/'--' overloads are 0-param mutators of self.
-    /// </summary>
     [Fact]
     public void PostfixIncrementOverloadDispatches()
     {
@@ -283,9 +246,6 @@ public class OperatorConsistencyTests
             """);
     }
 
-    /// <summary>
-    /// '!' must return bool; '++'/'--' mutate in place and must return void.
-    /// </summary>
     [Theory]
     [InlineData("operator int func !() { return 1; }")]
     [InlineData("operator int func ++() { return 1; }")]
@@ -300,9 +260,6 @@ public class OperatorConsistencyTests
             """);
     }
 
-    /// <summary>
-    /// The 0-param operators reject a declared parameter - self is the operand.
-    /// </summary>
     [Theory]
     [InlineData("operator func !(Box other) { return true; }")]
     [InlineData("operator Box func ~(Box other) { return other; }")]
@@ -317,10 +274,6 @@ public class OperatorConsistencyTests
             """);
     }
 
-    /// <summary>
-    /// Unary overloads on a class without one still fail with the pre-existing operand-type
-    /// errors - dispatch only fires when the overload exists.
-    /// </summary>
     [Fact]
     public void UnaryOnClassWithoutOverloadStillRejected()
     {
@@ -337,10 +290,6 @@ public class OperatorConsistencyTests
 
     #region Operator visibility
 
-    /// <summary>
-    /// Operators are private by default like every other member: using one from outside its
-    /// declaring class without 'public' is a PrivateMember error.
-    /// </summary>
     [Theory]
     [InlineData("let Box c = a + b;")]
     [InlineData("let bool e = a == b;")]
@@ -361,9 +310,6 @@ public class OperatorConsistencyTests
             """);
     }
 
-    /// <summary>
-    /// A private '[]'/'[]=' pair is equally inaccessible from outside.
-    /// </summary>
     [Fact]
     public void PrivateIndexOperatorIsRejectedOutsideItsClass()
     {
@@ -379,9 +325,6 @@ public class OperatorConsistencyTests
             """);
     }
 
-    /// <summary>
-    /// A private 'as' conversion cannot be invoked from outside its declaring class.
-    /// </summary>
     [Fact]
     public void PrivateAsOperatorIsRejectedOutsideItsClass()
     {
@@ -396,10 +339,6 @@ public class OperatorConsistencyTests
             """);
     }
 
-    /// <summary>
-    /// A private operator is freely usable from inside its own class - private means private to
-    /// the class, exactly as it does for fields and methods.
-    /// </summary>
     [Fact]
     public void PrivateOperatorIsUsableInsideItsClass()
     {
@@ -416,10 +355,6 @@ public class OperatorConsistencyTests
             """);
     }
 
-    /// <summary>
-    /// 'static' has no meaning on an operator declaration - operators define their own
-    /// self/static shape ('as' is static, everything else is an instance operator).
-    /// </summary>
     [Fact]
     public void StaticModifierOnOperatorIsRejected()
     {

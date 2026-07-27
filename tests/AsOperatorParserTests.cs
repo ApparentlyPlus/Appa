@@ -11,10 +11,6 @@ using Appa;
 /// </summary>
 public class AsOperatorParserTests
 {
-    /// <summary>
-    /// 'operator Target func as(Source s)' parses as an OperatorDecl with Op "as", one
-    /// parameter, and the declared return type.
-    /// </summary>
     [Fact]
     public void AsOperatorParsesWithParameterAndReturnType()
     {
@@ -32,9 +28,6 @@ public class AsOperatorParserTests
         Assert.Equal("Wrapper", op.ReturnType?.ToSpecString());
     }
 
-    /// <summary>
-    /// A user-defined class parameter type parses the same way as a primitive one.
-    /// </summary>
     [Fact]
     public void AsOperatorAcceptsClassParameterType()
     {
@@ -51,10 +44,6 @@ public class AsOperatorParserTests
         Assert.Equal("Box", op.Params[0].Type.ToSpecString());
     }
 
-    /// <summary>
-    /// The return type is optional in the grammar - it's the resolver, not the parser, that
-    /// requires (and defaults) it to the owner class.
-    /// </summary>
     [Fact]
     public void AsOperatorReturnTypeIsOptionalInGrammar()
     {
@@ -70,11 +59,6 @@ public class AsOperatorParserTests
         Assert.Null(op.ReturnType);
     }
 
-    /// <summary>
-    /// A class may declare several 'as' operators, one per source type - the parser places no
-    /// limit on how many; that's a semantic (duplicate-parameter-type) concern, not a syntactic
-    /// one.
-    /// </summary>
     [Fact]
     public void MultipleAsOperatorsParseAsSeparateMembers()
     {
@@ -92,10 +76,6 @@ public class AsOperatorParserTests
         Assert.Equal("char", op2.Params[0].Type.ToSpecString());
     }
 
-    /// <summary>
-    /// 'as' is a reserved keyword, so it could never be parsed as a method named "as" - this
-    /// only compiles because ParseOperatorSymbol special-cases TK.As.
-    /// </summary>
     [Fact]
     public void AsIsRecognizedAsAnOperatorKeywordNotAnIdentifier()
     {

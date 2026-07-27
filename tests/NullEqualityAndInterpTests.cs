@@ -87,10 +87,6 @@ public class NullEqualityAndInterpTests
         }
         """;
 
-    /// <summary>
-    /// 'x == null' on a class that declares 'operator ==' must not dispatch to it -
-    /// the operator body's own 'o == null' guard would otherwise call itself forever.
-    /// </summary>
     [Fact]
     public void EqNullBypassesDeclaredOperator()
     {
@@ -104,9 +100,6 @@ public class NullEqualityAndInterpTests
         Assert.DoesNotContain(CollectEntry(module).Calls, c => eqOps.Contains(c));
     }
 
-    /// <summary>
-    /// 'x != null' takes the same identity path, not the derived negation of '=='.
-    /// </summary>
     [Fact]
     public void NeNullBypassesDeclaredOperator()
     {
@@ -120,9 +113,6 @@ public class NullEqualityAndInterpTests
         Assert.DoesNotContain(CollectEntry(module).Calls, c => eqOps.Contains(c));
     }
 
-    /// <summary>
-    /// A null literal on the left side is identity too, agreeing with the right-side form.
-    /// </summary>
     [Fact]
     public void NullOnLeftIsIdentity()
     {
@@ -136,10 +126,6 @@ public class NullEqualityAndInterpTests
         Assert.DoesNotContain(CollectEntry(module).Calls, c => eqOps.Contains(c));
     }
 
-    /// <summary>
-    /// Comparing two class values still dispatches to the declared operator - the bypass
-    /// is strictly for the null literal.
-    /// </summary>
     [Fact]
     public void ValueEqualityStillDispatches()
     {
@@ -154,10 +140,6 @@ public class NullEqualityAndInterpTests
         Assert.Contains(CollectEntry(module).Calls, c => eqOps.Contains(c));
     }
 
-    /// <summary>
-    /// The identity path still type-checks its non-null side: a primitive compared
-    /// against null is not comparable.
-    /// </summary>
     [Fact]
     public void IntAgainstNullIsRejected()
     {
@@ -166,9 +148,6 @@ public class NullEqualityAndInterpTests
         Assert.Contains(diag.All, d => d.Severity == Severity.Error && d.Code == Codes.TypeMismatch);
     }
 
-    /// <summary>
-    /// A class with no declared '==' keeps compiling its null checks as before.
-    /// </summary>
     [Fact]
     public void PlainClassNullCheckStillClean()
     {
@@ -207,10 +186,6 @@ public class NullEqualityAndInterpTests
         }
         """;
 
-    /// <summary>
-    /// Three or more parts build through one StringBuilder: an allocation of the builder
-    /// plus a Put per part, instead of a String allocation per '+' fold.
-    /// </summary>
     [Fact]
     public void ThreePartInterpUsesStringBuilder()
     {
@@ -224,9 +199,6 @@ public class NullEqualityAndInterpTests
         Assert.Contains("StringBuilder", calls.News);
     }
 
-    /// <summary>
-    /// Two parts stay a single '+' call - a builder would be pure overhead there.
-    /// </summary>
     [Fact]
     public void TwoPartInterpKeepsConcat()
     {
@@ -240,10 +212,6 @@ public class NullEqualityAndInterpTests
         Assert.DoesNotContain("StringBuilder", calls.News);
     }
 
-    /// <summary>
-    /// A stdlib that binds no @builtin(StringBuilder) still lowers interpolation - the
-    /// concat chain remains as the fallback, with no diagnostic.
-    /// </summary>
     [Fact]
     public void NoBuilderBindingFallsBackToConcat()
     {

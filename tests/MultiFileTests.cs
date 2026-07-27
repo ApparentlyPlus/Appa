@@ -29,13 +29,13 @@ public class MultiFileTests
         string? Crash);
 
     /// <summary>
-    /// Writes a case's files into a fresh directory and runs the same front-end sequence
-    /// Program.RunFrontEnd does, minus the toolchain. Returns the working directory so a
-    /// caller can go on to compile what was emitted.
+    /// Writes a case's files into the given directory and runs the same front-end sequence
+    /// Program.RunFrontEnd does, minus the toolchain. The caller owns the directory, so it can
+    /// go on to compile what was emitted and still get cleanup from a single 'using'.
     /// </summary>
-    private static (BuildResult Result, string Work) Build(MultiFileCase c)
+    private static BuildResult Build(MultiFileCase c, TempDir dir)
     {
-        var work = Directory.CreateTempSubdirectory("appa-multifile-").FullName;
+        var work = dir.Path;
         try
         {
             bool hasEnv = c.Files.Any(f => f.Path == "env.g");
@@ -62,22 +62,16 @@ public class MultiFileTests
             Pipeline.ValidateIntrinsics(module, diag);
             Pipeline.ValidateStructure(programs, Target.Hosted, diag);
 
-            if (diag.HasErrors) return (new BuildResult(diag, module, null, null), work);
+            if (diag.HasErrors) return new BuildResult(diag, module, null, null);
             var files = Layout.Compose(new Emitter(module, diag).Build(), module.Symbols);
-            return (new BuildResult(diag, module, files, null), work);
+            return new BuildResult(diag, module, files, null);
         }
         catch (Exception ex)
         {
             var frame = (ex.StackTrace ?? "").Split('\n').FirstOrDefault()?.Trim() ?? "<no stack>";
-            return (new BuildResult(null, null, null,
-                $"{ex.GetType().Name}: {ex.Message.Replace('\n', ' ')} @ {frame}"), work);
+            return new BuildResult(null, null, null,
+                $"{ex.GetType().Name}: {ex.Message.Replace('\n', ' ')} @ {frame}");
         }
-    }
-
-    /// <summary>Removes a case's working directory, ignoring failures.</summary>
-    private static void Cleanup(string work)
-    {
-        try { Directory.Delete(work, recursive: true); } catch { /* best effort */ }
     }
 
     /// <summary>Renders a case's files for a failure message.</summary>
@@ -102,9 +96,7 @@ public class MultiFileTests
         return null;
     }
 
-    /// <summary>
-    /// Collects failure messages across a sweep and turns them into a single assertion.
-    /// </summary>
+    /// <summary>Collects failure messages across a sweep and turns them into a single assertion.</summary>
     private sealed class Failures
     {
         private readonly List<string> _items = [];
@@ -132,17 +124,13 @@ public class MultiFileTests
         var fails = new Failures();
         foreach (var c in MultiFileCorpus.All)
         {
-            var (r, work) = Build(c);
-            Cleanup(work);
+            using var work = TempDir.Create("appa-multifile-");
+            var r = Build(c, work);
             if (r.Crash != null) fails.Add($"[{c.Name}] {r.Crash}\n{Describe(c)}");
         }
         fails.Assert("multi-file projects crashed the compiler");
     }
 
-    /// <summary>
-    /// Cases marked Rejected must produce an error, and the named code when one is given;
-    /// cases marked Accepted must build clean.
-    /// </summary>
     [Fact]
     public void MultiFileExpectationsHold()
     {
@@ -151,8 +139,8 @@ public class MultiFileTests
         {
             if (c.Expect == Expect.Any) continue;
 
-            var (r, work) = Build(c);
-            Cleanup(work);
+            using var work = TempDir.Create("appa-multifile-");
+            var r = Build(c, work);
             if (r.Crash != null) continue; // owned by NoMultiFileProjectCrashesTheCompiler
 
             var errors = r.Diag!.All.Where(d => d.Severity == Severity.Error).ToList();
@@ -188,31 +176,27 @@ public class MultiFileTests
         var fails = new Failures();
         foreach (var c in MultiFileCorpus.All)
         {
-            var (r, work) = Build(c);
-            try
+            using var work = TempDir.Create("appa-multifile-");
+            var r = Build(c, work);
+            if (r.Crash != null) continue;
+
+            foreach (var d in r.Diag!.All)
             {
-                if (r.Crash != null) continue;
+                if (d.Loc.Span == TextSpan.None) continue; // build-level, not file-level
+                if (string.IsNullOrEmpty(d.Loc.File)) continue;
+                // Names the compiler uses for things with no file of their own.
+                if (d.Loc.File is "<runtime>" or "<environment>") continue;
 
-                foreach (var d in r.Diag!.All)
+                if (!File.Exists(d.Loc.File))
                 {
-                    if (d.Loc.Span == TextSpan.None) continue; // build-level, not file-level
-                    if (string.IsNullOrEmpty(d.Loc.File)) continue;
-
-                    // Names the compiler uses for things with no file of their own.
-                    if (d.Loc.File is "<runtime>" or "<environment>") continue;
-
-                    if (!File.Exists(d.Loc.File))
-                    {
-                        fails.Add($"[{c.Name}] {d.Code} points at '{d.Loc.File}', which is not a build file -- '{d.Message}'");
-                        continue;
-                    }
-                    int len = new FileInfo(d.Loc.File).Length == 0 ? 0 : File.ReadAllText(d.Loc.File).Length;
-                    if (d.Loc.Span.Start < 0 || d.Loc.Span.Start + d.Loc.Span.Length > len)
-                        fails.Add($"[{c.Name}] {d.Code} span [{d.Loc.Span.Start}..{d.Loc.Span.Start + d.Loc.Span.Length}] " +
-                                  $"outside {Path.GetFileName(d.Loc.File)} (length {len}) -- '{d.Message}'");
+                    fails.Add($"[{c.Name}] {d.Code} points at '{d.Loc.File}', which is not a build file -- '{d.Message}'");
+                    continue;
                 }
+                int len = new FileInfo(d.Loc.File).Length == 0 ? 0 : File.ReadAllText(d.Loc.File).Length;
+                if (d.Loc.Span.Start < 0 || d.Loc.Span.Start + d.Loc.Span.Length > len)
+                    fails.Add($"[{c.Name}] {d.Code} span [{d.Loc.Span.Start}..{d.Loc.Span.Start + d.Loc.Span.Length}] " +
+                              $"outside {Path.GetFileName(d.Loc.File)} (length {len}) -- '{d.Message}'");
             }
-            finally { Cleanup(work); }
         }
         fails.Assert("multi-file diagnostics pointing at unreal source");
     }
@@ -240,38 +224,35 @@ public class MultiFileTests
 
         foreach (var c in MultiFileCorpus.All)
         {
-            var (r, work) = Build(c);
-            try
-            {
-                if (r.Crash != null || r.Files == null) continue;
+            using var work = TempDir.Create("appa-multifile-");
+            var r = Build(c, work);
+            if (r.Crash != null || r.Files == null) continue;
 
-                var outDir = Path.Combine(work, "out");
-                Directory.CreateDirectory(outDir);
-                foreach (var f in r.Files) File.WriteAllText(Path.Combine(outDir, f.Name), f.Content);
+            var outDir = work.Combine("out");
+            Directory.CreateDirectory(outDir);
+            foreach (var f in r.Files) File.WriteAllText(Path.Combine(outDir, f.Name), f.Content);
 
-                var units = r.Files.Where(f => f.Name.EndsWith(".c", StringComparison.Ordinal))
-                                   .Select(f => f.Name).ToList();
-                if (units.Count == 0) continue;
+            var units = r.Files.Where(f => f.Name.EndsWith(".c", StringComparison.Ordinal))
+                               .Select(f => f.Name).ToList();
+            if (units.Count == 0) continue;
 
-                // A user realm emits a generated main(); a kernel realm does not, so those link
-                // as a relocatable object instead of a program.
-                bool hasMain = r.Files.Any(f => f.Content.Contains("int main(void)", StringComparison.Ordinal));
-                string mode = hasMain ? "" : "-r -nostdlib ";
-                var args = $"-std=c11 -I. {mode}-o linked.out {string.Join(" ", units)}";
+            // A user realm emits a generated main(); a kernel realm does not, so those link
+            // as a relocatable object instead of a program.
+            bool hasMain = r.Files.Any(f => f.Content.Contains("int main(void)", StringComparison.Ordinal));
+            string mode = hasMain ? "" : "-r -nostdlib ";
+            var args = $"-std=c11 -I. {mode}-o linked.out {string.Join(" ", units)}";
 
-                var psi = new ProcessStartInfo(cc, args)
-                { WorkingDirectory = outDir, RedirectStandardError = true, UseShellExecute = false };
-                using var p = Process.Start(psi)!;
-                var err = p.StandardError.ReadToEnd();
-                p.WaitForExit(60_000);
-                linked++;
-                if (p.ExitCode == 0) continue;
+            var psi = new ProcessStartInfo(cc, args)
+            { WorkingDirectory = outDir, RedirectStandardError = true, UseShellExecute = false };
+            using var p = Process.Start(psi)!;
+            var err = p.StandardError.ReadToEnd();
+            p.WaitForExit(60_000);
+            linked++;
+            if (p.ExitCode == 0) continue;
 
-                var first = err.Split('\n').FirstOrDefault(l =>
-                                l.Contains("error", StringComparison.OrdinalIgnoreCase)) ?? err;
-                fails.Add($"[{c.Name}] {cc} failed on {string.Join(" + ", units)}: {first.Trim()}\n{Describe(c)}");
-            }
-            finally { Cleanup(work); }
+            var first = err.Split('\n').FirstOrDefault(l =>
+                            l.Contains("error", StringComparison.OrdinalIgnoreCase)) ?? err;
+            fails.Add($"[{c.Name}] {cc} failed on {string.Join(" + ", units)}: {first.Trim()}\n{Describe(c)}");
         }
 
         Assert.True(linked > 0, "no multi-file project reached the linker; the harness stopped emitting");
@@ -358,8 +339,8 @@ public class MultiFileTests
             var c = new MultiFileCase($"graph/{shape}/seed{seed}", [.. files],
                                       acyclic ? Expect.Accepted : Expect.Any);
 
-            var (r, work) = Build(c);
-            Cleanup(work);
+            using var work = TempDir.Create("appa-multifile-");
+            var r = Build(c, work);
 
             if (r.Crash != null) { fails.Add($"[{c.Name}] {r.Crash}\n{Describe(c)}"); continue; }
             if (!acyclic) continue;

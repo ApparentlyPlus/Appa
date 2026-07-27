@@ -27,10 +27,6 @@ public class HardeningTests
 
     #region Entry signatures
 
-    /// <summary>
-    /// An entry func is invoked through a fixed void(void) ABI; parameters used to be
-    /// silently dropped by the emitter, producing C that referenced unbound names.
-    /// </summary>
     [Fact]
     public void EntryFuncWithParamsIsRejected()
     {
@@ -38,9 +34,6 @@ public class HardeningTests
             "kernel { entry func Main(int x) { } }");
     }
 
-    /// <summary>
-    /// An entry func has no caller to receive a value; a declared return type is an error.
-    /// </summary>
     [Fact]
     public void EntryFuncWithReturnTypeIsRejected()
     {
@@ -48,9 +41,6 @@ public class HardeningTests
             "kernel { entry int func Main() { return 1; } }");
     }
 
-    /// <summary>
-    /// An entry func cannot be throws - the Result would go nowhere.
-    /// </summary>
     [Fact]
     public void EntryFuncWithThrowsIsRejected()
     {
@@ -58,10 +48,6 @@ public class HardeningTests
             "kernel { entry throws func Main() { } }");
     }
 
-    /// <summary>
-    /// A thread entry's emitted signature is the fixed void(void*) thread ABI; declared
-    /// parameters were scoped by the resolver but never bound in the emitted C.
-    /// </summary>
     [Fact]
     public void ThreadEntryWithParamsIsRejected()
     {
@@ -71,9 +57,6 @@ public class HardeningTests
             """);
     }
 
-    /// <summary>
-    /// The plain forms stay accepted.
-    /// </summary>
     [Fact]
     public void PlainEntrySignaturesAreClean()
     {
@@ -87,10 +70,6 @@ public class HardeningTests
 
     #region Realm structure
 
-    /// <summary>
-    /// Every 'entry func' mangles to the single kernel entry symbol, so one inside
-    /// 'user { }' in a GatOS build would link-collide with the kernel's.
-    /// </summary>
     [Fact]
     public void UserEntryFuncInGatOSBuildIsRejected()
     {
@@ -103,9 +82,6 @@ public class HardeningTests
         Assert.Contains(diag.All, d => d.Code == Codes.EntryOutsideKernel);
     }
 
-    /// <summary>
-    /// Hosted builds keep their user-entry rule: a user-block entry func is required there.
-    /// </summary>
     [Fact]
     public void UserEntryFuncInHostedBuildIsAccepted()
     {
@@ -131,9 +107,6 @@ public class HardeningTests
         AssertError(Codes.BadThrowsReturnType, src);
     }
 
-    /// <summary>
-    /// A throws method on a class is validated the same way as a free function.
-    /// </summary>
     [Fact]
     public void ThrowsPointerReturnOnMethodIsRejected()
     {
@@ -143,10 +116,6 @@ public class HardeningTests
             """);
     }
 
-    /// <summary>
-    /// A throws enum return now emits a matching Result typedef (previously the typedef
-    /// field was mis-typed as a class pointer).
-    /// </summary>
     [Fact]
     public void ThrowsEnumReturnIsCleanAndEmitsMatchingTypedef()
     {
@@ -164,10 +133,6 @@ public class HardeningTests
 
     #region throws initializer type checking
 
-    /// <summary>
-    /// 'let T x = throwsCall();' used to skip type checking entirely because both sides
-    /// of CheckAssign bailed on Result types.
-    /// </summary>
     [Fact]
     public void ThrowsInitializerInnerTypeMismatchIsRejected()
     {
@@ -178,9 +143,6 @@ public class HardeningTests
             """);
     }
 
-    /// <summary>
-    /// A matching declared type (and a widening one) stays accepted.
-    /// </summary>
     [Theory]
     [InlineData("throws int func F() { return 1; } kernel { entry func Main() { try { let int x = F(); } catch { } } }")]
     [InlineData("throws int func F() { return 1; } kernel { entry func Main() { try { let int64 x = F(); } catch { } } }")]
@@ -215,9 +177,6 @@ public class HardeningTests
             """);
     }
 
-    /// <summary>
-    /// Conflicting bindings across the two slots of the same type parameter are diagnosed.
-    /// </summary>
     [Fact]
     public void GenericFuncConflictingBindingIsRejected()
     {
@@ -239,9 +198,6 @@ public class HardeningTests
 
     #region Dedicated diagnostic codes
 
-    /// <summary>
-    /// Control transfer out of a defer body gets its own code, not a repurposed G004.
-    /// </summary>
     [Theory]
     [InlineData("kernel { entry func Main() { defer { return; } } }")]
     [InlineData("kernel { entry func Main() { while (true) { defer { break; } } } }")]
@@ -252,9 +208,6 @@ public class HardeningTests
         AssertError(Codes.DeferTransfer, src);
     }
 
-    /// <summary>
-    /// A field on a module is a category error with its own code.
-    /// </summary>
     [Fact]
     public void ModuleFieldUsesModuleFieldCode()
     {
@@ -262,9 +215,6 @@ public class HardeningTests
             "module M { int x; } kernel { entry func Main() { } }");
     }
 
-    /// <summary>
-    /// 'public private' and repeated modifiers are conflicts, not silent no-ops.
-    /// </summary>
     [Theory]
     [InlineData("class C { public private func F() { } } kernel { entry func Main() { } }")]
     [InlineData("class C { public public func F() { } } kernel { entry func Main() { } }")]
@@ -274,10 +224,6 @@ public class HardeningTests
         AssertError(Codes.ConflictingModifiers, src);
     }
 
-    /// <summary>
-    /// _init/_deinit are called from generated allocator/destructor code that cannot
-    /// receive a Result; throws on them is a hard error.
-    /// </summary>
     [Theory]
     [InlineData("class C { throws func _init() { } } kernel { entry func Main() { } }")]
     [InlineData("class C { throws func _deinit() { } } kernel { entry func Main() { } }")]
@@ -290,10 +236,6 @@ public class HardeningTests
 
     #region Single-source-of-truth consistency
 
-    /// <summary>
-    /// Every primitive spelling in the shared table lexes as a primitive keyword, so the
-    /// lexer's keyword list cannot silently drift from PrimTypes.
-    /// </summary>
     [Fact]
     public void EveryPrimitiveSpellingLexesAsAPrimitiveKeyword()
     {
@@ -306,10 +248,6 @@ public class HardeningTests
         }
     }
 
-    /// <summary>
-    /// Every overloadable operator symbol (except 'as', which is deliberately generic)
-    /// has a distinct mangling suffix, so two operators can never share a C name.
-    /// </summary>
     [Fact]
     public void OperatorManglingSuffixesAreDistinct()
     {
@@ -328,10 +266,6 @@ public class HardeningTests
 
     #region String concatenation floor
 
-    /// <summary>
-    /// '+' on Strings with no String '+' operator in the build is a diagnostic, not a
-    /// silently fabricated symbol that fails at link time.
-    /// </summary>
     [Fact]
     public void StringConcatWithoutOperatorIsDiagnosed()
     {

@@ -3,26 +3,23 @@ namespace Appa.Tests;
 using System.Diagnostics;
 
 /// <summary>
-/// End-to-end boot regression, ported from tests/boot/run.sh: build a full GatOS
-/// ISO from a comprehensive program and boot it headless in QEMU, asserting the
-/// kernel reaches its idle loop and the program's own markers print. Needs the
-/// GatOS toolchain + template that 'appa setup' installs; skips gracefully when
-/// that isn't present.
+/// End-to-end boot regression: build a full GatOS ISO from a comprehensive program and boot it
+/// headless in QEMU, asserting the kernel reaches its idle loop and that every section of the
+/// program announced itself. Needs the GatOS toolchain + template that 'appa setup' installs;
+/// skips gracefully when that isn't present.
 /// </summary>
 [Collection("Boot")]
 public class BootTests(BootFixture fixture)
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(35);
 
+    #region Expectations
+
     /// <summary>
-    /// The trace markers Fixtures/Boot/main.g emits, one per section, in program order. A
-    /// missing marker names the exact construct that failed to run on the target.
-    ///
-    /// Kernel-realm markers only: a user-realm 'debug' is routed to COM3 by GatOS, a separate
-    /// serial channel from the kernel's COM2, and this harness captures only the latter. The
-    /// user thread reports through Console instead, and is checked in ExpectedOutput.
+    /// Kernel-realm trace markers, in program order. GatOS routes a kernel 'debug' to COM1
+    /// (drivers/serial.h), which QEMU multiplexes onto stdio.
     /// </summary>
-    private static readonly string[] ExpectedMarkers =
+    private static readonly string[] KernelMarkers =
     [
         "M:start",              // entry reached
         "M:arith",              // overload selection, int64 arithmetic, explicit narrowing
@@ -42,6 +39,19 @@ public class BootTests(BootFixture fixture)
     ];
 
     /// <summary>
+    /// User-realm trace markers. A user 'debug' is a SYS_DEBUG_WRITE syscall that bypasses the
+    /// TTY and goes straight to COM3 (sys/syscall.c), which appa points at artifacts/user-debug.log.
+    /// Checking that file is what proves the userspace _env_dbg bind works at all, rather than
+    /// inferring it from the thread's ordinary console output.
+    /// </summary>
+    private static readonly string[] UserMarkers =
+    [
+        "M:user-thread", // the spawned user thread's entry ran
+        "M:user-arc",    // a class from the other file, allocated in userspace
+        "M:user-done",   // ran to the end of the thread entry
+    ];
+
+    /// <summary>
     /// Exact output lines the program prints. Every value is derived rather than constant, so
     /// each one pins a computation: 'neg=-5' is a nested unary minus, 'scaled=10' is the two
     /// private Scale functions resolving to their own file's, 'crate=4' is the cross-file
@@ -56,15 +66,11 @@ public class BootTests(BootFixture fixture)
         "keywords=3 scaled=10 deref=42 crate=4",
         "recursed=20100 strchurn=3835",
         "REGRESSION_OK",
-        "M:user-thread",
         "pi*2=6 load=3",
     ];
 
-    /// <summary>
-    /// Scaffolds a throwaway GatOS project around boot/main.g, runs 'appa build
-    /// --run --headless' against it, and asserts the serial log carries the idle
-    /// loop marker, the kernel-side regression marker, and the userspace marker.
-    /// </summary>
+    #endregion
+
     [Fact]
     public async Task GatOSImageBootsAndProgramMarkersAppear()
     {
@@ -77,68 +83,74 @@ public class BootTests(BootFixture fixture)
         string fixturesDir = Path.Combine(AppContext.BaseDirectory, "Fixtures");
         string appaDll = Path.Combine(AppContext.BaseDirectory, "Appa.dll");
 
-        string work = Directory.CreateTempSubdirectory("appa-boot-").FullName;
-        try
+        using var work = TempDir.Create("appa-boot-");
+        Directory.CreateDirectory(Path.Combine(work.Path, "src"));
+        foreach (var g in Directory.GetFiles(Path.Combine(fixturesDir, "Boot"), "*.g"))
+            File.Copy(g, Path.Combine(work.Path, "src", Path.GetFileName(g)));
+        File.Copy(Path.Combine(fixture.EnvsDir!, "env.GatOS.g"), Path.Combine(work.Path, "env.g"));
+        File.WriteAllText(Path.Combine(work.Path, "boot.gconf"), """
+            <appa>
+                <ProjectName>boot</ProjectName>
+                <TargetBackend>GatOS</TargetBackend>
+                <BuildMode>Debug</BuildMode>
+                <OutputType>Serial</OutputType>
+            </appa>
+            """);
+
+        // No --stdlib: this exercises the real, installed GatOS toolchain end to end, so it
+        // discovers libgata the same way a real 'appa build' does.
+        var psi = new ProcessStartInfo("dotnet",
+            $"\"{appaDll}\" build --run --headless --timeout={(int)Timeout.TotalSeconds}s")
         {
-            Directory.CreateDirectory(Path.Combine(work, "src"));
-            // Every .g in the fixture, not just main.g: the program spans two files so the
-            // boot regression covers the multi-file front end on the real target too.
-            foreach (var g in Directory.GetFiles(Path.Combine(fixturesDir, "Boot"), "*.g"))
-                File.Copy(g, Path.Combine(work, "src", Path.GetFileName(g)));
-            File.Copy(Path.Combine(fixture.EnvsDir!, "env.GatOS.g"), Path.Combine(work, "env.g"));
-            File.WriteAllText(Path.Combine(work, "boot.gconf"), """
-                <appa>
-                    <ProjectName>boot</ProjectName>
-                    <TargetBackend>GatOS</TargetBackend>
-                    <BuildMode>Debug</BuildMode>
-                    <OutputType>Serial</OutputType>
-                </appa>
-                """);
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            WorkingDirectory = work.Path,
+        };
+        // Read both streams concurrently before waiting: draining one to completion first
+        // deadlocks if the process fills the other's OS pipe buffer.
+        var ct = TestContext.Current.CancellationToken;
+        using var proc = Process.Start(psi)!;
+        var outTask = proc.StandardOutput.ReadToEndAsync(ct);
+        var errTask = proc.StandardError.ReadToEndAsync(ct);
+        using var cts = new CancellationTokenSource(Timeout + TimeSpan.FromSeconds(15));
+        try { await proc.WaitForExitAsync(cts.Token); }
+        catch (OperationCanceledException) { try { proc.Kill(entireProcessTree: true); } catch { } }
 
-            // No --stdlib: this test exercises the real, installed GatOS toolchain end
-            // to end, so it discovers libgata the same way a real 'appa build' does.
-            var psi = new ProcessStartInfo("dotnet",
-                $"\"{appaDll}\" build --run --headless --timeout={(int)Timeout.TotalSeconds}s")
-            {
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                WorkingDirectory = work,
-            };
-            // Read both streams concurrently before waiting: reading one to completion
-            // first deadlocks if the process fills the other's OS pipe buffer, since it
-            // then blocks on that write while we block on this read.
-            var ct = TestContext.Current.CancellationToken;
-            using var proc = Process.Start(psi)!;
-            var outTask = proc.StandardOutput.ReadToEndAsync(ct);
-            var errTask = proc.StandardError.ReadToEndAsync(ct);
-            using var cts = new CancellationTokenSource(Timeout + TimeSpan.FromSeconds(15));
-            try { await proc.WaitForExitAsync(cts.Token); }
-            catch (OperationCanceledException) { try { proc.Kill(entireProcessTree: true); } catch { } }
+        string log = await outTask + await errTask;
+        string userLog = ReadIfPresent(Path.Combine(work.Path, "artifacts", "user-debug.log"));
 
-            string log = await outTask + await errTask;
+        Assert.Contains("Reached kernel idle loop", log);
 
-            // The kernel reached its idle loop, so the image booted and ran to completion.
-            Assert.Contains("Reached kernel idle loop", log);
+        // What separates "the ISO booted" from "every construct actually executed": a section
+        // that faults, is skipped, or is optimised away leaves its marker missing, and checking
+        // only the final answers would not notice.
+        AssertMarkers(KernelMarkers, "[DEBUG] ", log, "COM1/stdio", log, userLog);
+        AssertMarkers(UserMarkers, "[USER DEBUG] ", userLog, "COM3/user-debug.log", log, userLog);
 
-            // Every section of the program announced itself. This is what separates "the ISO
-            // booted" from "every construct actually executed": a section that faults, is
-            // skipped, or is optimised away leaves its marker missing, and checking only the
-            // final answers would not notice.
-            var missing = ExpectedMarkers.Where(m => !log.Contains($"[DEBUG] {m}")).ToList();
-            Assert.True(missing.Count == 0,
-                $"the image booted but these sections never ran: {string.Join(", ", missing)}\n\n--- serial log ---\n{log}");
+        // Markers prove the code ran; these prove it computed the right thing.
+        foreach (var expected in ExpectedOutput)
+            Assert.True(log.Contains(expected),
+                $"expected output line not found: '{expected}'{Logs(log, userLog)}");
+    }
 
-            // Markers prove the code ran; these prove it computed the right thing. Each line
-            // is checked verbatim, so a miscompile shows up as a wrong number rather than as
-            // a silent pass.
-            foreach (var expected in ExpectedOutput)
-                Assert.True(log.Contains(expected),
-                    $"expected output line not found: '{expected}'\n\n--- serial log ---\n{log}");
-        }
-        finally
-        {
-            try { Directory.Delete(work, recursive: true); } catch { }
-        }
+    /// <summary>Asserts every marker, with its realm's prefix, reached the channel it belongs on.</summary>
+    private static void AssertMarkers(
+        string[] markers, string prefix, string channel, string channelName, string log, string userLog)
+    {
+        var missing = markers.Where(m => !channel.Contains(prefix + m)).ToList();
+        Assert.True(missing.Count == 0,
+            $"the image booted but these sections never reached {channelName}: " +
+            $"{string.Join(", ", missing)}{Logs(log, userLog)}");
+    }
+
+    private static string Logs(string log, string userLog) =>
+        $"\n\n--- COM1/stdio ---\n{log}\n--- COM3/user-debug.log ---\n{userLog}";
+
+    /// <summary>Reads a serial capture, tolerating QEMU never having created it.</summary>
+    private static string ReadIfPresent(string path)
+    {
+        try { return File.Exists(path) ? File.ReadAllText(path) : "<not written>"; }
+        catch (IOException) { return "<unreadable>"; }
     }
 }

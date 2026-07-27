@@ -8,9 +8,6 @@ using Appa;
 /// </summary>
 public class LanguageCoreTests
 {
-    /// <summary>
-    /// A language-core program with no diagnostics of any kind - it must transpile cleanly.
-    /// </summary>
     [Theory]
     [MemberData(nameof(GoodPrograms))]
     public void GoodProgramTranspilesCleanly(string name, string src)
@@ -238,10 +235,6 @@ public class LanguageCoreTests
         return data;
     }
 
-    /// <summary>
-    /// A language-core program with a single semantic error - it must fail with
-    /// exactly the diagnostic code named in the fixture's original header.
-    /// </summary>
     [Theory]
     [MemberData(nameof(BadPrograms))]
     public void BadProgramFailsWithExpectedCode(string name, string expectedCode, string src)
@@ -705,10 +698,6 @@ public class LanguageCoreTests
         return data;
     }
 
-    /// <summary>
-    /// A language-core program that produces the warning code named in the
-    /// fixture's original header.
-    /// </summary>
     [Theory]
     [MemberData(nameof(WarnPrograms))]
     public void WarnProgramProducesExpectedCode(string name, string expectedCode, string src)

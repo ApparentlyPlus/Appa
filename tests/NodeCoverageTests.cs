@@ -7,15 +7,29 @@ using Appa;
 /// in Monomorphizer's AST substituter or in IrRewriter/IrWalker is silent: the node is returned
 /// untouched and a whole subtree is quietly never visited. Two real bugs in this compiler had
 /// exactly that shape, so the inert set is asserted rather than assumed.
+///
+/// The guards are [Conditional("DEBUG")] on purpose -- a shipped compiler meeting an unexpected
+/// node should emit slightly wrong code rather than abort mid-build -- so the calls vanish
+/// entirely in Release and there is nothing left to assert. The rejection tests skip there
+/// instead of failing, and say why.
 /// </summary>
 public class NodeCoverageTests
 {
-    /// <summary>
-    /// A node with no children is legitimately allowed through the default arm.
-    /// </summary>
+    private const bool GuardsActive =
+#if DEBUG
+        true;
+#else
+        false;
+#endif
+
+    private const string NotInRelease =
+        "NodeCoverage's guards are [Conditional(\"DEBUG\")] and compile out of a Release build";
+
     [Fact]
     public void InertNodesArePermitted()
     {
+        if (!GuardsActive) { Assert.Skip(NotInRelease); return; }
+
         NodeCoverage.AssertInertIrExpr(new IrLitInt(1), "test");
         NodeCoverage.AssertInertIrExpr(new IrVar("x", IrType.Int), "test");
         NodeCoverage.AssertInertIrStmt(new IrBreak(), "test");
@@ -24,13 +38,11 @@ public class NodeCoverageTests
         NodeCoverage.AssertInertAstStmt(new BreakStmt(TextSpan.None));
     }
 
-    /// <summary>
-    /// A node that owns children must not reach a default arm - that is the bug being guarded
-    /// against, and in a debug build it fails loudly instead of silently skipping the subtree.
-    /// </summary>
     [Fact]
     public void NodesWithChildrenAreRejected()
     {
+        if (!GuardsActive) { Assert.Skip(NotInRelease); return; }
+
         var lit = new IrLitInt(1);
         Assert.Throws<System.Diagnostics.UnreachableException>(() =>
             NodeCoverage.AssertInertIrExpr(new IrBinOp(BinOp.Add, lit, lit, IrType.Int), "test"));
@@ -40,13 +52,11 @@ public class NodeCoverageTests
             NodeCoverage.AssertInertAstStmt(new ReturnStmt(null, TextSpan.None)));
     }
 
-    /// <summary>
-    /// The message has to name the dispatcher, the node, and the consequence - a bare
-    /// "unhandled node" would leave the next person to rediscover why it matters.
-    /// </summary>
     [Fact]
     public void RejectionExplainsTheConsequence()
     {
+        if (!GuardsActive) { Assert.Skip(NotInRelease); return; }
+
         var ex = Assert.Throws<System.Diagnostics.UnreachableException>(() =>
             NodeCoverage.AssertInertIrExpr(new IrInterp([]), "IrWalker.WalkExpr"));
         Assert.Contains("IrWalker.WalkExpr", ex.Message);

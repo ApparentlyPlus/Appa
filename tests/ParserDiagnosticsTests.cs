@@ -8,17 +8,12 @@ using Appa;
 /// </summary>
 public class ParserDiagnosticsTests
 {
-    /// <summary>
-    /// Parses and returns the ParseException the source must produce.
-    /// </summary>
+    /// <summary>Parses and returns the ParseException the source must produce.</summary>
     private static ParseException Parse(string src)
     {
         return Assert.Throws<ParseException>(() => SingleFileCompile.Parse(src));
     }
 
-    /// <summary>
-    /// Plain and compound assignments are valid for-loop steps, mirroring the init clause.
-    /// </summary>
     [Theory]
     [InlineData("func F() { for (let int i = 0; i < 5; i = i + 1) { } }")]
     [InlineData("func F() { for (let int i = 0; i < 5; i += 1) { } }")]
@@ -30,9 +25,6 @@ public class ParserDiagnosticsTests
         Assert.IsType<AssignStmt>(forStmt.Step);
     }
 
-    /// <summary>
-    /// A variable declaration makes no sense in the for-loop step and is rejected.
-    /// </summary>
     [Fact]
     public void LetInForStepIsRejected()
     {
@@ -40,9 +32,6 @@ public class ParserDiagnosticsTests
         Assert.Contains("cannot declare a variable in the for-loop step", ex.Message);
     }
 
-    /// <summary>
-    /// A single '=' in a condition suggests '==' instead of a generic paren error.
-    /// </summary>
     [Theory]
     [InlineData("func F() { let int x = 1; if (x = 3) { } }")]
     [InlineData("func F() { let int x = 1; while (x = 3) { } }")]
@@ -55,9 +44,6 @@ public class ParserDiagnosticsTests
         Assert.Contains("did you mean '=='?", ex.Hints);
     }
 
-    /// <summary>
-    /// Expected-token messages spell the token like source code, not the enum name.
-    /// </summary>
     [Theory]
     [InlineData("func F() { let int x = 5 }", "expected ';'")]
     [InlineData("func F() { G(1, 2; }", "expected ')'")]
@@ -68,19 +54,12 @@ public class ParserDiagnosticsTests
         Assert.Contains(expected, Parse(src).Message);
     }
 
-    /// <summary>
-    /// Hitting the end of the token stream says "end of file", not an empty quote.
-    /// </summary>
     [Fact]
     public void EofReadsAsEndOfFile()
     {
         Assert.Contains("end of file", Parse("func F() {").Message);
     }
 
-    /// <summary>
-    /// A colon after a process name must be followed by a mode keyword; a stray
-    /// identifier no longer falls through to a confusing '{' error.
-    /// </summary>
     [Fact]
     public void ProcessColonWithoutModeIsRejected()
     {
@@ -89,9 +68,6 @@ public class ParserDiagnosticsTests
         Assert.Contains("'foreground' or 'background'", ex.Message);
     }
 
-    /// <summary>
-    /// Spelling the process mode both before the keyword and after the colon is rejected.
-    /// </summary>
     [Fact]
     public void ProcessModeSpecifiedTwiceIsRejected()
     {
@@ -119,10 +95,6 @@ public class ParserDiagnosticsTests
         Assert.DoesNotContain("foreground process App", ex.Message);
     }
 
-    /// <summary>
-    /// A bare identifier immediately followed by '{' where 'func' was expected hints that a
-    /// 'process' declaration was likely intended, instead of the bare "expected 'func'" message.
-    /// </summary>
     [Fact]
     public void MissingProcessKeywordHintsAtFreeFuncError()
     {
@@ -134,9 +106,6 @@ public class ParserDiagnosticsTests
         Assert.Contains(ex.Hints, h => h.Contains("TicTacToe"));
     }
 
-    /// <summary>
-    /// Trailing commas in declaration lists carry the trailing-comma code.
-    /// </summary>
     [Theory]
     [InlineData("enum Color { Red, Green, }")]
     [InlineData("union U { A, B, }")]
@@ -146,9 +115,6 @@ public class ParserDiagnosticsTests
         Assert.Equal(Codes.TrailingComma, Parse(src).Code);
     }
 
-    /// <summary>
-    /// A statement that starts with a type followed by a name hints at the missing 'let'.
-    /// </summary>
     [Fact]
     public void TypeThenNameHintsMissingLet()
     {
@@ -160,9 +126,6 @@ public class ParserDiagnosticsTests
         Assert.Contains(ex.Hints, h => h.Contains("let MyType"));
     }
 
-    /// <summary>
-    /// Nesting violations carry the invalid-nesting code.
-    /// </summary>
     [Theory]
     [InlineData("kernel { user { } }")]
     [InlineData("class A { class B { } }")]
@@ -173,9 +136,6 @@ public class ParserDiagnosticsTests
         Assert.Equal(Codes.InvalidNesting, Parse(src).Code);
     }
 
-    /// <summary>
-    /// An annotation on a declaration that cannot use it points at the annotation itself.
-    /// </summary>
     [Fact]
     public void RejectedAnnotationPointsAtTheAnnotation()
     {
@@ -184,9 +144,6 @@ public class ParserDiagnosticsTests
         Assert.Equal(0, ex.Span.Start);
     }
 
-    /// <summary>
-    /// A trailing '-> type' on a function declaration names the function and the fix.
-    /// </summary>
     [Fact]
     public void TrailingReturnTypeNamesTheFunction()
     {
@@ -210,10 +167,6 @@ public class ParserDiagnosticsTests
         Assert.Contains("before 'func'", ex.Message);
     }
 
-    /// <summary>
-    /// The old 'operator func +(X) -> T' spelling gets the same targeted migration message as
-    /// functions and methods do - the return type now goes between 'operator' and 'func'.
-    /// </summary>
     [Fact]
     public void TrailingReturnTypeOnOperatorNamesTheOperator()
     {
@@ -223,9 +176,6 @@ public class ParserDiagnosticsTests
         Assert.Contains("after 'operator'", ex.Message);
     }
 
-    /// <summary>
-    /// The new leading-type operator spelling parses, and the return type lands in the AST.
-    /// </summary>
     [Fact]
     public void LeadingReturnTypeOnOperatorParses()
     {
@@ -236,10 +186,6 @@ public class ParserDiagnosticsTests
         Assert.Equal("C", op.ReturnType?.ToSpecString());
     }
 
-    /// <summary>
-    /// The old '@extern func F(...) -> T;' spelling gets the same targeted migration message;
-    /// the return type now leads, like every other function's.
-    /// </summary>
     [Fact]
     public void TrailingReturnTypeOnExternNamesTheFunction()
     {
@@ -249,9 +195,6 @@ public class ParserDiagnosticsTests
         Assert.Contains("before 'func'", ex.Message);
     }
 
-    /// <summary>
-    /// The new leading-type extern spelling parses, and the return type lands in the AST.
-    /// </summary>
     [Fact]
     public void LeadingReturnTypeOnExternParses()
     {
@@ -275,9 +218,6 @@ public class ParserDiagnosticsTests
         Assert.Equal("func(int)->int", op.ReturnType?.ToSpecString());
     }
 
-    /// <summary>
-    /// Assignments remain valid in the for-loop init clause; only the step rejects them.
-    /// </summary>
     [Fact]
     public void AssignmentInForInitStillParses()
     {
@@ -285,9 +225,6 @@ public class ParserDiagnosticsTests
         Assert.IsType<FuncDecl>(prog.Items[0]);
     }
 
-    /// <summary>
-    /// Postfix increment and decrement remain valid for-loop steps.
-    /// </summary>
     [Theory]
     [InlineData("func F() { for (let int i = 0; i < 5; i++) { } }")]
     [InlineData("func F() { for (let int i = 5; i > 0; i--) { } }")]

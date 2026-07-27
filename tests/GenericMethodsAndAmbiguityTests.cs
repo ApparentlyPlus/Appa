@@ -54,10 +54,6 @@ public class GenericMethodsAndAmbiguityTests
 
     #region Generic methods
 
-    /// <summary>
-    /// A generic method on a module is monomorphized per call site, callable as an ordinary
-    /// qualified module call - the shape Algorithms.g now uses for Min/Max.
-    /// </summary>
     [Fact]
     public void GenericModuleMethodCompilesForMultipleInstantiations()
     {
@@ -72,9 +68,6 @@ public class GenericMethodsAndAmbiguityTests
             """);
     }
 
-    /// <summary>
-    /// A generic method on a class can be static, resolved the same way as a module method.
-    /// </summary>
     [Fact]
     public void GenericStaticClassMethodCompiles()
     {
@@ -124,10 +117,6 @@ public class GenericMethodsAndAmbiguityTests
             m => Assert.False(m.IsStatic));
     }
 
-    /// <summary>
-    /// A generic method can call a same-module/class generic sibling unqualified, mirroring
-    /// how ordinary sibling methods are already callable bare from inside their own class.
-    /// </summary>
     [Fact]
     public void GenericModuleMethodCallsGenericSiblingUnqualified()
     {
@@ -146,10 +135,6 @@ public class GenericMethodsAndAmbiguityTests
 
     #region AmbiguousCall (G069)
 
-    /// <summary>
-    /// A generic free function and a same-named sibling module method are equally plausible
-    /// bare-call candidates; silently picking the generic (the pre-fix behavior) is now an error.
-    /// </summary>
     [Fact]
     public void AmbiguousCallBetweenGenericFreeFunctionAndSiblingMethodIsRejected()
     {
@@ -162,9 +147,6 @@ public class GenericMethodsAndAmbiguityTests
             """);
     }
 
-    /// <summary>
-    /// Qualifying through the module's own name resolves the ambiguity cleanly.
-    /// </summary>
     [Fact]
     public void AmbiguousCallResolvedByQualifyingThroughModuleIsClean()
     {
@@ -177,10 +159,6 @@ public class GenericMethodsAndAmbiguityTests
             """, path: "collide.g");
     }
 
-    /// <summary>
-    /// Qualifying by the declaring file's basename resolves it too, for the case where no
-    /// module/self qualifier applies (the general escape hatch).
-    /// </summary>
     [Fact]
     public void AmbiguousCallResolvedByQualifyingThroughFileNameIsClean()
     {
@@ -193,10 +171,6 @@ public class GenericMethodsAndAmbiguityTests
             """, path: "collide.g");
     }
 
-    /// <summary>
-    /// Two different in-scope files each publicly declaring a same-named generic free
-    /// function is a genuine cross-file ambiguity (previously silent last-write-wins).
-    /// </summary>
     [Fact]
     public void AmbiguousCallAcrossTwoFilesPubliclyDeclaringSameGenericIsRejected()
     {
@@ -207,9 +181,6 @@ public class GenericMethodsAndAmbiguityTests
         Assert.Contains(diag.All, d => d.Severity == Severity.Error && d.Code == Codes.AmbiguousCall);
     }
 
-    /// <summary>
-    /// Qualifying by file name still resolves the cross-file collision.
-    /// </summary>
     [Fact]
     public void FileNamespaceQualifiedCallResolvesCrossFileCollision()
     {
@@ -225,10 +196,6 @@ public class GenericMethodsAndAmbiguityTests
 
     #region Privacy/scope gating for generic templates
 
-    /// <summary>
-    /// Two files each declaring their own private generic under the same name must not
-    /// clobber one another - each file's bare call resolves to its own version.
-    /// </summary>
     [Fact]
     public void PrivateGenericFunctionsInDifferentFilesDoNotClobberEachOther()
     {
