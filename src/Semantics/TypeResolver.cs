@@ -98,6 +98,11 @@ internal sealed class TypeResolver(
     // EmitArrayTypes runs over distinct entries rather than one per syntactic occurrence.
     private readonly List<IrArrayType> _arrays = [];
     private readonly HashSet<string> _arraysSeen = [];
+
+    // Process names seen across the whole build. Processes live outside the symbol table,
+    // so this is the only thing standing between two same-named processes and a duplicate
+    // C function definition.
+    private readonly HashSet<string> _processNames = [];
     private int _tmpSeq;
 
     /// <summary>
@@ -237,8 +242,24 @@ internal sealed class TypeResolver(
     {
         var seen = new HashSet<string>();
         foreach (var p in ps)
+        {
             if (!seen.Add(p.Name))
                 diag.Error(Codes.DuplicateName, ctx.File, p.Span, $"duplicate parameter '{p.Name}'");
+            CheckNotReservedLocal(p.Name, p.Span, "parameter", ctx);
+        }
+    }
+
+    /// <summary>
+    /// Rejects a local or parameter name that the compiler also generates for its own
+    /// temporaries. Both would be emitted verbatim into the same C scope, so the two
+    /// declarations would collide, and no renaming rule can separate them after the fact.
+    /// </summary>
+    private void CheckNotReservedLocal(string name, TextSpan span, string what, ResolveCtx ctx)
+    {
+        if (!Mangler.IsReservedLocal(name)) return;
+        diag.Error(Codes.DuplicateName, ctx.File, span,
+            $"'{name}' is reserved for compiler-generated {what}s",
+            ["pick another name; this shape is used for the temporaries lowering introduces"]);
     }
 
     /// <summary>
@@ -983,6 +1004,92 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
+    /// Whole-body backstop for throws placement, run once per resolved function body.
+    ///
+    /// ForbidNestedThrows is opt-in: every expression position that must reject a nested
+    /// throwing call has to remember to call it, and a position nobody thought of (a
+    /// switch case label, say) lets an IrThrowsCall or IrCatchCall reach the emitter,
+    /// which has no case for either and dies. This walk is opt-out instead - it visits
+    /// the entire body and reports anything that is not in one of the two positions the
+    /// language actually permits, so a new expression form cannot silently open the hole
+    /// back up.
+    ///
+    /// Diagnostics already reported at the same span by ForbidNestedThrows are skipped,
+    /// so the precise per-site message stays the one the user sees.
+    /// </summary>
+    private void CheckThrowsPlacement(IrBlock body, ResolveCtx ctx)
+    {
+        new ThrowsPlacementCheck(diag, ctx.File).Check(body);
+    }
+
+    /// <summary>
+    /// The walker behind CheckThrowsPlacement. Statements reached through WalkStmt route
+    /// their one legal root slot - a variable initializer or a bare expression statement -
+    /// through WalkRoot, which permits a throwing call there and keeps checking below it.
+    /// Every other path lands in WalkExpr, where a throwing call is by definition nested.
+    /// </summary>
+    private sealed class ThrowsPlacementCheck(DiagnosticBag diag, string file) : IrWalker
+    {
+        /// <summary>Walks a resolved function body, reporting every misplaced throwing call.</summary>
+        public void Check(IrBlock body) => WalkStmt(body);
+
+        protected override void WalkStmt(IrStmt s)
+        {
+            switch (s)
+            {
+                case IrDeclVar { Init: not null } d: WalkRoot(d.Init); break;
+                case IrExprStmt e: WalkRoot(e.Expr); break;
+                default: base.WalkStmt(s); break;
+            }
+        }
+
+        /// <summary>
+        /// Visits an expression in a position where a throwing call is legal, then keeps
+        /// walking its children, where one no longer is.
+        /// </summary>
+        private void WalkRoot(IrExpr e)
+        {
+            switch (e)
+            {
+                case IrCatchCall cc: WalkRoot(cc.Call); WalkStmt(cc.Handler); break;
+                case IrThrowsCall tc: foreach (var a in tc.Args) WalkExpr(a); break;
+                case IrThrowsInstanceCall ti:
+                    WalkExpr(ti.Recv);
+                    foreach (var a in ti.Args) WalkExpr(a);
+                    break;
+                default: WalkExpr(e); break;
+            }
+        }
+
+        protected override void WalkExpr(IrExpr e)
+        {
+            switch (e)
+            {
+                case IrThrowsCall or IrThrowsInstanceCall:
+                    Report(e.Span, "throwing call cannot appear inside a larger expression", null);
+                    break;
+                case IrCatchCall:
+                    Report(e.Span,
+                        "a 'catch' handler must cover a whole declaration or statement, not a call nested inside a larger expression",
+                        ["bind the call to its own local first, then use that local here"]);
+                    break;
+            }
+            base.WalkExpr(e);
+        }
+
+        /// <summary>
+        /// Reports the error unless the per-site check already produced one at this span,
+        /// which would otherwise print the same complaint twice.
+        /// </summary>
+        private void Report(TextSpan span, string message, string[]? hints)
+        {
+            foreach (var d in diag.All)
+                if (d.Code == Codes.ThrowsOutsideTry && d.Loc.Span == span) return;
+            diag.Error(Codes.ThrowsOutsideTry, file, span, message, hints);
+        }
+    }
+
+    /// <summary>
     /// Reports ThrowsOutsideTry when a throwing call is nested inside a non-statement expression.
     /// The allowRoot flag permits the call itself at the top of the expression tree.
     /// </summary>
@@ -1224,19 +1331,38 @@ internal sealed class TypeResolver(
         private readonly Dictionary<string, IrType> _vars;
         private readonly HashSet<string> _refs;
 
+        // True for the scope a function's parameters are declared in. It is the one scope
+        // with no matching pair of braces in the emitted C: parameters and the body's
+        // top-level locals share the function's compound statement, so a local that
+        // shadows a parameter is a redeclaration there rather than a new binding.
+        private readonly bool _isParams;
+
         /// <summary>
         /// Constructs a root scope with no parent.
         /// </summary>
         public ScopeStack() { _parent = null; _vars = []; _refs = []; }
 
-        private ScopeStack(ScopeStack parent) { _parent = parent; _vars = []; _refs = []; }
+        private ScopeStack(ScopeStack parent, bool isParams)
+        {
+            _parent = parent; _vars = []; _refs = []; _isParams = isParams;
+        }
 
         /// <summary>
-        /// Creates a child scope nested inside this one.
+        /// Creates a child scope nested inside this one. Set isParams for the scope holding
+        /// a function's parameters.
         /// </summary>
-        public ScopeStack Push()
+        public ScopeStack Push(bool isParams = false)
         {
-            return new(this);
+            return new(this, isParams);
+        }
+
+        /// <summary>
+        /// Returns true when declaring the name here would collide with a parameter of the
+        /// enclosing function rather than shadow it, because both land in the same C scope.
+        /// </summary>
+        public bool CollidesWithParam(string name)
+        {
+            return _parent is { _isParams: true } p && p._vars.ContainsKey(name);
         }
 
         /// <summary>
@@ -1400,9 +1526,9 @@ internal sealed class TypeResolver(
         /// <summary>
         /// Returns a context with a new child scope pushed.
         /// </summary>
-        public ResolveCtx PushScope()
+        public ResolveCtx PushScope(bool isParams = false)
         {
-            return this with { Scope = Scope.Push() };
+            return this with { Scope = Scope.Push(isParams) };
         }
     }
 
@@ -1697,12 +1823,12 @@ internal sealed class TypeResolver(
 
         string cname = Mangler.Method(cls, md.Name, md.Params, sym.IsOverloadedMethod(cls, md.Name));
         var mctx = ctx.WithClass(cls).WithFunc(md.Name).WithStatic(isStatic)
-            .WithThrowsFunc(md.Throws).PushScope();
+            .WithThrowsFunc(md.Throws).PushScope(isParams: true);
         if (!isStatic) mctx.Scope.Declare("self", new IrClassRef(cls));
         foreach (var p in md.Params) mctx.Scope.Declare(p.Name, ResolveType(p.Type), p.IsRef);
         var (body, native) = ResolveBodyOrNative(md.Body, mctx, ret);
         CheckMissingReturn(body, ret, md.Throws, md.Span, $"{Mangler.DisplayName(cls)}.{md.Name}", ctx);
-        if (body != null) CheckBodyQuality(body, ret, md.Span, ctx, md.Params, md.Span);
+        if (body != null) { CheckBodyQuality(body, ret, md.Span, ctx, md.Params, md.Span); CheckThrowsPlacement(body, mctx); }
         return new IrFunction(md.Name, cname, ret, pars, isStatic, md.IsEntry, md.Throws, lib, vis,
             cls, body, native, [..md.Annotations]);
     }
@@ -1755,12 +1881,12 @@ internal sealed class TypeResolver(
         }
 
         string cname = Mangler.Operator(cls, od.Op, od.Params, sym.IsOverloadedOperator(cls, od.Op));
-        var octx = ctx.WithClass(cls).WithFunc($"op_{Mangler.OpSuffix(od.Op)}").WithStatic(isAs).PushScope();
+        var octx = ctx.WithClass(cls).WithFunc($"op_{Mangler.OpSuffix(od.Op)}").WithStatic(isAs).PushScope(isParams: true);
         if (!isAs) octx.Scope.Declare("self", new IrClassRef(cls));
         foreach (var p in od.Params) octx.Scope.Declare(p.Name, ResolveType(p.Type), p.IsRef);
         var (body, native) = ResolveBodyOrNative(od.Body, octx, ret);
         CheckMissingReturn(body, ret, false, od.Span, $"operator {od.Op} on {Mangler.DisplayName(cls)}", ctx);
-        if (body != null) CheckBodyQuality(body, ret, od.Span, ctx, od.Params, od.Span);
+        if (body != null) { CheckBodyQuality(body, ret, od.Span, ctx, od.Params, od.Span); CheckThrowsPlacement(body, octx); }
 
         return new IrOperator(od.Op, cname, ret, pars, cls, lib, vis, body, native, IsStatic: isAs);
     }
@@ -1802,11 +1928,11 @@ internal sealed class TypeResolver(
             ? Mangler.PrivateFreeFunc(Mangler.FileToken(ctx.File), fd.Name, fd.Params,
                 sym.PrivateFuncOverloads(ctx.File, fd.Name).Count > 1)
             : Mangler.FreeFunc(fd.Name, fd.Params, sym.IsOverloadedFunc(fd.Name), fd.IsEntry, isExtern: false);
-        var fctx = ctx.WithFunc(fd.Name).WithStatic(true).WithThrowsFunc(fd.Throws).PushScope();
+        var fctx = ctx.WithFunc(fd.Name).WithStatic(true).WithThrowsFunc(fd.Throws).PushScope(isParams: true);
         foreach (var p in fd.Params) fctx.Scope.Declare(p.Name, ResolveType(p.Type), p.IsRef);
         var (body, native) = ResolveBodyOrNative(fd.Body, fctx, ret);
         CheckMissingReturn(body, ret, fd.Throws, fd.Span, fd.Name, ctx);
-        if (body != null) CheckBodyQuality(body, ret, fd.Span, ctx, fd.Params, fd.Span);
+        if (body != null) { CheckBodyQuality(body, ret, fd.Span, ctx, fd.Params, fd.Span); CheckThrowsPlacement(body, fctx); }
 
         return new IrFunction(fd.Name, cname, ret, pars, true, fd.IsEntry, fd.Throws, lib, vis,
             null, body, native, [..fd.Annotations]);
@@ -1831,13 +1957,25 @@ internal sealed class TypeResolver(
     private IrProcess ResolveProcess(ProcessDecl pd, ResolveCtx ctx)
     {
         var vis = VisOf(ctx.Context);
+
+        // Process and thread names are not symbols, so nothing upstream deduplicates
+        // them, but both are mangled into C function names (gata_<process>_<thread>_main).
+        // A repeat would emit that function twice and fail at the C compiler instead of here.
+        if (!_processNames.Add(pd.Name))
+            diag.Error(Codes.DuplicateName, ctx.File, pd.Span,
+                $"process '{pd.Name}' is already declared");
+
         var threads = new List<IrThread>(pd.Threads.Length);
+        var seenThreads = new HashSet<string>();
         for (int i = 0; i < pd.Threads.Length; i++)
         {
             var td = pd.Threads[i];
             if (td.Mode != null)
                 diag.Error(Codes.ThreadModeNotAllowed, ctx.File, td.Span,
                     $"thread '{td.Name}' has explicit mode '{td.Mode}'; threads do not support 'foreground' or 'background' modifiers");
+            if (!seenThreads.Add(td.Name))
+                diag.Error(Codes.DuplicateName, ctx.File, td.Span,
+                    $"thread '{td.Name}' is already declared in process '{pd.Name}'");
             string tFull = $"{pd.Name}_{td.Name}";
             threads.Add(new IrThread(td.Name, tFull, ResolveThreadEntry(tFull, td.Entry, ctx, vis)));
         }
@@ -1860,10 +1998,11 @@ internal sealed class TypeResolver(
             pars.Add(new IrParam(p.Name, ResolveType(p.Type)));
         }
 
-        var fctx = ctx.WithStatic(true).PushScope();
+        var fctx = ctx.WithStatic(true).PushScope(isParams: true);
         foreach (var p in ef.Params) fctx.Scope.Declare(p.Name, ResolveType(p.Type));
         var body = ResolveBlock(ef.Body, fctx, IrType.Void);
         CheckBodyQuality(body, IrType.Void, ef.Span, ctx, ef.Params, ef.Span);
+        CheckThrowsPlacement(body, fctx);
         return new IrFunction(fullName, Mangler.ThreadEntry(fullName), IrType.Void, pars, true, true, false,
             false, vis, null, body, null, []);
     }
@@ -1995,8 +2134,10 @@ internal sealed class TypeResolver(
         {
             var (fd, file, context, binds, mangled) = _genericQueue.Dequeue();
             var cMap = binds.ToDictionary(kv => kv.Key, kv => Monomorphizer.CTypeOf(kv.Value));
+            var instRet = Monomorphizer.SubType(fd.ReturnType, binds);
+            if (fd.Throws) sym.RegisterThrows(instRet);
             var inst = new FuncDecl(fd.Modifiers, fd.Annotations,
-                Monomorphizer.SubType(fd.ReturnType, binds), mangled, [],
+                instRet, mangled, [],
                 [..Monomorphizer.SubParams(fd.Params, binds)], fd.IsEntry, fd.Throws,
                 Monomorphizer.SubBody(fd.Body, binds, cMap), fd.Span);
             _scope = visible.GetValueOrDefault(file, [file]);
@@ -2008,8 +2149,10 @@ internal sealed class TypeResolver(
         {
             var (md, owner, file, context, binds, mangled) = _genericMethodQueue.Dequeue();
             var cMap = binds.ToDictionary(kv => kv.Key, kv => Monomorphizer.CTypeOf(kv.Value));
+            var instMethodRet = Monomorphizer.SubType(md.ReturnType, binds);
+            if (md.Throws) sym.RegisterThrows(instMethodRet);
             var inst = new MethodDecl(md.Modifiers, md.Annotations,
-                Monomorphizer.SubType(md.ReturnType, binds), mangled, [],
+                instMethodRet, mangled, [],
                 [..Monomorphizer.SubParams(md.Params, binds)], md.IsEntry, md.Throws,
                 Monomorphizer.SubBody(md.Body, binds, cMap), md.Span);
             _scope = visible.GetValueOrDefault(file, [file]);
@@ -2060,6 +2203,13 @@ internal sealed class TypeResolver(
     /// </summary>
     private IrEnum ResolveEnum(EnumDecl ed, ResolveCtx ctx)
     {
+        // "typedef enum { } E;" is a constraint violation in C, so an enum with no
+        // members has to be rejected here rather than surfacing as a gcc error later.
+        if (ed.Members.Length == 0)
+            diag.Error(Codes.BadDeclHeader, ctx.File, ed.Span,
+                $"enum '{ed.Name}' declares no members",
+                ["an enum needs at least one member, e.g. 'enum " + ed.Name + " { First }'"]);
+
         var members = new List<(string, string?)>();
         var seen = new HashSet<string>();
         var values = new Dictionary<string, long>();
@@ -2144,11 +2294,33 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Resolves a union declaration to its IR form.
-    /// Variant fields must be unmanaged value types; class references are rejected.
+    /// Returns true if union <paramref name="from"/> stores a value of union
+    /// <paramref name="target"/> in any variant, directly or through other unions.
+    /// Only by-value fields count: a pointer to a union is a fixed-size field and breaks
+    /// the cycle. <paramref name="visited"/> keeps a union graph that is already cyclic
+    /// from looping here forever.
     /// </summary>
+    private bool UnionContains(string from, string target, HashSet<string> visited)
+    {
+        if (from == target) return true;
+        if (!visited.Add(from)) return false;
+        if (sym.UnionDef(from) is not { } variants) return false;
+        foreach (var v in variants)
+            foreach (var f in v.Fields)
+                if (f.Type is NamedSpec ns && UnionContains(ns.Name, target, visited))
+                    return true;
+        return false;
+    }
+
     private IrUnion ResolveUnion(UnionDecl ud, ResolveCtx ctx)
     {
+        // Same reasoning as the empty-enum check: a union with no variants lowers to an
+        // empty tag enum and an empty payload union, neither of which is legal C.
+        if (ud.Variants.Length == 0)
+            diag.Error(Codes.BadDeclHeader, ctx.File, ud.Span,
+                $"union '{ud.Name}' declares no variants",
+                ["a union needs at least one variant, e.g. 'union " + ud.Name + " { First }'"]);
+
         var variants = new List<IrUnionVariant>();
         var seen = new HashSet<string>();
         foreach (var v in ud.Variants)
@@ -2157,6 +2329,10 @@ internal sealed class TypeResolver(
                 diag.Error(Codes.DuplicateName, ctx.File, v.Span,
                     $"union '{ud.Name}' already declares a variant '{v.Name}'");
             var fields = new List<IrParam>();
+            // A variant's fields become one C struct, so two of the same name would emit
+            // two members with one name - rejected by the C compiler, not by us, unless
+            // this catches it first.
+            var seenFields = new HashSet<string>();
             foreach (var f in v.Fields)
             {
                 CheckType(f.Type, ctx, f.Span);
@@ -2164,6 +2340,15 @@ internal sealed class TypeResolver(
                 if (ft is IrClassRef)
                     diag.Error(Codes.TypeMismatch, ctx.File, f.Span,
                         $"union variant field '{f.Name}' has type '{Describe(ft)}', but union variant fields must be unmanaged value types (no String/class types)");
+                if (!seenFields.Add(f.Name))
+                    diag.Error(Codes.DuplicateName, ctx.File, f.Span,
+                        $"variant '{v.Name}' already declares a field '{f.Name}'");
+                if (f.Type is NamedSpec ns && UnionContains(ns.Name, ud.Name, []))
+                    diag.Error(Codes.TypeMismatch, ctx.File, f.Span,
+                        ns.Name == ud.Name
+                            ? $"variant field '{f.Name}' has type '{ud.Name}', the union being declared; a union cannot contain itself by value"
+                            : $"variant field '{f.Name}' has type '{ns.Name}', which contains '{ud.Name}' by value; the two would have no size",
+                        ["store a pointer, or split the recursive part into a class"]);
                 fields.Add(new IrParam(f.Name, ft));
             }
             variants.Add(new IrUnionVariant(v.Name, Mangler.UnionTag(ud.Name, v.Name), fields));
@@ -2346,6 +2531,12 @@ internal sealed class TypeResolver(
                 // block inside another defer's body
                 if (ctx.InDefer)
                     diag.Error(Codes.DeferTransfer, ctx.File, ds.Span, "a 'defer' body cannot itself 'defer'");
+                // A bare 'defer let x = ...;' declares a local that nothing can ever read
+                if (ds.Action is LetStmt dlet)
+                    diag.Error(Codes.NoEffect, ctx.File, ds.Span,
+                        $"a 'defer' body cannot be a declaration; '{dlet.Name}' would go out of scope immediately",
+                        ["declare the variable before the 'defer' and use it in the deferred action",
+                         "or wrap the action in a block: 'defer { ... }'"]);
                 var dctx = ctx.WithDefer().PushScope();
                 return new IrDefer(ResolveStmt(ds.Action, dctx, retType));
             }
@@ -2684,8 +2875,14 @@ internal sealed class TypeResolver(
                 ["end every path with 'assign <value>;'",
                  "or leave the handler through 'return', 'throw', 'break', or 'continue'"]);
 
+        CheckNotReservedLocal(ls.Name, ls.Span, "variable", ctx);
         if (ctx.Scope.DeclaredHere(ls.Name))
             diag.Error(Codes.DuplicateName, ctx.File, ls.Span, $"'{ls.Name}' is already declared in this scope");
+        else if (ctx.Scope.CollidesWithParam(ls.Name))
+            diag.Error(Codes.DuplicateName, ctx.File, ls.Span,
+                $"'{ls.Name}' is already a parameter of this function",
+                ["a parameter and a top-level local share one scope; rename one of them",
+                 "shadowing is fine inside a nested block"]);
         else if (ctx.Scope.ShadowsOuter(ls.Name))
             diag.Warn(Codes.ShadowedVariable, ctx.File, ls.Span,
                 $"'{ls.Name}' shadows a variable of the same name from an enclosing scope",
@@ -2782,14 +2979,26 @@ internal sealed class TypeResolver(
                 CheckType(de.TypeName, ctx, de.Span);
                 return new IrDefault(ResolveType(de.TypeName));
             case AddrOfExpr ao:
+            {
                 if (!ctx.InUnsafe)
                     diag.Error(Codes.UnsafeRequired, ctx.File, ao.Span, "address-of '&' requires an 'unsafe' block");
-                return new IrAddrOf(ResolveExpr(ao.Target, ctx));
+                var target = ResolveExpr(ao.Target, ctx);
+                if (target is not (IrVar or IrFieldLoad or IrIndex or IrDeref or IrSelfExpr))
+                    diag.Error(Codes.NotAnLvalue, ctx.File, ao.Span,
+                        "address-of '&' needs a variable, field, or element; this operand has no address",
+                        ["bind the value to a local first, then take its address"]);
+                return new IrAddrOf(target);
+            }
             case DerefExpr dr:
             {
                 if (!ctx.InUnsafe)
                     diag.Error(Codes.UnsafeRequired, ctx.File, dr.Span, "pointer dereference '*' requires an 'unsafe' block");
                 var ptr = ResolveExpr(dr.Ptr, ctx);
+                // Without this the non-pointer case silently produces a void-typed deref,
+                // which reaches the emitter as "(*n)" over an int.
+                if (ptr.Type is not IrPtrType)
+                    diag.Error(Codes.TypeMismatch, ctx.File, dr.Span,
+                        $"pointer dereference '*' requires a pointer, got '{Describe(ptr.Type)}'");
                 var inner = ptr.Type is IrPtrType pt ? pt.Inner : IrType.Void;
                 return new IrDeref(ptr, inner);
             }
@@ -2969,6 +3178,14 @@ internal sealed class TypeResolver(
         if (!(IsArith(left.Type) && IsArith(right.Type)))
             diag.Error(Codes.TypeMismatch, ctx.File, be.Span,
                 $"operator '{be.Op.Sym()}' cannot be applied to '{Describe(left.Type)}' and '{Describe(right.Type)}'");
+
+        // C's '%' is defined on integers only - there is no floating-point remainder
+        // operator - so a double operand lowers to C that the compiler rejects outright.
+        if (be.Op == BinOp.Mod && IsArith(left.Type) && IsArith(right.Type)
+            && !(IsInteger(left.Type) && IsInteger(right.Type)))
+            diag.Error(Codes.TypeMismatch, ctx.File, be.Span,
+                $"operator '%' requires integer operands, got '{Describe(left.Type)}' and '{Describe(right.Type)}'",
+                ["for a floating-point remainder, call the library's Math function instead"]);
 
         // An integer divisor that is literally zero traps at runtime on every target, so
         // there is no program for which this is correct. Reject it at compile time.
@@ -3162,6 +3379,14 @@ internal sealed class TypeResolver(
                 diag.Error(Codes.UndefinedVariable, ctx.File, ma.Span,
                     $"'{Mangler.DisplayName(cls)}' has no field '{ma.Member}'");
         }
+        else
+        {
+            // Nothing but a class (or a pointer to one) has fields. Without this the
+            // member load is built anyway and typed 'int', and the emitter prints
+            // "1->Length" - rejected by the C compiler rather than here.
+            diag.Error(Codes.UndefinedVariable, ctx.File, ma.Span,
+                $"'{Describe(obj.Type)}' has no member '{ma.Member}'; only class types have fields");
+        }
         return new IrFieldLoad(obj, ma.Member, fieldType);
     }
 
@@ -3189,6 +3414,10 @@ internal sealed class TypeResolver(
             else if (argIsRef)
             {
                 CheckLValue(args[i], ctx);
+                if (args[i].Type != pt)
+                    diag.Error(Codes.RefArgMismatch, ctx.File, astArgs[i].Span,
+                        $"'ref' argument {i + 1} must be exactly '{Describe(pt)}', got '{Describe(args[i].Type)}'",
+                        ["a 'ref' parameter takes the variable's address, so no conversion can apply"]);
                 args[i] = new IrAddrOf(args[i]);
             }
         }
@@ -3423,6 +3652,19 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
+    /// Reports a type error unless the subscript of a fixed-array or pointer index is an
+    /// integer. Only the operator-'[]' path type-checks its index, against the declared
+    /// parameter type; raw array and pointer indexing lowers straight to C "a[i]", so a
+    /// bool, a class reference, or a void call used to reach the C compiler as a subscript.
+    /// </summary>
+    private void CheckIndexIsInteger(IrExpr idx, ResolveCtx ctx, TextSpan span)
+    {
+        if (IsInteger(idx.Type) || idx.Type is IrEnumType) return;
+        diag.Error(Codes.TypeMismatch, ctx.File, span,
+            $"index must be an integer, got '{Describe(idx.Type)}'");
+    }
+
+    /// <summary>
     /// Resolves an index expression, dispatching to the class operator [] overload,
     /// fixed-array element access, or unsafe pointer indexing.
     /// </summary>
@@ -3451,6 +3693,7 @@ internal sealed class TypeResolver(
             diag.Error(Codes.IndexOnNonCollection, ctx.File, ix.Span, $"'{Describe(obj.Type)}' cannot be indexed");
             elem = IrType.Int;
         }
+        CheckIndexIsInteger(idx, ctx, ix.Index.Span);
         return new IrIndex(obj, idx, elem);
     }
 
@@ -3535,6 +3778,7 @@ internal sealed class TypeResolver(
             diag.Error(Codes.IndexOnNonCollection, ctx.File, ixt.Span, $"'{Describe(obj.Type)}' cannot be indexed");
             elem = IrType.Int;
         }
+        CheckIndexIsInteger(idx, ctx, ixt.Index.Span);
         var val = ResolveExpr(asgn.Value, ctx);
         if (asgn.Op == AssignOp.Assign)
         {

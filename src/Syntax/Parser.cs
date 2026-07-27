@@ -1631,8 +1631,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     /// Parses a 'new' expression. After the type spec, an optional '(' constructor arg list
     /// and an optional collection initializer (either '{' or '[' delimited) may each follow,
     /// independently of one another - 'new Foo(args) { init }' is legal. A bare 'new Type'
-    /// with neither is valid for fixed-size array types like '[5]char' that carry their size
-    /// in the type string.
+    /// with neither parses too; the type resolver decides what that means, and rejects it
+    /// with NewOnNonClass for anything that is not a class.
     /// </summary>
     private NewExpr ParseNewExpr(int s)
     {

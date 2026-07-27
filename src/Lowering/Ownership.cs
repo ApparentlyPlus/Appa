@@ -33,8 +33,9 @@ internal sealed class Ownership(IrModule module)
     /// Deliberately silent, and the silence is load bearing. BuildModule (and therefore this
     /// pass) legitimately runs over stdlib free input, SingleFileCompile checks an import-free
     /// source string with no libgata at all, so an unbound ARC role here does not by itself
-    /// mean a broken build. The emitter reports MissingIntrinsic for alloc/obj_init/obj_header
-    /// and, when a class owns managed fields, release; those are the points a real build fails.
+    /// mean a broken build. A real build always imports libgata, which declares String and
+    /// therefore a non-module class, so Pipeline.ValidateIntrinsics requires the whole ARC
+    /// role set before emission and reports G019 there if any of it is unbound.
     /// </summary>
     private static string Role(IrModule m, string role)
     {
@@ -333,10 +334,15 @@ internal sealed class Ownership(IrModule module)
     /// <summary>
     /// Releases all frames from innermost outward, stopping after the first frame where stopAfter returns true.
     /// Used by early-exit statements such as return, break, and throw.
+    ///
+    /// The frame stack is snapshotted first because ReleaseFrame re-lowers deferred
+    /// actions, and a block-bodied 'defer { ... }' lowers through LowerBlock, which
+    /// pushes and pops a frame. Iterating the live stack instead would invalidate the
+    /// enumerator on the first such defer.
     /// </summary>
     private void ReleaseForExit(List<IrStmt> outs, Func<Frame, bool> stopAfter)
     {
-        foreach (var f in _frames)
+        foreach (var f in _frames.ToArray())
         {
             ReleaseFrame(f, outs);
             if (stopAfter(f)) break;

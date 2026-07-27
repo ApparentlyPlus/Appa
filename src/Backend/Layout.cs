@@ -90,7 +90,7 @@ internal static class Layout
     private static string Concat(string name, string s1, string s2, string s3, string s4, string s5 = "")
     {
         var sb = new System.Text.StringBuilder();
-        sb.Append(Finesse.GenerateKewlHeader(name))
+        sb.Append(Finesse.GenerateKewlHeader(name)).Append('\n')
           .Append(s1).Append('\n')
           .Append(s2).Append('\n')
           .Append(s3).Append('\n')

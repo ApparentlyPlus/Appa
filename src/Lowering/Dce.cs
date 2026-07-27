@@ -57,6 +57,14 @@ internal sealed class Dce(IrModule m) : IrWalker
         foreach (var role in new[] { Roles.Alloc, Roles.Retain, Roles.Release, Roles.ObjInit })
             if (m.Symbols.IntrinsicOrNull(role) is { } cn) Ref(cn);
 
+        // Unions are emitted whole and never pruned, so every type stored in a variant is
+        // live by definition. Without this the payload struct still names, say, an
+        // Arr_int_4 whose typedef was dropped for having no reference from live code.
+        foreach (var u in m.Unions)
+            foreach (var v in u.Variants)
+                foreach (var f in v.Fields)
+                    MarkType(f.Type);
+
         // @keep is the explicit escape hatch for symbols reachable only through native text.
         foreach (var c in m.Classes) if (c.Keep) Root(new UnitKey(c.Name, false));
         foreach (var f in m.FreeFunctions) if (f.Annotations.Any(a => a is KeepAnnotation)) Root(new UnitKey(f.CName, true));

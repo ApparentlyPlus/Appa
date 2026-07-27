@@ -66,9 +66,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     {
         EmitForwardTypedefs();
         EmitEnums();
-        EmitUnions();
-        EmitFuncPtrTypedefs();
-        EmitArrayTypes();
+        EmitAggregateTypes();
         EmitIntrinsicProtos();
         EmitResultTypedefs();
 
@@ -157,51 +155,46 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     }
 
     /// <summary>
-    /// Emits a tagged-union struct for every declared Gata union type into the shared header.
-    /// Each union becomes a tag integer plus a C union of per-variant payload structs.
+    /// Emits one tagged-union struct into the shared header: a tag integer plus a C union
+    /// of per-variant payload structs. Called by EmitAggregateTypes once every type this
+    /// union stores by value is already defined.
     /// </summary>
-    private void EmitUnions()
+    private void EmitUnion(IrUnion u)
     {
-        var unions = CollectionsMarshal.AsSpan(module.Unions);
-        for (int i = 0; i < unions.Length; i++)
+        using (_sharedH.Block("typedef struct {", $"}} {u.CName};"))
         {
-            var u = unions[i];
-            using (_sharedH.Block("typedef struct {", $"}} {u.CName};"))
+            _sharedH.Line("int __tag;");
+
+            bool hasFields = false;
+            var variants = CollectionsMarshal.AsSpan(u.Variants);
+            for (int j = 0; j < variants.Length; j++)
             {
-                _sharedH.Line("int __tag;");
-                
-                bool hasFields = false;
-                var variants = CollectionsMarshal.AsSpan(u.Variants);
-                for (int j = 0; j < variants.Length; j++)
+                if (variants[j].Fields.Count > 0) { hasFields = true; break; }
+            }
+
+            if (hasFields)
+            {
+                using (_sharedH.Block("union {", "} payload;"))
                 {
-                    if (variants[j].Fields.Count > 0) { hasFields = true; break; }
-                }
-                
-                if (hasFields)
-                {
-                    using (_sharedH.Block("union {", "} payload;"))
+                    for (int j = 0; j < variants.Length; j++)
                     {
-                        for (int j = 0; j < variants.Length; j++)
+                        var v = variants[j];
+                        if (v.Fields.Count == 0) continue;
+
+                        var sb = new System.Text.StringBuilder();
+                        sb.Append("struct { ");
+                        var fields = CollectionsMarshal.AsSpan(v.Fields);
+                        for (int k = 0; k < fields.Length; k++)
                         {
-                            var v = variants[j];
-                            if (v.Fields.Count == 0) continue;
-                            
-                            var sb = new System.Text.StringBuilder();
-                            sb.Append("struct { ");
-                            var fields = CollectionsMarshal.AsSpan(v.Fields);
-                            for (int k = 0; k < fields.Length; k++)
-                            {
-                                var f = fields[k];
-                                sb.Append(f.Type.ToCType()).Append(' ').Append(f.Name).Append("; ");
-                            }
-                            sb.Append("} ").Append(v.Name).Append(';');
-                            _sharedH.Line(sb.ToString());
+                            var f = fields[k];
+                            sb.Append(f.Type.ToCType()).Append(' ').Append(f.Name).Append("; ");
                         }
+                        sb.Append("} ").Append(v.Name).Append(';');
+                        _sharedH.Line(sb.ToString());
                     }
                 }
             }
         }
-        if (module.Unions.Count > 0) _sharedH.Line("");
     }
 
     #endregion
@@ -209,51 +202,12 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     #region Fixed-array types
 
     /// <summary>
-    /// Emits a C struct wrapper for each distinct fixed-array type used in the module.
-    /// Ordered by nesting depth so array-of-array element types are defined first.
+    /// Emits the C struct wrapper for one fixed-array type. Called by EmitAggregateTypes
+    /// once the element type is already defined.
     /// </summary>
-    private void EmitArrayTypes()
+    private void EmitArrayType(IrArrayType a)
     {
-        var list = new List<IrArrayType>(module.ArrayTypes.Count);
-        for (int i = 0; i < module.ArrayTypes.Count; i++)
-        {
-            var a = module.ArrayTypes[i];
-            if (a.Size > 0) list.Add(a);
-        }
-
-        if (list.Count == 0) return;
-
-        list.Sort(new ArrayTypeDepthComparer());
-
-        bool any = false;
-        var span = CollectionsMarshal.AsSpan(list);
-        for (int i = 0; i < span.Length; i++)
-        {
-            var a = span[i];
-            string cn = a.ToCType();
-            if (!FirstInto(_sharedH, 'S', cn)) continue;
-            _sharedH.Line($"typedef struct {{ {a.Elem.ToCType()} _[{a.Size}]; }} {cn};");
-            any = true;
-        }
-        if (any) _sharedH.Line("");
-    }
-
-    /// <summary>
-    /// Comparer to sort fixed-array types by their nesting depth.
-    /// </summary>
-    private struct ArrayTypeDepthComparer : IComparer<IrArrayType>
-    {
-        public readonly int Compare(IrArrayType? x, IrArrayType? y)
-        {
-            if (x == null) return y == null ? 0 : -1;
-            if (y == null) return 1;
-            return Depth(x).CompareTo(Depth(y));
-        }
-
-        private static int Depth(IrType t)
-        {
-            return t is IrArrayType a ? 1 + Depth(a.Elem) : 0;
-        }
+        _sharedH.Line($"typedef struct {{ {a.Elem.ToCType()} _[{a.Size}]; }} {a.ToCType()};");
     }
 
     #endregion
@@ -294,39 +248,107 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     #region Function pointer types
 
     /// <summary>
-    /// Emits a C function-pointer typedef for each distinct function-pointer type used in
-    /// the module. Emitted after enums, unions, and array types so any referenced types
-    /// are already visible.
+    /// Emits the C typedef for one function-pointer type. Called by EmitAggregateTypes
+    /// once every type named in the signature is already defined.
     /// </summary>
-    private void EmitFuncPtrTypedefs()
+    private void EmitFuncPtrType(IrFuncPtrType f)
     {
-        bool any = false;
-        var funcPtrs = CollectionsMarshal.AsSpan(module.FuncPtrTypes);
-        for (int i = 0; i < funcPtrs.Length; i++)
+        var sb = new System.Text.StringBuilder();
+        sb.Append("typedef ").Append(f.Ret.ToCType()).Append(" (*").Append(f.ToCType()).Append(")(");
+        if (f.Params.Count == 0)
         {
-            var f = funcPtrs[i];
-            string cn = f.ToCType();
-            if (!FirstInto(_sharedH, 'F', cn)) continue;
-
-            var sb = new System.Text.StringBuilder();
-            sb.Append("typedef ").Append(f.Ret.ToCType()).Append(" (*").Append(cn).Append(")(");
-            if (f.Params.Count == 0)
-            {
-                sb.Append("void");
-            }
-            else
-            {
-                for (int j = 0; j < f.Params.Count; j++)
-                {
-                    if (j > 0) sb.Append(", ");
-                    sb.Append(f.Params[j].ToCType());
-                }
-            }
-            sb.Append(");");
-            _sharedH.Line(sb.ToString());
-            any = true;
+            sb.Append("void");
         }
+        else
+        {
+            for (int j = 0; j < f.Params.Count; j++)
+            {
+                if (j > 0) sb.Append(", ");
+                sb.Append(f.Params[j].ToCType());
+            }
+        }
+        sb.Append(");");
+        _sharedH.Line(sb.ToString());
+    }
+
+    #endregion
+
+    #region Aggregate type ordering
+
+    /// <summary>
+    /// Emits every fixed-array, function-pointer, and union typedef in dependency order.
+    ///
+    /// These three kinds can name each other: a union variant can hold a fixed array, a
+    /// fixed array can hold a union, a function-pointer signature can mention either. C
+    /// requires the named type to be complete at the point of use, so no fixed order over
+    /// the three groups is correct - emitting unions first breaks 'union U { A([4]int x) }',
+    /// emitting arrays first breaks '[4]U'. Each typedef is emitted only after everything
+    /// it names by value, computed per type rather than assumed per group.
+    ///
+    /// Classes are excluded because they are always used through a pointer and were already
+    /// forward-declared; enums are excluded because they depend on nothing and are emitted
+    /// before this runs.
+    /// </summary>
+    private void EmitAggregateTypes()
+    {
+        // cname -> the thing to emit under that name.
+        var pending = new Dictionary<string, object>();
+        foreach (var a in module.ArrayTypes)
+            if (a.Size > 0) pending.TryAdd(a.ToCType(), a);
+        foreach (var f in module.FuncPtrTypes) pending.TryAdd(f.ToCType(), f);
+        foreach (var u in module.Unions) pending.TryAdd(u.CName, u);
+
+        if (pending.Count == 0) return;
+
+        // Names currently on the DFS stack. A cycle among these types means a struct that
+        // contains itself, which the resolver already rejects; breaking here just stops
+        // this pass from recursing forever on IR it was handed anyway.
+        var visiting = new HashSet<string>();
+        bool any = false;
+        foreach (var name in pending.Keys.ToList()) any |= Emit(name);
         if (any) _sharedH.Line("");
+
+        bool Emit(string cname)
+        {
+            if (!pending.TryGetValue(cname, out var item)) return false;
+            if (!visiting.Add(cname)) return false;
+            foreach (var dep in DependenciesOf(item)) Emit(dep);
+            visiting.Remove(cname);
+
+            // Re-check: a cycle can bring us back here after the dependency walk.
+            if (!pending.Remove(cname)) return false;
+            switch (item)
+            {
+                case IrArrayType a: EmitArrayType(a); break;
+                case IrFuncPtrType f: EmitFuncPtrType(f); break;
+                case IrUnion u: EmitUnion(u); break;
+            }
+            FirstInto(_sharedH, 'S', cname);
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Yields the C type names an aggregate needs defined before it can be emitted:
+    /// its element type, its signature types, or its variant field types.
+    /// </summary>
+    private static IEnumerable<string> DependenciesOf(object item)
+    {
+        switch (item)
+        {
+            case IrArrayType a:
+                yield return a.Elem.ToCType();
+                break;
+            case IrFuncPtrType f:
+                yield return f.Ret.ToCType();
+                foreach (var p in f.Params) yield return p.ToCType();
+                break;
+            case IrUnion u:
+                foreach (var v in u.Variants)
+                    foreach (var fld in v.Fields)
+                        yield return fld.Type.ToCType();
+                break;
+        }
     }
 
     #endregion
@@ -620,7 +642,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
                     w.Line($"if (_o) _o->{f.Name} = {EmitExpr(init)};");
             if (cls.HasInit)
             {
-                var args = string.Join(", ", new[] { "_o" }.Concat((InitOf(cls)?.Params ?? []).Select(p => p.Name)));
+                var args = string.Join(", ", new[] { "_o" }.Concat((InitOf(cls)?.Params ?? []).Select(p => Mangler.Local(p.Name))));
                 w.Line($"if (_o) {InitOf(cls)!.CName}({args});");
             }
             w.Line("return _o;");
@@ -725,7 +747,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         {
             if (hasParams) sb.Append(", ");
             var p = m.Params[i];
-            sb.Append(ParamCType(p)).Append(' ').Append(p.Name);
+            sb.Append(ParamCType(p)).Append(' ').Append(Mangler.Local(p.Name));
             hasParams = true;
         }
         
@@ -753,7 +775,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         {
             var p = o.Params[i];
             if (needsComma) sb.Append(", ");
-            sb.Append(ParamCType(p)).Append(' ').Append(p.Name);
+            sb.Append(ParamCType(p)).Append(' ').Append(Mangler.Local(p.Name));
             needsComma = true;
         }
         sb.Append(')');
@@ -774,7 +796,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             {
                 if (i > 0) sb.Append(", ");
                 var p = init.Params[i];
-                sb.Append(ParamCType(p)).Append(' ').Append(p.Name);
+                sb.Append(ParamCType(p)).Append(' ').Append(Mangler.Local(p.Name));
             }
         }
         else
@@ -805,7 +827,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         {
             if (i > 0) sb.Append(", ");
             var p = fn.Params[i];
-            sb.Append(ParamCType(p)).Append(' ').Append(p.Name);
+            sb.Append(ParamCType(p)).Append(' ').Append(Mangler.Local(p.Name));
         }
         sb.Append(')');
         return sb.ToString();
@@ -974,10 +996,10 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// </summary>
     private void EmitDeclVar(IrDeclVar dv, CodeWriter w)
     {
-        if (dv.Init != null) { w.Line($"{dv.Type.ToCType()} {dv.Name} = {EmitExpr(dv.Init)};"); return; }
-        w.Line(dv.Type is IrArrayType or IrUnionType ? $"{dv.Type.ToCType()} {dv.Name} = {{0}};"
-             : IsManaged(dv.Type)                    ? $"{dv.Type.ToCType()} {dv.Name} = NULL;"
-             :                                          $"{dv.Type.ToCType()} {dv.Name};");
+        if (dv.Init != null) { w.Line($"{dv.Type.ToCType()} {Mangler.Local(dv.Name)} = {EmitExpr(dv.Init)};"); return; }
+        w.Line(dv.Type is IrArrayType or IrUnionType ? $"{dv.Type.ToCType()} {Mangler.Local(dv.Name)} = {{0}};"
+             : IsManaged(dv.Type)                    ? $"{dv.Type.ToCType()} {Mangler.Local(dv.Name)} = NULL;"
+             :                                         $"{dv.Type.ToCType()} {Mangler.Local(dv.Name)};");
     }
 
     /// <summary>
@@ -998,8 +1020,8 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         string init = fr.Init switch
         {
             IrDeclVar dv => dv.Init != null
-                ? $"{dv.Type.ToCType()} {dv.Name} = {EmitExpr(dv.Init)}"
-                : $"{dv.Type.ToCType()} {dv.Name}",
+                ? $"{dv.Type.ToCType()} {Mangler.Local(dv.Name)} = {EmitExpr(dv.Init)}"
+                : $"{dv.Type.ToCType()} {Mangler.Local(dv.Name)}",
             IrAssign aa  => $"{EmitExpr(aa.Target)} {aa.Op.Sym()} {EmitExpr(aa.Value)}",
             IrExprStmt e => EmitExpr(e.Expr),
             _            => ""
@@ -1035,7 +1057,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             IrLitString ls => $"GATA_STRLIT({IrType.String.ToCType().TrimEnd('*')}, {ls.Raw})",
             IrLitNull => "NULL",
             IrEnumConst ec => Mangler.EnumMember(ec.EnumName, ec.Member),
-            IrVar v => v.IsRef ? $"(*{v.Name})" : v.Name,
+            IrVar v => v.IsRef ? $"(*{Mangler.Local(v.Name)})" : Mangler.Local(v.Name),
             IrSelfExpr => "self",
 
             IrFieldLoad fl => fl.Obj.Type is IrUnionType or IrResultType
@@ -1048,8 +1070,8 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             IrInstanceCall ic => $"{ic.CName}({EmitArgs(ic.Args, EmitExpr(ic.Recv))})",
             IrBinOp bo => $"({EmitExpr(bo.Left)} {bo.Op.Sym()} {EmitExpr(bo.Right)})",
             IrTernary tn => $"({EmitExpr(tn.Cond)} ? {EmitExpr(tn.Then)} : {EmitExpr(tn.Else)})",
-            IrUnaryOp uo => $"{uo.Op.Sym()}{EmitExpr(uo.Operand)}",
-            IrPostfix pf => $"{EmitExpr(pf.Operand)}{pf.Op.Sym()}",
+            IrUnaryOp uo => $"({uo.Op.Sym()}{EmitExpr(uo.Operand)})",
+            IrPostfix pf => $"({EmitExpr(pf.Operand)}{pf.Op.Sym()})",
             IrCast c => $"(({c.To.ToCType()}){EmitExpr(c.Value)})",
             IrNew n => $"{Mangler.Allocator(n.ClassName)}({EmitArgs(n.Args)})",
             IrArrayLit al => $"({al.ArrType.ToCType()}){{ {{ {EmitArgs(al.Elems)} }} }}",
@@ -1057,7 +1079,9 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             IrDeref dr => $"(*{EmitExpr(dr.Ptr)})",
             IrSizeof so => $"sizeof({so.Of.ToCType()})",
             IrStructLit sl => $"({sl.StructType.ToCType()}){{ {EmitStructFields(sl.Fields)} }}",
-            IrDefault df => $"(({df.Of.ToCType()})0)",
+            IrDefault df => IsAggregate(df.Of)
+                ? $"({df.Of.ToCType()}){{ 0 }}"
+                : $"(({df.Of.ToCType()})0)",
             IrFuncRef fr => fr.CName,
             IrIndirectCall ic2 => $"({EmitExpr(ic2.Target)})({EmitArgs(ic2.Args)})",
             IrUnionConstruct uc => EmitUnionConstruct(uc),
@@ -1215,6 +1239,13 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         }
         return sb.ToString();
     }
+
+    /// <summary>
+    /// Returns true for the IR types that lower to a C struct rather than a scalar.
+    /// Fixed arrays, unions, and throws Results are all wrapped in a struct by the
+    /// emitter; class references are pointers, and everything else is a primitive.
+    /// </summary>
+    private static bool IsAggregate(IrType t) => t is IrArrayType or IrUnionType or IrResultType;
 
     /// <summary>
     /// Resolves a compiler runtime role to the C symbol name bound via an intrinsic annotation.

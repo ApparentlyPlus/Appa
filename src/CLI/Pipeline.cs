@@ -311,6 +311,12 @@ internal static class Pipeline
                                 "an 'entry func' inside a 'user { }' block is only valid in a Hosted build; " +
                                 "in a GatOS build, userspace entry points are the threads of a 'process'");
                 }
+                else if (item is FuncDecl { IsEntry: true } tef)
+                {
+                    diag.Error(Codes.EntryOutsideKernel, path, tef.Span,
+                        $"'{tef.Name}' is declared 'entry' outside any realm block",
+                        ["move it inside the 'kernel { }' block, or drop 'entry'"]);
+                }
 
         if (kernelBlocks.Count == 0)
         {

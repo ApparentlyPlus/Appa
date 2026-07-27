@@ -10,6 +10,75 @@ internal static class Mangler
 {
     public const string KernelEntry = "gata_kernelspace_main";
 
+    // C keywords and the handful of standard macros that behave like them. None of these
+    // is a Gata keyword, so all of them are ordinary identifiers a Gata program may use -
+    // and locals and parameters are the only names emitted verbatim, so they are the only
+    // names that can collide. Everything else already carries a gata_ prefix.
+    private static readonly System.Collections.Frozen.FrozenSet<string> CReserved =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet(
+        [
+            "auto", "break", "case", "char", "const", "continue", "default", "do", "double",
+            "else", "enum", "extern", "float", "for", "goto", "if", "inline", "int", "long",
+            "register", "restrict", "return", "short", "signed", "sizeof", "static", "struct",
+            "switch", "typedef", "union", "unsigned", "void", "volatile", "while",
+            "_Alignas", "_Alignof", "_Atomic", "_Bool", "_Complex", "_Generic", "_Imaginary",
+            "_Noreturn", "_Static_assert", "_Thread_local",
+            "bool", "true", "false", "NULL", "alignas", "alignof", "static_assert",
+            "thread_local", "complex", "imaginary", "noreturn",
+        ], StringComparer.Ordinal);
+
+    /// <summary>
+    /// Returns the C spelling of a local variable or parameter name.
+    ///
+    /// Locals and parameters are the one category of name the emitter prints as written -
+    /// keeping them readable is the point, since they are what a person reads the generated
+    /// C for. That makes them the one category that can collide with C's own vocabulary:
+    /// 'struct', 'register' and 'signed' are all perfectly good Gata identifiers, and each
+    /// one used to produce C that would not parse. A trailing underscore is appended in
+    /// exactly those cases, which C guarantees is never itself reserved.
+    ///
+    /// Must be applied at every site that prints such a name - the declaration, the
+    /// parameter list, and each reference - so the three can never disagree.
+    /// </summary>
+    public static string Local(string name)
+    {
+        return CReserved.Contains(name) ? name + "_" : name;
+    }
+
+    // Prefixes the compiler itself generates local names from: Ownership's hoisting temps,
+    // Desugar's switch and match scrutinee temps, the throws lowering's Result temps and
+    // labels, the constructor's self parameter, and the Densifier's dense function tokens.
+    // Each is followed by a sequence number, except the fixed names checked separately.
+    private static readonly string[] GeneratedPrefixes =
+    [
+        "_g", "_a", "_arr", "_asg", "_ci", "_col", "_e", "_fc", "_fi", "_first", "_if",
+        "_ixi", "_ixo", "_mt", "_res_", "_ret", "_sw", "_tern", "_wh", "_catch_", "_end_",
+    ];
+
+    /// <summary>
+    /// Returns true if a user-written local or parameter name would collide with a name the
+    /// compiler generates for its own temporaries.
+    ///
+    /// Renaming the user's version is not an option here: the generated names are emitted
+    /// through the same path, so any rule that moves one moves the other and the collision
+    /// survives. Rejecting the name instead is unambiguous and costs the user a rename of an
+    /// identifier they had no reason to pick. Ordinary leading-underscore names such as
+    /// '_unused' are unaffected - only an exact generated shape matches.
+    /// </summary>
+    public static bool IsReservedLocal(string name)
+    {
+        if (name is "_has_error" or "_o") return true;
+        foreach (var prefix in GeneratedPrefixes)
+        {
+            if (name.Length <= prefix.Length || !name.StartsWith(prefix, StringComparison.Ordinal)) continue;
+            bool allDigits = true;
+            for (int i = prefix.Length; i < name.Length; i++)
+                if (!char.IsAsciiLetterOrDigit(name[i]) || char.IsAsciiLetterUpper(name[i])) { allDigits = false; break; }
+            if (allDigits) return true;
+        }
+        return false;
+    }
+
     // Step 7 dense naming. When populated by the Densifier after reachability, a
     // class's readable C name collapses to a short machine token. Empty during resolution.
     [ThreadStatic] private static Dictionary<string, string>? _denseTls;
