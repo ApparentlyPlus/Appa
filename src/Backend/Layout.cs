@@ -132,9 +132,9 @@ internal static class Layout
     /// </summary>
     private static string Launcher(IReadOnlyList<IrProcess> procs, SymbolTable sym)
     {
-        string procCreate = sym.IntrinsicOrNull(Roles.EnvProcCreate) ?? "_env_proc_create";
-        string procHide = sym.IntrinsicOrNull(Roles.EnvProcHide) ?? "_env_proc_hide";
-        string threadSpawn = sym.IntrinsicOrNull(Roles.EnvThreadSpawn) ?? "_env_thread_spawn";
+        string procCreate = sym.FloorName(Roles.EnvProcCreate);
+        string procHide = sym.FloorName(Roles.EnvProcHide);
+        string threadSpawn = sym.FloorName(Roles.EnvThreadSpawn);
 
         var w = new CodeWriter();
         w.Lines(

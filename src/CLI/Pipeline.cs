@@ -2,10 +2,6 @@ namespace Appa;
 
 using System.Diagnostics;
 
-/// <summary>
-/// Orchestrates the compiler's front-end: parsing, import resolution, name/type
-/// resolution, and IR lowering. Called by the CLI build command and by tests.
-/// </summary>
 internal static class Pipeline
 {
     #region Project discovery
@@ -195,10 +191,10 @@ internal static class Pipeline
         // a launcher will actually be emitted (dual-realm: kernel + user both present).
         if (module.Processes.Count > 0 && module.HasKernelRealm && module.HasUserRealm)
         {
-            probe.Refs.Add(module.Symbols.IntrinsicOrNull(Roles.EnvProcCreate) ?? "_env_proc_create");
-            probe.Refs.Add(module.Symbols.IntrinsicOrNull(Roles.EnvThreadSpawn) ?? "_env_thread_spawn");
+            probe.Refs.Add(module.Symbols.FloorName(Roles.EnvProcCreate));
+            probe.Refs.Add(module.Symbols.FloorName(Roles.EnvThreadSpawn));
             if (module.Processes.Any(p => p.Mode == "background"))
-                probe.Refs.Add(module.Symbols.IntrinsicOrNull(Roles.EnvProcHide) ?? "_env_proc_hide");
+                probe.Refs.Add(module.Symbols.FloorName(Roles.EnvProcHide));
         }
         if (probe.Refs.Count == 0) return;
 
@@ -210,6 +206,44 @@ internal static class Pipeline
             if (!ContainsWholeWord(env, name))
                 diag.Error(Codes.MissingFloorBind, "<environment>", TextSpan.None,
                     $"the active environment's @preamble provides no definition of '{name}'; add one (the environment file, not your Gata source, is incomplete)");
+    }
+
+    // The reference-counting runtime, as one contract rather than five independent knobs.
+    // A stdlib binding some-but-not-all of these is not partially working: every managed class
+    // gets an allocator (alloc + obj_init), a header field (obj_header), and a destructor whose
+    // field cleanup and whose callers go through retain/release.
+    private static readonly string[] ArcRoles =
+        [Roles.Alloc, Roles.Retain, Roles.Release, Roles.ObjHeader, Roles.ObjInit];
+
+    /// <summary>
+    /// Validates that the standard library binds the whole ARC contract whenever the program
+    /// actually needs it - that is, whenever any reference-counted class survives to codegen.
+    ///
+    /// Note here that this deliberately lives at the CLI front-end layer beside ValidateFloor rather than
+    /// BuildModule: BuildModule legitimately runs over stdlib-free input (SingleFileCompile checks
+    /// an import-free source string with no libgata at all), where an unbound ARC role means only
+    /// "no standard library here", not "broken build". By the time a real build reaches this point
+    /// a real libgata has been resolved, so an unbound role is unambiguously an error.
+    /// </summary>
+    public static void ValidateIntrinsics(IrModule module, DiagnosticBag diag)
+    {
+        // Every non-module class left after DCE is reference-counted, and each one causes the
+        // emitter to reach for the full ARC set. No such class means the program never touches
+        // the runtime, so an unbound role costs it nothing.
+        bool needsArc = module.Classes.Any(c => !c.IsModule);
+        if (!needsArc) return;
+
+        var missing = ArcRoles.Where(r => module.Symbols.IntrinsicOrNull(r) == null).ToList();
+        if (missing.Count == 0) return;
+
+        string roles = string.Join(", ", missing.Select(r => $"@intrinsic({r})"));
+        diag.Error(Codes.MissingIntrinsic, "<runtime>", TextSpan.None,
+            $"the standard library binds no {roles}",
+            [
+                "reference counting needs the whole set: " +
+                    string.Join(", ", ArcRoles.Select(r => $"@intrinsic({r})")),
+                "the standard library is incomplete, not your program; check libgata's Runtime.g and Mem.g"
+            ]);
     }
 
     /// <summary>
@@ -260,9 +294,6 @@ internal static class Pipeline
             return;
         }
 
-        // GatOS, or no target (loose transpile mode): the original kernel-block rule.
-        // Every 'entry func' mangles to the single kernel entry symbol, so one inside a
-        // 'user { }' block would silently link-collide with the kernel's.
         var kernelEntryFuncs = new List<(string file, TextSpan span)>();
         foreach (var (path, prog) in programs)
             foreach (var item in prog.Items)
@@ -393,13 +424,17 @@ internal static class Pipeline
         }
 
         var sw = Stopwatch.StartNew();
+        var byFile = diag.All.ToLookup(d => d.Loc.File, StringComparer.OrdinalIgnoreCase);
         int i = 0;
         foreach (var path in attempted)
         {
             i++;
-            var fileDiags = diag.All.Where(d => string.Equals(d.Loc.File, path, StringComparison.OrdinalIgnoreCase)).ToList();
-            var errors = fileDiags.Where(d => d.Severity == Severity.Error).ToList();
-            var warnings = fileDiags.Where(d => d.Severity == Severity.Warning).ToList();
+            List<Diagnostic> errors = [], warnings = [];
+            foreach (var d in byFile[path])
+            {
+                if (d.Severity == Severity.Error) errors.Add(d);
+                else if (d.Severity == Severity.Warning) warnings.Add(d);
+            }
 
             if (errors.Count > 0 || (warnAsError && warnings.Count > 0))
                 Fail(errors.Concat(warnings));
@@ -452,8 +487,8 @@ sealed class EnvProbe(SymbolTable sym) : IrRewriter
     /// </summary>
     protected override IrStmt RewriteStmt(IrStmt s)
     {
-        if (s is IrDebug) Refs.Add(sym.IntrinsicOrNull(Roles.EnvDebug) ?? "_env_dbg");
-        if (s is IrPanic) Refs.Add(sym.IntrinsicOrNull(Roles.EnvPanic) ?? "_env_panic");
+        if (s is IrDebug) Refs.Add(sym.FloorName(Roles.EnvDebug));
+        if (s is IrPanic) Refs.Add(sym.FloorName(Roles.EnvPanic));
         return base.RewriteStmt(s);
     }
 

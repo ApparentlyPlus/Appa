@@ -79,32 +79,25 @@ internal sealed class TypeResolver(
         var priv = sym.LookupPrivateFunc(ctx.File, name);
         if (priv != null && Path.GetFileNameWithoutExtension(ctx.File) == ns)
         {
-            var pchosen = ChooseOverload(sym.PrivateFuncOverloads(ctx.File, name), priv, args, name, ctx, ce.Span);
-            string pcn = pchosen?.CName ?? Mangler.PrivateFreeFunc(Mangler.FileToken(ctx.File), name, [], false);
-            var pret = pchosen != null ? ResolveType(pchosen.Type) : IrType.Void;
-            CoerceArgs(args, pchosen?.Sig, ctx, ce.Args);
-            if (pchosen?.Sig?.IsThrows == true)
-                { CheckThrowsHandled(ctx, ce.Span); return new IrThrowsCall(pcn, pret, args); }
-            return new IrStaticCall(pcn, pret, args);
+            return BuildCall(sym.PrivateFuncOverloads(ctx.File, name), priv, args, name,
+                Mangler.PrivateFreeFunc(Mangler.FileToken(ctx.File), name, [], false), null, ctx, ce);
         }
 
         var fsym = sym.LookupFreeFunc(name);
         if (fsym != null && Path.GetFileNameWithoutExtension(fsym.Module) == ns && _scope.Contains(fsym.Module))
         {
-            var chosen = ChooseOverload(sym.FuncOverloads(name), fsym, args, name, ctx, ce.Span);
-            string cn = chosen?.CName ?? Mangler.FreeFunc(name, [], false, false, false);
-            var ret = chosen != null ? ResolveType(chosen.Type) : IrType.Void;
-            CoerceArgs(args, chosen?.Sig, ctx, ce.Args);
-            if (chosen?.Sig?.IsThrows == true)
-                { CheckThrowsHandled(ctx, ce.Span); return new IrThrowsCall(cn, ret, args); }
-            return new IrStaticCall(cn, ret, args);
+            return BuildCall(sym.FuncOverloads(name), fsym, args, name,
+                Mangler.FreeFunc(name, [], false, false, false), null, ctx, ce);
         }
 
         return null;
     }
 
-    // Every fixed-array (T, N) pair used; the emitter stamps one struct per pair.
+    // Every distinct fixed-array (T, N) pair used; the emitter stamps one struct per pair.
+    // Deduped on the way in, mirroring _funcPtrTypes below, so the emitter's sort in
+    // EmitArrayTypes runs over distinct entries rather than one per syntactic occurrence.
     private readonly List<IrArrayType> _arrays = [];
+    private readonly HashSet<string> _arraysSeen = [];
     private int _tmpSeq;
 
     /// <summary>
@@ -121,7 +114,7 @@ internal sealed class TypeResolver(
     private IrArrayType Arr(IrType elem, int size)
     {
         var a = new IrArrayType(elem, size);
-        _arrays.Add(a);
+        if (_arraysSeen.Add(a.MangledName)) _arrays.Add(a);
         return a;
     }
 
@@ -259,6 +252,32 @@ internal sealed class TypeResolver(
     }
 
     #region Overload resolution
+
+    /// <summary>
+    /// The common tail of every resolved call: pick the overload, settle on a C name, resolve the
+    /// return type, coerce the arguments, then build the matching IR node.
+    /// </summary>
+    private IrExpr BuildCall(IReadOnlyList<Symbol> cands, Symbol? primary, List<IrExpr> args,
+                             string display, string fallbackCName, IrExpr? recv,
+                             ResolveCtx ctx, CallExpr ce)
+    {
+        var chosen = ChooseOverload(cands, primary, args, display, ctx, ce.Span);
+        string cn = chosen?.CName ?? fallbackCName;
+        var ret = chosen != null ? ResolveType(chosen.Type) : IrType.Void;
+        CoerceArgs(args, chosen?.Sig, ctx, ce.Args);
+
+        if (chosen?.Sig?.IsThrows == true)
+        {
+            CheckThrowsHandled(ctx, ce.Span);
+            return recv == null
+                ? new IrThrowsCall(cn, ret, args)
+                : new IrThrowsInstanceCall(recv, cn, ret, args);
+        }
+        return recv == null
+            ? new IrStaticCall(cn, ret, args)
+            : new IrInstanceCall(recv, cn, ret, args);
+    }
+
     /// <summary>
     /// Picks the best-matching overload from the candidates for the given argument list.
     /// Reports a diagnostic when no overload matches or multiple overloads tie.
@@ -308,7 +327,6 @@ internal sealed class TypeResolver(
         return total;
     }
 
-    // 0 = exact, 1 = widening numeric, 2 = narrowing numeric, null = incompatible.
     /// <summary>
     /// Returns the conversion cost from the argument's type to the target type,
     /// or null when the types are incompatible.
@@ -316,7 +334,7 @@ internal sealed class TypeResolver(
     private static int? ArgConvCost(IrExpr arg, IrType to)
     {
         var from = arg.Type;
-        if (arg is IrLitNull) return to is IrClassRef or IrPtrType ? 0 : null;
+        if (arg is IrLitNull) return to is IrClassRef or IrPtrType or IrFuncPtrType ? 0 : null;
         if (SameType(from, to)) return 0;
         if ((from.IsNumeric || from.IsFloat) && (to.IsNumeric || to.IsFloat))
             return NumRank(from) <= NumRank(to) ? 1 : 2;
@@ -349,6 +367,7 @@ internal sealed class TypeResolver(
     #endregion
 
     #region Type compatibility
+
     /// <summary>
     /// Returns true when both IR types are structurally identical.
     /// </summary>
@@ -397,7 +416,8 @@ internal sealed class TypeResolver(
         if (from.IsString && to.IsString) return true;
         if (from is IrPtrType fp && to is IrPtrType tp)
             return SameType(fp.Inner, tp.Inner) || fp.Inner is IrVoidType || tp.Inner is IrVoidType;
-        if (from is IrClassRef fc && to is IrClassRef tc) return fc.ClassName == tc.ClassName;
+        // Class-to-class needs no case of its own: SameType already compares IrClassRef by name,
+        // and Gata has no subtyping, so anything it rejects is genuinely unassignable.
         return false;
     }
 
@@ -898,12 +918,68 @@ internal sealed class TypeResolver(
 
     /// <summary>
     /// Reports ThrowsOutsideTry when a throwing call appears outside a try block or throws function.
+    /// A call carrying its own `catch` handler is the third handled form, alongside those two.
     /// </summary>
     private void CheckThrowsHandled(ResolveCtx ctx, TextSpan span)
     {
-        if (!ctx.InTry && !ctx.InThrowsFunc)
+        if (!ctx.InTry && !ctx.InThrowsFunc && !ctx.CatchWrapped)
             diag.Error(Codes.ThrowsOutsideTry, ctx.File, span,
-                "throwing call must be inside a 'try' block or a 'throws' function");
+                "throwing call must be inside a 'try' block or a 'throws' function",
+                ["or handle it in place: 'let T x = f() catch { assign <fallback>; };'"]);
+    }
+
+    /// <summary>
+    /// Returns true when the statement list leaves its handler on every path - either by
+    /// supplying a value with `assign`, or by transferring control out entirely.
+    /// </summary>
+    private static bool AssignsOrExitsList(IReadOnlyList<IrStmt> stmts)
+    {
+        return stmts.Any(AssignsOrExits);
+    }
+
+    /// <summary>
+    /// Returns true when a statement definitely ends its enclosing `catch` handler.
+    /// </summary>
+    private static bool AssignsOrExits(IrStmt s)
+    {
+        return s switch
+        {
+            IrAssignValue => true,
+            IrBreak or IrContinue => true,
+            IrBlock b => AssignsOrExitsList(b.Stmts),
+            IrUnsafeBlock u => AssignsOrExitsList(u.Body.Stmts),
+            IrIf i => i.Else != null && AssignsOrExits(i.Then) && AssignsOrExits(i.Else),
+            IrTryCatch t => AssignsOrExits(t.Try) && AssignsOrExits(t.Catch),
+            IrSwitch sw => sw.Default != null && sw.Cases.All(c => AssignsOrExits(c.Body))
+                           && AssignsOrExits(sw.Default),
+            IrMatch ms => ms.Cases.All(c => AssignsOrExits(c.Body))
+                          && (ms.Default == null || AssignsOrExits(ms.Default)),
+            _ => DefinitelyReturns(s)
+        };
+    }
+
+    /// <summary>
+    /// Returns true when an `assign` appears anywhere inside the statement.
+    /// Used to reject one in a handler that has no declaration to assign to.
+    /// </summary>
+    private static bool ContainsAssignValue(IrStmt s)
+    {
+        return s switch
+        {
+            IrAssignValue => true,
+            IrBlock b => b.Stmts.Any(ContainsAssignValue),
+            IrUnsafeBlock u => ContainsAssignValue(u.Body),
+            IrIf i => ContainsAssignValue(i.Then) || (i.Else != null && ContainsAssignValue(i.Else)),
+            IrWhile w => ContainsAssignValue(w.Body),
+            IrFor f => ContainsAssignValue(f.Body),
+            IrForIn fi => ContainsAssignValue(fi.Body),
+            IrTryCatch t => ContainsAssignValue(t.Try) || ContainsAssignValue(t.Catch),
+            IrSwitch sw => sw.Cases.Any(c => ContainsAssignValue(c.Body))
+                           || (sw.Default != null && ContainsAssignValue(sw.Default)),
+            IrMatch ms => ms.Cases.Any(c => ContainsAssignValue(c.Body))
+                          || (ms.Default != null && ContainsAssignValue(ms.Default)),
+            _ => false
+        };
     }
 
     /// <summary>
@@ -934,6 +1010,14 @@ internal sealed class TypeResolver(
             case IrThrowsInstanceCall ti:
                 ForbidNestedThrows(ti.Recv, ctx, false);
                 for (int i = 0; i < ti.Args.Count; i++) ForbidNestedThrows(ti.Args[i], ctx, false);
+                break;
+            case IrCatchCall cc:
+                if (!allowRoot)
+                    diag.Error(Codes.ThrowsOutsideTry, ctx.File, cc.Span,
+                        "a 'catch' handler must cover a whole declaration or statement, not a call nested inside a larger expression",
+                        ["bind the call to its own local first, then use that local here"]);
+                else
+                    ForbidNestedThrows(cc.Call, ctx, allowRoot: true);
                 break;
             case IrBinOp b: ForbidNestedThrows(b.Left, ctx, false); ForbidNestedThrows(b.Right, ctx, false); break;
             case IrTernary t: ForbidNestedThrows(t.Cond, ctx, false); ForbidNestedThrows(t.Then, ctx, false); ForbidNestedThrows(t.Else, ctx, false); break;
@@ -1226,7 +1310,10 @@ internal sealed class TypeResolver(
         string CatchLabel,
         int LoopDepth,
         ScopeStack Scope,
-        bool InDefer = false)
+        bool InDefer = false,
+        IrType? AssignType = null,
+        bool CatchWrapped = false,
+        IrType? RetType = null)
     {
         /// <summary>
         /// Returns a context with the current class updated.
@@ -1282,6 +1369,24 @@ internal sealed class TypeResolver(
         public ResolveCtx WithContext(string ctx)
         {
             return this with { Context = ctx };
+        }
+
+        /// <summary>
+        /// Returns a context that marks entry into a `catch` handler attached to a call.
+        /// </summary>
+        public ResolveCtx WithCatchHandler(IrType assignType)
+        {
+            return this with { AssignType = assignType, CatchWrapped = false };
+        }
+
+        /// <summary>
+        /// Returns a context marking the call about to be resolved as carrying its own `catch`
+        /// handler, so CheckThrowsHandled accepts it. Cleared again for the call's arguments,
+        /// which are ordinary sub-expressions and get no such dispensation.
+        /// </summary>
+        public ResolveCtx WithCatchWrapped()
+        {
+            return this with { CatchWrapped = true };
         }
 
         /// <summary>
@@ -1547,6 +1652,7 @@ internal sealed class TypeResolver(
                     {
                         init = Coerce(ResolveExpr(fd.Init, classCtx.WithStatic(false)), ft, classCtx);
                         CheckAssign(init, ft, $"field '{fd.Name}'", classCtx, Codes.TypeMismatch);
+                        ForbidNestedThrows(init, classCtx, allowRoot: false);
                         fieldInits[fd.Name] = init;
                     }
                     fields.Add(new IrField(fd.Name, ft, init));
@@ -1714,7 +1820,7 @@ internal sealed class TypeResolver(
         return b switch
         {
             NativeMethodBody nmb => (null, nmb.Native.C),
-            BlockBody bb => (ResolveBlock(bb.Block, ctx, ret), null),
+            BlockBody bb => (ResolveBlock(bb.Block, ctx with { RetType = ret }, ret), null),
             _ => (null, null)
         };
     }
@@ -2147,6 +2253,10 @@ internal sealed class TypeResolver(
             {
                 var e = ResolveExpr(es.E, ctx);
                 ForbidNestedThrows(e, ctx, allowRoot: true);
+                if (e is IrCatchCall sc && ContainsAssignValue(sc.Handler))
+                    diag.Error(Codes.AssignOutsideCatch, ctx.File, sc.Handler.Span,
+                        "'assign' needs a declaration to supply a value for, and this call's result is discarded",
+                        [$"bind the call first: 'let T x = ... catch {{ assign <value>; }};'"]);
                 WarnIfNoEffect(es.E, e, ctx);
                 return new IrExprStmt(e);
             }
@@ -2245,6 +2355,26 @@ internal sealed class TypeResolver(
                     diag.Error(Codes.DeferTransfer, ctx.File, s.Span, "a 'defer' body cannot 'throw'");
                 CheckThrowsHandled(ctx, s.Span);
                 return new IrThrow();
+
+            case AssignValueStmt av:
+            {
+                if (ctx.AssignType == null)
+                {
+                    diag.Error(Codes.AssignOutsideCatch, ctx.File, s.Span,
+                        "'assign' is only valid inside a 'catch' handler attached to a call",
+                        ["it supplies the value for the declaration the handler belongs to",
+                         "to return from the enclosing function, use 'return'"]);
+                    return new IrAssignValue(ResolveExpr(av.Value, ctx));
+                }
+                if (ctx.InDefer)
+                    diag.Error(Codes.DeferTransfer, ctx.File, s.Span, "a 'defer' body cannot 'assign'");
+
+                var value = ResolveExpr(av.Value, ctx);
+                ForbidNestedThrows(value, ctx, allowRoot: false);
+                value = Coerce(value, ctx.AssignType, ctx);
+                CheckAssign(value, ctx.AssignType, "'assign'", ctx, Codes.TypeMismatch);
+                return new IrAssignValue(value);
+            }
 
             case DebugStmt d:
                 if (releaseMode)
@@ -2476,6 +2606,28 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
+    /// Resolves `f() catch { ... }`: a throwing call that handles its own failure in place.
+    /// </summary>
+    private IrExpr ResolveCatchCall(CatchCallExpr cce, ResolveCtx ctx)
+    {
+        var call = ResolveExpr(cce.Call, ctx.WithCatchWrapped());
+
+        if (call.Type is not IrResultType rt)
+        {
+            // Not a throwing call, so there is no failure to handle. Resolve the handler anyway
+            // (against the value's own type) so names inside it still get checked and reported.
+            diag.Error(Codes.ThrowsOutsideTry, ctx.File, cce.Call.Span,
+                "'catch' here needs a call to a 'throws' function; this call cannot fail",
+                ["remove the 'catch' block"]);
+            ResolveBlock(cce.Handler, ctx.WithCatchHandler(call.Type), ctx.RetType ?? IrType.Void);
+            return call;
+        }
+
+        var handler = ResolveBlock(cce.Handler, ctx.WithCatchHandler(rt.Inner), ctx.RetType ?? IrType.Void);
+        return new IrCatchCall(call, handler, rt.Inner) { Span = cce.Span };
+    }
+
+    /// <summary>
     /// Resolves a let declaration: infers or checks its type, resolves the initializer,
     /// checks assignability, and declares the variable in the current scope.
     /// </summary>
@@ -2525,6 +2677,12 @@ internal sealed class TypeResolver(
                 $"this throwing call produces '{Describe(irt.Inner)}', which cannot initialize '{ls.Name}' of type '{Describe(type)}'");
 
         if (init != null) ForbidNestedThrows(init, ctx, allowRoot: true);
+
+        if (init is IrCatchCall cc && !AssignsOrExits(cc.Handler))
+            diag.Error(Codes.CatchHandlerNoAssign, ctx.File, cc.Handler.Span,
+                $"this 'catch' handler can finish without supplying a value for '{ls.Name}'",
+                ["end every path with 'assign <value>;'",
+                 "or leave the handler through 'return', 'throw', 'break', or 'continue'"]);
 
         if (ctx.Scope.DeclaredHere(ls.Name))
             diag.Error(Codes.DuplicateName, ctx.File, ls.Span, $"'{ls.Name}' is already declared in this scope");
@@ -2612,6 +2770,7 @@ internal sealed class TypeResolver(
             case UnaryExpr un: return ResolveUnary(un, ctx);
             case BinExpr be: return ResolveBin(be, ctx);
             case CallExpr ce: return ResolveCall(ce, ctx);
+            case CatchCallExpr cce: return ResolveCatchCall(cce, ctx);
             case MemberAccessExpr ma: return ResolveMemberAccess(ma, ctx);
             case NewExpr ne: return ResolveNew(ne, ctx);
             case ArrayLitExpr al: return ResolveArrayLit(al, ctx);
@@ -3041,13 +3200,12 @@ internal sealed class TypeResolver(
     /// </summary>
     private IrExpr ResolveCall(CallExpr ce, ResolveCtx ctx)
     {
-        // ref arguments are resolved as their plain target so type inference sees the real type;
-        // ref/non-ref matching and address-of wrapping happen in CoerceArgs once the callee is known.
+        var argCtx = ctx.CatchWrapped ? ctx with { CatchWrapped = false } : ctx;
         var args = new List<IrExpr>(ce.Args.Length);
         for (int i = 0; i < ce.Args.Length; i++)
         {
             var a = ce.Args[i];
-            args.Add(ResolveExpr(a is RefArgExpr ra ? ra.Target : a, ctx));
+            args.Add(ResolveExpr(a is RefArgExpr ra ? ra.Target : a, argCtx));
         }
 
         // member access call: obj.Method(args) or ClassName.StaticMethod(args)
@@ -3081,14 +3239,9 @@ internal sealed class TypeResolver(
                     diag.Error(Codes.StaticOnInstance, ctx.File, ce.Span,
                         $"'{Mangler.DisplayName(objName)}.{ma.Member}' is an instance method; call it on a value");
                 CheckMemberAccess(objName, ma.Member, ctx, ce.Span);
-                var chosen = ChooseOverload(sym.MethodOverloads(objName, ma.Member), msym, args,
-                    $"{Mangler.DisplayName(objName)}.{ma.Member}", ctx, ce.Span);
-                string cn = chosen?.CName ?? Mangler.Method(objName, ma.Member, [], false);
-                var ret = chosen != null ? ResolveType(chosen.Type) : IrType.Void;
-                CoerceArgs(args, chosen?.Sig, ctx, ce.Args);
-                if (chosen?.Sig?.IsThrows == true)
-                    { CheckThrowsHandled(ctx, ce.Span); return new IrThrowsCall(cn, ret, args); }
-                return new IrStaticCall(cn, ret, args);
+                return BuildCall(sym.MethodOverloads(objName, ma.Member), msym, args,
+                    $"{Mangler.DisplayName(objName)}.{ma.Member}",
+                    Mangler.Method(objName, ma.Member, [], false), null, ctx, ce);
             }
 
             if (!string.IsNullOrEmpty(objName) && ctx.Scope.Lookup(objName) == null && !ClassInScope(objName.AsSpan())
@@ -3127,14 +3280,9 @@ internal sealed class TypeResolver(
                     diag.Error(Codes.InstanceOnStatic, ctx.File, ce.Span,
                         $"'{Mangler.DisplayName(cls)}.{ma.Member}' is static; call it as '{Mangler.DisplayName(cls)}.{ma.Member}(...)'");
                 CheckMemberAccess(cls, ma.Member, ctx, ce.Span);
-                var chosen = ChooseOverload(sym.MethodOverloads(cls, ma.Member), msym, args,
-                    $"{Mangler.DisplayName(cls)}.{ma.Member}", ctx, ce.Span);
-                string cn = chosen?.CName ?? Mangler.Method(cls, ma.Member, [], false);
-                var ret = chosen != null ? ResolveType(chosen.Type) : IrType.Void;
-                CoerceArgs(args, chosen?.Sig, ctx, ce.Args);
-                if (chosen?.Sig?.IsThrows == true)
-                    { CheckThrowsHandled(ctx, ce.Span); return new IrThrowsInstanceCall(recv, cn, ret, args); }
-                return new IrInstanceCall(recv, cn, ret, args);
+                return BuildCall(sym.MethodOverloads(cls, ma.Member), msym, args,
+                    $"{Mangler.DisplayName(cls)}.{ma.Member}",
+                    Mangler.Method(cls, ma.Member, [], false), recv, ctx, ce);
             }
 
             diag.Error(Codes.UndefinedMethod, ctx.File, ce.Span,
@@ -3187,13 +3335,8 @@ internal sealed class TypeResolver(
             var pfsym = sym.LookupPrivateFunc(ctx.File, id.Name);
             if (pfsym != null)
             {
-                var pchosen = ChooseOverload(sym.PrivateFuncOverloads(ctx.File, id.Name), pfsym, args, id.Name, ctx, ce.Span);
-                string pcn = pchosen?.CName ?? Mangler.PrivateFreeFunc(Mangler.FileToken(ctx.File), id.Name, [], false);
-                var pret = pchosen != null ? ResolveType(pchosen.Type) : IrType.Void;
-                CoerceArgs(args, pchosen?.Sig, ctx, ce.Args);
-                if (pchosen?.Sig?.IsThrows == true)
-                    { CheckThrowsHandled(ctx, ce.Span); return new IrThrowsCall(pcn, pret, args); }
-                return new IrStaticCall(pcn, pret, args);
+                return BuildCall(sym.PrivateFuncOverloads(ctx.File, id.Name), pfsym, args, id.Name,
+                    Mangler.PrivateFreeFunc(Mangler.FileToken(ctx.File), id.Name, [], false), null, ctx, ce);
             }
 
             var fsym = sym.LookupFreeFunc(id.Name);
@@ -3202,13 +3345,8 @@ internal sealed class TypeResolver(
                 if (fsym.Sig?.IsEntry == true)
                     diag.Error(Codes.CallToEntry, ctx.File, ce.Span,
                         $"'{id.Name}' is an entry point and cannot be called directly");
-                var chosen = ChooseOverload(sym.FuncOverloads(id.Name), fsym, args, id.Name, ctx, ce.Span);
-                string cn = chosen?.CName ?? Mangler.FreeFunc(id.Name, [], false, false, false);
-                var ret = chosen != null ? ResolveType(chosen.Type) : IrType.Void;
-                CoerceArgs(args, chosen?.Sig, ctx, ce.Args);
-                if (chosen?.Sig?.IsThrows == true)
-                    { CheckThrowsHandled(ctx, ce.Span); return new IrThrowsCall(cn, ret, args); }
-                return new IrStaticCall(cn, ret, args);
+                return BuildCall(sym.FuncOverloads(id.Name), fsym, args, id.Name,
+                    Mangler.FreeFunc(id.Name, [], false, false, false), null, ctx, ce);
             }
 
             // sibling method of the current class
@@ -3229,21 +3367,20 @@ internal sealed class TypeResolver(
                 if (msym != null)
                 {
                     bool isStatic = msym.Sig?.IsStatic ?? false;
-                    var chosen = ChooseOverload(sym.MethodOverloads(ctx.CurClass, id.Name), msym, args,
-                        $"{Mangler.DisplayName(ctx.CurClass)}.{id.Name}", ctx, ce.Span);
-                    string cn = chosen?.CName ?? Mangler.Method(ctx.CurClass, id.Name, [], false);
-                    var ret = chosen != null ? ResolveType(chosen.Type) : IrType.Void;
                     if (!isStatic)
                     {
+                        var ichosen = ChooseOverload(sym.MethodOverloads(ctx.CurClass, id.Name), msym, args,
+                            $"{Mangler.DisplayName(ctx.CurClass)}.{id.Name}", ctx, ce.Span);
                         diag.Error(Codes.UndefinedMethod, ctx.File, ce.Span,
                             $"'{id.Name}' is an instance method; call it as 'self.{id.Name}(...)'");
-                        CoerceArgs(args, chosen?.Sig, ctx, ce.Args);
-                        return new IrInstanceCall(new IrSelfExpr(ctx.CurClass), cn, ret, args);
+                        CoerceArgs(args, ichosen?.Sig, ctx, ce.Args);
+                        return new IrInstanceCall(new IrSelfExpr(ctx.CurClass),
+                            ichosen?.CName ?? Mangler.Method(ctx.CurClass, id.Name, [], false),
+                            ichosen != null ? ResolveType(ichosen.Type) : IrType.Void, args);
                     }
-                    CoerceArgs(args, chosen?.Sig, ctx, ce.Args);
-                    if (chosen?.Sig?.IsThrows == true)
-                        { CheckThrowsHandled(ctx, ce.Span); return new IrThrowsCall(cn, ret, args); }
-                    return new IrStaticCall(cn, ret, args);
+                    return BuildCall(sym.MethodOverloads(ctx.CurClass, id.Name), msym, args,
+                        $"{Mangler.DisplayName(ctx.CurClass)}.{id.Name}",
+                        Mangler.Method(ctx.CurClass, id.Name, [], false), null, ctx, ce);
                 }
             }
 

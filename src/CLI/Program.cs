@@ -14,8 +14,8 @@ try
 {
     switch (args[0])
     {
-        case "setup": await RunSetup(isUpdate: false); break;
-        case "update": await RunSetup(isUpdate: true); break;
+        case "setup": await Installer.RunSetup(isUpdate: false); break;
+        case "update": await Installer.RunSetup(isUpdate: true); break;
         case "init": RunInit(args[1..]); break;
         case "build": RunBuild(args[1..]); break;
         case "check": RunCheck(args[1..]); break;
@@ -53,14 +53,14 @@ static void RunInit(string[] args)
 {
     string name = args.ElementAtOrDefault(0) ?? "myproject";
     if (!System.Text.RegularExpressions.Regex.IsMatch(name, @"^[a-zA-Z_][a-zA-Z0-9_]*$"))
-        Fail($"'{name}' is not a valid project name");
+        Cli.Fail($"'{name}' is not a valid project name");
 
     string projDir = Path.GetFullPath(name);
-    if (Directory.Exists(projDir)) Fail($"directory '{name}' already exists");
+    if (Directory.Exists(projDir)) Cli.Fail($"directory '{name}' already exists");
 
     string envSrc = Path.Combine(AppaPaths.EnvsDir, "env.GatOS.g");
     if (!File.Exists(envSrc))
-        Fail("GatOS environment not found. Run 'appa setup' first.");
+        Cli.Fail("GatOS environment not found. Run 'appa setup' first.");
 
     Directory.CreateDirectory(Path.Combine(projDir, "src"));
     File.Copy(envSrc, Path.Combine(projDir, "env.g"));
@@ -86,7 +86,7 @@ static void RunInit(string[] args)
         Console.WriteLine($"{C.DIM}{branch}{C.NC} {p.PadRight(width)}  {C.DIM}{desc}{C.NC}");
     }
     Console.WriteLine();
-    Console.WriteLine($"{C.CYAN}Next:{C.NC}");
+    Console.WriteLine($"{C.CYAN}Common next steps:{C.NC}");
     Console.WriteLine($"  cd {name}");
     Console.WriteLine($"  appa build");
     Console.WriteLine();
@@ -96,14 +96,6 @@ static void RunInit(string[] args)
 
 #region appa build
 
-// appa build [project | project.gconf] [--run] [--headless] [--timeout=<Xs>]
-//            [--werror] [--stdlib <dir>]
-//   --pure-transpile --env <env.g> --entry <file.g>   (file-level: no project dir)
-//
-// A project build auto-discovers its environment (the @environment file in the
-// project dir) and its entry (src/main.g). --env/--entry also work standalone
-// against a real manifest project, to point at a shared environment file without
-// copying it into every project dir.
 /// <summary>
 /// Parses build arguments, transpiles and lowers the project, then dispatches to
 /// the GatOS image builder or the hosted pure-transpile path.
@@ -126,14 +118,14 @@ static void RunBuild(string[] args)
             case "--pure-transpile": pureTranspile = true; break;
             case "--emit-sourcemap": emitSourcemap = true; break;
             default:
-                if (args[i].StartsWith("--timeout=")) timeout = ParseTimeout(args[i]["--timeout=".Length..]);
-                else if (args[i].StartsWith("--")) Fail($"unknown option '{args[i]}'");
+                if (args[i].StartsWith("--timeout=")) timeout = Cli.ParseTimeout(args[i]["--timeout=".Length..]);
+                else if (args[i].StartsWith("--")) Cli.Fail($"unknown option '{args[i]}'");
                 else manifestArg = args[i];
                 break;
         }
 
     bool looseTranspile = pureTranspile && envOverride != null && entryOverride != null;
-    var (manifest, envPath, entryPath, projectRoot, stdlibDir) = ResolveInputs(
+    var (manifest, envPath, entryPath, projectRoot, stdlibDir) = Cli.ResolveInputs(
         manifestArg, envOverride, entryOverride, stdlibOverride, looseTranspile,
         "--pure-transpile --env <file> --entry <file>", "--pure-transpile --env --entry");
 
@@ -143,19 +135,7 @@ static void RunBuild(string[] args)
         Console.WriteLine($"{C.BOLD}Building{C.NC} {C.DIM}(--pure-transpile){C.NC}");
     Console.WriteLine();
 
-    var inputFiles = new List<string> { Path.GetFullPath(envPath), Path.GetFullPath(entryPath) };
-    var (programs, attempted, imports, diag) = Pipeline.Transpile(inputFiles, projectRoot, stdlibDir);
-    var visible = Pipeline.VisibleModules(imports);
-    var (module, sourcemap, caps) = Pipeline.BuildModule(programs, visible, manifest?.Mode ?? Mode.Debug, diag);
-
-    Pipeline.ValidateEnvironment(programs, diag);
-    Pipeline.ValidateFloor(module, diag);
-    Pipeline.ValidateStructure(programs, manifest?.Target, diag);
-    if (manifest?.Target == Target.Hosted && module.HasKernelRealm)
-        diag.Error(Codes.KernelBlockInHosted, "<environment>", TextSpan.None,
-            "the active environment declares a kernel preamble, which is not allowed for a Hosted build");
-    if (!diag.HasErrors) Pipeline.WarnReferenceCycles(module);
-    Pipeline.ReportGataFiles(attempted, diag, warnAsError);
+    var (module, sourcemap, caps, diag) = RunFrontEnd(envPath, entryPath, projectRoot, stdlibDir, manifest, warnAsError);
 
     var output = Layout.Compose(new Emitter(module, diag).Build(), module.Symbols);
 
@@ -172,17 +152,17 @@ static void RunBuild(string[] args)
     if (!emitIso)
     {
         string outDir = Path.Combine(projectRoot, "transpilation");
-        WriteOutputs(output, outDir);
-        if (emitSourcemap) WriteSourcemap(sourcemap, outDir);
+        Cli.WriteOutputs(output, outDir);
+        if (emitSourcemap) Cli.WriteSourcemap(sourcemap, outDir);
         Console.WriteLine();
         Console.WriteLine($"{C.BOLD}Finished{C.NC} {C.DIM}→{C.NC} {outDir}{Path.DirectorySeparatorChar}");
         foreach (var f in output) Out.Child($"{C.DIM}{Path.Combine("transpilation", f.Name)}{C.NC}");
         return;
     }
 
-    if (emitSourcemap) WriteSourcemap(sourcemap, projectRoot);
-    var defines = CapabilityDefines(caps, manifest!);
-    BuildGatOSImage(output, manifest!, projectRoot, defines, CapabilitiesNote(caps, manifest!), doRun, headless, timeout);
+    if (emitSourcemap) Cli.WriteSourcemap(sourcemap, projectRoot);
+    var defines = Toolchain.CapabilityDefines(caps, manifest!);
+    Toolchain.BuildGatOSImage(output, manifest!, projectRoot, defines, Toolchain.CapabilitiesNote(caps, manifest!), doRun, headless, timeout);
 }
 
 #endregion
@@ -206,13 +186,13 @@ static void RunCheck(string[] args)
             case "--stdlib" when i + 1 < args.Length: stdlibOverride = args[++i]; break;
             case "--werror": warnAsError = true; break;
             default:
-                if (args[i].StartsWith("--")) Fail($"unknown option '{args[i]}'");
+                if (args[i].StartsWith("--")) Cli.Fail($"unknown option '{args[i]}'");
                 else manifestArg = args[i];
                 break;
         }
 
     bool loose = envOverride != null && entryOverride != null;
-    var (manifest, envPath, entryPath, projectRoot, stdlibDir) = ResolveInputs(
+    var (manifest, envPath, entryPath, projectRoot, stdlibDir) = Cli.ResolveInputs(
         manifestArg, envOverride, entryOverride, stdlibOverride, loose,
         "--env <file> --entry <file>", "--env --entry");
 
@@ -222,134 +202,37 @@ static void RunCheck(string[] args)
         Console.WriteLine($"{C.BOLD}Checking{C.NC} {C.DIM}(--env/--entry){C.NC}");
     Console.WriteLine();
 
+    RunFrontEnd(envPath, entryPath, projectRoot, stdlibDir, manifest, warnAsError);
+}
+
+/// <summary>
+/// Runs every front-end stage shared by `appa build` and `appa check`: parse, lower, validate the
+/// environment/floor/structure, then report diagnostics.
+/// </summary>
+static (IrModule Module, IReadOnlyDictionary<string, string> Sourcemap, CapabilityScan Caps, DiagnosticBag Diag)
+    RunFrontEnd(string envPath, string entryPath, string projectRoot, string stdlibDir,
+                Manifest? manifest, bool warnAsError)
+{
     var inputFiles = new List<string> { Path.GetFullPath(envPath), Path.GetFullPath(entryPath) };
     var (programs, attempted, imports, diag) = Pipeline.Transpile(inputFiles, projectRoot, stdlibDir);
     var visible = Pipeline.VisibleModules(imports);
-    var (module, _, _) = Pipeline.BuildModule(programs, visible, manifest?.Mode ?? Mode.Debug, diag);
+    var (module, sourcemap, caps) = Pipeline.BuildModule(programs, visible, manifest?.Mode ?? Mode.Debug, diag);
 
     Pipeline.ValidateEnvironment(programs, diag);
     Pipeline.ValidateFloor(module, diag);
+    Pipeline.ValidateIntrinsics(module, diag);
     Pipeline.ValidateStructure(programs, manifest?.Target, diag);
     if (manifest?.Target == Target.Hosted && module.HasKernelRealm)
         diag.Error(Codes.KernelBlockInHosted, "<environment>", TextSpan.None,
             "the active environment declares a kernel preamble, which is not allowed for a Hosted build");
     if (!diag.HasErrors) Pipeline.WarnReferenceCycles(module);
-
     Pipeline.ReportGataFiles(attempted, diag, warnAsError);
+
+    return (module, sourcemap, caps, diag);
 }
 
 #endregion
 
-#region Utilities
-
-/// <summary>
-/// Resolves the environment file, entry file, project root, and libgata directory for a
-/// build or check invocation. Shared between 'appa build' and 'appa check', since both
-/// resolve identically: a project .gconf (auto-discovered, or given explicitly), or a
-/// loose --env/--entry pair with no project directory at all. loose bypasses manifest
-/// discovery entirely; looseHint/manifestHint fill in the two command-specific phrases
-/// ('--pure-transpile --env --entry' for build, '--env --entry' for check) in the
-/// resulting error/warning text.
-/// </summary>
-static (Manifest? manifest, string envPath, string entryPath, string projectRoot, string stdlibDir) ResolveInputs(
-    string? manifestArg, string? envOverride, string? entryOverride, string? stdlibOverride,
-    bool loose, string manifestHint, string looseHint)
-{
-    Manifest? manifest = null;
-    if (!loose)
-    {
-        try
-        {
-            string? manifestPath =
-                manifestArg == null ? ManifestReader.Discover(Directory.GetCurrentDirectory())
-                : Directory.Exists(manifestArg) ? ManifestReader.Discover(manifestArg)
-                : manifestArg;
-            if (manifestPath != null) manifest = ManifestReader.Load(manifestPath);
-        }
-        catch (ManifestError e) { Fail(e.Message); }
-        if (manifest == null)
-            Fail($"no <project>.gconf found - run 'appa init', or use {manifestHint}");
-    }
-    else if (manifestArg != null)
-        Log.Warn($"project argument '{manifestArg}' is ignored with {looseHint} (loose-file mode discovers nothing from a project)");
-
-    var unreadableEnvCandidates = new List<string>();
-    string? envPath = envOverride
-        ?? (manifest != null ? Pipeline.DiscoverEnv(manifest.Dir, unreadableEnvCandidates) : null);
-    string? entryPath = entryOverride ?? (manifest != null ? Pipeline.DiscoverEntry(manifest.Dir) : null);
-    if (envPath == null)
-        Fail("no environment found - mark one project file @environment, or pass --env",
-             unreadableEnvCandidates.Count > 0
-                 ? $"could not parse {string.Join(", ", unreadableEnvCandidates)}; if the environment is declared there, fix the syntax error first"
-                 : null);
-    if (entryPath == null) Fail("no entry point - expected src/main.g, or pass --entry");
-
-    string projectRoot = manifest?.Dir ?? Path.GetDirectoryName(Path.GetFullPath(entryPath))!;
-    string? stdlibDir = stdlibOverride ?? Pipeline.FindLibgata();
-    if (stdlibDir == null) Fail("cannot find libgata - run 'appa setup' or pass --stdlib <dir>");
-    foreach (var p in new[] { envPath, entryPath })
-        if (!File.Exists(p)) Fail($"file not found: {p}");
-
-    return (manifest, envPath, entryPath, projectRoot, stdlibDir);
-}
-
-/// <summary>
-/// Writes all output files to a directory, creating it if necessary.
-/// </summary>
-static void WriteOutputs(IReadOnlyList<OutputFile> files, string dir)
-{
-    Directory.CreateDirectory(dir);
-    foreach (var f in files) File.WriteAllText(Path.Combine(dir, f.Name), f.Content);
-}
-
-// The sourcemap: dense machine name to original readable C name, written as JSON by hand
-// (no reflection-based serializer, AOT-safe).
-/// <summary>
-/// Writes the dense-to-readable name sourcemap as sourcemap.json in the given directory.
-/// </summary>
-static void WriteSourcemap(IReadOnlyDictionary<string, string> map, string dir)
-{
-    if (map.Count == 0) return;
-    Directory.CreateDirectory(dir);
-    var sb = new System.Text.StringBuilder("{\n");
-    var items = map.OrderBy(kv => kv.Key, StringComparer.Ordinal).ToList();
-    for (int i = 0; i < items.Count; i++)
-        sb.Append($"  \"{items[i].Key}\": \"{items[i].Value}\"{(i < items.Count - 1 ? "," : "")}\n");
-    sb.Append("}\n");
-    File.WriteAllText(Path.Combine(dir, "sourcemap.json"), sb.ToString());
-}
-
-/// <summary>
-/// Recursively copies a directory tree from src to dst.
-/// </summary>
-static void CopyDirectory(string src, string dst)
-{
-    foreach (var dir in Directory.GetDirectories(src, "*", SearchOption.AllDirectories))
-        Directory.CreateDirectory(Path.Combine(dst, Path.GetRelativePath(src, dir)));
-    foreach (var file in Directory.GetFiles(src, "*", SearchOption.AllDirectories))
-        File.Copy(file, Path.Combine(dst, Path.GetRelativePath(src, file)), true);
-}
-
-/// <summary>
-/// Parses a timeout argument of the form "30s", "5m", or "1h" into seconds.
-/// An unrecognized format is a hard error, never a silent default.
-/// </summary>
-static int ParseTimeout(string val)
-{
-    var m = System.Text.RegularExpressions.Regex.Match(val, @"^(\d+)([smh])$");
-    if (m.Success && int.TryParse(m.Groups[1].Value, out int n))
-        return m.Groups[2].Value switch { "m" => n * 60, "h" => n * 3600, _ => n };
-    Fail($"invalid --timeout value '{val}'; expected a duration like 30s, 5m, or 1h");
-    return 0;
-}
-
-/// <summary>
-/// Reports a fatal configuration error and exits.
-/// </summary>
-[DoesNotReturn]
-static void Fail(string message, string? hint = null) { Log.Error(message, hint); Environment.Exit(1); }
-
-#endregion
 
 #region Help
 
@@ -357,7 +240,7 @@ static void Fail(string message, string? hint = null) { Log.Error(message, hint)
 /// Prints the top-level usage text: commands, build options, and examples.
 /// </summary>
 static void PrintHelp() => Console.WriteLine($$"""
-{{C.GREEN}}appa{{C.NC}} {{AppaVersion.Current}} - the Gata language compiler for GatOS
+{{C.GREEN}}Welcome to Appa {{C.NC}} {{AppaVersion.Current}} - the Gata language compiler for GatOS
 
 {{C.CYAN}}Usage:{{C.NC}}
   appa setup                      Install the GatOS toolchain, template, and libgata
@@ -392,627 +275,6 @@ static void PrintHelp() => Console.WriteLine($$"""
 """);
 
 #endregion
-
-#region Build pipeline
-
-/// <summary>
-/// Runs an external process, optionally capturing its output and animating a spinner.
-/// Reads must drain async before waiting to avoid a full-pipe deadlock.
-/// </summary>
-static (int ExitCode, string Stdout, string Stderr) Exec(
-    string exe, string arguments, string? workDir,
-    bool silent = false, bool capture = false, string? spinner = null)
-{
-    if (!silent && !capture && spinner == null)
-        Console.WriteLine($"{C.BLUE}>>> {exe} {arguments}{C.NC}");
-
-    var psi = new ProcessStartInfo(exe, arguments)
-    {
-        UseShellExecute = false,
-        RedirectStandardOutput = capture,
-        RedirectStandardError = capture,
-        WorkingDirectory = workDir ?? ""
-    };
-
-    using var proc = Process.Start(psi)!;
-    var outTask = capture ? proc.StandardOutput.ReadToEndAsync() : null;
-    var errTask = capture ? proc.StandardError.ReadToEndAsync() : null;
-
-    if (spinner != null) Spin.WhileRunning(proc, spinner);
-    proc.WaitForExit();
-    return (proc.ExitCode, outTask?.Result ?? "", errTask?.Result ?? "");
-}
-
-#endregion
-
-#region GatOS image build
-
-// Resolved capability set, with every platform-transitive implication applied.
-// Mirrors the implications in GatOS's kernel/caps.h exactly so that header's
-// #ifdefs and what appa reports/emits here can never drift apart.
-/// <summary>
-/// Resolves the final Mem/Input/Threads/Discover capability set for a build,
-/// combining the scanned capabilities with the manifest's discovery setting.
-/// </summary>
-static (bool Mem, bool Input, bool Threads, bool Time, bool Discover) ResolveCaps(CapabilityScan caps, Manifest m)
-{
-    bool discover = m.CapabilityDiscovery == CapabilityDiscovery.On;
-    bool mem = !discover || caps.Mem, input = !discover || caps.Input, threads = !discover || caps.Threads;
-    bool time = !discover || caps.Time;
-
-    // Threads pull in the whole multitasking stack, which allocates internally.
-    mem = mem || threads;
-
-    // The dashboard keyboard cycling is wired through the keyboard IRQ, which only
-    // exists under GATA_CAP_INPUT: THREADS implies INPUT.
-    input = input || threads;
-
-    // USB hotplug watch runs as its own kernel thread: HOTPLUG implies THREADS.
-    if (m.Keyboard == Keyboard.Hotplug) threads = true;
-
-    // xHCI device enumeration allocates heap structures even for a one-time scan.
-    if (m.Keyboard is Keyboard.External or Keyboard.Hotplug) { mem = true; input = true; }
-
-    // ACPI/APIC/timer tick are needed whenever the scheduler (THREADS) or keyboard
-    // (INPUT) needs IRQ routing; all three map tables/MMIO through the VMM.
-    if (threads || input) mem = mem || threads || input;
-
-    // The time source (get_uptime_ns) is the timer subsystem, which only ticks when
-    // the interrupt subsystem is up - TIME implies the same ACPI/APIC/heap floor.
-    if (time) mem = true;
-
-    return (mem, input, threads, time, discover);
-}
-
-/// <summary>
-/// Returns the -D macros for the GatOS gcc build, representing the resolved capability set.
-/// MEM/INPUT/THREADS are inferred; FRAMEBUFFER and keyboard level come from the manifest.
-/// </summary>
-static List<string> CapabilityDefines(CapabilityScan caps, Manifest m)
-{
-    var r = ResolveCaps(caps, m);
-
-    var d = new List<string>();
-    if (r.Mem) d.Add("-DGATA_CAP_MEM");
-    if (r.Input) d.Add("-DGATA_CAP_INPUT");
-    if (r.Threads) d.Add("-DGATA_CAP_THREADS");
-    if (r.Time) d.Add("-DGATA_CAP_TIME");
-    d.Add(m.Output == Output.Serial ? "-DGATA_OUTPUT_SERIAL" : "-DGATA_CAP_FRAMEBUFFER");
-    d.Add(m.Keyboard switch
-    {
-        Keyboard.External => "-DGATA_KBD_EXTERNAL",
-        Keyboard.Hotplug => "-DGATA_KBD_HOTPLUG",
-        _ => "-DGATA_KBD_DEFAULT",
-    });
-
-    return d;
-}
-
-/// <summary>
-/// Returns the human-readable capability summary printed before "Finished".
-/// </summary>
-static string CapabilitiesNote(CapabilityScan caps, Manifest m)
-{
-    var r = ResolveCaps(caps, m);
-
-    var on = new List<string>();
-    if (r.Mem) on.Add("mem"); if (r.Input) on.Add("input"); if (r.Threads) on.Add("threads"); if (r.Time) on.Add("time");
-    on.Add(m.Output == Output.Serial ? "serial" : "framebuffer");
-    string suffix = r.Discover ? "" : " (discovery off: assumed, not inferred)";
-    return $"Capabilities: {string.Join(" ", on)}{suffix} (keyboard={m.Keyboard.ToString().ToLowerInvariant()})";
-}
-
-/// <summary>
-/// Stages the GatOS template, compiles and links the kernel, builds the ISO,
-/// copies it to the project build dir, and optionally runs QEMU.
-/// </summary>
-static void BuildGatOSImage(IReadOnlyList<OutputFile> output, Manifest manifest,
-                            string projectRoot, List<string> defines, string capsNote,
-                            bool doRun, bool headless, int? timeout)
-{
-    if (!Directory.Exists(AppaPaths.TemplateDir) || !Directory.GetDirectories(AppaPaths.TemplateDir).Any())
-        Fail("GatOS template not found. Run 'appa setup' first.");
-    if (!File.Exists(AppaPaths.Gcc()))
-        Fail("Toolchain not found. Run 'appa setup' first.");
-
-    string buildDir = Path.Combine(Path.GetTempPath(),
-        $"appa-build-{Environment.ProcessId}-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}");
-    Directory.CreateDirectory(buildDir);
-    var total = Stopwatch.StartNew();
-
-    try
-    {
-        Spin.Step("Prepared build workspace", () => CopyDirectory(AppaPaths.TemplateDir, buildDir));
-
-        string kernelSrcDir = Path.Combine(buildDir, "src", "kernel");
-        Directory.CreateDirectory(kernelSrcDir);
-        WriteOutputs(output, kernelSrcDir);
-
-        string targetsDir = Path.Combine(buildDir, "targets", "x86_64");
-        if (!File.Exists(Path.Combine(targetsDir, "linker.ld")))
-            Fail("Template is missing targets/x86_64/linker.ld.");
-
-        var srcDir = Path.Combine(buildDir, "src");
-        var objDir = Path.Combine(buildDir, "build");
-        var distDir = Path.Combine(buildDir, "dist", "x86_64");
-        var isoDir = Path.Combine(buildDir, "targets", "x86_64", "iso");
-        Directory.CreateDirectory(objDir);
-        Directory.CreateDirectory(distDir);
-
-        var cFiles = Directory.GetFiles(srcDir, "*.c", SearchOption.AllDirectories).ToList();
-        var asmFiles = Directory.GetFiles(srcDir, "*.S", SearchOption.AllDirectories).ToList();
-        var objFiles = CompileAll(cFiles, asmFiles, srcDir, objDir, manifest.Mode, defines);
-
-        string kernelBin = Path.Combine(distDir, "kernel.bin");
-        LinkKernel(objFiles, kernelBin, targetsDir);
-
-        string isoPath = MakeIso(kernelBin, isoDir, distDir, buildDir);
-
-        string projectBuildDir = Path.Combine(projectRoot, "build");
-        Directory.CreateDirectory(projectBuildDir);
-        string outIso = Path.Combine(projectBuildDir, Path.GetFileName(isoPath));
-        File.Copy(isoPath, outIso, true);
-        Out.Note(capsNote);
-        Console.WriteLine();
-        Console.WriteLine($"{C.BOLD}Finished{C.NC} in {Spin.Fmt(total.Elapsed)} {C.DIM}→{C.NC} {outIso}");
-
-        if (doRun)
-        {
-            string artifactsDir = Path.Combine(projectRoot, "artifacts");
-            Directory.CreateDirectory(artifactsDir);
-            RunQemu(outIso, artifactsDir, headless, timeout);
-        }
-    }
-    finally { try { Directory.Delete(buildDir, true); } catch { } }
-}
-
-// A translation unit is userspace iff it is ulibc or the emitted user process file.
-/// <summary>
-/// Returns true if the given translation unit path belongs to the userspace
-/// realm rather than the kernel.
-/// </summary>
-static bool IsUserspace(string rel) =>
-    rel.StartsWith("ulibc/") || rel == "kernel/uproc.c";
-
-/// <summary>
-/// Compiles all C and assembly files in parallel, reporting in-place progress.
-/// On the first failure, stops scheduling new jobs and prints the failure block.
-/// </summary>
-static List<string> CompileAll(List<string> cFiles, List<string> asmFiles,
-                               string srcDir, string objDir, Mode mode, List<string> defines)
-{
-    var modeFlags = GatosFlags.For(mode);
-    bool isMac = RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
-    var jobs = new List<(string src, string obj, string[] flags)>();
-
-    foreach (var src in cFiles)
-    {
-        string rel = Path.GetRelativePath(srcDir, src).Replace('\\', '/');
-        string obj = Path.Combine(objDir, rel.Replace('/', '_') + ".o");
-        var cflags = new List<string>(GatosFlags.Common) { $"-I{srcDir}" };
-        cflags.AddRange(modeFlags);
-        cflags.AddRange(defines);
-        if (IsUserspace(rel))
-            cflags.Add("-ffast-math");
-        else
-        {
-            if (!isMac) cflags.Add("-flto");
-            if (GatosFlags.InterruptPath.Contains(rel))
-                cflags.AddRange(GatosFlags.FpuRestrictions);
-        }
-        jobs.Add((src, obj, cflags.ToArray()));
-    }
-
-    foreach (var src in asmFiles)
-    {
-        string rel = Path.GetRelativePath(srcDir, src);
-        string obj = Path.Combine(objDir, rel.Replace(Path.DirectorySeparatorChar, '_') + ".o");
-        var asmFlags = new List<string> { $"-I{srcDir}", "-D__ASSEMBLER__" };
-        asmFlags.AddRange(defines);
-        jobs.Add((src, obj, asmFlags.ToArray()));
-    }
-
-    (string Name, string Stderr)? failure = null;
-    object gate = new();
-    int completed = 0, total = jobs.Count;
-    var sw = Stopwatch.StartNew();
-    bool tty = !Console.IsOutputRedirected;
-    Parallel.ForEach(jobs, new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount },
-        (job, state) =>
-        {
-            if (failure != null) { state.Stop(); return; }
-            Directory.CreateDirectory(Path.GetDirectoryName(job.obj)!);
-            var result = Exec(AppaPaths.Gcc(), $"-c {string.Join(' ', job.flags.Select(f => $"\"{f}\""))} \"{job.src}\" -o \"{job.obj}\"", null, silent: true, capture: true);
-            string name = Path.GetFileName(job.src);
-            lock (gate)
-            {
-                if (failure != null) { state.Stop(); return; }
-                if (result.ExitCode != 0)
-                {
-                    failure = (name, result.Stderr.TrimEnd());
-                    state.Stop();
-                }
-                else
-                {
-                    completed++;
-                    if (tty) Out.Redraw($"  {C.DIM}⠿ Compiling [{completed}/{total}] {name}{C.NC}");
-                }
-            }
-        });
-
-    if (failure != null)
-    {
-        if (tty) Out.ClearRedraw();
-        Console.Error.WriteLine($"{C.RED}failed:{C.NC} {failure.Value.Name}");
-        Console.Error.WriteLine(failure.Value.Stderr);
-        Environment.Exit(1);
-    }
-
-    if (tty) Out.ClearRedraw();
-    Spin.Done($"Compiled {total} files", sw.Elapsed);
-    return [.. jobs.Select(j => j.obj)];
-}
-
-/// <summary>
-/// Links all object files into a kernel.bin using the cross-gcc linker script.
-/// macOS links with ld directly (no LTO); every other host links through cross-gcc with LTO.
-/// </summary>
-static void LinkKernel(List<string> objFiles, string kernelBin, string targetsDir)
-{
-    string linkerScript = Path.Combine(targetsDir, "linker.ld");
-    string objList = string.Join(' ', objFiles.Select(o => $"\"{o}\""));
-    var sw = Stopwatch.StartNew();
-
-    var r = RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
-        ? Exec(AppaPaths.Gcc("x86_64-elf-ld"),
-            $"-n -nostdlib --gc-sections -T\"{linkerScript}\" --no-relax -g -o \"{kernelBin}\" {objList}",
-            null, capture: true, spinner: "Linking kernel.bin")
-        : Exec(AppaPaths.Gcc(),
-            $"-nostdlib -flto -g -Wl,-n,--gc-sections,--no-relax,-T\"{linkerScript}\" -o \"{kernelBin}\" {objList}",
-            null, capture: true, spinner: "Linking kernel.bin");
-    if (r.ExitCode != 0) { Log.Error($"Link failed:\n{r.Stderr}"); Environment.Exit(1); }
-
-    Exec(AppaPaths.Gcc("x86_64-elf-strip"), $"\"{kernelBin}\"", null, capture: true);
-    Spin.Done("Linked kernel.bin", sw.Elapsed);
-}
-
-/// <summary>
-/// Creates a bootable ISO from a kernel.bin using grub-mkstandalone and grub-mkrescue.
-/// Returns the path to the created ISO.
-/// </summary>
-static string MakeIso(string kernelBin, string isoDir, string distDir, string buildDir)
-{
-    string bootDir = Path.Combine(isoDir, "boot");
-    string uefiDir = Path.Combine(isoDir, "EFI", "BOOT");
-    string grubCfg = Path.Combine(isoDir, "boot", "grub", "grub.cfg");
-    Directory.CreateDirectory(bootDir);
-    Directory.CreateDirectory(uefiDir);
-    var sw = Stopwatch.StartNew();
-
-    File.Copy(kernelBin, Path.Combine(bootDir, "kernel.bin"), true);
-
-    string uefiGrub = Path.Combine(uefiDir, "BOOTX64.EFI");
-    var r1 = Exec(AppaPaths.GrubTool("grub-mkstandalone"),
-        $"--directory=\"{Path.Combine(AppaPaths.GrubDir, "x86_64-efi")}\" " +
-        $"--format=x86_64-efi --output=\"{uefiGrub}\" --locales= --fonts= " +
-        $"\"boot/grub/grub.cfg={grubCfg}\"", null, capture: true, spinner: "Creating ISO image");
-    if (r1.ExitCode != 0) { Log.Error($"grub-mkstandalone failed:\n{r1.Stderr}"); Environment.Exit(1); }
-
-    string isoOut = Path.Combine(distDir, "GatOS.iso");
-    // Uniform grub-mkrescue invocation across every platform, run from the grub
-    // dir - the same command GatOS's run.py uses. The Windows toolchain bundle now
-    // ships its own xorriso + mtools, so Windows no longer needs the old
-    // `-d "{GrubDir}"` fallback (which mislocated the module dir and broke BIOS boot).
-    string mkrescueArgs =
-        $"--xorriso=\"{AppaPaths.XorrisoExe}\" --fonts=unicode --themes= -o \"{isoOut}\" \"{isoDir}\"";
-
-    var r2 = Exec(AppaPaths.GrubTool("grub-mkrescue"), mkrescueArgs,
-        AppaPaths.GrubDir, capture: true, spinner: "Creating ISO image");
-    if (r2.ExitCode != 0) { Log.Error($"grub-mkrescue failed:\n{r2.Stderr}"); Environment.Exit(1); }
-
-    Spin.Done("Created ISO image", sw.Elapsed);
-    return isoOut;
-}
-
-/// <summary>
-/// Launches QEMU with the given ISO and waits for it to exit, optionally with a timeout.
-/// </summary>
-static void RunQemu(string isoPath, string artifactsDir, bool headless, int? timeout)
-{
-    Console.WriteLine($"Running QEMU [{(headless ? "headless" : "GUI")}]...");
-    string debugLog = Path.Combine(artifactsDir, "debug.log");
-    string userDebugLog = Path.Combine(artifactsDir, "user-debug.log");
-    var qemuArgs = new System.Text.StringBuilder();
-    qemuArgs.Append($"-cdrom \"{isoPath}\"");
-    // 3 serial ports: COM1 (mon:stdio - boot markers + serial output), COM2 (GatOS debug.log),
-    // COM3 (userspace debug channel).
-    qemuArgs.Append($" -serial mon:stdio");
-    qemuArgs.Append($" -serial \"file:{debugLog}\"");
-    qemuArgs.Append($" -serial \"file:{userDebugLog}\"");
-    qemuArgs.Append($" -cpu kvm64,+smep,+smap");
-    if (headless) qemuArgs.Append(" -nographic");
-
-    string exe = AppaPaths.QemuExe;
-    string finalArgs = RuntimeInformation.IsOSPlatform(OSPlatform.Linux) &&
-                       exe.EndsWith(".AppImage")
-        ? $"qemu-system-x86_64 {qemuArgs}"
-        : qemuArgs.ToString();
-
-    var psi = new ProcessStartInfo(exe, finalArgs)
-    {
-        UseShellExecute = false, RedirectStandardOutput = false,
-        RedirectStandardError = false
-    };
-    using var proc = Process.Start(psi)!;
-    if (timeout.HasValue)
-    {
-        bool exited = proc.WaitForExit(timeout.Value * 1000);
-        // Linux AppImage launcher forks qemu-system-x86_64 as a child via FUSE/dwarfs;
-        // killing just the launcher PID leaves the child running.
-        if (!exited) { try { proc.Kill(entireProcessTree: true); } catch { } }
-        Log.Info("QEMU session ended.");
-    }
-    else proc.WaitForExit();
-}
-
-#endregion
-
-#region appa setup / appa update
-
-/// <summary>
-/// Downloads and installs (or re-installs) the GatOS toolchain, libgata, template, and appa binary.
-/// </summary>
-static async Task RunSetup(bool isUpdate)
-{
-    Log.Info(isUpdate
-        ? "Updating appa toolchain, libgata, and template (overwriting existing)..."
-        : "Setting up appa toolchain and resources...");
-    Log.Info($"Installation directory: {AppaPaths.Root}");
-
-    // Re-running setup re-downloads everything. If already installed, confirm first
-    // (interactive only; `update` is always intentional).
-    if (!isUpdate && Directory.Exists(AppaPaths.ToolchainDir) && !Console.IsInputRedirected)
-    {
-        Console.Write($"{C.YELLOW}appa is already installed at {AppaPaths.Root}. Re-download and overwrite? [y/N]: {C.NC}");
-        if (Console.ReadLine()?.Trim().ToLowerInvariant() is not ("y" or "yes"))
-        { Log.Info("Setup cancelled - existing install left untouched."); return; }
-    }
-
-    bool isWin = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
-    bool isMac = RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
-
-    // Ask about PATH first (setup only, interactive only). Putting appa on PATH is a
-    // privileged, system-wide change, so we decide up front: if the user wants it but
-    // we're not elevated, tell them to re-run with privileges and continue without it.
-    bool wantsPath = false;
-    if (!isUpdate && !Console.IsInputRedirected)
-    {
-        Console.Write($"{C.CYAN}Add appa to your PATH so you can run it from anywhere? [y/N]: {C.NC}");
-        wantsPath = Console.ReadLine()?.Trim().ToLowerInvariant() is "y" or "yes";
-        if (wantsPath && !Environment.IsPrivilegedProcess)
-        {
-            Log.Warn("Adding appa to PATH needs elevated privileges.");
-            Log.Info(isWin
-                ? "Re-run 'appa setup' from an Administrator terminal."
-                : "Re-run 'sudo appa setup'.");
-            Environment.Exit(1);
-        }
-    }
-
-    Directory.CreateDirectory(AppaPaths.ToolchainDir);
-    Directory.CreateDirectory(AppaPaths.LibgataDir);
-    Directory.CreateDirectory(AppaPaths.TemplateDir);
-    Directory.CreateDirectory(AppaPaths.BinDir);
-
-    string tcZip = Path.Combine(Path.GetTempPath(), "appa_tc.zip");
-    DownloadWithProgress(Urls.Toolchain(), tcZip, "toolchain");
-    Log.Step("Extracting toolchain...");
-    System.IO.Compression.ZipFile.ExtractToDirectory(tcZip, AppaPaths.ToolchainDir, true);
-    File.Delete(tcZip);
-
-    // libgata and envs are fetched live from the Gata repo's "main" branch (not a
-    // release zip), so this content is never duplicated - the Gata repo is the only
-    // source of truth.
-    Log.Step("Fetching libgata and envs from GitHub...");
-    using (var ghClient = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromMinutes(5) })
-    {
-        await GitHubDirDownloader.DownloadDirectoriesAsync(
-            Urls.GataOwner, Urls.GataRepo, Urls.GataRef,
-            new Dictionary<string, string> { ["envs/"] = AppaPaths.EnvsDir, ["libgata/"] = AppaPaths.LibgataDir },
-            ghClient);
-    }
-
-    string tmplZip = Path.Combine(Path.GetTempPath(), "appa_template.zip");
-    DownloadWithProgress(Urls.Template, tmplZip, "GatOS template");
-    Log.Step("Extracting GatOS template...");
-    ExtractTemplate(tmplZip, AppaPaths.TemplateDir);
-    File.Delete(tmplZip);
-
-    if (!isWin)
-    {
-        Log.Step("Setting executable permissions...");
-        Exec("chmod", $"-R +x \"{AppaPaths.PlatformToolchain}\"", null, silent: true);
-    }
-
-    if (isUpdate)
-        UpdateAppaBinary(isWin, isMac);
-    else
-        InstallSelf(isWin);
-
-    if (wantsPath && Environment.IsPrivilegedProcess)
-        AddToPath(isWin);
-
-    if (!isWin)
-    {
-        string? sudoUser = Environment.GetEnvironmentVariable("SUDO_USER");
-        if (!string.IsNullOrEmpty(sudoUser))
-        {
-            Log.Step($"Restoring ownership of installation files to {sudoUser}...");
-            Exec("chown", $"-R {sudoUser}: \"{AppaPaths.Root}\"", null, silent: true);
-        }
-    }
-
-    Log.Ok(isUpdate
-        ? "Update complete. Toolchain, libgata, template, and appa are now up to date."
-        : "Setup complete. Run 'appa init <project>' to create a new project.");
-}
-
-/// <summary>
-/// Adds the appa bin directory to the system PATH.
-/// Unix creates a symlink in /usr/local/bin; Windows appends to the machine PATH variable.
-/// Requires elevated privileges (checked by caller).
-/// </summary>
-static void AddToPath(bool isWin)
-{
-    try
-    {
-        if (isWin)
-        {
-            string bin = AppaPaths.BinDir;
-            string cur = Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.Machine) ?? "";
-            bool present = cur.Split(';', StringSplitOptions.RemoveEmptyEntries)
-                              .Any(p => string.Equals(p.TrimEnd('\\'), bin.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase));
-            if (present) { Log.Info("appa's bin directory is already on PATH."); return; }
-            Environment.SetEnvironmentVariable("PATH", cur.TrimEnd(';') + ";" + bin, EnvironmentVariableTarget.Machine);
-            Log.Ok($"Added {bin} to the system PATH. Open a new terminal for it to take effect.");
-        }
-        else
-        {
-            const string link = "/usr/local/bin/appa";
-            var r = Exec("ln", $"-sf \"{AppaPaths.AppaBin}\" \"{link}\"", null, silent: true, capture: true);
-            if (r.ExitCode == 0)
-                Log.Ok($"Linked {link} → {AppaPaths.AppaBin}. 'appa' is now on your PATH.");
-            else
-                Log.Warn($"Could not create symlink {link}: {r.Stderr.Trim()}");
-        }
-    }
-    catch (Exception ex) { Log.Warn($"Could not add appa to PATH: {ex.Message}"); }
-}
-
-/// <summary>
-/// Copies the currently-running appa binary into the bin dir (used by `appa setup`).
-/// </summary>
-static void InstallSelf(bool isWin)
-{
-    string self = Environment.ProcessPath ?? "";
-    if (string.IsNullOrEmpty(self) || !File.Exists(self))
-    { Log.Warn("Could not locate the running appa binary to install."); return; }
-
-    string target = AppaPaths.AppaBin;
-    if (string.Equals(Path.GetFullPath(self), Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase))
-        return;
-
-    try
-    {
-        Log.Step("Installing appa binary...");
-        File.Copy(self, target, true);
-        if (!isWin) Exec("chmod", $"+x \"{target}\"", null, silent: true);
-        Log.Info($"appa installed to {target}");
-    }
-    catch (Exception ex) { Log.Warn($"Could not install appa binary: {ex.Message}"); }
-}
-
-/// <summary>
-/// Downloads the latest appa binary and swaps it in after this process exits.
-/// The replacement is deferred to a detached process because the installed binary
-/// may be the one currently running.
-/// </summary>
-static void UpdateAppaBinary(bool isWin, bool isMac)
-{
-    string target = AppaPaths.AppaBin;
-    string newBin = Path.Combine(Path.GetTempPath(), isWin ? "appa_new.exe" : "appa_new");
-
-    try { DownloadWithProgress(Urls.AppaBinary(), newBin, "appa"); }
-    catch (Exception ex) { Log.Warn($"Could not download new appa binary: {ex.Message}"); return; }
-
-    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-
-    try
-    {
-        if (isWin)
-        {
-            var psi = new ProcessStartInfo("cmd.exe",
-                $"/c timeout /t 2 /nobreak >nul & move /Y \"{newBin}\" \"{target}\"")
-            { UseShellExecute = false, CreateNoWindow = true };
-            Process.Start(psi);
-        }
-        else
-        {
-            string script = $"sleep 2; mv -f '{newBin}' '{target}'; chmod +x '{target}'; ";
-            if (isMac) script += $"xattr -d com.apple.quarantine '{target}' 2>/dev/null; ";
-            script += "true";
-            var psi = new ProcessStartInfo("/bin/sh") { UseShellExecute = false, CreateNoWindow = true };
-            psi.ArgumentList.Add("-c");
-            psi.ArgumentList.Add(script);
-            Process.Start(psi);
-        }
-        Log.Info("Downloaded the latest appa; it will replace the installed binary momentarily.");
-    }
-    catch (Exception ex) { Log.Warn($"Could not schedule appa self-update: {ex.Message}"); }
-}
-
-/// <summary>
-/// Downloads a URL to a local file, printing a progress bar or byte counter while downloading.
-/// </summary>
-static void DownloadWithProgress(string url, string dest, string name)
-{
-    using var client = new System.Net.Http.HttpClient();
-    client.Timeout = TimeSpan.FromMinutes(10);
-    using var response = client.GetAsync(url, System.Net.Http.HttpCompletionOption.ResponseHeadersRead).Result;
-    response.EnsureSuccessStatusCode();
-    long? total = response.Content.Headers.ContentLength;
-    using var stream = response.Content.ReadAsStream();
-    using var outFile = File.Create(dest);
-    var buffer = new byte[81920];
-    const string spin = @"|/-\";
-    long downloaded = 0;
-    int read, ticks = 0;
-    while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
-    {
-        outFile.Write(buffer, 0, read);
-        downloaded += read;
-        // A known, positive Content-Length draws a percentage bar; an absent or
-        // zero-length total (e.g. GitHub archive endpoints) shows a live byte counter.
-        if (total is > 0)
-        {
-            int pct = (int)(downloaded * 100 / total.Value);
-            int filled = pct * 40 / 100;
-            string bar = new string('=', filled) + new string(' ', 40 - filled);
-            Out.Redraw($"{name}  |{bar}| {pct}% ({downloaded/1048576.0:F1}/{total.Value/1048576.0:F1} MB)");
-        }
-        else
-            Out.Redraw($"{name}  {spin[ticks++ % 4]} {downloaded/1048576.0:F1} MB");
-    }
-    Console.WriteLine();
-}
-
-/// <summary>
-/// Extracts the GatOS template zip into destDir, flattening GitHub's single wrapper
-/// folder and keeping only its top-level directories (src/, targets/).
-/// </summary>
-static void ExtractTemplate(string zipPath, string destDir)
-{
-    string staging = Path.Combine(Path.GetTempPath(), $"appa-tmpl-stage-{Environment.ProcessId}");
-    if (Directory.Exists(staging)) Directory.Delete(staging, true);
-    System.IO.Compression.ZipFile.ExtractToDirectory(zipPath, staging);
-
-    var entries = Directory.GetFileSystemEntries(staging);
-    string root = entries.Length == 1 && Directory.Exists(entries[0]) ? entries[0] : staging;
-
-    if (Directory.Exists(destDir)) Directory.Delete(destDir, true);
-    Directory.CreateDirectory(destDir);
-    foreach (var dir in Directory.GetDirectories(root))
-    {
-        string dst = Path.Combine(destDir, Path.GetFileName(dir));
-        Directory.CreateDirectory(dst);
-        CopyDirectory(dir, dst);
-    }
-    Directory.Delete(staging, true);
-}
-
-#endregion
-
-// Type declarations must follow all top-level statements.
 
 // Files written by `appa init`.
 static class Templates

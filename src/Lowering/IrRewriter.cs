@@ -2,15 +2,6 @@ namespace Appa;
 
 using System.Runtime.InteropServices;
 
-// Base for IR->IR lowering passes. By default it deep-copies the IR, recursing into
-// every expression and statement; a pass overrides RewriteExpr / RewriteStmt to
-// transform specific nodes (call base first to rewrite children). Spans and types
-// ride along through record copies.
-/// <summary>
-/// Abstract base for IR-to-IR lowering passes.
-/// Default implementation is an identity transform; subclasses override RewriteExpr or RewriteStmt
-/// to transform specific node kinds.
-/// </summary>
 internal abstract class IrRewriter
 {
     /// <summary>
@@ -115,6 +106,8 @@ internal abstract class IrRewriter
             IrInstanceCall ic => UpdateInstanceCall(ic),
             IrThrowsCall tc => UpdateThrowsCall(tc),
             IrThrowsInstanceCall ti => UpdateThrowsInstanceCall(ti),
+            IrCatchCall cc => UpdateCatchCall(cc),
+            IrStructLit sl => UpdateStructLit(sl),
             IrBinOp b => UpdateBinOp(b),
             IrTernary t => UpdateTernary(t),
             IrUnaryOp u => UpdateUnaryOp(u),
@@ -129,8 +122,26 @@ internal abstract class IrRewriter
             IrIndirectCall ic2 => UpdateIndirectCall(ic2),
             IrUnionConstruct uc => UpdateUnionConstruct(uc),
             IrUnionField uf => UpdateUnionField(uf),
-            _ => e   // literals, IrVar, IrSelfExpr, IrFuncRef
+            _ => Inert(e)
         };
+    }
+
+    /// <summary>
+    /// Pass-through for a node with no children, checked in debug builds. See NodeCoverage.
+    /// </summary>
+    private static IrExpr Inert(IrExpr e)
+    {
+        NodeCoverage.AssertInertIrExpr(e, "IrRewriter.MapExpr");
+        return e;
+    }
+
+    /// <summary>
+    /// Pass-through for a statement with no children, checked in debug builds. See NodeCoverage.
+    /// </summary>
+    private static IrStmt Inert(IrStmt s)
+    {
+        NodeCoverage.AssertInertIrStmt(s, "IrRewriter.MapStmt");
+        return s;
     }
 
     /// <summary>
@@ -188,6 +199,47 @@ internal abstract class IrRewriter
         var recv = RewriteExpr(ti.Recv);
         var args = Map(ti.Args);
         return ReferenceEquals(recv, ti.Recv) && ReferenceEquals(args, ti.Args) ? ti : ti with { Recv = recv, Args = args };
+    }
+
+    /// <summary>
+    /// Rewrites the inner call and the handler block of an IrCatchCall; returns the original if unchanged.
+    /// </summary>
+    private IrCatchCall UpdateCatchCall(IrCatchCall cc)
+    {
+        var call = RewriteExpr(cc.Call);
+        var handler = RewriteBlock(cc.Handler);
+        return ReferenceEquals(call, cc.Call) && ReferenceEquals(handler, cc.Handler)
+            ? cc
+            : cc with { Call = call, Handler = handler };
+    }
+
+    /// <summary>
+    /// Rewrites the field values of an IrStructLit; returns the original if unchanged.
+    /// </summary>
+    private IrStructLit UpdateStructLit(IrStructLit sl)
+    {
+        List<(string Field, IrExpr Value)>? result = null;
+        for (int i = 0; i < sl.Fields.Count; i++)
+        {
+            var (name, value) = sl.Fields[i];
+            var rewritten = RewriteExpr(value);
+            if (!ReferenceEquals(value, rewritten) && result == null)
+            {
+                result = new List<(string, IrExpr)>(sl.Fields.Count);
+                for (int j = 0; j < i; j++) result.Add(sl.Fields[j]);
+            }
+            result?.Add((name, rewritten));
+        }
+        return result == null ? sl : sl with { Fields = result };
+    }
+
+    /// <summary>
+    /// Rewrites the value of an IrAssignValue; returns the original if unchanged.
+    /// </summary>
+    private IrAssignValue UpdateAssignValue(IrAssignValue av)
+    {
+        var value = RewriteExpr(av.Value);
+        return ReferenceEquals(value, av.Value) ? av : av with { Value = value };
     }
 
     /// <summary>
@@ -342,7 +394,8 @@ internal abstract class IrRewriter
             IrUnsafeBlock u => UpdateUnsafeBlock(u),
             IrMatch m => UpdateMatch(m),
             IrDefer d => UpdateDefer(d),
-            _ => s   // IrNativeStmt, IrRaw, IrBreak, IrContinue, IrThrow, IrDebug, IrPanic
+            IrAssignValue av => UpdateAssignValue(av),
+            _ => Inert(s)
         };
     }
 
@@ -492,23 +545,25 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Maps a list of expressions, returning the original list if no element was rewritten.
+    /// CoW list map that applies <paramref name="f"/> to every element and returns the
+    /// original list unless some element was actually rewritten, in which case the prefix of
+    /// unchanged elements is cloned first.
     /// </summary>
-    private List<IrExpr> Map(List<IrExpr> xs)
+    private static List<T> MapList<T>(List<T> xs, Func<T, T> f) where T : class
     {
         if (xs.Count == 0) return xs;
 
-        List<IrExpr>? result = null;
+        List<T>? result = null;
         var span = CollectionsMarshal.AsSpan(xs);
         for (int i = 0; i < span.Length; i++)
         {
             var orig = span[i];
-            var rewritten = RewriteExpr(orig);
+            var rewritten = f(orig);
             if (!ReferenceEquals(orig, rewritten))
             {
                 if (result == null)
                 {
-                    result = new List<IrExpr>(xs.Count);
+                    result = new List<T>(xs.Count);
                     for (int j = 0; j < i; j++) result.Add(span[j]);
                 }
                 result.Add(rewritten);
@@ -521,291 +576,86 @@ internal abstract class IrRewriter
         return result ?? xs;
     }
 
-    /// <summary>
-    /// Maps a list of statements, returning the original list if no element was rewritten.
-    /// </summary>
-    private List<IrStmt> MapStmts(List<IrStmt> xs)
-    {
-        if (xs.Count == 0) return xs;
+    // Cached element rewriter delegates. Held as fields so MapList does not allocate a fresh
+    // delegate on every list it walks; virtual dispatch to a subclass override still applies.
+    private readonly Func<IrExpr, IrExpr> _fExpr;
+    private readonly Func<IrStmt, IrStmt> _fStmt;
+    private readonly Func<IrSwitchCase, IrSwitchCase> _fSwitchCase;
+    private readonly Func<IrMatchCase, IrMatchCase> _fMatchCase;
+    private readonly Func<IrClass, IrClass> _fClass;
+    private readonly Func<IrFunction, IrFunction> _fFunction;
+    private readonly Func<IrOperator, IrOperator> _fOperator;
+    private readonly Func<IrProcess, IrProcess> _fProcess;
+    private readonly Func<IrThread, IrThread> _fThread;
+    private readonly Func<IrField, IrField> _fField;
 
-        List<IrStmt>? result = null;
-        var span = CollectionsMarshal.AsSpan(xs);
-        for (int i = 0; i < span.Length; i++)
-        {
-            var orig = span[i];
-            var rewritten = RewriteStmt(orig);
-            if (!ReferenceEquals(orig, rewritten))
-            {
-                if (result == null)
-                {
-                    result = new List<IrStmt>(xs.Count);
-                    for (int j = 0; j < i; j++) result.Add(span[j]);
-                }
-                result.Add(rewritten);
-            }
-            else
-            {
-                result?.Add(orig);
-            }
-        }
-        return result ?? xs;
+    /// <summary>
+    /// Binds the element-rewriter delegates once per rewriter instance.
+    /// </summary>
+    protected IrRewriter()
+    {
+        _fExpr = RewriteExpr;
+        _fStmt = RewriteStmt;
+        _fSwitchCase = RewriteSwitchCase;
+        _fMatchCase = RewriteMatchCase;
+        _fClass = RewriteClass;
+        _fFunction = RewriteFunction;
+        _fOperator = RewriteOperator;
+        _fProcess = RewriteProcess;
+        _fThread = RewriteThread;
+        _fField = RewriteField;
+    }
+
+    private List<IrExpr> Map(List<IrExpr> xs) => MapList(xs, _fExpr);
+    private List<IrStmt> MapStmts(List<IrStmt> xs) => MapList(xs, _fStmt);
+    private List<IrSwitchCase> MapCases(List<IrSwitchCase> xs) => MapList(xs, _fSwitchCase);
+    private List<IrMatchCase> MapMatchCases(List<IrMatchCase> xs) => MapList(xs, _fMatchCase);
+    private List<IrClass> MapClasses(List<IrClass> xs) => MapList(xs, _fClass);
+    private List<IrFunction> MapFunctions(List<IrFunction> xs) => MapList(xs, _fFunction);
+    private List<IrOperator> MapOperators(List<IrOperator> xs) => MapList(xs, _fOperator);
+    private List<IrProcess> MapProcesses(List<IrProcess> xs) => MapList(xs, _fProcess);
+    private List<IrThread> MapThreads(List<IrThread> xs) => MapList(xs, _fThread);
+    private List<IrField> MapFields(List<IrField> xs) => MapList(xs, _fField);
+
+    /// <summary>
+    /// Rewrites one switch case's labels and body; returns the original if unchanged.
+    /// </summary>
+    private IrSwitchCase RewriteSwitchCase(IrSwitchCase c)
+    {
+        var labels = Map(c.Labels);
+        var body = RewriteBlock(c.Body);
+        return ReferenceEquals(labels, c.Labels) && ReferenceEquals(body, c.Body)
+            ? c
+            : c with { Labels = labels, Body = body };
     }
 
     /// <summary>
-    /// Maps a list of switch cases, returning the original list if no case was rewritten.
+    /// Rewrites one match case's body; returns the original if unchanged.
     /// </summary>
-    private List<IrSwitchCase> MapCases(List<IrSwitchCase> xs)
+    private IrMatchCase RewriteMatchCase(IrMatchCase c)
     {
-        if (xs.Count == 0) return xs;
-
-        List<IrSwitchCase>? result = null;
-        var span = CollectionsMarshal.AsSpan(xs);
-        for (int i = 0; i < span.Length; i++)
-        {
-            var orig = span[i];
-            var labels = Map(orig.Labels);
-            var body = RewriteBlock(orig.Body);
-            var rewritten = ReferenceEquals(labels, orig.Labels) && ReferenceEquals(body, orig.Body) ? orig : orig with { Labels = labels, Body = body };
-
-            if (!ReferenceEquals(orig, rewritten))
-            {
-                if (result == null)
-                {
-                    result = new List<IrSwitchCase>(xs.Count);
-                    for (int j = 0; j < i; j++) result.Add(span[j]);
-                }
-                result.Add(rewritten);
-            }
-            else
-            {
-                result?.Add(orig);
-            }
-        }
-        return result ?? xs;
+        var body = RewriteBlock(c.Body);
+        return ReferenceEquals(body, c.Body) ? c : c with { Body = body };
     }
 
     /// <summary>
-    /// Maps a list of match cases, returning the original list if no case was rewritten.
+    /// Rewrites a thread's entry function; returns the original if unchanged or absent.
     /// </summary>
-    private List<IrMatchCase> MapMatchCases(List<IrMatchCase> xs)
+    private IrThread RewriteThread(IrThread t)
     {
-        if (xs.Count == 0) return xs;
-
-        List<IrMatchCase>? result = null;
-        var span = CollectionsMarshal.AsSpan(xs);
-        for (int i = 0; i < span.Length; i++)
-        {
-            var orig = span[i];
-            var body = RewriteBlock(orig.Body);
-            var rewritten = ReferenceEquals(body, orig.Body) ? orig : orig with { Body = body };
-
-            if (!ReferenceEquals(orig, rewritten))
-            {
-                if (result == null)
-                {
-                    result = new List<IrMatchCase>(xs.Count);
-                    for (int j = 0; j < i; j++) result.Add(span[j]);
-                }
-                result.Add(rewritten);
-            }
-            else
-            {
-                result?.Add(orig);
-            }
-        }
-        return result ?? xs;
+        if (t.EntryFunc == null) return t;
+        var entry = RewriteFunction(t.EntryFunc);
+        return ReferenceEquals(entry, t.EntryFunc) ? t : t with { EntryFunc = entry };
     }
 
     /// <summary>
-    /// Maps a list of classes, returning the original list if no class was rewritten.
+    /// Rewrites a field's initializer; returns the original if unchanged or absent.
     /// </summary>
-    private List<IrClass> MapClasses(List<IrClass> xs)
+    private IrField RewriteField(IrField f)
     {
-        if (xs.Count == 0) return xs;
-        List<IrClass>? result = null;
-        var span = CollectionsMarshal.AsSpan(xs);
-        for (int i = 0; i < span.Length; i++)
-        {
-            var orig = span[i];
-            var rewritten = RewriteClass(orig);
-            if (!ReferenceEquals(orig, rewritten))
-            {
-                if (result == null)
-                {
-                    result = new List<IrClass>(xs.Count);
-                    for (int j = 0; j < i; j++) result.Add(span[j]);
-                }
-                result.Add(rewritten);
-            }
-            else
-            {
-                result?.Add(orig);
-            }
-        }
-        return result ?? xs;
-    }
-
-    /// <summary>
-    /// Maps a list of functions, returning the original list if no function was rewritten.
-    /// </summary>
-    private List<IrFunction> MapFunctions(List<IrFunction> xs)
-    {
-        if (xs.Count == 0) return xs;
-        List<IrFunction>? result = null;
-        var span = CollectionsMarshal.AsSpan(xs);
-        for (int i = 0; i < span.Length; i++)
-        {
-            var orig = span[i];
-            var rewritten = RewriteFunction(orig);
-            if (!ReferenceEquals(orig, rewritten))
-            {
-                if (result == null)
-                {
-                    result = new List<IrFunction>(xs.Count);
-                    for (int j = 0; j < i; j++) result.Add(span[j]);
-                }
-                result.Add(rewritten);
-            }
-            else
-            {
-                result?.Add(orig);
-            }
-        }
-        return result ?? xs;
-    }
-
-    /// <summary>
-    /// Maps a list of operators, returning the original list if no operator was rewritten.
-    /// </summary>
-    private List<IrOperator> MapOperators(List<IrOperator> xs)
-    {
-        if (xs.Count == 0) return xs;
-        List<IrOperator>? result = null;
-        var span = CollectionsMarshal.AsSpan(xs);
-        for (int i = 0; i < span.Length; i++)
-        {
-            var orig = span[i];
-            var rewritten = RewriteOperator(orig);
-            if (!ReferenceEquals(orig, rewritten))
-            {
-                if (result == null)
-                {
-                    result = new List<IrOperator>(xs.Count);
-                    for (int j = 0; j < i; j++) result.Add(span[j]);
-                }
-                result.Add(rewritten);
-            }
-            else
-            {
-                result?.Add(orig);
-            }
-        }
-        return result ?? xs;
-    }
-
-    /// <summary>
-    /// Maps a list of processes, returning the original list if no process was rewritten.
-    /// </summary>
-    private List<IrProcess> MapProcesses(List<IrProcess> xs)
-    {
-        if (xs.Count == 0) return xs;
-        List<IrProcess>? result = null;
-        var span = CollectionsMarshal.AsSpan(xs);
-        for (int i = 0; i < span.Length; i++)
-        {
-            var orig = span[i];
-            var rewritten = RewriteProcess(orig);
-            if (!ReferenceEquals(orig, rewritten))
-            {
-                if (result == null)
-                {
-                    result = new List<IrProcess>(xs.Count);
-                    for (int j = 0; j < i; j++) result.Add(span[j]);
-                }
-                result.Add(rewritten);
-            }
-            else
-            {
-                result?.Add(orig);
-            }
-        }
-        return result ?? xs;
-    }
-
-    /// <summary>
-    /// Maps a list of threads, returning the original list if no thread's entry function was rewritten.
-    /// </summary>
-    private List<IrThread> MapThreads(List<IrThread> xs)
-    {
-        if (xs.Count == 0) return xs;
-        List<IrThread>? result = null;
-        var span = CollectionsMarshal.AsSpan(xs);
-        for (int i = 0; i < span.Length; i++)
-        {
-            var orig = span[i];
-            var rewritten = orig;
-            if (orig.EntryFunc != null)
-            {
-                var entry = RewriteFunction(orig.EntryFunc);
-                if (!ReferenceEquals(entry, orig.EntryFunc))
-                {
-                    rewritten = orig with { EntryFunc = entry };
-                }
-            }
-
-            if (!ReferenceEquals(orig, rewritten))
-            {
-                if (result == null)
-                {
-                    result = new List<IrThread>(xs.Count);
-                    for (int j = 0; j < i; j++) result.Add(span[j]);
-                }
-                result.Add(rewritten);
-            }
-            else
-            {
-                result?.Add(orig);
-            }
-        }
-        return result ?? xs;
-    }
-
-    /// <summary>
-    /// Maps a list of fields, returning the original list if no field initializer was rewritten.
-    /// </summary>
-    private List<IrField> MapFields(List<IrField> xs)
-    {
-        if (xs.Count == 0) return xs;
-        List<IrField>? result = null;
-        var span = CollectionsMarshal.AsSpan(xs);
-        for (int i = 0; i < span.Length; i++)
-        {
-            var orig = span[i];
-            var rewritten = orig;
-            if (orig.Init != null)
-            {
-                var init = RewriteExpr(orig.Init);
-                if (!ReferenceEquals(init, orig.Init))
-                {
-                    rewritten = orig with { Init = init };
-                }
-            }
-
-            if (!ReferenceEquals(orig, rewritten))
-            {
-                if (result == null)
-                {
-                    result = new List<IrField>(xs.Count);
-                    for (int j = 0; j < i; j++) result.Add(span[j]);
-                }
-                result.Add(rewritten);
-            }
-            else
-            {
-                result?.Add(orig);
-            }
-        }
-        return result ?? xs;
+        if (f.Init == null) return f;
+        var init = RewriteExpr(f.Init);
+        return ReferenceEquals(init, f.Init) ? f : f with { Init = init };
     }
 
     /// <summary>

@@ -4,8 +4,11 @@ using Appa;
 
 // G016/G039 need a String or union payload constructor that only resolves once
 // libgata is really imported - both are covered by the torture fixture port
-// (TortureTests) instead. G019/G020/G036/G042 need a real environment/release-mode
-// setup neither this file nor the torture corpus currently reproduces.
+// (TortureTests) instead. G020/G036/G042 need a real environment/release-mode
+// setup neither this file nor the torture corpus currently reproduces. G019 is not
+// reachable from here either, but for a different reason: it is raised by
+// Pipeline.ValidateIntrinsics, which runs above BuildModule precisely so that the
+// libgata-free sources in this file stay clean - see IntrinsicValidationTests.
 /// <summary>
 /// Inline string-literal semantic coverage: one minimal repro per diagnostic code
 /// reachable without libgata, plus a set of error-free "good path" language-feature

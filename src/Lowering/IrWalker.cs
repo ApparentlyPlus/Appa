@@ -84,9 +84,15 @@ internal abstract class IrWalker
                 if (ms.Default != null) WalkStmt(ms.Default);
                 break;
             case IrDefer d2:
-                WalkStmt(d2.Action); 
+                WalkStmt(d2.Action);
                 break;
-            // IrNativeStmt, IrRaw, IrBreak, IrContinue, IrThrow, IrDebug, IrPanic: no children.
+            case IrAssignValue av:
+                WalkExpr(av.Value);
+                break;
+            
+            // IrNativeStmt, IrGoto, IrLabel, IrBreak, IrContinue, IrThrow, IrDebug, IrPanic:
+            // no children. Debug builds reject anything else.
+            default: NodeCoverage.AssertInertIrStmt(s, "IrWalker.WalkStmt"); break;
         }
     }
 
@@ -115,9 +121,16 @@ internal abstract class IrWalker
             case IrThrowsCall tc:
                 foreach (var a in CollectionsMarshal.AsSpan(tc.Args)) WalkExpr(a);
                 break;
-            case IrThrowsInstanceCall ti: 
-                WalkExpr(ti.Recv); 
-                foreach (var a in CollectionsMarshal.AsSpan(ti.Args)) WalkExpr(a); 
+            case IrThrowsInstanceCall ti:
+                WalkExpr(ti.Recv);
+                foreach (var a in CollectionsMarshal.AsSpan(ti.Args)) WalkExpr(a);
+                break;
+            case IrCatchCall cc:
+                WalkExpr(cc.Call);
+                WalkStmt(cc.Handler);
+                break;
+            case IrStructLit sl:
+                foreach (var f in CollectionsMarshal.AsSpan(sl.Fields)) WalkExpr(f.Value);
                 break;
             case IrNew n:
                 foreach (var a in CollectionsMarshal.AsSpan(n.Args)) WalkExpr(a); 
@@ -167,6 +180,7 @@ internal abstract class IrWalker
                 WalkExpr(uf.Union);
                 break;
             // Literals, IrVar, IrSelfExpr, IrFuncRef, IrSizeof, IrDefault: no children.
+            default: NodeCoverage.AssertInertIrExpr(e, "IrWalker.WalkExpr"); break;
         }
     }
 }

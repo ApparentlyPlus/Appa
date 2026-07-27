@@ -949,7 +949,8 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     {
         switch (s)
         {
-            case IrRaw r:         w.Line(r.Code); break;
+            case IrGoto g:        w.Line($"goto {g.Label};"); break;
+            case IrLabel l:       w.Line($"{l.Name}:;"); break;
             case IrNativeStmt ns: w.Line(TrimC(ns.C)); break;
             case IrBlock b:       EmitBlock(b, w); break;
             case IrUnsafeBlock u: EmitBlock(u.Body, w); break;
@@ -959,8 +960,8 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             case IrReturn rs:     w.Line(rs.Value == null ? "return;" : $"return {EmitExpr(rs.Value)};"); break;
             case IrBreak:         w.Line("break;"); break;
             case IrContinue:      w.Line("continue;"); break;
-            case IrDebug d:       w.Line($"{module.Symbols.IntrinsicOrNull(Roles.EnvDebug) ?? "_env_dbg"}({d.Raw});"); break;
-            case IrPanic p:       w.Line($"{module.Symbols.IntrinsicOrNull(Roles.EnvPanic) ?? "_env_panic"}({p.Raw});"); break;
+            case IrDebug d:       w.Line($"{module.Symbols.FloorName(Roles.EnvDebug)}({d.Raw});"); break;
+            case IrPanic p:       w.Line($"{module.Symbols.FloorName(Roles.EnvPanic)}({p.Raw});"); break;
             case IrIf ifs:        EmitIf(ifs, w); break;
             case IrWhile ws:      w.Line($"while ({EmitExpr(ws.Cond)})"); EmitBlock(ws.Body, w); break;
             case IrFor fr:        EmitFor(fr, w); break;
@@ -1036,7 +1037,8 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             IrEnumConst ec => Mangler.EnumMember(ec.EnumName, ec.Member),
             IrVar v => v.IsRef ? $"(*{v.Name})" : v.Name,
             IrSelfExpr => "self",
-            IrFieldLoad fl => fl.Obj.Type is IrUnionType
+
+            IrFieldLoad fl => fl.Obj.Type is IrUnionType or IrResultType
                                 ? $"{EmitExpr(fl.Obj)}.{fl.Field}"
                                 : $"{EmitExpr(fl.Obj)}->{fl.Field}",
             IrIndex ix => ix.Obj.Type is IrArrayType
@@ -1054,6 +1056,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             IrAddrOf ao => $"(&{EmitExpr(ao.Target)})",
             IrDeref dr => $"(*{EmitExpr(dr.Ptr)})",
             IrSizeof so => $"sizeof({so.Of.ToCType()})",
+            IrStructLit sl => $"({sl.StructType.ToCType()}){{ {EmitStructFields(sl.Fields)} }}",
             IrDefault df => $"(({df.Of.ToCType()})0)",
             IrFuncRef fr => fr.CName,
             IrIndirectCall ic2 => $"({EmitExpr(ic2.Target)})({EmitArgs(ic2.Args)})",
@@ -1061,6 +1064,20 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             IrUnionField uf => $"{EmitExpr(uf.Union)}.payload.{UnionVariantName(uf.Union.Type, uf.VariantIndex)}.{uf.Field}",
             _ => throw new System.Diagnostics.UnreachableException($"[Emitter] unhandled IrExpr: {e.GetType().Name}")
         };
+    }
+
+    /// <summary>
+    /// Renders the designated initializer body of an IrStructLit
+    /// </summary>
+    private string EmitStructFields(List<(string Field, IrExpr Value)> fields)
+    {
+        var sb = new System.Text.StringBuilder();
+        for (int i = 0; i < fields.Count; i++)
+        {
+            if (i > 0) sb.Append(", ");
+            sb.Append('.').Append(fields[i].Field).Append(" = ").Append(EmitExpr(fields[i].Value));
+        }
+        return sb.ToString();
     }
 
     /// <summary>

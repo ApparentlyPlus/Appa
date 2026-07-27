@@ -566,6 +566,11 @@ internal record CastExpr(TypeSpec TargetType, Expr Value, TextSpan Span) : Expr(
 internal record CallExpr(Expr Callee, Expr[] Args, TextSpan Span) : Expr(Span);
 
 /// <summary>
+/// A throwing call with an inline handler: `f() catch { ... assign v; }`.
+/// </summary>
+internal record CatchCallExpr(Expr Call, Block Handler, TextSpan Span) : Expr(Span);
+
+/// <summary>
 /// Member access via dot, eg. obj.field or obj.method. Member is the field or method name.
 /// </summary>
 internal record MemberAccessExpr(Expr Object, string Member, TextSpan Span) : Expr(Span);
@@ -738,6 +743,14 @@ internal record DeferStmt(Stmt Action, TextSpan Span) : Stmt(Span);
 /// A throw statement that aborts the enclosing throws function or try block with an error Result.
 /// </summary>
 internal record ThrowStmt(TextSpan Span) : Stmt(Span);
+
+/// <summary>
+/// `assign expr;` - supplies the replacement value for the declaration a `catch` handler is
+/// attached to, then resumes execution after it. Legal only inside such a handler.
+/// Spelled with its own keyword rather than reusing `return` so it can never be misread as
+/// returning out of the enclosing function.
+/// </summary>
+internal record AssignValueStmt(Expr Value, TextSpan Span) : Stmt(Span);
 
 /// <summary>
 /// A debug statement. Raw is the raw string literal including quotes. Lowered to the

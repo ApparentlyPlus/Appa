@@ -1,0 +1,479 @@
+namespace Appa.Tests;
+
+using Appa;
+
+/// <summary>
+/// Coverage for `f() catch { ... assign v; }` - handling a throwing call in place instead of
+/// through a try block, so the value it produces stays in the enclosing scope.
+///
+/// The emitted-C assertions here pin the shape the ARC pass produces, because that shape is the
+/// feature: a declaration in the *enclosing* block plus a two-armed branch. A try block would
+/// have put the declaration inside braces, which is exactly what this construct exists to avoid.
+/// </summary>
+public class CatchCallTests
+{
+    private const string Throwing = "throws int func P(int x) { if (x < 0) { throw; } return x; }\n";
+
+    private static void AssertClean(string src)
+    {
+        var (diag, _) = SingleFileCompile.Check(src);
+        Assert.False(diag.HasErrors, "expected no errors but got: " +
+            string.Join("; ", diag.All.Where(d => d.Severity == Severity.Error)
+                                      .Select(d => $"{d.Code} {d.Message}")));
+    }
+
+    private static void AssertError(string code, string src)
+    {
+        var (diag, _) = SingleFileCompile.Check(src);
+        Assert.True(diag.HasErrors, $"expected {code} but no errors were produced");
+        Assert.Contains(diag.All, d => d.Severity == Severity.Error && d.Code == code);
+    }
+
+    private static string EmitMain(string src)
+    {
+        var files = SingleFileCompile.Emit(src);
+        Assert.NotEmpty(files);
+        return string.Join("\n", files.Select(f => f.Content));
+    }
+
+    #region Accepted forms
+
+    /// <summary>
+    /// The base case: a handler supplying a fallback satisfies the throws rule with no try block.
+    /// </summary>
+    [Fact]
+    public void CatchHandlerSatisfiesTheThrowsRule()
+    {
+        AssertClean(Throwing +
+            "kernel { entry func Main() { let int a = P(1) catch { assign 0; }; } }");
+    }
+
+    /// <summary>
+    /// The reason the construct exists: the declaration outlives the handler, so later statements
+    /// in the same scope can still see it. Inside a try block this variable would be unreachable.
+    /// </summary>
+    [Fact]
+    public void DeclarationStaysInTheEnclosingScope()
+    {
+        AssertClean(Throwing +
+            """
+            kernel { entry func Main() {
+                let int a = P(1) catch { assign 0; };
+                let int b = a + 1;
+                let int c = a + b;
+            } }
+            """);
+    }
+
+    /// <summary>
+    /// A handler may bail out instead of supplying a value, as long as every path leaves. Inside
+    /// a throws function, `throw` propagates the failure onward.
+    /// </summary>
+    [Fact]
+    public void HandlerMayGiveUpByThrowing()
+    {
+        AssertClean(Throwing +
+            """
+            throws int func Chain(int x) {
+                let int v = P(x) catch { throw; };
+                return v + 1;
+            }
+            kernel { entry func Main() { try { let int q = Chain(1); } catch { } } }
+            """);
+    }
+
+    /// <summary>
+    /// `return` is an equally valid way out of a handler for a non-throws function.
+    /// </summary>
+    [Fact]
+    public void HandlerMayGiveUpByReturning()
+    {
+        AssertClean(Throwing +
+            """
+            int func Safe(int x) {
+                let int v = P(x) catch { return -1; };
+                return v;
+            }
+            kernel { entry func Main() { let int z = Safe(3); } }
+            """);
+    }
+
+    /// <summary>
+    /// Definite-assignment is path-sensitive, not syntactic: an if/else that assigns on both
+    /// arms is accepted even though no single statement is an `assign`.
+    /// </summary>
+    [Fact]
+    public void BranchingHandlerAssigningOnEveryPathIsAccepted()
+    {
+        AssertClean(Throwing +
+            """
+            kernel { entry func Main() {
+                let int a = P(1) catch {
+                    if (true) { assign 1; } else { assign 2; }
+                };
+            } }
+            """);
+    }
+
+    /// <summary>
+    /// Handlers nest: the inner `assign` belongs to the inner declaration and the outer to the
+    /// outer, so a handler can itself recover from a second failing call.
+    /// </summary>
+    [Fact]
+    public void HandlersNest()
+    {
+        AssertClean(Throwing +
+            """
+            kernel { entry func Main() {
+                let int a = P(-1) catch {
+                    let int inner = P(-1) catch { assign 7; };
+                    assign inner * 2;
+                };
+            } }
+            """);
+    }
+
+    /// <summary>
+    /// In statement position the result is discarded, so the handler is recovery-only and needs
+    /// no `assign` - there is nothing to assign to.
+    /// </summary>
+    [Fact]
+    public void StatementPositionNeedsNoAssign()
+    {
+        AssertClean(Throwing +
+            "kernel { entry func Main() { P(-1) catch { let int logged = 1; }; } }");
+    }
+
+    /// <summary>
+    /// The handler's value is coerced to the declared type like any other initializer, so a
+    /// narrower `assign` widens rather than failing.
+    /// </summary>
+    [Fact]
+    public void AssignWidensToTheDeclaredType()
+    {
+        AssertClean(Throwing +
+            "kernel { entry func Main() { let int64 a = P(1) catch { assign 0; }; } }");
+    }
+
+    #endregion
+
+    #region Rejected forms
+
+    /// <summary>
+    /// A handler that can fall out of its own end would leave the declaration unset.
+    /// </summary>
+    [Fact]
+    public void HandlerFallingThroughIsRejected()
+    {
+        AssertError(Codes.CatchHandlerNoAssign, Throwing +
+            "kernel { entry func Main() { let int a = P(1) catch { let int z = 0; }; } }");
+    }
+
+    /// <summary>
+    /// An if with no else is not exhaustive, so the fall-through path still reaches the end.
+    /// </summary>
+    [Fact]
+    public void HandlerAssigningOnOnlyOnePathIsRejected()
+    {
+        AssertError(Codes.CatchHandlerNoAssign, Throwing +
+            """
+            kernel { entry func Main() {
+                let int a = P(1) catch { if (true) { assign 1; } };
+            } }
+            """);
+    }
+
+    /// <summary>
+    /// `assign` is meaningless with no handler around it, and must not be mistaken for a way to
+    /// return from the enclosing function.
+    /// </summary>
+    [Fact]
+    public void AssignOutsideAnyHandlerIsRejected()
+    {
+        AssertError(Codes.AssignOutsideCatch,
+            "kernel { entry func Main() { assign 5; } }");
+    }
+
+    /// <summary>
+    /// In statement position there is no declaration behind the handler, so `assign` has no target.
+    /// </summary>
+    [Fact]
+    public void AssignInStatementPositionIsRejected()
+    {
+        AssertError(Codes.AssignOutsideCatch, Throwing +
+            "kernel { entry func Main() { P(1) catch { assign 3; }; } }");
+    }
+
+    /// <summary>
+    /// A call that cannot fail has nothing for a handler to do; silently allowing it would let a
+    /// handler rot in place after the callee stopped being `throws`.
+    /// </summary>
+    [Fact]
+    public void CatchOnNonThrowingCallIsRejected()
+    {
+        AssertError(Codes.ThrowsOutsideTry,
+            """
+            int func Plain(int x) { return x; }
+            kernel { entry func Main() { let int a = Plain(1) catch { assign 0; }; } }
+            """);
+    }
+
+    /// <summary>
+    /// Only a call can throw, so `catch` after anything else is a syntax error rather than a
+    /// type error discovered later.
+    /// </summary>
+    [Fact]
+    public void CatchOnNonCallIsRejected()
+    {
+        AssertError(Codes.Syntax,
+            "kernel { entry func Main() { let int a = 5 catch { assign 0; }; } }");
+    }
+
+    /// <summary>
+    /// The assigned value is type-checked against what the declaration expects.
+    /// </summary>
+    [Fact]
+    public void AssignOfWrongTypeIsRejected()
+    {
+        AssertError(Codes.TypeMismatch, Throwing +
+            "kernel { entry func Main() { let int a = P(1) catch { assign \"nope\"; }; } }");
+    }
+
+    /// <summary>
+    /// A handler on the outer call does not cover a throwing call buried in its arguments: that
+    /// inner call fails before the outer one is ever entered, so it needs handling of its own.
+    /// </summary>
+    [Fact]
+    public void CatchDoesNotCoverThrowingArguments()
+    {
+        AssertError(Codes.ThrowsOutsideTry, Throwing +
+            """
+            throws int func Q(int x) { if (x < 0) { throw; } return x; }
+            kernel { entry func Main() { let int a = Q(P(1)) catch { assign 0; }; } }
+            """);
+    }
+
+    /// <summary>
+    /// A field initializer is spliced into the generated allocator, which has nowhere to put a
+    /// failure branch. A bare throwing call there is already rejected by the handled-context
+    /// check; a `catch` satisfies that check by design, so this position needs its own guard or
+    /// the node reaches the emitter with no diagnostic at all.
+    /// </summary>
+    [Fact]
+    public void CatchInFieldInitializerIsRejected()
+    {
+        AssertError(Codes.ThrowsOutsideTry, Throwing +
+            "class B { public int v = P(1) catch { assign 0; }; }\n" +
+            "kernel { entry func Main() { let B b = new B(); } }");
+    }
+
+    /// <summary>
+    /// Same reasoning for a constructor argument and a collection-initializer element: both are
+    /// evaluated inside a larger expression with no statement boundary to branch at.
+    /// </summary>
+    [Theory]
+    [InlineData("class B { int v; func _init(int x) { self.v = x; } }\nkernel { entry func Main() { let B b = new B(P(1) catch { assign 0; }); } }")]
+    [InlineData("class L { public void func Add(int x) { } }\nkernel { entry func Main() { let L l = new L { P(1) catch { assign 0; } }; } }")]
+    public void CatchNestedInsideALargerExpressionIsRejected(string body)
+    {
+        AssertError(Codes.ThrowsOutsideTry, Throwing + body);
+    }
+
+    /// <summary>
+    /// A `break` inside a loop *within* the handler exits that loop, not the handler, so it does
+    /// not count as leaving. Without this the analysis would accept a handler that falls through.
+    /// </summary>
+    [Fact]
+    public void BreakInsideALoopInTheHandlerDoesNotCountAsLeaving()
+    {
+        AssertError(Codes.CatchHandlerNoAssign, Throwing +
+            "kernel { entry func Main() { let int v = P(1) catch { while (true) { break; } }; } }");
+    }
+
+    /// <summary>
+    /// The construct is a statement like any other, so it works unchanged inside a loop body, an
+    /// unsafe block, a nested block, and even inside a try - where the handler wins and the
+    /// enclosing catch is never reached.
+    /// </summary>
+    [Theory]
+    [InlineData("for (let int i = 0; i < 2; i = i + 1) { let int v = P(i) catch { assign 9; }; }")]
+    [InlineData("unsafe { let int v = P(1) catch { assign 9; }; }")]
+    [InlineData("{ let int v = P(1) catch { assign 9; }; }")]
+    [InlineData("try { let int v = P(1) catch { assign 9; }; } catch { }")]
+    public void CatchWorksInEveryStatementPosition(string body)
+    {
+        AssertClean(Throwing + "kernel { entry func Main() { " + body + " } }");
+    }
+
+    /// <summary>
+    /// A handler is an ordinary block sitting inside an expression, and generic instantiation
+    /// substitutes the AST by hand, node kind by node kind. Without an explicit case the handler
+    /// falls through the substituter's default and a type parameter used inside it survives into
+    /// the stamped copy unreplaced - which fails as "unknown type 'T'" at the instantiation.
+    /// </summary>
+    [Fact]
+    public void TypeParametersAreSubstitutedInsideAHandler()
+    {
+        AssertClean(Throwing +
+            """
+            T func Wrap[T](T fb) {
+                let int a = P(-1) catch { let T shadow = fb; assign 0; };
+                return fb;
+            }
+            kernel { entry func Main() { let int w = Wrap(7); } }
+            """);
+    }
+
+    /// <summary>
+    /// The same substitution has to reach a generic class's members, which are stamped per
+    /// instantiation rather than per call site.
+    /// </summary>
+    [Fact]
+    public void TypeParametersAreSubstitutedInsideAGenericClassMethodHandler()
+    {
+        AssertClean(Throwing +
+            """
+            class Holder[T] {
+                T v;
+                func _init(T x) { self.v = x; }
+                public T func Pick() {
+                    let int a = P(-1) catch { let T inner = self.v; assign 0; };
+                    return self.v;
+                }
+            }
+            kernel { entry func Main() { let Holder[int] h = new Holder[int](3); let int p = h.Pick(); } }
+            """);
+    }
+
+    /// <summary>
+    /// Handlers are not limited to free functions: a method body and an operator body are
+    /// ordinary bodies and get the same treatment.
+    /// </summary>
+    [Fact]
+    public void CatchWorksInMethodAndOperatorBodies()
+    {
+        AssertClean(Throwing +
+            """
+            class Ops {
+                public int func M() { let int v = P(-1) catch { assign -5; }; return v; }
+                public operator int func +(Ops o) { let int v = P(-1) catch { assign 42; }; return v; }
+            }
+            kernel { entry func Main() { let Ops o = new Ops(); let int m = o.M(); let int s = o + o; } }
+            """);
+    }
+
+    #endregion
+
+    #region Lowered shape
+
+    /// <summary>
+    /// Returns the fully-lowered body of the kernel entry function. SingleFileCompile has no
+    /// environment, so it emits no translation unit to string-match against - but the module it
+    /// returns has already been through ARC lowering, which is the pass under test here.
+    /// </summary>
+    private static List<IrStmt> LoweredMain(string src)
+    {
+        var (diag, module) = SingleFileCompile.Check(src);
+        Assert.False(diag.HasErrors, "expected no errors but got: " +
+            string.Join("; ", diag.All.Where(d => d.Severity == Severity.Error)
+                                      .Select(d => $"{d.Code} {d.Message}")));
+        Assert.NotNull(module);
+        var entry = module.FreeFunctions.Single(f => f.IsEntry);
+        Assert.NotNull(entry.Body);
+        return entry.Body.Stmts;
+    }
+
+    /// <summary>
+    /// The structural heart of the feature: the variable is declared in the enclosing block,
+    /// ahead of the Result temp, and a two-armed branch stores into it. A try block would have
+    /// put that declaration inside its own scope, which is what this construct exists to avoid.
+    /// </summary>
+    [Fact]
+    public void LowersToDeclarationThenBranchInTheEnclosingBlock()
+    {
+        var body = LoweredMain(Throwing +
+            "kernel { entry func Main() { let int a = P(1) catch { assign 0; }; let int b = a; } }");
+
+        var decl = Assert.IsType<IrDeclVar>(body[0]);
+        Assert.Equal("a", decl.Name);
+        Assert.Null(decl.Init);
+
+        var res = Assert.IsType<IrDeclVar>(body[1]);
+        Assert.Equal("_res_a", res.Name);
+        Assert.IsType<IrResultType>(res.Type);
+
+        var branch = Assert.IsType<IrIf>(body[2]);
+        Assert.NotNull(branch.Else);
+
+        // Success arm restores the plain-throws behaviour: the call's value goes straight in.
+        var ok = Assert.IsType<IrAssign>(branch.Else!.Stmts.Single());
+        Assert.Equal("a", Assert.IsType<IrVar>(ok.Target).Name);
+        Assert.Equal("value", Assert.IsType<IrFieldLoad>(ok.Value).Field);
+
+        // And the declaration that follows is a sibling, not nested inside the branch.
+        Assert.Equal("b", Assert.IsType<IrDeclVar>(body[3]).Name);
+    }
+
+    /// <summary>
+    /// `assign` becomes an ordinary store into that same variable, on the failure arm.
+    /// </summary>
+    [Fact]
+    public void AssignLowersToAStoreIntoTheDeclaration()
+    {
+        var body = LoweredMain(Throwing +
+            "kernel { entry func Main() { let int a = P(1) catch { assign 9; }; } }");
+
+        var branch = Assert.IsType<IrIf>(body[2]);
+        var store = Assert.IsType<IrAssign>(branch.Then.Stmts.Single());
+        Assert.Equal("a", Assert.IsType<IrVar>(store.Target).Name);
+        Assert.Equal(9, Assert.IsType<IrLitInt>(store.Value).Value);
+    }
+
+    /// <summary>
+    /// A managed target is declared with no initializer so the emitter NULL-initializes it. That
+    /// is what makes the give-up path safe: a handler leaving through `throw` never assigns, but
+    /// the variable is already an owner by then, and releasing null is a no-op in the runtime.
+    /// </summary>
+    [Fact]
+    public void ManagedTargetIsDeclaredWithoutAnInitializer()
+    {
+        var body = LoweredMain(
+            """
+            class Box { int v; }
+            throws Box func Make(int x) { if (x < 0) { throw; } return new Box(); }
+            kernel { entry func Main() { let Box b = Make(1) catch { assign new Box(); }; } }
+            """);
+
+        var decl = Assert.IsType<IrDeclVar>(body[0]);
+        Assert.Equal("b", decl.Name);
+        Assert.Null(decl.Init);
+        Assert.IsType<IrClassRef>(decl.Type);
+    }
+
+    /// <summary>
+    /// In statement position the call's +1 reference is owned by nobody, so the success arm has
+    /// to release it. The failure arm must not: the Result's value was never set on that path.
+    /// </summary>
+    [Fact]
+    public void DiscardedManagedResultIsReleasedOnTheSuccessArmOnly()
+    {
+        var body = LoweredMain(
+            """
+            class Box { int v; }
+            throws Box func Make(int x) { if (x < 0) { throw; } return new Box(); }
+            kernel { entry func Main() { Make(1) catch { let int logged = 1; }; } }
+            """);
+
+        var branch = Assert.IsType<IrIf>(body[1]);
+        Assert.NotNull(branch.Else);
+
+        var release = Assert.IsType<IrExprStmt>(branch.Else!.Stmts.Single());
+        var call = Assert.IsType<IrStaticCall>(release.Expr);
+        Assert.Equal("value", Assert.IsType<IrFieldLoad>(call.Args.Single()).Field);
+
+        // The failure arm holds the handler, and releases nothing.
+        Assert.DoesNotContain(branch.Then.Stmts, st => st is IrExprStmt { Expr: IrStaticCall });
+    }
+
+    #endregion
+}

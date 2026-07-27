@@ -36,6 +36,34 @@ internal static class Roles
         StringifyInt, StringifyFloat, StringifyChar,
         EnvDebug, EnvPanic, EnvProcCreate, EnvProcHide, EnvThreadSpawn, EnvRead, EnvAlloc, EnvTime
     ]);
+
+    // The floor's canonical C names. Unlike the ARC/stringify roles, an unbound env role is not
+    // an error: the floor bind names are a fixed contract every environment implements (see the
+    // book, Ch. 23), and libgata binds them from Sys.g/Mem.g/Console.g/Time.g - none of which a
+    // program is obliged to import. A debug statement in a program that never imports Sys must
+    // still emit a call, so the role acts as an optional rename over a known default rather than
+    // as a required binding. Stated once here because the defaults were previously inlined at
+    // thirteen call sites, where env_time's default was already spelled inconsistently with its
+    // role name.
+    private static readonly Dictionary<string, string> FloorDefaults = new()
+    {
+        [EnvDebug]       = "_env_dbg",
+        [EnvPanic]       = "_env_panic",
+        [EnvProcCreate]  = "_env_proc_create",
+        [EnvProcHide]    = "_env_proc_hide",
+        [EnvThreadSpawn] = "_env_thread_spawn",
+        [EnvRead]        = "_env_read",
+        [EnvAlloc]       = "_env_alloc",
+        [EnvTime]        = "_env_time_ns",
+    };
+
+    /// <summary>
+    /// Returns the canonical floor C name for an environment role.
+    /// </summary>
+    public static string FloorDefault(string role)
+    {
+        return FloorDefaults[role];
+    }
 }
 
 // The lifecycle methods the compiler itself invokes from generated code: the allocator
@@ -141,6 +169,16 @@ internal sealed class SymbolTable
     public string? IntrinsicOrNull(string role)
     {
         return Intrinsics.TryGetValue(role, out var n) ? n : null;
+    }
+
+    /// <summary>
+    /// Resolves an environment floor role to a C name: whatever libgata bound to it, or the
+    /// role's canonical floor name when nothing did. See Roles.FloorDefaults for why an unbound
+    /// env role is legitimate rather than a MissingIntrinsic error.
+    /// </summary>
+    public string FloorName(string role)
+    {
+        return IntrinsicOrNull(role) ?? Roles.FloorDefault(role);
     }
 
     #region Registration

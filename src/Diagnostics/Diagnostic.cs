@@ -108,6 +108,8 @@ internal static class Codes
     public const string SelfComparison         = "G078";
     public const string BadShiftCount          = "G079";
     public const string MissingInterpolation   = "G080";
+    public const string AssignOutsideCatch     = "G081";
+    public const string CatchHandlerNoAssign   = "G082";
 }
 
 /// <summary>
@@ -255,6 +257,24 @@ internal sealed class DiagnosticBag(SourceSet sources)
                 .Append(C.NC)
                 .Append(": ")
                 .Append(d.Message);
+
+            // Spanless diagnostics have no snippet or gutter to hang help lines off, but they
+            // still carry hints, and those hints used to be dropped on the floor here - which hit
+            // exactly the diagnostics that need them most (G019 missing intrinsic, G020 missing
+            // floor bind, G002 no entry point), since none of those point at a source location.
+            for (int i = 0; i < d.Hints.Length; i++)
+                sb.AppendLine()
+                    .Append("  ")
+                    .Append(C.BLUE)
+                    .Append('=')
+                    .Append(C.NC)
+                    .Append(' ')
+                    .Append(C.CYAN)
+                    .Append("help")
+                    .Append(C.NC)
+                    .Append(": ")
+                    .Append(d.Hints[i]);
+
             return sb.ToString();
         }
 

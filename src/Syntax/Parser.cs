@@ -962,6 +962,15 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
             Expect(TK.Semi);
             return new ThrowStmt(To(s));
         }
+
+        // `assign v;` terminates a catch handler. Parsed here rather than in ParseExprOrAssign
+        // for the same reason as throw: it transfers control, it is not an expression.
+        if (At(TK.Assign)) {
+            Advance();
+            var value = ParseExpr();
+            Expect(TK.Semi);
+            return new AssignValueStmt(value, To(s));
+        }
         if (At(TK.Debug)) {
             Advance();
             if (!At(TK.StrLit)) Fail("'debug' takes a string literal", hints: ["e.g. debug \"message\";"]);
@@ -1480,6 +1489,14 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
             else if (At(TK.Dot)) { Advance(); expr = new MemberAccessExpr(expr, Expect(TK.Ident).Value, To(s)); }
             else if (At(TK.LBrack)) { Advance(); var idx = ParseExpr(); Expect(TK.RBrack); expr = new IndexExpr(expr, idx, To(s)); }
             else if (At(TK.LParen)) { Advance(); var args = ParseArgList(); Expect(TK.RParen); expr = new CallExpr(expr, args, To(s)); }
+            else if (At(TK.Catch))
+            {
+                if (expr is not CallExpr)
+                    Fail("'catch' here must follow a call to a 'throws' function",
+                        hints: ["e.g. let int x = Parse(s) catch { assign 0; };"]);
+                Advance();
+                expr = new CatchCallExpr(expr, ParseBlock(), To(s));
+            }
             else break;
         }
         return expr;

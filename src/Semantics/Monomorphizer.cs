@@ -540,6 +540,11 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
                 if (ReferenceEquals(newRv, rs.Value)) return s;
                 return new ReturnStmt(newRv, rs.Span) { Span = s.Span };
 
+            case AssignValueStmt av:
+                var newAvValue = SubExpr(av.Value, ctx);
+                if (ReferenceEquals(newAvValue, av.Value)) return s;
+                return new AssignValueStmt(newAvValue, av.Span) { Span = s.Span };
+
             case TryCatchStmt tc:
                 var newTry = SubBlock(tc.Try, ctx);
                 var newCatch = SubBlock(tc.Catch, ctx);
@@ -639,7 +644,10 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
                 return new MatchStmt(newMsScrut, newMsCases ?? ms.Cases, newMsDefault, ms.Span) { Span = s.Span };
 
             default:
-                return s;   // NativeStmt, BreakStmt, ContinueStmt, ThrowStmt, DebugStmt, PanicStmt
+                // NativeStmt, BreakStmt, ContinueStmt, ThrowStmt, DebugStmt, PanicStmt - nothing
+                // to substitute.
+                NodeCoverage.AssertInertAstStmt(s);
+                return s;
         }
     }
 
@@ -719,6 +727,13 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
                 }
                 if (newAlElems == null) return e;
                 return new ArrayLitExpr(newAlElems, al.Span) { Span = e.Span };
+
+
+            case CatchCallExpr cc:
+                var newCcCall = SubExpr(cc.Call, ctx);
+                var newCcHandler = SubBlock(cc.Handler, ctx);
+                if (ReferenceEquals(newCcCall, cc.Call) && ReferenceEquals(newCcHandler, cc.Handler)) return e;
+                return new CatchCallExpr(newCcCall, newCcHandler, cc.Span) { Span = e.Span };
 
             case CallExpr cx:
                 var newCallee = SubExpr(cx.Callee, ctx);
@@ -815,7 +830,9 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
                 return new DefaultExpr(newDeType!, de.Span) { Span = e.Span };
 
             default:
-                return e;   // literals, IdentExpr, NullExpr
+                // Literals, IdentExpr, NullExpr - nothing to substitute.
+                NodeCoverage.AssertInertAstExpr(e);
+                return e;
         }
     }
 
@@ -823,10 +840,6 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
 
     /// <summary>
     /// Tries to bind a type parameter inferred from one argument position.
-    /// Returns false only on a conflicting re-bind; a concrete (non-parameter) type returns true.
-    /// A generic-class parameter (e.g. Map[K, V]) unifies against the argument's registered
-    /// instantiation record, so multi-parameter generics and underscore-containing class
-    /// names infer correctly instead of being split at the first underscore.
     /// </summary>
     internal static bool UnifyParam(TypeSpec paramType, IrType argType,
         string[] gparams, Dictionary<string, TypeSpec> binds)

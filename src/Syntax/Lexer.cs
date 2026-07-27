@@ -76,6 +76,7 @@ internal sealed class Lexer(string src)
         ["defer"]       = TK.Defer,     
         ["match"]       = TK.Match,
         ["union"]       = TK.Union,
+        ["assign"]      = TK.Assign,
         ["bool"]        = TK.TBool,     
         ["int"]         = TK.TInt,
         ["char"]        = TK.TChar,     

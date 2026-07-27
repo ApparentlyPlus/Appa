@@ -417,6 +417,17 @@ internal record IrThrowsCall(string CName, IrType InnerType, List<IrExpr> Args) 
 internal record IrThrowsInstanceCall(IrExpr Recv, string CName, IrType InnerType, List<IrExpr> Args) : IrExpr(new IrResultType(InnerType));
 
 /// <summary>
+/// A throwing call carrying its own inline failure handler (`f() catch { ... }`).
+///
+/// Note here that unlike IrThrowsCall, whose type is the Result wrapper because the caller still has to test
+/// it, this node's type is the inner type: the handler is guaranteed to have supplied a value
+/// on the failure path, so by the time control resumes the value is unconditionally there.
+/// Call is an IrThrowsCall or IrThrowsInstanceCall; the ARC pass splits the pair into a
+/// declaration plus an if/else and never lets this node reach the emitter.
+/// </summary>
+internal record IrCatchCall(IrExpr Call, IrBlock Handler, IrType InnerType) : IrExpr(InnerType);
+
+/// <summary>
 /// A bare reference to a free function by name, decaying to a function-pointer value.
 /// CName is a valid C function-pointer value with no cast needed.
 /// </summary>
@@ -506,6 +517,13 @@ internal record IrSizeof(IrType Of) : IrExpr(IrType.SizeT);
 /// </summary>
 internal record IrDefault(IrType Of) : IrExpr(Of);
 
+/// <summary>
+/// A designated struct literal: `(T){ .field = value, ... }`. Fields left out of the list are
+/// zero-initialized by C's own rules, which is how a Result carrying only an error is built.
+/// The ARC pass uses this to construct the Result values a throws function returns.
+/// </summary>
+internal record IrStructLit(IrType StructType, List<(string Field, IrExpr Value)> Fields) : IrExpr(StructType);
+
 #endregion
 
 #region Statements
@@ -526,11 +544,24 @@ internal record IrBlock(List<IrStmt> Stmts) : IrStmt;
 /// </summary>
 internal record IrNativeStmt(string C) : IrStmt;
 
-// Verbatim C produced by a lowering pass (Result branches, gotos/labels). Printed as-is.
 /// <summary>
-/// Verbatim C code produced by a lowering pass such as Result branches or goto/label pairs.
+/// `assign v;` inside a catch handler: stores the replacement value into the declaration the
+/// handler is attached to. The ARC pass rewrites it into a plain store, since only that pass
+/// knows the target's name - the handler is lowered as part of the declaration it belongs to.
 /// </summary>
-internal record IrRaw(string Code) : IrStmt;
+internal record IrAssignValue(IrExpr Value) : IrStmt;
+
+/// <summary>
+/// A goto targeting an IrLabel. Only the ARC pass emits these, to route a failed throwing
+/// call or an explicit throw to its enclosing try's handler.
+/// </summary>
+internal record IrGoto(string Label) : IrStmt;
+
+/// <summary>
+/// A label an IrGoto can target. Emitted as `name:;` - the trailing empty statement keeps a
+/// label legal immediately before a closing brace, which C forbids otherwise.
+/// </summary>
+internal record IrLabel(string Name) : IrStmt;
 
 /// <summary>
 /// A local variable declaration with an optional initializer.

@@ -28,7 +28,13 @@ internal sealed class Ownership(IrModule module)
     private readonly string _release = Role(module, Roles.Release);
 
     /// <summary>
-    /// Returns the intrinsic symbol for a role, or a placeholder if not found.
+    /// Returns the intrinsic symbol for a role, or a `gata_MISSING_*` placeholder if unbound.
+    ///
+    /// Deliberately silent, and the silence is load bearing. BuildModule (and therefore this
+    /// pass) legitimately runs over stdlib free input, SingleFileCompile checks an import-free
+    /// source string with no libgata at all, so an unbound ARC role here does not by itself
+    /// mean a broken build. The emitter reports MissingIntrinsic for alloc/obj_init/obj_header
+    /// and, when a class owns managed fields, release; those are the points a real build fails.
     /// </summary>
     private static string Role(IrModule m, string role)
     {
@@ -103,6 +109,10 @@ internal sealed class Ownership(IrModule module)
     private bool _inThrowsFunc;
     private IrResultType? _resultType;
 
+    // The variable an `assign` inside the current catch handler stores into. Null outside a
+    // handler; the resolver has already rejected any `assign` that could reach here with it unset.
+    private IrVar? _assignTarget;
+
     // Inside `unsafe`, automatic reference counting is suppressed: owning stores,
     // owner tracking, consume-retains and producer hoisting all step aside, so the
     // author manages element lifetimes by hand via retain/release. Exits (return /
@@ -112,6 +122,85 @@ internal sealed class Ownership(IrModule module)
     // Zero-allocation side-effect and cleanup lists
     private readonly List<IrStmt> _pre = [];
     private readonly List<(string Name, IrType Type)> _cl = [];
+
+    // The two Result fields the throws lowering reads and writes. Spelled once here so the
+    // struct's shape lives in exactly two places: this pass and Emitter.EmitResultTypedefs.
+    private const string ResultValue = "value";
+    private const string ResultHasError = "has_error";
+
+    // The per-try error flag. One is declared at the top of each try block; nested throwing
+    // calls inside that block set it, and the block's tail tests it to reach the catch label.
+    private const string HasErrorFlag = "_has_error";
+    private static IrVar HasErrorVar => new(HasErrorFlag, IrType.Bool);
+
+    /// <summary>
+    /// Builds `res.value` for a Result-typed temp, typed as the underlying value.
+    /// </summary>
+    private static IrFieldLoad ResultValueOf(string res, IrResultType rt)
+    {
+        return new IrFieldLoad(new IrVar(res, rt), ResultValue, rt.Inner);
+    }
+
+    /// <summary>
+    /// Builds `res.has_error` for a Result-typed temp.
+    /// </summary>
+    private static IrFieldLoad ResultHasErrorOf(string res, IrResultType rt)
+    {
+        return new IrFieldLoad(new IrVar(res, rt), ResultHasError, IrType.Bool);
+    }
+
+    /// <summary>
+    /// Builds the `(Result_T){ .has_error = true }` literal a failed throws call returns.
+    /// The value field is deliberately omitted: C zero-initializes it.
+    /// </summary>
+    private IrStructLit ErrorResult()
+    {
+        return new IrStructLit(_resultType!, [(ResultHasError, new IrLitBool(true))]);
+    }
+
+    /// <summary>
+    /// Builds the success Result for a throws function's return, with or without a value.
+    /// </summary>
+    private IrStructLit OkResult(IrExpr? value)
+    {
+        return value == null
+            ? new IrStructLit(_resultType!, [(ResultHasError, new IrLitBool(false))])
+            : new IrStructLit(_resultType!, [(ResultValue, value), (ResultHasError, new IrLitBool(false))]);
+    }
+
+    /// <summary>
+    /// Wraps a condition in `if (cond) { body }` for the single-statement branches this pass emits.
+    /// </summary>
+    private static IrIf IfThen(IrExpr cond, List<IrStmt> body)
+    {
+        return new IrIf(cond, new IrBlock(body), null);
+    }
+
+    /// <summary>
+    /// Builds a logical negation of a bool-typed expression.
+    /// </summary>
+    private static IrUnaryOp Not(IrExpr e)
+    {
+        return new IrUnaryOp(UnOp.Not, e, IrType.Bool);
+    }
+
+    // The induction variable both for-in shapes count with. A nested for-in re-declares it in
+    // its own C for-scope, which shadows the outer one exactly as the previous raw text did.
+    private const string IndexName = "_fi";
+    private static IrVar IndexVar => new(IndexName, IrType.Int);
+
+    /// <summary>
+    /// Builds `for (int _fi = 0; _fi &lt; limit; _fi++) body` - the counted loop both for-in
+    /// shapes iterate with.
+    /// </summary>
+    private static IrFor CountedFor(IrExpr limit, IrBlock body)
+    {
+        return new IrFor(
+            new IrDeclVar(IndexName, IrType.Int, new IrLitInt(0)),
+            new IrBinOp(BinOp.Lt, IndexVar, limit, IrType.Bool),
+            new IrExprStmt(new IrPostfix(PostfixOp.Inc, IndexVar)),
+            body);
+    }
 
     #region Entry
 
@@ -302,7 +391,7 @@ internal sealed class Ownership(IrModule module)
     {
         switch (s)
         {
-            case IrNativeStmt or IrRaw or IrDebug or IrPanic: outs.Add(s); break;
+            case IrNativeStmt or IrGoto or IrLabel or IrDebug or IrPanic: outs.Add(s); break;
             case IrBlock b: outs.Add(LowerBlock(b)); break;
             case IrUnsafeBlock u:
             {
@@ -312,6 +401,7 @@ internal sealed class Ownership(IrModule module)
                 break;
             }
             case IrThrow: LowerThrow(outs); break;
+            case IrAssignValue av: LowerAssignValue(av, outs); break;
             case IrDeclVar dv: LowerDecl(dv, outs); break;
             case IrAssign a: LowerAssign(a, outs); break;
             case IrExprStmt es: LowerExprStmt(es, outs); break;
@@ -335,6 +425,12 @@ internal sealed class Ownership(IrModule module)
     {
         bool managed = IsManaged(dv.Type);
 
+        if (dv.Init is IrCatchCall cc)
+        {
+            LowerCatchDecl(dv, cc, managed, outs);
+            return;
+        }
+
         if (dv.Init is IrThrowsCall or IrThrowsInstanceCall)
         {
             int preStart = _pre.Count;
@@ -353,8 +449,8 @@ internal sealed class Ownership(IrModule module)
                 outs.Add(ReleaseStmt(new IrVar(_cl[clStart + i].Name, _cl[clStart + i].Type)));
             _cl.RemoveRange(clStart, clCount);
 
-            ThrowsCheck(res, outs);
-            outs.Add(new IrRaw($"{dv.Type.ToCType()} {dv.Name} = {res}.value;"));
+            ThrowsCheck(res, (IrResultType)dv.Init.Type, outs);
+            outs.Add(new IrDeclVar(dv.Name, dv.Type, ResultValueOf(res, (IrResultType)dv.Init.Type)));
             if (managed) RegisterOwner(dv.Name, dv.Type);
             return;
         }
@@ -382,6 +478,135 @@ internal sealed class Ownership(IrModule module)
         _cl.RemoveRange(cStart, cCount);
 
         if (managed) RegisterOwner(dv.Name, dv.Type);
+    }
+
+    /// <summary>
+    /// Lowers `let T x = f() catch { ... };` into a declaration plus a two armed branch:
+    ///
+    ///     T x;                              (NULL/{0} for managed and aggregate types)
+    ///     Result_T _res_x = f(...);
+    ///     if (_res_x.has_error) { &lt;handler, with 'assign v' lowered to 'x = v'&gt; }
+    ///     else                  { x = _res_x.value; }
+    ///
+    /// The variable is declared in the enclosing block and registered as an owner there, which
+    /// is the whole point of the construct: unlike a try block, the handler introduces no scope
+    /// the value can be trapped inside, so everything after this statement still sees x.
+    ///
+    /// Declaring it without an initializer also makes the give-up path safe. A handler that
+    /// leaves through `throw`/`return` never assigns, but x is already in the frame's owner list
+    /// by then; the emitter's NULL-initialization means the unwind releases a null pointer, which
+    /// the runtime's release() ignores.
+    /// </summary>
+    private void LowerCatchDecl(IrDeclVar dv, IrCatchCall cc, bool managed, List<IrStmt> outs)
+    {
+        int preStart = _pre.Count;
+        int clStart = _cl.Count;
+        var call = FlattenThrows(cc.Call);
+
+        for (int i = preStart; i < _pre.Count; i++) outs.Add(_pre[i]);
+        _pre.RemoveRange(preStart, _pre.Count - preStart);
+
+        // Declare first, so both arms of the branch below store into the same enclosing local.
+        outs.Add(new IrDeclVar(dv.Name, dv.Type, null) { Span = dv.Span });
+        if (managed) RegisterOwner(dv.Name, dv.Type);
+
+        var rt = (IrResultType)cc.Call.Type;
+        string res = $"_res_{dv.Name}";
+        outs.Add(new IrDeclVar(res, cc.Call.Type, call));
+
+        int clCount = _cl.Count - clStart;
+        for (int i = 0; i < clCount; i++)
+            outs.Add(ReleaseStmt(new IrVar(_cl[clStart + i].Name, _cl[clStart + i].Type)));
+        _cl.RemoveRange(clStart, clCount);
+
+        // The handler's own frame
+        var target = new IrVar(dv.Name, dv.Type);
+        var prevTarget = _assignTarget;
+        _assignTarget = target;
+        var handlerStmts = new List<IrStmt>();
+        var handlerFrame = new Frame();
+        _frames.Push(handlerFrame);
+        LowerBodyInto(cc.Handler, handlerStmts);
+        ReleaseFrame(handlerFrame, handlerStmts);
+        _frames.Pop();
+        _assignTarget = prevTarget;
+
+        // Success arm
+        var okStmts = new List<IrStmt>
+        {
+            new IrAssign(target, AssignOp.Assign, ResultValueOf(res, rt))
+        };
+
+        outs.Add(new IrIf(ResultHasErrorOf(res, rt), new IrBlock(handlerStmts), new IrBlock(okStmts)));
+    }
+
+    /// <summary>
+    /// Lowers `f() catch { ... };` in statement position, where the call's result is discarded:
+    ///
+    ///     Result_T _res_tmp_N = f(...);
+    ///     if (_res_tmp_N.has_error) { &lt;handler&gt; }
+    ///     else                      { release(_res_tmp_N.value); }   // managed inner type only
+    ///
+    /// There is no variable here, so the resolver rejects `assign` in this position. The success
+    /// arm still has to release: the call handed back a +1 reference that nothing else will own.
+    /// The failure arm must not - on that path the Result's value field was never set.
+    /// </summary>
+    private void LowerCatchExprStmt(IrCatchCall cc, List<IrStmt> outs)
+    {
+        int preStart = _pre.Count;
+        int clStart = _cl.Count;
+        var call = FlattenThrows(cc.Call);
+
+        for (int i = preStart; i < _pre.Count; i++) outs.Add(_pre[i]);
+        _pre.RemoveRange(preStart, _pre.Count - preStart);
+
+        var rt = (IrResultType)cc.Call.Type;
+        string res = Tmp("_res_tmp_");
+        outs.Add(new IrDeclVar(res, cc.Call.Type, call));
+
+        int clCount = _cl.Count - clStart;
+        for (int i = 0; i < clCount; i++)
+            outs.Add(ReleaseStmt(new IrVar(_cl[clStart + i].Name, _cl[clStart + i].Type)));
+        _cl.RemoveRange(clStart, clCount);
+
+        var handlerStmts = new List<IrStmt>();
+        var handlerFrame = new Frame();
+        _frames.Push(handlerFrame);
+        LowerBodyInto(cc.Handler, handlerStmts);
+        ReleaseFrame(handlerFrame, handlerStmts);
+        _frames.Pop();
+
+        List<IrStmt> okStmts = IsManaged(rt.Inner)
+            ? [ReleaseStmt(ResultValueOf(res, rt))]
+            : [];
+
+        outs.Add(okStmts.Count == 0
+            ? IfThen(ResultHasErrorOf(res, rt), handlerStmts)
+            : new IrIf(ResultHasErrorOf(res, rt), new IrBlock(handlerStmts), new IrBlock(okStmts)));
+    }
+
+    /// <summary>
+    /// Lowers `assign v;` into a store to the declaration its handler belongs to. A managed value
+    /// is consumed (+1) so the variable owns it, matching what the success arm gets from the call.
+    /// </summary>
+    private void LowerAssignValue(IrAssignValue av, List<IrStmt> outs)
+    {
+        var target = _assignTarget!;
+        int preStart = _pre.Count;
+        int clStart = _cl.Count;
+
+        bool managed = IsManaged(target.Type);
+        IrExpr value = managed ? Consume(av.Value) : Flatten(av.Value, false);
+
+        for (int i = preStart; i < _pre.Count; i++) outs.Add(_pre[i]);
+        _pre.RemoveRange(preStart, _pre.Count - preStart);
+
+        outs.Add(new IrAssign(target, AssignOp.Assign, value));
+
+        int clCount = _cl.Count - clStart;
+        for (int i = 0; i < clCount; i++)
+            outs.Add(ReleaseStmt(new IrVar(_cl[clStart + i].Name, _cl[clStart + i].Type)));
+        _cl.RemoveRange(clStart, clCount);
     }
 
     /// <summary>
@@ -435,6 +660,12 @@ internal sealed class Ownership(IrModule module)
     /// </summary>
     private void LowerExprStmt(IrExprStmt es, List<IrStmt> outs)
     {
+        if (es.Expr is IrCatchCall scc)
+        {
+            LowerCatchExprStmt(scc, outs);
+            return;
+        }
+
         if (es.Expr is IrThrowsCall or IrThrowsInstanceCall)
         {
             int pStart = _pre.Count;
@@ -453,9 +684,10 @@ internal sealed class Ownership(IrModule module)
                 outs.Add(ReleaseStmt(new IrVar(_cl[cStart + i].Name, _cl[cStart + i].Type)));
             _cl.RemoveRange(cStart, cCount);
 
-            ThrowsCheck(res, outs);
-            if (es.Expr.Type is IrResultType rt && IsManaged(rt.Inner))
-                outs.Add(new IrRaw($"{_release}({res}.value);"));
+            var ert = (IrResultType)es.Expr.Type;
+            ThrowsCheck(res, ert, outs);
+            if (IsManaged(ert.Inner))
+                outs.Add(ReleaseStmt(ResultValueOf(res, ert)));
             return;
         }
 
@@ -484,7 +716,7 @@ internal sealed class Ownership(IrModule module)
         if (rs.Value == null)
         {
             ReleaseForExit(outs, _ => false);
-            outs.Add(_inThrowsFunc ? new IrRaw($"return ({_resultType!.ToCType()}){{ .has_error = false }};") : new IrReturn(null));
+            outs.Add(new IrReturn(_inThrowsFunc ? OkResult(null) : null));
             return;
         }
 
@@ -506,9 +738,8 @@ internal sealed class Ownership(IrModule module)
         _cl.RemoveRange(cStart, cCount);
 
         ReleaseForExit(outs, _ => false);
-        outs.Add(_inThrowsFunc
-            ? new IrRaw($"return ({_resultType!.ToCType()}){{ .value = {tmp}, .has_error = false }};")
-            : new IrReturn(new IrVar(tmp, rs.Value.Type)));
+        var retVar = new IrVar(tmp, rs.Value.Type);
+        outs.Add(new IrReturn(_inThrowsFunc ? OkResult(retVar) : retVar));
     }
 
     /// <summary>
@@ -573,7 +804,7 @@ internal sealed class Ownership(IrModule module)
             inner.Add(ReleaseStmt(new IrVar(_cl[i].Name, _cl[i].Type)));
         _cl.RemoveRange(cStart, cCount);
 
-        inner.Add(new IrRaw($"if (!{cv}) break;"));
+        inner.Add(IfThen(Not(new IrVar(cv, IrType.Bool)), [new IrBreak()]));
         _nextFrameIsLoop = true;
         inner.Add(LowerBlock(ws.Body));
         outs.Add(new IrWhile(new IrLitBool(true), new IrBlock(inner)));
@@ -628,10 +859,10 @@ internal sealed class Ownership(IrModule module)
         if (stepOut.Count > 0)
         {
             string firstFlag = Tmp("_first");
-            outer.Add(new IrRaw($"int {firstFlag} = 1;"));
-            loop.Add(new IrRaw($"if (!{firstFlag})"));
-            loop.Add(new IrBlock(stepOut));
-            loop.Add(new IrRaw($"{firstFlag} = 0;"));
+            var flagVar = new IrVar(firstFlag, IrType.Bool);
+            outer.Add(new IrDeclVar(firstFlag, IrType.Bool, new IrLitBool(true)));
+            loop.Add(IfThen(Not(flagVar), stepOut));
+            loop.Add(new IrAssign(flagVar, AssignOp.Assign, new IrLitBool(false)));
         }
         if (fr.Cond != null)
         {
@@ -641,7 +872,7 @@ internal sealed class Ownership(IrModule module)
             loop.Add(new IrDeclVar(cv, IrType.Bool, cond));
             for (int i = 0; i < ccCount; i++)
                 loop.Add(ReleaseStmt(new IrVar(_cl[ccStart + i].Name, _cl[ccStart + i].Type)));
-            loop.Add(new IrRaw($"if (!{cv}) break;"));
+            loop.Add(IfThen(Not(new IrVar(cv, IrType.Bool)), [new IrBreak()]));
         }
 
         _pre.RemoveRange(cpStart, _pre.Count - cpStart);
@@ -679,21 +910,20 @@ internal sealed class Ownership(IrModule module)
                 outs.Add(ReleaseStmt(new IrVar(_cl[cStart + i].Name, _cl[cStart + i].Type)));
             _cl.RemoveRange(cStart, cCount);
 
-            outs.Add(new IrRaw($"for (int _fi = 0; _fi < {fi.ArraySize}; _fi++)"));
             var body = new List<IrStmt>();
             var frame = new Frame { Loop = true };
             _frames.Push(frame);
-            string elem = $"({av})._[_fi]";
+            IrExpr elem = new IrIndex(new IrVar(av, fi.Collection.Type), IndexVar, fi.ElemType);
             if (IsManaged(fi.ElemType))
             {
-                body.Add(new IrRaw($"{fi.ElemType.ToCType()} {fi.Var} = {_retain}({elem});"));
+                body.Add(new IrDeclVar(fi.Var, fi.ElemType, Retain(elem)));
                 RegisterOwner(fi.Var, fi.ElemType);
             }
-            else body.Add(new IrRaw($"{fi.ElemType.ToCType()} {fi.Var} = {elem};"));
+            else body.Add(new IrDeclVar(fi.Var, fi.ElemType, elem));
             LowerBodyInto(fi.Body, body);
             ReleaseFrame(frame, body);
             _frames.Pop();
-            outs.Add(new IrBlock(body));
+            outs.Add(CountedFor(new IrLitInt(fi.ArraySize), new IrBlock(body)));
             return;
         }
 
@@ -712,17 +942,18 @@ internal sealed class Ownership(IrModule module)
             outs.Add(ReleaseStmt(new IrVar(_cl[cStart + i].Name, _cl[cStart + i].Type)));
         _cl.RemoveRange(cStart, c2Count);
 
-        outs.Add(new IrRaw($"for (int _fi = 0; _fi < {fi.LenCName}({cv}); _fi++)"));
+        var colVar = new IrVar(cv, fi.Collection.Type);
         var b2 = new List<IrStmt>();
         var f2 = new Frame { Loop = true };
         _frames.Push(f2);
-        b2.Add(new IrRaw($"{fi.ElemType.ToCType()} {fi.Var} = {fi.GetCName}({cv}, _fi);"));
+        b2.Add(new IrDeclVar(fi.Var, fi.ElemType,
+            new IrStaticCall(fi.GetCName, fi.ElemType, [colVar, IndexVar])));
         if (IsManaged(fi.ElemType)) RegisterOwner(fi.Var, fi.ElemType);
         LowerBodyInto(fi.Body, b2);
         ReleaseFrame(f2, b2);
         _frames.Pop();
-        outs.Add(new IrBlock(b2));
-        if (colManaged) outs.Add(ReleaseStmt(new IrVar(cv, fi.Collection.Type)));
+        outs.Add(CountedFor(new IrStaticCall(fi.LenCName, IrType.Int, [colVar]), new IrBlock(b2)));
+        if (colManaged) outs.Add(ReleaseStmt(colVar));
     }
 
     /// <summary>
@@ -733,7 +964,7 @@ internal sealed class Ownership(IrModule module)
         string catchLbl = $"_catch_{tc.Seq}";
         string endLbl = $"_end_{tc.Seq}";
 
-        var tryStmts = new List<IrStmt> { new IrRaw("int _has_error = 0;") };
+        var tryStmts = new List<IrStmt> { new IrDeclVar(HasErrorFlag, IrType.Bool, new IrLitBool(false)) };
         var prev = (_inTry, _catchLabel);
         _inTry = true; _catchLabel = catchLbl;
         var tryFrame = new Frame { Try = true };
@@ -742,11 +973,11 @@ internal sealed class Ownership(IrModule module)
         ReleaseFrame(tryFrame, tryStmts);
         _frames.Pop();
         (_inTry, _catchLabel) = prev;
-        tryStmts.Add(new IrRaw($"if (_has_error) goto {catchLbl};"));
+        tryStmts.Add(IfThen(HasErrorVar, [new IrGoto(catchLbl)]));
         outs.Add(new IrBlock(tryStmts));
 
-        outs.Add(new IrRaw($"goto {endLbl};"));
-        outs.Add(new IrRaw($"{catchLbl}:;"));
+        outs.Add(new IrGoto(endLbl));
+        outs.Add(new IrLabel(catchLbl));
 
         var catchStmts = new List<IrStmt>();
         var catchFrame = new Frame();
@@ -755,31 +986,29 @@ internal sealed class Ownership(IrModule module)
         ReleaseFrame(catchFrame, catchStmts);
         _frames.Pop();
         outs.Add(new IrBlock(catchStmts));
-        outs.Add(new IrRaw($"{endLbl}:;"));
+        outs.Add(new IrLabel(endLbl));
     }
 
     /// <summary>
     /// Emits the error-branch check after a throwing call's Result is captured into res.
     /// Inside a try, routes to the catch label; otherwise propagates upward as a return.
     /// </summary>
-    private void ThrowsCheck(string res, List<IrStmt> outs)
+    private void ThrowsCheck(string res, IrResultType rt, List<IrStmt> outs)
     {
         var branch = new List<IrStmt>();
         if (_inTry)
         {
-            outs.Add(new IrRaw($"_has_error = {res}.has_error;"));
+            outs.Add(new IrAssign(HasErrorVar, AssignOp.Assign, ResultHasErrorOf(res, rt)));
             ReleaseForExit(branch, f => f.Try);
-            branch.Add(new IrRaw($"goto {_catchLabel};"));
-            outs.Add(new IrRaw("if (_has_error)"));
+            branch.Add(new IrGoto(_catchLabel));
+            outs.Add(IfThen(HasErrorVar, branch));
         }
         else
         {
             ReleaseForExit(branch, _ => false);
-            branch.Add(new IrRaw($"{_resultType!.ToCType()} _err = {{ .has_error = true }};"));
-            branch.Add(new IrRaw("return _err;"));
-            outs.Add(new IrRaw($"if ({res}.has_error)"));
+            branch.Add(new IrReturn(ErrorResult()));
+            outs.Add(IfThen(ResultHasErrorOf(res, rt), branch));
         }
-        outs.Add(new IrBlock(branch));
     }
 
     /// <summary>
@@ -790,13 +1019,12 @@ internal sealed class Ownership(IrModule module)
         if (_inTry)
         {
             ReleaseForExit(outs, f => f.Try);
-            outs.Add(new IrRaw($"goto {_catchLabel};"));
+            outs.Add(new IrGoto(_catchLabel));
         }
         else if (_resultType != null)
         {
             ReleaseForExit(outs, _ => false);
-            outs.Add(new IrRaw($"{_resultType.ToCType()} _err = {{ .has_error = true }};"));
-            outs.Add(new IrRaw("return _err;"));
+            outs.Add(new IrReturn(ErrorResult()));
         }
     }
 
