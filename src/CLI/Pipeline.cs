@@ -70,11 +70,11 @@ internal static class Pipeline
     {
         Mangler.ResetDense();
         Mangler.ResetGenericDisplay();
-        new Monomorphizer(diag).Process(programs);
+        var genericRequestFile = new Monomorphizer(diag).Process(programs);
         var collected = new SymbolCollector(diag).Collect([.. programs.Select(t => (t.path, t.prog))]);
         var module = new TypeResolver(collected.Sym, collected.HasInit,
                                       collected.PreDefinedStructs, collected.OpaqueFieldClasses, visible,
-                                      releaseMode: mode == Mode.Release, diag)
+                                      genericRequestFile, releaseMode: mode == Mode.Release, diag)
                          .Resolve([.. programs.Select(t => (t.prog, t.path))]);
         // The backend assumes well-typed IR. If the front-end reported any error, stop
         // here: lowering an ill-typed program would otherwise fault.

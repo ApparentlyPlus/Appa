@@ -13,7 +13,7 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
 {
     private readonly SymbolTable _sym = new();
     private readonly HashSet<string> _hasInit = [];
-    private readonly HashSet<string> _declaredClasses = [];
+    private readonly HashSet<string> _declaredTypes = [];
     private readonly Dictionary<string, HashSet<string>> _declaredFieldNames = [];
     private readonly Dictionary<string, HashSet<string>> _declaredMethodNames = [];
     private readonly Dictionary<string, HashSet<string>> _declaredMethodSigs = [];
@@ -118,11 +118,15 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
                 P1Extern(ed, file);
                 break;
             case EnumDecl ed:
+                if (!_declaredTypes.Add(ed.Name))
+                    diag.Error(Codes.DuplicateName, file, ed.Span, $"type '{ed.Name}' is already declared");
                 var enumNames = new string[ed.Members.Length];
                 for (int i = 0; i < enumNames.Length; i++) enumNames[i] = ed.Members[i].Name;
                 _sym.RegisterEnum(ed.Name, enumNames);
                 break;
             case UnionDecl ud:
+                if (!_declaredTypes.Add(ud.Name))
+                    diag.Error(Codes.DuplicateName, file, ud.Span, $"type '{ud.Name}' is already declared");
                 _sym.RegisterUnion(ud.Name, [.. ud.Variants]);
                 break;
         }
@@ -134,7 +138,7 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
     private void P1Class(ClassDecl cd, string file)
     {
         // Throw an error if the class name is already declared, but still register it so the resolver can find it.
-        if (!_declaredClasses.Add(cd.Name))
+        if (!_declaredTypes.Add(cd.Name))
             diag.Error(Codes.DuplicateName, file, cd.Span, $"type '{Mangler.DisplayName(cd.Name)}' is already declared");
 
         // Register the class in the symbol table, and if it's a module, add it to the modules set.
@@ -301,7 +305,7 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
     /// </summary>
     private void P1NativeType(NativeTypeDecl nd, string file)
     {
-        if (!_declaredClasses.Add(nd.Name))
+        if (!_declaredTypes.Add(nd.Name))
             diag.Error(Codes.DuplicateName, file, nd.Span, $"type '{nd.Name}' is already declared");
         _sym.RegisterClass(nd.Name, file);
         _preDefinedStructs.Add(nd.Name);

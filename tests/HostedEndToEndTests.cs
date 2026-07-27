@@ -90,6 +90,13 @@ public class HostedEndToEndTests
                 let Counter c = new Counter();
                 for x in xs { c.Bump(); }
 
+                // A library generic instantiated over a class declared in *this* file. The
+                // stamped List[Counter] lands in List.g, which has never heard of Counter,
+                // so this only resolves if the instance is given the requesting file's scope.
+                let List[Counter] cs = new List[Counter]();
+                cs.Add(c);
+                cs.Add(new Counter());
+
                 let [4]int arr = [0, 0, 0, 0];
                 arr[2] = 7;
 
@@ -102,11 +109,12 @@ public class HostedEndToEndTests
 
                 Console.PrintLine($"len={xs.Length()} map={m.Length()} bumps={c.Value()}");
                 Console.PrintLine($"arr={arr[2]} deref={deref} abs={Math.Abs(-9)}");
+                Console.PrintLine($"generic={cs.Length()} first={cs.Get(0).Value()}");
             }
         }
         """;
 
-    private const string ExpectedOutput = "len=2 map=1 bumps=2\narr=7 deref=42 abs=9\n";
+    private const string ExpectedOutput = "len=2 map=1 bumps=2\narr=7 deref=42 abs=9\ngeneric=2 first=2\n";
 
     [Fact]
     public void StdlibProgramTranspilesCompilesAndRuns()

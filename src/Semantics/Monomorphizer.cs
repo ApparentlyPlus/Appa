@@ -132,20 +132,23 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     /// with instances. Deferred inner uses (template bodies that reference other templates
     /// via their own type parameters) are replayed once their owning instantiation is done.
     /// </summary>
-    public void Process(List<(string path, Program prog)> programs)
+    public Dictionary<string, string> Process(List<(string path, Program prog)> programs)
     {
         var templates = new Dictionary<string, Template>();
         var tmplNames = new HashSet<string>();
-        foreach (var (_, prog) in programs)
+        foreach (var (path, prog) in programs)
             foreach (var item in prog.Items)
                 if (item is ClassDecl cd && cd.GenericParams.Length > 0)
                 {
                     string baseName = BaseNameOf(cd);
+                    if (templates.ContainsKey(baseName))
+                        diag.Error(Codes.DuplicateName, path, cd.Span,
+                            $"generic type '{baseName}' is already declared");
                     templates[baseName] = new Template(cd, cd.GenericParams, baseName);
                     tmplNames.Add(cd.Name);
                 }
 
-        if (templates.Count == 0) return;
+        if (templates.Count == 0) return [];
 
         var directUses = new List<(GenericUse Use, string File)>();
         var deferredByOwner = new Dictionary<string, List<(GenericUse Use, string File)>>();
@@ -197,6 +200,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
         foreach (var (use, file) in directUses) AddRequest(use.Base, use.Args, use.Span, file);
 
         var instancesByBase = new Dictionary<string, List<ClassDecl>>();
+        var requestedFrom = new Dictionary<string, string>();
         var pending = new Queue<string>(requests.Keys);
         var done = new HashSet<string>();
         while (pending.Count > 0)
@@ -222,6 +226,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
             }
             var (concrete, binds) = Instantiate(tmpl, args, mangled);
             Mangler.RegisterGenericInstance(mangled, baseName, [..args]);
+            requestedFrom[mangled] = file;
             if (!instancesByBase.TryGetValue(baseName, out var list))
                 instancesByBase[baseName] = list = [];
             list.Add(concrete);
@@ -252,6 +257,8 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
             }
             if (changed) programs[i] = (path, prog with { Items = [..rewritten] });
         }
+
+        return requestedFrom;
     }
 
     /// <summary>

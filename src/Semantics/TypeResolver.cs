@@ -6,11 +6,15 @@ internal sealed class TypeResolver(
     HashSet<string> nativeStructs,
     HashSet<string> opaqueFieldClasses,
     Dictionary<string, HashSet<string>> visible,
+    Dictionary<string, string> genericRequestFile,
     bool releaseMode,
     DiagnosticBag diag)
 {
     // Modules visible to the file currently being resolved (set per file).
     private HashSet<string> _scope = [];
+
+    // Scope for the file currently being resolved, before any per-item widening.
+    private HashSet<string> _fileScope = [];
 
     /// <summary>
     /// Returns true when a class name is declared in a module the current file imports.
@@ -1574,13 +1578,36 @@ internal sealed class TypeResolver(
             CollectFuncTemplates(prog.Items, "none", file);
         foreach (var (prog, file) in programs)
         {
-            _scope = visible.GetValueOrDefault(file, [file]);
+            _fileScope = visible.GetValueOrDefault(file, [file]);
             var ctx = new ResolveCtx(file, "none", "", null, false, false, false, false, "", 0, new ScopeStack());
             foreach (var item in prog.Items)
+            {
+                _scope = ScopeFor(item, file);
                 ResolveTop(item, ctx, module);
+            }
+            _scope = _fileScope;
         }
         DrainGenericInstances(module);
         return module;
+    }
+
+    /// <summary>
+    /// Returns the module scope a top-level item resolves under.
+    ///
+    /// Almost always this is just the enclosing file's scope. The exception is a stamped
+    /// generic instance: the Monomorphizer splices it into the file that declared the
+    /// template, but its type arguments were named at the use site.
+    /// </summary>
+    private HashSet<string> ScopeFor(TopLevel item, string file)
+    {
+        if (item is not ClassDecl cd) return _fileScope;
+        if (!genericRequestFile.TryGetValue(cd.Name, out var requester)) return _fileScope;
+        if (requester == file) return _fileScope;
+        if (!visible.TryGetValue(requester, out var requesterScope)) return _fileScope;
+
+        var widened = new HashSet<string>(_fileScope, StringComparer.OrdinalIgnoreCase);
+        widened.UnionWith(requesterScope);
+        return widened;
     }
 
     /// <summary>
