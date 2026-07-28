@@ -1,5 +1,6 @@
 namespace Appa;
 
+using System.Text;
 using System.Runtime.InteropServices;
 
 internal sealed class Emitter(IrModule module, DiagnosticBag diag)
@@ -23,27 +24,14 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
 
     // ARC-managed classes: every non-module Gata class carries a refcount header
     // and a generated destructor.
-    private readonly HashSet<string> _managed = InitializeManaged(module);
+    private readonly ManagedTypes _managed = new(module);
 
     // Roles for which no @intrinsic binding was found; each role is reported once.
     private readonly HashSet<string> _missingRoles = [];
 
     /// <summary>
-    /// Populates and returns the set of ARC-managed class names from the module.
-    /// </summary>
-    private static HashSet<string> InitializeManaged(IrModule module)
-    {
-        var set = new HashSet<string>(module.Classes.Count);
-        foreach (var c in module.Classes)
-        {
-            if (!c.IsModule) set.Add(c.Name);
-        }
-        return set;
-    }
-
-    /// <summary>
-    /// Returns true the first time the given key is seen for the given writer,
-    /// suppressing duplicate emission within a single translation unit.
+    /// Returns true the first time the given key is seen for the given writer, suppressing
+    /// duplicate emission within a single translation unit.
     /// </summary>
     private bool FirstInto(CodeWriter w, char kind, string name)
     {
@@ -52,11 +40,33 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     }
 
     /// <summary>
-    /// Returns true if the IR type is a reference to an ARC-managed class.
+    /// Returns true if the IR type participates in reference counting - a managed class reference,
+    /// or a union whose live variant may hold one.
     /// </summary>
     private bool IsManaged(IrType t)
     {
-        return t is IrClassRef cr && _managed.Contains(cr.ClassName);
+        return _managed.IsManaged(t);
+    }
+
+    /// <summary>
+    /// Returns the C statement retaining one value of the given type: the runtime intrinsic for a
+    /// class reference, the union's generated retain for a managed union.
+    /// </summary>
+    private string RetainCall(IrType t, string operand)
+    {
+        return t is IrUnionType ut
+            ? $"{Mangler.UnionRetain(ut.Name)}({operand});"
+            : $"{Intrinsic(Roles.Retain)}({operand});";
+    }
+
+    /// <summary>
+    /// The releasing counterpart of <see cref="RetainCall"/>.
+    /// </summary>
+    private string ReleaseCall(IrType t, string operand)
+    {
+        return t is IrUnionType ut
+            ? $"{Mangler.UnionRelease(ut.Name)}({operand});"
+            : $"{Intrinsic(Roles.Release)}({operand});";
     }
 
     /// <summary>
@@ -68,6 +78,8 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         EmitEnums();
         EmitAggregateTypes();
         EmitIntrinsicProtos();
+        EmitUnionArc();
+        EmitUnionEq();
         EmitResultTypedefs();
 
         var nativeBlocks = CollectionsMarshal.AsSpan(module.NativeBlocks);
@@ -107,8 +119,8 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     #region Forward typedefs
 
     /// <summary>
-    /// Forward-declares every Gata class struct in the shared header so any file
-    /// can use a class pointer before its full struct is defined.
+    /// Forward-declares every Gata class struct in the shared header so any file can use a class
+    /// pointer before its full struct is defined.
     /// </summary>
     private void EmitForwardTypedefs()
     {
@@ -135,7 +147,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         for (int i = 0; i < enums.Length; i++)
         {
             var e = enums[i];
-            var sb = new System.Text.StringBuilder();
+            var sb = new StringBuilder();
             sb.Append("typedef enum { ");
             var members = CollectionsMarshal.AsSpan(e.Members);
             for (int j = 0; j < members.Length; j++)
@@ -155,9 +167,9 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     }
 
     /// <summary>
-    /// Emits one tagged-union struct into the shared header: a tag integer plus a C union
-    /// of per-variant payload structs. Called by EmitAggregateTypes once every type this
-    /// union stores by value is already defined.
+    /// Emits one tagged-union struct into the shared header: a tag integer plus a C union of
+    /// per-variant payload structs. Called by EmitAggregateTypes once every type this union stores
+    /// by value is already defined.
     /// </summary>
     private void EmitUnion(IrUnion u)
     {
@@ -181,7 +193,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
                         var v = variants[j];
                         if (v.Fields.Count == 0) continue;
 
-                        var sb = new System.Text.StringBuilder();
+                        var sb = new StringBuilder();
                         sb.Append("struct { ");
                         var fields = CollectionsMarshal.AsSpan(v.Fields);
                         for (int k = 0; k < fields.Length; k++)
@@ -202,8 +214,8 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     #region Fixed-array types
 
     /// <summary>
-    /// Emits the C struct wrapper for one fixed-array type. Called by EmitAggregateTypes
-    /// once the element type is already defined.
+    /// Emits the C struct wrapper for one fixed-array type. Called by EmitAggregateTypes once the
+    /// element type is already defined.
     /// </summary>
     private void EmitArrayType(IrArrayType a)
     {
@@ -215,8 +227,8 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     #region Result types
 
     /// <summary>
-    /// Emits Result_T struct typedefs for every throws function return type, forward-declaring
-    /// any class pointer types they reference so the shared header stays self-contained.
+    /// Emits Result_T struct typedefs for every throws function return type, forward-declaring any
+    /// class pointer types they reference so the shared header stays self-contained.
     /// </summary>
     private void EmitResultTypedefs()
     {
@@ -248,12 +260,12 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     #region Function pointer types
 
     /// <summary>
-    /// Emits the C typedef for one function-pointer type. Called by EmitAggregateTypes
-    /// once every type named in the signature is already defined.
+    /// Emits the C typedef for one function-pointer type. Called by EmitAggregateTypes once every
+    /// type named in the signature is already defined.
     /// </summary>
     private void EmitFuncPtrType(IrFuncPtrType f)
     {
-        var sb = new System.Text.StringBuilder();
+        var sb = new StringBuilder();
         sb.Append("typedef ").Append(f.Ret.ToCType()).Append(" (*").Append(f.ToCType()).Append(")(");
         if (f.Params.Count == 0)
         {
@@ -277,17 +289,6 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
 
     /// <summary>
     /// Emits every fixed-array, function-pointer, and union typedef in dependency order.
-    ///
-    /// These three kinds can name each other: a union variant can hold a fixed array, a
-    /// fixed array can hold a union, a function-pointer signature can mention either. C
-    /// requires the named type to be complete at the point of use, so no fixed order over
-    /// the three groups is correct - emitting unions first breaks 'union U { A([4]int x) }',
-    /// emitting arrays first breaks '[4]U'. Each typedef is emitted only after everything
-    /// it names by value, computed per type rather than assumed per group.
-    ///
-    /// Classes are excluded because they are always used through a pointer and were already
-    /// forward-declared; enums are excluded because they depend on nothing and are emitted
-    /// before this runs.
     /// </summary>
     private void EmitAggregateTypes()
     {
@@ -329,8 +330,8 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     }
 
     /// <summary>
-    /// Yields the C type names an aggregate needs defined before it can be emitted:
-    /// its element type, its signature types, or its variant field types.
+    /// Yields the C type names an aggregate needs defined before it can be emitted: its element
+    /// type, its signature types, or its variant field types.
     /// </summary>
     private static IEnumerable<string> DependenciesOf(object item)
     {
@@ -351,13 +352,232 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         }
     }
 
+    /// <summary>
+    /// Emits the retain/release pair for every managed union: the tag decides what to count, so the
+    /// pair is per-type and generated like a class destructor. By value, so retain composes in
+    /// expression position; prototypes first, as a union may hold one.
+    /// </summary>
+    private void EmitUnionArc()
+    {
+        var managed = new List<IrUnion>();
+        foreach (var u in module.Unions)
+            if (_managed.IsManagedUnion(u.Name)) managed.Add(u);
+        if (managed.Count == 0) return;
+
+        foreach (var u in managed)
+        {
+            _sharedH.Line($"static inline {u.CName} {Mangler.UnionRetain(u.Name)}({u.CName} _v);");
+            _sharedH.Line($"static inline void {Mangler.UnionRelease(u.Name)}({u.CName} _v);");
+        }
+        _sharedH.Line("");
+
+        foreach (var u in managed)
+        {
+            EmitUnionArcBody(u, retain: true);
+            EmitUnionArcBody(u, retain: false);
+        }
+    }
+
+    /// <summary>
+    /// Emits one half of a managed union's retain/release pair. The two differ only in the
+    /// per-field call and the return, so they share this body rather than drifting apart.
+    /// </summary>
+    private void EmitUnionArcBody(IrUnion u, bool retain)
+    {
+        string name = retain ? Mangler.UnionRetain(u.Name) : Mangler.UnionRelease(u.Name);
+        string sig = retain ? $"static inline {u.CName} {name}({u.CName} _v)" : $"static inline void {name}({u.CName} _v)";
+
+        using (_sharedH.Block($"{sig} {{"))
+        {
+            using (_sharedH.Block("switch (_v.__tag) {", "}"))
+            {
+                for (int i = 0; i < u.Variants.Count; i++)
+                {
+                    var v = u.Variants[i];
+                    var managedFields = new List<IrParam>();
+                    foreach (var f in v.Fields)
+                        if (IsManaged(f.Type)) managedFields.Add(f);
+                    if (managedFields.Count == 0) continue;
+
+                    // The variant index, not the tag enumerator: __tag is a plain int, and every
+                    // other site that writes or tests it uses the index too.
+                    var sb = new StringBuilder();
+                    sb.Append("case ").Append(i).Append(": ");
+                    foreach (var f in managedFields)
+                    {
+                        string operand = $"_v.payload.{v.Name}.{f.Name}";
+                        sb.Append(retain ? RetainCall(f.Type, operand) : ReleaseCall(f.Type, operand)).Append(' ');
+                    }
+                    sb.Append("break;");
+                    _sharedH.Line(sb.ToString());
+                }
+
+                // Variants holding nothing managed land here. Always emitted: a switch whose
+                // every case was skipped above would otherwise be an empty statement.
+                _sharedH.Line("default: break;");
+            }
+            if (retain) _sharedH.Line("return _v;");
+        }
+        _sharedH.Blank();
+    }
+
+    /// <summary>
+    /// Emits each union's structural equality: tags first, then one comparison per field of the
+    /// live variant, by whatever '==' already means for that field's own type. memcmp would be
+    /// wrong, not just slow - it reads the payload's inactive members and padding.
+    /// </summary>
+    private void EmitUnionEq()
+    {
+        if (module.Unions.Count == 0) return;
+        foreach (var u in module.Unions)
+            _sharedH.Line($"static inline bool {Mangler.UnionEq(u.Name)}({u.CName} _a, {u.CName} _b);");
+        _sharedH.Line("");
+
+        foreach (var u in module.Unions)
+        {
+            if (EqEmittableIn(u, Visibility.Kernel)) EmitUnionEqBody(u, _kFuncs);
+            if (EqEmittableIn(u, Visibility.User)) EmitUnionEqBody(u, _uFunc);
+        }
+    }
+
+    /// <summary>
+    /// True if every '==' this union's equality calls is declared in the given realm. A class
+    /// inside 'user { }' is emitted only into uproc.c, so a kernel-side body would call an
+    /// undeclared function - a warning on the pinned gcc 7, fatal on anything newer.
+    /// </summary>
+    private bool EqEmittableIn(IrUnion u, Visibility realm)
+    {
+        return Visit(u, []);
+
+        bool Visit(IrUnion union, HashSet<string> seen)
+        {
+            if (!seen.Add(union.Name)) return true;
+            foreach (var v in union.Variants)
+                foreach (var f in v.Fields)
+                    if (!Reachable(f.Type)) return false;
+            return true;
+        }
+
+        bool Reachable(IrType t)
+        {
+            switch (t)
+            {
+                case IrArrayType a: return Reachable(a.Elem);
+                case IrUnionType nested:
+                    return UnionByName(nested.Name) is not { } n || Visit(n, []);
+                case IrClassRef cr when ClassEqOperator(cr.ClassName) != null:
+                    var vis = ClassByName(cr.ClassName)!.Vis;
+                    return realm == Visibility.Kernel ? vis != Visibility.User : vis != Visibility.Kernel;
+                default: return true;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Emits one union's equality body into the given writer.
+    /// </summary>
+    private void EmitUnionEqBody(IrUnion u, CodeWriter w)
+    {
+        using (w.Block($"static inline bool {Mangler.UnionEq(u.Name)}({u.CName} _a, {u.CName} _b) {{"))
+        {
+            w.Line("if (_a.__tag != _b.__tag) return false;");
+            using (w.Block("switch (_a.__tag) {", "}"))
+            {
+                for (int i = 0; i < u.Variants.Count; i++)
+                {
+                    var v = u.Variants[i];
+                    if (v.Fields.Count == 0) continue;
+
+                    var terms = new List<string>(v.Fields.Count);
+                    foreach (var f in v.Fields)
+                        terms.Add(EqTerm(f.Type,
+                            $"_a.payload.{v.Name}.{f.Name}", $"_b.payload.{v.Name}.{f.Name}"));
+
+                    w.Line($"case {i}: return {string.Join(" && ", terms)};");
+                }
+
+                // Payload-free variants, and any variant whose fields all compared trivially.
+                w.Line("default: return true;");
+            }
+        }
+        w.Blank();
+    }
+
+    /// <summary>
+    /// Returns a C expression comparing two values of the given type, applying the same rule that
+    /// '==' on that type would apply on its own.
+    /// </summary>
+    private string EqTerm(IrType t, string a, string b)
+    {
+        switch (t)
+        {
+            case IrUnionType ut:
+                return $"{Mangler.UnionEq(ut.Name)}({a}, {b})";
+
+            case IrArrayType arr when arr.Size > 0:
+            {
+                var terms = new List<string>(arr.Size);
+                for (int i = 0; i < arr.Size; i++)
+                    terms.Add(EqTerm(arr.Elem, $"{a}._[{i}]", $"{b}._[{i}]"));
+                return terms.Count == 0 ? "true" : $"({string.Join(" && ", terms)})";
+            }
+
+            case IrClassRef cr when ClassEqOperator(cr.ClassName) is { } opCName:
+                return $"{opCName}({a}, {b})";
+
+            default:
+                return $"({a} == {b})";
+        }
+    }
+
+    private Dictionary<string, IrClass>? _classIndex;
+    private Dictionary<string, IrUnion>? _unionIndex;
+
+    /// <summary>
+    /// Returns the declared class of that name, or null.
+    /// </summary>
+    private IrClass? ClassByName(string name)
+    {
+        _classIndex ??= BuildIndex(module.Classes, c => c.Name);
+        return _classIndex.GetValueOrDefault(name);
+    }
+
+    /// <summary>
+    /// Returns the declared union of that name, or null.
+    /// </summary>
+    private IrUnion? UnionByName(string name)
+    {
+        _unionIndex ??= BuildIndex(module.Unions, u => u.Name);
+        return _unionIndex.GetValueOrDefault(name);
+    }
+
+    private static Dictionary<string, T> BuildIndex<T>(List<T> items, Func<T, string> key)
+    {
+        var d = new Dictionary<string, T>(items.Count);
+        foreach (var i in items) d.TryAdd(key(i), i);
+        return d;
+    }
+
+    /// <summary>
+    /// Returns the CName of the class's bool-returning '==' overload, or null if it declares none -
+    /// in which case its references compare by address, as they do anywhere else.
+    /// </summary>
+    private string? ClassEqOperator(string className)
+    {
+        if (ClassByName(className) is not { } cls) return null;
+        foreach (var op in cls.Operators)
+            if (op.Op == "==" && op.Params.Count == 1 && op.ReturnType is IrPrimType { CName: "bool" })
+                return op.CName;
+        return null;
+    }
+
     #endregion
 
     #region Native blocks
 
     /// <summary>
-    /// Emits a native block into the appropriate preamble, types, or boot section based
-    /// on the block's section tag, then routes to the kernel or user writer by visibility.
+    /// Emits a native block into the appropriate preamble, types, or boot section based on the
+    /// block's section tag, then routes to the kernel or user writer by visibility.
     /// </summary>
     private void EmitNativeBlock(IrNativeBlock nb)
     {
@@ -453,8 +673,8 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     }
 
     /// <summary>
-    /// Emits a concrete class into the given writers. Library classes use static-inline
-    /// functions; context classes use regular linkage with separate forward declarations.
+    /// Emits a concrete class into the given writers. Library classes use static-inline functions;
+    /// context classes use regular linkage with separate forward declarations.
     /// </summary>
     private void EmitConcreteClass(IrClass cls, CodeWriter types, CodeWriter fwd,
                            CodeWriter funcs, bool isLib)
@@ -633,10 +853,8 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         using (w.Block($"{prefix}{AllocatorSig(cls)} {{"))
         {
             w.Line($"{cls.CName}* _o = ({cls.CName}*){Intrinsic(Roles.Alloc)}(sizeof({cls.CName}));");
+            w.Line($"if (_o) *_o = ({cls.CName}){{0}};");
             w.Line($"if (_o) {Intrinsic(Roles.ObjInit)}(_o, {dtorArg});");
-            foreach (var f in cls.Fields)
-                if (IsManaged(f.Type) && !cls.FieldInits.ContainsKey(f.Name))
-                    w.Line($"if (_o) _o->{f.Name} = NULL;");
             foreach (var f in cls.Fields)
                 if (cls.FieldInits.TryGetValue(f.Name, out var init))
                     w.Line($"if (_o) _o->{f.Name} = {EmitExpr(init)};");
@@ -651,7 +869,8 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     }
 
     /// <summary>
-    /// Emits the destructor for the given class if it owns managed references or declares a finalizer.
+    /// Emits the destructor for the given class if it owns managed references or declares a
+    /// finalizer.
     /// </summary>
     private void EmitDtor(IrClass cls, CodeWriter w, bool isLib)
     {
@@ -662,7 +881,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             w.Line($"{cls.CName}* self = ({cls.CName}*)_vp;");
             if (DeinitOf(cls) != null) w.Line($"{DeinitOf(cls)!.CName}(self);");
             foreach (var f in cls.Fields)
-                if (IsManaged(f.Type)) w.Line($"{Intrinsic(Roles.Release)}(self->{f.Name});");
+                if (IsManaged(f.Type)) w.Line(ReleaseCall(f.Type, $"self->{f.Name}"));
         }
         w.Blank();
     }
@@ -720,7 +939,8 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     #region Signatures
 
     /// <summary>
-    /// Returns the C type for a parameter, adding one level of pointer indirection for ref parameters.
+    /// Returns the C type for a parameter, adding one level of pointer indirection for ref
+    /// parameters.
     /// </summary>
     private static string ParamCType(IrParam p)
     {
@@ -733,7 +953,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     private static string MethodSig(IrFunction m)
     {
         string ret = m.IsThrows ? new IrResultType(m.ReturnType).ToCType() : m.ReturnType.ToCType();
-        var sb = new System.Text.StringBuilder();
+        var sb = new StringBuilder();
         sb.Append(ret).Append(' ').Append(m.CName).Append('(');
         
         bool hasParams = false;
@@ -756,14 +976,13 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     }
 
     /// <summary>
-    /// Returns the full C function signature for an operator overload. Includes the self
-    /// parameter for every operator except a static "as" (a factory - self doesn't exist yet),
-    /// which takes only its explicit parameter, the same as a static method would.
-    /// Internal so tests can assert the emitted signature shape directly.
+    /// The full C signature for an operator overload, with a self parameter for every operator
+    /// except a static "as" - a factory, where self does not exist yet. Internal so tests can
+    /// assert the emitted shape directly.
     /// </summary>
     internal static string OperatorSig(IrOperator o)
     {
-        var sb = new System.Text.StringBuilder();
+        var sb = new StringBuilder();
         sb.Append(o.ReturnType.ToCType()).Append(' ').Append(o.CName).Append('(');
         bool needsComma = false;
         if (!o.IsStatic)
@@ -788,7 +1007,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     private static string AllocatorSig(IrClass cls)
     {
         var init = InitOf(cls);
-        var sb = new System.Text.StringBuilder();
+        var sb = new StringBuilder();
         sb.Append(cls.CName).Append("* ").Append(Mangler.Allocator(cls.Name)).Append('(');
         if (init != null && init.Params.Count > 0)
         {
@@ -821,7 +1040,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     private static string FuncSig(IrFunction fn)
     {
         string ret = fn.IsThrows ? new IrResultType(fn.ReturnType).ToCType() : fn.ReturnType.ToCType();
-        var sb = new System.Text.StringBuilder();
+        var sb = new StringBuilder();
         sb.Append(ret).Append(' ').Append(fn.CName).Append('(');
         for (int i = 0; i < fn.Params.Count; i++)
         {
@@ -838,11 +1057,9 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     #region Free functions
 
     /// <summary>
-    /// Emits a free function into the appropriate translation unit sections based on its flags.
-    /// Entry functions go to their own realm (kernel by default, user if declared inside a
-    /// 'user { }' block - this is what lets a Hosted build's user-realm entry func become
-    /// program.c's invocable main()); library functions are static-inline into both units;
-    /// all others are forwarded and emitted into the realm they belong to.
+    /// Emits a free function into the translation units its flags call for: an entry function into
+    /// its own realm, which lets a Hosted user entry become program.c's main(); a library function
+    /// static-inline into both; anything else into its realm.
     /// </summary>
     private void EmitFreeFunc(IrFunction fn)
     {
@@ -1043,8 +1260,8 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     #region Expressions
 
     /// <summary>
-    /// Emits an IR expression and returns the corresponding C text. Every node kind
-    /// must be fully resolved before reaching this method; unrecognised nodes throw.
+    /// Emits an IR expression and returns the corresponding C text. Every node kind must be fully
+    /// resolved before reaching this method; unrecognised nodes throw.
     /// </summary>
     private string EmitExpr(IrExpr e)
     {
@@ -1095,7 +1312,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// </summary>
     private string EmitStructFields(List<(string Field, IrExpr Value)> fields)
     {
-        var sb = new System.Text.StringBuilder();
+        var sb = new StringBuilder();
         for (int i = 0; i < fields.Count; i++)
         {
             if (i > 0) sb.Append(", ");
@@ -1105,12 +1322,12 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     }
 
     /// <summary>
-    /// Renders a comma-separated argument list, with an optional leading receiver,
-    /// without LINQ enumerator or intermediate array allocations.
+    /// Renders a comma-separated argument list, with an optional leading receiver, without LINQ
+    /// enumerator or intermediate array allocations.
     /// </summary>
     private string EmitArgs(List<IrExpr> args, string? first = null)
     {
-        var sb = new System.Text.StringBuilder();
+        var sb = new StringBuilder();
         if (first != null) sb.Append(first);
         for (int i = 0; i < args.Count; i++)
         {
@@ -1146,8 +1363,8 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     #region Intrinsic prototypes
 
     /// <summary>
-    /// Emits a static-inline prototype into the shared header for every free function
-    /// annotated with an intrinsic role binding. Skips duplicates via FirstInto.
+    /// Emits a static-inline prototype into the shared header for every free function annotated
+    /// with an intrinsic role binding. Skips duplicates via FirstInto.
     /// </summary>
     private void EmitIntrinsicProtos()
     {
@@ -1182,8 +1399,8 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     #region Utilities
 
     /// <summary>
-    /// Strips uniform leading indentation from raw C text so embedded native bodies
-    /// re-indent correctly at whatever depth the writer is currently at.
+    /// Strips uniform leading indentation from raw C text so embedded native bodies re-indent
+    /// correctly at whatever depth the writer is currently at.
     /// </summary>
     private static string TrimC(string raw)
     {
@@ -1192,7 +1409,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         ReadOnlySpan<char> textSpan = raw.AsSpan();
         int minI = int.MaxValue;
         
-        // Pass 1: Find minimum indentation
+        // Find minimum indentation
         int offset = 0;
         while (offset < textSpan.Length)
         {
@@ -1210,8 +1427,8 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         
         if (minI == int.MaxValue) minI = 0;
         
-        // Pass 2: Re-indent lines
-        var sb = new System.Text.StringBuilder();
+        // Re-indent lines
+        var sb = new StringBuilder();
         offset = 0;
         while (offset < textSpan.Length)
         {
@@ -1233,7 +1450,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         }
         
         // Trim trailing newlines directly on the StringBuilder
-        while (sb.Length > 0 && char.IsWhiteSpace(sb[sb.Length - 1]))
+        while (sb.Length > 0 && char.IsWhiteSpace(sb[^1]))
         {
             sb.Length--;
         }
@@ -1241,9 +1458,9 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     }
 
     /// <summary>
-    /// Returns true for the IR types that lower to a C struct rather than a scalar.
-    /// Fixed arrays, unions, and throws Results are all wrapped in a struct by the
-    /// emitter; class references are pointers, and everything else is a primitive.
+    /// Returns true for the IR types that lower to a C struct rather than a scalar. Fixed arrays,
+    /// unions, and throws Results are all wrapped in a struct by the emitter; class references are
+    /// pointers, and everything else is a primitive.
     /// </summary>
     private static bool IsAggregate(IrType t) => t is IrArrayType or IrUnionType or IrResultType;
 

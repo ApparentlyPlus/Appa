@@ -3,9 +3,8 @@ namespace Appa.Tests;
 using Appa;
 
 /// <summary>
-/// Regression coverage for the hardening pass: entry-signature validation, throws
-/// return-type restrictions, throws-initializer type checking, realm-structure rules,
-/// and the string-concat missing-operator diagnostic. Each test pins a case that
+/// Regression coverage for the hardening pass: entry signatures, throws return types and
+/// initializers, realm structure, and the string-concat operator diagnostic. Each pins a case that
 /// previously produced uncompilable or wrong C with no diagnostic.
 /// </summary>
 public class HardeningTests
@@ -71,7 +70,7 @@ public class HardeningTests
     #region Realm structure
 
     [Fact]
-    public void UserEntryFuncInGatOSBuildIsRejected()
+    public void UserEntryInGatOSIsRejected()
     {
         var prog = SingleFileCompile.Parse("""
             kernel { entry func Main() { } }
@@ -83,7 +82,7 @@ public class HardeningTests
     }
 
     [Fact]
-    public void UserEntryFuncInHostedBuildIsAccepted()
+    public void UserEntryInHostedIsAccepted()
     {
         var prog = SingleFileCompile.Parse("user { entry func UMain() { } }");
         var diag = new DiagnosticBag(new SourceSet());
@@ -96,19 +95,19 @@ public class HardeningTests
     #region throws return types
 
     /// <summary>
-    /// A throws pointer/array return type has no legal Result_T typedef spelling
-    /// (it used to emit 'typedef ... Result_int*;' - invalid C).
+    /// A throws pointer/array return type has no legal Result_T typedef spelling (it used to emit
+    /// 'typedef ... Result_int*;' - invalid C).
     /// </summary>
     [Theory]
     [InlineData("throws int* func F() { throw; } kernel { entry func Main() { try { unsafe { let int* p = F(); } } catch { } } }")]
     [InlineData("throws [4]int func F() { throw; } kernel { entry func Main() { try { let [4]int a = F(); } catch { } } }")]
-    public void ThrowsPointerOrArrayReturnIsRejected(string src)
+    public void ThrowsPointerReturnIsRejected(string src)
     {
         AssertError(Codes.BadThrowsReturnType, src);
     }
 
     [Fact]
-    public void ThrowsPointerReturnOnMethodIsRejected()
+    public void ThrowsPointerMethodIsRejected()
     {
         AssertError(Codes.BadThrowsReturnType, """
             class Box { public throws int* func Get() { throw; } }
@@ -117,7 +116,7 @@ public class HardeningTests
     }
 
     [Fact]
-    public void ThrowsEnumReturnIsCleanAndEmitsMatchingTypedef()
+    public void ThrowsEnumReturnEmitsItsTypedef()
     {
         var output = SingleFileCompile.Emit("""
             enum Color { Red, Green }
@@ -134,7 +133,7 @@ public class HardeningTests
     #region throws initializer type checking
 
     [Fact]
-    public void ThrowsInitializerInnerTypeMismatchIsRejected()
+    public void ThrowsInitTypeMismatchIsRejected()
     {
         AssertError(Codes.TypeMismatch, """
             class Box { int v; }
@@ -146,7 +145,7 @@ public class HardeningTests
     [Theory]
     [InlineData("throws int func F() { return 1; } kernel { entry func Main() { try { let int x = F(); } catch { } } }")]
     [InlineData("throws int func F() { return 1; } kernel { entry func Main() { try { let int64 x = F(); } catch { } } }")]
-    public void ThrowsInitializerMatchingTypeIsClean(string src)
+    public void ThrowsInitMatchingTypeIsClean(string src)
     {
         AssertClean(src);
     }
@@ -156,12 +155,12 @@ public class HardeningTests
     #region Generic inference over multi-parameter generics
 
     /// <summary>
-    /// Inferring a type argument from a multi-parameter generic class argument used to fail:
-    /// the old inference split the mangled instance name (Pair_int_int) at the first
-    /// underscore, so 'Pair[T, T]' never unified. Structural unification fixes it.
+    /// Inferring a type argument from a multi-parameter generic class argument used to fail: the
+    /// old inference split the mangled instance name (Pair_int_int) at the first underscore, so
+    /// 'Pair[T, T]' never unified. Structural unification fixes it.
     /// </summary>
     [Fact]
-    public void GenericFuncInfersFromMultiParamGenericClassArg()
+    public void GenericFuncInfersFromMultiParam()
     {
         AssertClean("""
             class Pair[A, B] {
@@ -178,7 +177,7 @@ public class HardeningTests
     }
 
     [Fact]
-    public void GenericFuncConflictingBindingIsRejected()
+    public void ConflictingBindingIsRejected()
     {
         AssertError(Codes.ArgTypeMismatch, """
             class Pair[A, B] {
@@ -203,7 +202,7 @@ public class HardeningTests
     [InlineData("kernel { entry func Main() { while (true) { defer { break; } } } }")]
     [InlineData("kernel { entry func Main() { while (true) { defer { continue; } } } }")]
     [InlineData("kernel { entry func Main() { defer { defer { let x = 1; } } } }")]
-    public void DeferControlTransferUsesDeferTransferCode(string src)
+    public void DeferControlTransferHasItsOwnCode(string src)
     {
         AssertError(Codes.DeferTransfer, src);
     }
@@ -237,7 +236,7 @@ public class HardeningTests
     #region Single-source-of-truth consistency
 
     [Fact]
-    public void EveryPrimitiveSpellingLexesAsAPrimitiveKeyword()
+    public void EveryPrimitiveLexesAsAKeyword()
     {
         foreach (var name in SymbolTable.Primitives)
         {
@@ -249,7 +248,7 @@ public class HardeningTests
     }
 
     [Fact]
-    public void OperatorManglingSuffixesAreDistinct()
+    public void OperatorSuffixesAreDistinct()
     {
         string[] ops = ["+", "-", "*", "/", "==", "!=", "<", ">", "<=", ">=",
                         "&", "|", "^", "<<", ">>", "[]", "[]=", "!", "~", "++", "--"];
@@ -267,10 +266,37 @@ public class HardeningTests
     #region String concatenation floor
 
     [Fact]
-    public void StringConcatWithoutOperatorIsDiagnosed()
+    public void StringConcatNeedsAnOperator()
     {
         AssertError(Codes.MissingIntrinsic,
             """kernel { entry func Main() { let s = "a" + "b"; } }""");
+    }
+
+    #endregion
+
+    #region Speculative parsing leaves no residue
+
+    /// <summary>
+    /// An abandoned speculative parse gives back the recursion depth it used. 'a[0].x' is read both
+    /// ways and the failing attempt unwinds past every ExitDepth, so the leak is cumulative: 195 of
+    /// these hit MaxDepth. The count here is well past that.
+    /// </summary>
+    [Fact]
+    public void SpeculativeParseRestoresDepth()
+    {
+        var body = new System.Text.StringBuilder();
+        for (int i = 0; i < 600; i++) body.Append($"    total = total + a[0].x + b[i].y;\n");
+
+        AssertClean($$"""
+            class P { public int x; public int y; func _init() { } }
+            kernel { entry func Main() {
+                let [2]P a = default([2]P);
+                let [2]P b = default([2]P);
+                let int i = 0;
+                let int total = 0;
+            {{body}}    }
+            }
+            """);
     }
 
     #endregion

@@ -1,11 +1,5 @@
 namespace Appa;
 
-/// <summary>
-/// Reachability dead-code elimination pass that walks the call and type graph from all entry
-/// points and drops any class or free function that nothing reachable references.
-/// Runs after Desugar and before Ownership. Runtime roles the emitter inserts are seeded as roots.
-/// Classes and free functions marked @keep are exempt regardless of reachability.
-/// </summary>
 internal sealed class Dce(IrModule m) : IrWalker
 {
     private readonly record struct UnitKey(string Name, bool IsFunction);
@@ -33,7 +27,8 @@ internal sealed class Dce(IrModule m) : IrWalker
     private void Ref(string cname) { if (_unitOf.TryGetValue(cname, out var u)) Root(u); }
 
     /// <summary>
-    /// Runs the DCE pass and returns a new IrModule containing only reachable classes and free functions.
+    /// Runs the DCE pass and returns a new IrModule containing only reachable classes and free
+    /// functions.
     /// </summary>
     public IrModule Run()
     {
@@ -90,7 +85,8 @@ internal sealed class Dce(IrModule m) : IrWalker
     }
 
     /// <summary>
-    /// Marks all field types, field initializer expressions, methods, and operators of a class as reachable.
+    /// Marks all field types, field initializer expressions, methods, and operators of a class as
+    /// reachable.
     /// </summary>
     private void MarkClass(IrClass c)
     {

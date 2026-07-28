@@ -2,18 +2,13 @@ namespace Appa.Tests;
 
 using Appa;
 
-// G016/G039 need a String or union payload constructor that only resolves once
-// libgata is really imported - both are covered by the torture fixture port
-// (TortureTests) instead. G020/G036/G042 need a real environment/release-mode
-// setup neither this file nor the torture corpus currently reproduces. G019 is not
-// reachable from here either, but for a different reason: it is raised by
-// Pipeline.ValidateIntrinsics, which runs above BuildModule precisely so that the
-// libgata-free sources in this file stay clean - see IntrinsicValidationTests.
+// G016/G039 need libgata imported and G020/G036/G042 a real environment; G019 comes from
+// Pipeline.ValidateIntrinsics, above BuildModule so these sources stay clean.
+
 /// <summary>
-/// Inline string-literal semantic coverage: one minimal repro per diagnostic code
-/// reachable without libgata, plus a set of error-free "good path" language-feature
-/// programs. Repros are adapted from the torture corpus's import-free fixtures so
-/// the expected code is already validated against the real compiler.
+/// One minimal repro per diagnostic code reachable without libgata, plus error-free "good path"
+/// programs. The repros come from the torture corpus's import-free fixtures, so the expected code
+/// is already validated against the real compiler.
 /// </summary>
 public class PipelineTests
 {
@@ -88,7 +83,7 @@ public class PipelineTests
     [Theory]
     [InlineData("G002", "module M { }")]
     [InlineData("G001", "kernel { entry func Main() { } } kernel { entry func Main2() { } }")]
-    public void ValidateStructureProducesExpectedCode(string expectedCode, string src)
+    public void StructureGivesExpectedCode(string expectedCode, string src)
     {
         var prog = SingleFileCompile.Parse(src);
         var programs = new List<(string path, Appa.Program prog)> { ("<test>", prog) };
@@ -105,7 +100,7 @@ public class PipelineTests
     [InlineData("G057", "user { entry func A() { } } user { entry func B() { } }")]
     [InlineData("G058", "user { func f() { } }")]
     [InlineData("G059", "user { entry func A() { } entry func B() { } }")]
-    public void ValidateStructureProducesExpectedHostedCode(string expectedCode, string src)
+    public void StructureGivesExpectedHostedCode(string expectedCode, string src)
     {
         var prog = SingleFileCompile.Parse(src);
         var programs = new List<(string path, Appa.Program prog)> { ("<test>", prog) };
@@ -117,7 +112,7 @@ public class PipelineTests
     }
 
     [Fact]
-    public void ValidateStructureAcceptsWellFormedHosted()
+    public void StructureAcceptsWellFormedHosted()
     {
         const string src = "user { entry func Main() { } }";
         var prog = SingleFileCompile.Parse(src);
@@ -130,9 +125,9 @@ public class PipelineTests
     }
 
     /// <summary>
-    /// Error-free programs exercising core language features: generics with
-    /// inference, enums with switch, ternary/widening/narrowing, compound
-    /// assignment, width-explicit primitives, and unsafe pointer locals.
+    /// Error-free programs exercising core language features: generics with inference, enums with
+    /// switch, ternary/widening/narrowing, compound assignment, width-explicit primitives, and
+    /// unsafe pointer locals.
     /// </summary>
     [Theory]
     [InlineData("""
@@ -198,7 +193,7 @@ public class PipelineTests
     }
 
     [Fact]
-    public void OperatorOverloadDispatchesOnDeclaredOperator()
+    public void OverloadDispatchesOnDeclaration()
     {
         var (diag, module) = SingleFileCompile.Check("""
             class Vec {

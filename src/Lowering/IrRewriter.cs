@@ -4,9 +4,6 @@ using System.Runtime.InteropServices;
 
 internal abstract class IrRewriter
 {
-    /// <summary>
-    /// Runs the rewriter over an entire module, rewriting all classes, free functions, and processes.
-    /// </summary>
     public IrModule Run(IrModule m)
     {
         var classes = MapClasses(m.Classes);
@@ -192,7 +189,8 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the receiver and arguments of an IrThrowsInstanceCall; returns the original if unchanged.
+    /// Rewrites the receiver and arguments of an IrThrowsInstanceCall; returns the original if
+    /// unchanged.
     /// </summary>
     private IrThrowsInstanceCall UpdateThrowsInstanceCall(IrThrowsInstanceCall ti)
     {
@@ -202,7 +200,8 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the inner call and the handler block of an IrCatchCall; returns the original if unchanged.
+    /// Rewrites the inner call and the handler block of an IrCatchCall; returns the original if
+    /// unchanged.
     /// </summary>
     private IrCatchCall UpdateCatchCall(IrCatchCall cc)
     {
@@ -300,7 +299,8 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the constructor arguments and initializer elements of an IrNewInit; returns the original if unchanged.
+    /// Rewrites the constructor arguments and initializer elements of an IrNewInit; returns the
+    /// original if unchanged.
     /// </summary>
     private IrNewInit UpdateNewInit(IrNewInit ni)
     {
@@ -446,7 +446,8 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the condition, then-branch, and else-branch of an IrIf; returns the original if unchanged.
+    /// Rewrites the condition, then-branch, and else-branch of an IrIf; returns the original if
+    /// unchanged.
     /// </summary>
     private IrIf UpdateIf(IrIf i)
     {
@@ -501,7 +502,8 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the scrutinee, cases, and default block of an IrSwitch; returns the original if unchanged.
+    /// Rewrites the scrutinee, cases, and default block of an IrSwitch; returns the original if
+    /// unchanged.
     /// </summary>
     private IrSwitch UpdateSwitch(IrSwitch sw)
     {
@@ -523,7 +525,8 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the scrutinee, cases, and default block of an IrMatch; returns the original if unchanged.
+    /// Rewrites the scrutinee, cases, and default block of an IrMatch; returns the original if
+    /// unchanged.
     /// </summary>
     private IrMatch UpdateMatch(IrMatch m)
     {
@@ -545,9 +548,9 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// CoW list map that applies <paramref name="f"/> to every element and returns the
-    /// original list unless some element was actually rewritten, in which case the prefix of
-    /// unchanged elements is cloned first.
+    /// Copy-on-write list map: applies <paramref name="f"/> to every element and returns the
+    /// original list unless something was actually rewritten, in which case the unchanged prefix is
+    /// cloned first.
     /// </summary>
     private static List<T> MapList<T>(List<T> xs, Func<T, T> f) where T : class
     {
@@ -671,10 +674,7 @@ internal abstract class IrRewriter
             var rewrittenVal = RewriteExpr(origVal);
             if (!ReferenceEquals(origVal, rewrittenVal))
             {
-                if (result == null)
-                {
-                    result = new Dictionary<string, IrExpr>(dict);
-                }
+                result ??= new Dictionary<string, IrExpr>(dict);
                 result[kv.Key] = rewrittenVal;
             }
         }

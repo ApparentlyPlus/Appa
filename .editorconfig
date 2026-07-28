@@ -1,0 +1,21 @@
+root = true
+
+[*.cs]
+# One flat 'Appa' namespace for the whole compiler, deliberately - passes reach into each other
+# constantly and a folder-shaped namespace per directory would mean a using block on every file
+# for no isolation gained. Folders group by phase; the namespace is not the grouping mechanism.
+dotnet_diagnostic.IDE0130.severity = none
+dotnet_style_namespace_match_folder = false
+
+# Private state carries a leading underscore, including the properties that front a [ThreadStatic]
+# backing field. The default naming rules do not expect that on a property, so the rule is taught
+# the convention rather than the convention bent to the rule.
+dotnet_naming_rule.private_members_underscore.symbols = private_members
+dotnet_naming_rule.private_members_underscore.style = underscore_camel
+dotnet_naming_rule.private_members_underscore.severity = suggestion
+
+dotnet_naming_symbols.private_members.applicable_kinds = field, property
+dotnet_naming_symbols.private_members.applicable_accessibilities = private
+
+dotnet_naming_style.underscore_camel.required_prefix = _
+dotnet_naming_style.underscore_camel.capitalization = camel_case

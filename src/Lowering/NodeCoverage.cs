@@ -2,22 +2,6 @@ namespace Appa;
 
 using System.Diagnostics;
 
-// Guards for the compiler's four hand written node dispatchers: Monomorphizer's AST
-// substituter (SubStmt/SubExpr) and IrRewriter/IrWalker's IR traversals.
-//
-// Each of those switches ends in a catch all that returns the node untouched, which is correct
-// for the node kinds that genuinely have no children to visit - a literal, a `break`, an
-// identifier. The hazard is that it is equally silent for a node kind nobody taught it about:
-// adding a new AST or IR node and forgetting one dispatcher produces no error anywhere, just a
-// subtree that is never substituted, never renamed, never marked live. That failure mode has
-// already cost this compiler twice - a `catch` handler whose type parameters were left
-// unsubstituted inside a generic, and a struct literal whose field expressions were invisible
-// to both traversals.
-//
-// So the inert set is written down explicitly, once per dispatcher, and a debug build throws
-// on anything outside it. Release keeps the lenient pass-through: a shipped compiler meeting an
-// unexpected node should emit slightly wrong code, not abort mid-build. The [Conditional]
-// attribute removes the call entirely outside DEBUG, so this costs nothing in a release image.
 internal static class NodeCoverage
 {
     /// <summary>
@@ -59,8 +43,8 @@ internal static class NodeCoverage
     }
 
     /// <summary>
-    /// Asserts that an IR statement reaching a traversal's default arm has no child nodes.
-    /// Shared by IrRewriter.MapStmt and IrWalker.WalkStmt.
+    /// Asserts that an IR statement reaching a traversal's default arm has no child nodes. Shared
+    /// by IrRewriter.MapStmt and IrWalker.WalkStmt.
     /// </summary>
     [Conditional("DEBUG")]
     public static void AssertInertIrStmt(IrStmt s, string where)

@@ -2,7 +2,9 @@ namespace Appa.Tests;
 
 using Appa;
 
-/// <summary>One trivial test confirming the test project can call into Appa in-process.</summary>
+/// <summary>
+/// One trivial test confirming the test project can call into Appa in-process.
+/// </summary>
 public class SmokeTests
 {
     [Fact]

@@ -15,25 +15,18 @@ enum Mode { Debug, Release }
 // capability; Serial routes to the serial port instead (no framebuffer subsystem).
 enum Output { Framebuffer, Serial }
 
-// Keyboard support level - explicitly chosen, passed through to GatOS as-is.
-//   Default - PS/2 only (laptops)
-//   External - PS/2 plus external (USB) keyboards
-//   Hotplug - PS/2 plus external keyboards with hotplug
+// Keyboard support level, passed through to GatOS as-is: Default is PS/2 only, External adds
+// USB keyboards, Hotplug adds hotplug for them.
 enum Keyboard { Default, External, Hotplug }
 
-// On (default): MEM/INPUT/THREADS are inferred from the program by CapabilityScan,
-// so the image only carries the subsystems it actually uses. Off: skip inference
-// and assume all three are needed - the escape valve for a native blind spot
-// CapabilityScan can't see through (a raw native{} body that touches a capability
-// with no Gata-visible call), where inference would otherwise under-declare.
+// On (default): CapabilityScan infers MEM/INPUT/THREADS, so the image carries only what it
+// uses. Off: assume all three - the escape valve for a raw native{} body that touches a
+// capability through no Gata-visible call, where inference would under-declare.
 enum CapabilityDiscovery { On, Off }
 
-// A project's build configuration, read from its <project>.gconf. The lean source of
-// truth: what to build (target), how (mode), and the explicitly-chosen knobs (output
-// routing, keyboard level, whether to trust capability inference). gcc flags,
-// env/entry paths, and stdlib selection are NOT here - appa owns the flags, the
-// environment is auto-discovered (@environment), and the entry is the src/main.g
-// convention.
+// A project's build configuration, read from its <project>.gconf: what to build, how, and the
+// explicitly-chosen knobs. gcc flags, env/entry paths and stdlib selection are not here - appa
+// owns the flags, @environment is discovered, and the entry is the src/main.g convention.
 sealed record Manifest(
     string Dir,
     string ProjectName,
@@ -46,8 +39,8 @@ sealed record Manifest(
 static class ManifestReader
 {
     /// <summary>
-    /// Locates the single *.gconf in a directory.
-    /// Returns null if none exists, and throws ManifestError if more than one is found.
+    /// Locates the single *.gconf in a directory. Returns null if none exists, and throws
+    /// ManifestError if more than one is found.
     /// </summary>
     public static string? Discover(string dir)
     {
@@ -59,8 +52,8 @@ static class ManifestReader
     }
 
     /// <summary>
-    /// Parses a .gconf file and returns its Manifest.
-    /// Throws ManifestError on malformed or missing required elements.
+    /// Parses a .gconf file and returns its Manifest. Throws ManifestError on malformed or missing
+    /// required elements.
     /// </summary>
     public static Manifest Load(string path)
     {
@@ -85,15 +78,13 @@ static class ManifestReader
     }
 
     /// <summary>
-    /// Parses a child element's text into an enum case-insensitively with a clean
-    /// error listing the accepted spellings. A missing element returns the default.
+    /// Parses a child element's text into an enum case-insensitively with a clean error listing the
+    /// accepted spellings. A missing element returns the default.
     /// </summary>
     private static T ParseEnum<T>(XElement root, string elementName, T dflt) where T : struct, Enum
     {
         string? v = root.Element(elementName)?.Value.Trim();
         if (string.IsNullOrEmpty(v)) return dflt;
-        // TryParse also accepts the enum's numeric underlying value; reject that so a
-        // manifest can only spell a member by name, matching the previous strict behavior.
         if (!char.IsAsciiDigit(v[0]) && Enum.TryParse<T>(v, ignoreCase: true, out var result)) return result;
         throw new ManifestError(
             $"'{v}' is not a valid <{elementName}>; expected one of: {string.Join(", ", Enum.GetNames<T>())}");

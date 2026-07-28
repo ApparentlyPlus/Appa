@@ -3,12 +3,9 @@ namespace Appa.Tests;
 using Appa;
 
 /// <summary>
-/// Coverage for `f() catch { ... assign v; }` - handling a throwing call in place instead of
-/// through a try block, so the value it produces stays in the enclosing scope.
-///
-/// The emitted-C assertions here pin the shape the ARC pass produces, because that shape is the
-/// feature: a declaration in the *enclosing* block plus a two-armed branch. A try block would
-/// have put the declaration inside braces, which is exactly what this construct exists to avoid.
+/// Coverage for `f() catch { ... assign v; }` - handling a throwing call in place so its value
+/// stays in the enclosing scope. The emitted-C assertions pin the shape the ARC pass produces,
+/// because that shape is the feature a try block would not give.
 /// </summary>
 public class CatchCallTests
 {
@@ -39,7 +36,7 @@ public class CatchCallTests
     #region Accepted forms
 
     [Fact]
-    public void CatchHandlerSatisfiesTheThrowsRule()
+    public void HandlerSatisfiesTheThrowsRule()
     {
         AssertClean(Throwing +
             "kernel { entry func Main() { let int a = P(1) catch { assign 0; }; } }");
@@ -50,7 +47,7 @@ public class CatchCallTests
     /// in the same scope can still see it. Inside a try block this variable would be unreachable.
     /// </summary>
     [Fact]
-    public void DeclarationStaysInTheEnclosingScope()
+    public void DeclarationStaysInTheOuterScope()
     {
         AssertClean(Throwing +
             """
@@ -63,8 +60,8 @@ public class CatchCallTests
     }
 
     /// <summary>
-    /// A handler may bail out instead of supplying a value, as long as every path leaves. Inside
-    /// a throws function, `throw` propagates the failure onward.
+    /// A handler may bail out instead of supplying a value, as long as every path leaves. Inside a
+    /// throws function, `throw` propagates the failure onward.
     /// </summary>
     [Fact]
     public void HandlerMayGiveUpByThrowing()
@@ -93,7 +90,7 @@ public class CatchCallTests
     }
 
     [Fact]
-    public void BranchingHandlerAssigningOnEveryPathIsAccepted()
+    public void HandlerAssigningEveryPathIsClean()
     {
         AssertClean(Throwing +
             """
@@ -145,7 +142,7 @@ public class CatchCallTests
     }
 
     [Fact]
-    public void HandlerAssigningOnOnlyOnePathIsRejected()
+    public void HandlerMissingAPathIsRejected()
     {
         AssertError(Codes.CatchHandlerNoAssign, Throwing +
             """
@@ -163,7 +160,7 @@ public class CatchCallTests
     }
 
     [Fact]
-    public void AssignInStatementPositionIsRejected()
+    public void AssignAsAStatementIsRejected()
     {
         AssertError(Codes.AssignOutsideCatch, Throwing +
             "kernel { entry func Main() { P(1) catch { assign 3; }; } }");
@@ -194,7 +191,7 @@ public class CatchCallTests
     }
 
     [Fact]
-    public void CatchDoesNotCoverThrowingArguments()
+    public void CatchDoesNotCoverArguments()
     {
         AssertError(Codes.ThrowsOutsideTry, Throwing +
             """
@@ -204,10 +201,9 @@ public class CatchCallTests
     }
 
     /// <summary>
-    /// A field initializer is spliced into the generated allocator, which has nowhere to put a
-    /// failure branch. A bare throwing call there is already rejected by the handled-context
-    /// check; a `catch` satisfies that check by design, so this position needs its own guard or
-    /// the node reaches the emitter with no diagnostic at all.
+    /// A field initializer is spliced into the allocator, which has nowhere to put a failure
+    /// branch. A bare throwing call is already rejected there, but a `catch` satisfies that check
+    /// by design - so this position needs its own guard.
     /// </summary>
     [Fact]
     public void CatchInFieldInitializerIsRejected()
@@ -220,7 +216,7 @@ public class CatchCallTests
     [Theory]
     [InlineData("class B { int v; func _init(int x) { self.v = x; } }\nkernel { entry func Main() { let B b = new B(P(1) catch { assign 0; }); } }")]
     [InlineData("class L { public void func Add(int x) { } }\nkernel { entry func Main() { let L l = new L { P(1) catch { assign 0; } }; } }")]
-    public void CatchNestedInsideALargerExpressionIsRejected(string body)
+    public void NestedCatchIsRejected(string body)
     {
         AssertError(Codes.ThrowsOutsideTry, Throwing + body);
     }
@@ -230,7 +226,7 @@ public class CatchCallTests
     /// not count as leaving. Without this the analysis would accept a handler that falls through.
     /// </summary>
     [Fact]
-    public void BreakInsideALoopInTheHandlerDoesNotCountAsLeaving()
+    public void BreakInHandlerLoopIsNotLeaving()
     {
         AssertError(Codes.CatchHandlerNoAssign, Throwing +
             "kernel { entry func Main() { let int v = P(1) catch { while (true) { break; } }; } }");
@@ -246,19 +242,18 @@ public class CatchCallTests
     [InlineData("unsafe { let int v = P(1) catch { assign 9; }; }")]
     [InlineData("{ let int v = P(1) catch { assign 9; }; }")]
     [InlineData("try { let int v = P(1) catch { assign 9; }; } catch { }")]
-    public void CatchWorksInEveryStatementPosition(string body)
+    public void CatchWorksInEveryPosition(string body)
     {
         AssertClean(Throwing + "kernel { entry func Main() { " + body + " } }");
     }
 
     /// <summary>
-    /// A handler is an ordinary block sitting inside an expression, and generic instantiation
-    /// substitutes the AST by hand, node kind by node kind. Without an explicit case the handler
-    /// falls through the substituter's default and a type parameter used inside it survives into
-    /// the stamped copy unreplaced - which fails as "unknown type 'T'" at the instantiation.
+    /// A handler is an ordinary block inside an expression, and instantiation substitutes the AST
+    /// node kind by node kind. Without an explicit case it falls through the default and a type
+    /// parameter inside survives unreplaced, failing as "unknown type 'T'".
     /// </summary>
     [Fact]
-    public void TypeParametersAreSubstitutedInsideAHandler()
+    public void TypeParamsSubstituteInHandler()
     {
         AssertClean(Throwing +
             """
@@ -271,7 +266,7 @@ public class CatchCallTests
     }
 
     [Fact]
-    public void TypeParametersAreSubstitutedInsideAGenericClassMethodHandler()
+    public void TypeParamsSubstituteInMethodHandler()
     {
         AssertClean(Throwing +
             """
@@ -288,7 +283,7 @@ public class CatchCallTests
     }
 
     [Fact]
-    public void CatchWorksInMethodAndOperatorBodies()
+    public void CatchWorksInMemberBodies()
     {
         AssertClean(Throwing +
             """
@@ -322,12 +317,12 @@ public class CatchCallTests
     }
 
     /// <summary>
-    /// The structural heart of the feature: the variable is declared in the enclosing block,
-    /// ahead of the Result temp, and a two-armed branch stores into it. A try block would have
-    /// put that declaration inside its own scope, which is what this construct exists to avoid.
+    /// The structural heart of the feature: the variable is declared in the enclosing block, ahead
+    /// of the Result temp, and a two-armed branch stores into it. A try block would have put that
+    /// declaration inside its own scope, which is what this construct exists to avoid.
     /// </summary>
     [Fact]
-    public void LowersToDeclarationThenBranchInTheEnclosingBlock()
+    public void LowersToDeclarationThenBranch()
     {
         var body = LoweredMain(Throwing +
             "kernel { entry func Main() { let int a = P(1) catch { assign 0; }; let int b = a; } }");
@@ -353,7 +348,7 @@ public class CatchCallTests
     }
 
     [Fact]
-    public void AssignLowersToAStoreIntoTheDeclaration()
+    public void AssignStoresIntoTheDeclaration()
     {
         var body = LoweredMain(Throwing +
             "kernel { entry func Main() { let int a = P(1) catch { assign 9; }; } }");
@@ -365,12 +360,12 @@ public class CatchCallTests
     }
 
     /// <summary>
-    /// A managed target is declared with no initializer so the emitter NULL-initializes it. That
-    /// is what makes the give-up path safe: a handler leaving through `throw` never assigns, but
-    /// the variable is already an owner by then, and releasing null is a no-op in the runtime.
+    /// A managed target is declared with no initializer so the emitter NULL-initializes it. That is
+    /// what makes the give-up path safe: a handler leaving through `throw` never assigns, but the
+    /// variable is already an owner by then, and releasing null is a no-op in the runtime.
     /// </summary>
     [Fact]
-    public void ManagedTargetIsDeclaredWithoutAnInitializer()
+    public void ManagedTargetHasNoInitializer()
     {
         var body = LoweredMain(
             """
@@ -386,11 +381,11 @@ public class CatchCallTests
     }
 
     /// <summary>
-    /// In statement position the call's +1 reference is owned by nobody, so the success arm has
-    /// to release it. The failure arm must not: the Result's value was never set on that path.
+    /// In statement position the call's +1 reference is owned by nobody, so the success arm has to
+    /// release it. The failure arm must not: the Result's value was never set on that path.
     /// </summary>
     [Fact]
-    public void DiscardedManagedResultIsReleasedOnTheSuccessArmOnly()
+    public void DiscardedResultReleasesOnSuccess()
     {
         var body = LoweredMain(
             """

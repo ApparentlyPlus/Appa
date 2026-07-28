@@ -1,8 +1,8 @@
 namespace Appa;
 
 /// <summary>
-/// Recursive-descent parser that converts a flat token stream into an untyped AST.
-/// One instance per file. Call ParseProgram() once and discard.
+/// Recursive-descent parser that converts a flat token stream into an untyped AST. One instance per
+/// file. Call ParseProgram() once and discard.
 /// </summary>
 internal sealed class Parser(IReadOnlyList<Token> tokens)
 {
@@ -20,12 +20,14 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     private const int MaxDepth = 200;
 
     /// <summary>
-    /// Increments the recursion depth counter and throws if it exceeds MaxDepth. Always call ExitDepth in a finally block.
+    /// Increments the recursion depth counter and throws if it exceeds MaxDepth. Always call
+    /// ExitDepth in a finally block.
     /// </summary>
     private void EnterDepth() { if (++_depth > MaxDepth) Fail("nested too deeply"); }
 
     /// <summary>
-    /// Decrements the recursion depth counter. Always call in a finally block paired with EnterDepth.
+    /// Decrements the recursion depth counter. Always call in a finally block paired with
+    /// EnterDepth.
     /// </summary>
     private void ExitDepth()
     {
@@ -38,12 +40,14 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     #region Core stream helpers
 
     /// <summary>
-    /// Returns the token at the current position. Safe without a bounds check because Advance() clamps _pp to [0, Length-1].
+    /// Returns the token at the current position. Safe without a bounds check because Advance()
+    /// clamps _pp to [0, Length-1].
     /// </summary>
     private Token Cur => _tokens[_pp];
 
     /// <summary>
-    /// Returns the token n positions ahead of the current position, or the last token if the offset exceeds the stream length.
+    /// Returns the token n positions ahead of the current position, or the last token if the offset
+    /// exceeds the stream length.
     /// </summary>
     private Token Peek(int n = 1)
     {
@@ -117,12 +121,14 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Consumes the current token and returns true if it matches the given kind; otherwise returns false without consuming.
+    /// Consumes the current token and returns true if it matches the given kind; otherwise returns
+    /// false without consuming.
     /// </summary>
     private bool Try(TK k) { if (At(k)) { Advance(); return true; } return false; }
 
     /// <summary>
-    /// Returns true if the current token is TK.Punct with the given value. Only for operator tokens kept as TK.Punct: + - * / % and | ^ less-than greater-than ! ~
+    /// Returns true if the current token is TK.Punct with the given value. Only for operator tokens
+    /// kept as TK.Punct: + - * / % and | ^ less-than greater-than ! ~
     /// </summary>
     private bool AtP(string v)
     {
@@ -155,9 +161,9 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// After an expression has been parsed in a position where only an expression is legal,
-    /// rejects a trailing assignment operator with a targeted message instead of letting the
-    /// generic "expected ')'" error fire.
+    /// After an expression has been parsed in a position where only an expression is legal, rejects
+    /// a trailing assignment operator with a targeted message instead of letting the generic
+    /// "expected ')'" error fire.
     /// </summary>
     private void NoAssignHere(string where, string hint)
     {
@@ -171,8 +177,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     #region Annotations
 
     /// <summary>
-    /// Parses zero or more leading annotations. Uses null-lazy allocation so the common
-    /// path (no annotations) returns a static empty array without any heap allocation.
+    /// Parses zero or more leading annotations. Uses null-lazy allocation so the common path (no
+    /// annotations) returns a static empty array without any heap allocation.
     /// </summary>
     private Annotation[] ParseAnnotations()
     {
@@ -189,10 +195,9 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Verifies that no invalid annotations were attached to a declaration that can't use them.
-    /// @intrinsic and @preamble only bind to native blocks, native types, and functions.
-    /// @keep and @builtin are the two annotations a class or module can carry; everything
-    /// else rejects all of them.
+    /// Verifies that no invalid annotations were attached to a declaration that cannot use them.
+    /// @intrinsic and @preamble bind only to native blocks, native types and functions; @keep and
+    /// @builtin are what a class or module may carry, and everything else rejects all of them.
     /// </summary>
     private static void RejectAnns(Annotation[] anns, string what, bool allowKeep = false, bool allowBuiltin = false)
     {
@@ -235,8 +240,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
 
     /// <summary>
     /// Parses a free function declaration. Handles optional modifiers, an optional return type
-    /// using ParseOptionalReturnType, and an optional generic parameter list between the name
-    /// and the opening paren.
+    /// using ParseOptionalReturnType, and an optional generic parameter list between the name and
+    /// the opening paren.
     /// </summary>
     private FuncDecl ParseFreeFuncDecl(Annotation[] anns, int s)
     {
@@ -257,9 +262,9 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Parses an optional generic parameter list like [T, U]. Returns an empty array if there
-    /// is no leading bracket. Used by class declarations, free function declarations, and
-    /// class/module method declarations.
+    /// Parses an optional generic parameter list like [T, U]. Returns an empty array if there is no
+    /// leading bracket. Used by class declarations, free function declarations, and class/module
+    /// method declarations.
     /// </summary>
     private string[] ParseGenericParamList()
     {
@@ -298,8 +303,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Parses an import declaration. A string literal import is a filesystem path;
-    /// a bare identifier is a module name.
+    /// Parses an import declaration. A string literal import is a filesystem path; a bare
+    /// identifier is a module name.
     /// </summary>
     private ImportDecl ParseImport()
     {
@@ -325,8 +330,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Parses a native type declaration. The lexer encodes the type name and body
-    /// separated by \x1F in a single NativeTypeDecl token value.
+    /// Parses a native type declaration. The lexer encodes the type name and body separated by \x1F
+    /// in a single NativeTypeDecl token value.
     /// </summary>
     private NativeTypeDecl ParseNativeType(Annotation[] anns, int s)
     {
@@ -336,8 +341,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Parses an @extern function pre-declaration. Tells the compiler a C function exists
-    /// so it can be called from Gata without a Gata body.
+    /// Parses an @extern function pre-declaration. Tells the compiler a C function exists so it can
+    /// be called from Gata without a Gata body.
     /// </summary>
     private ExternFuncDecl ParseExternDecl(Annotation[] anns, int s)
     {
@@ -364,8 +369,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Dispatches to the correct parser for a single item inside a kernel or user block.
-    /// Context blocks cannot be nested, so kernel and user keywords are hard errors here.
+    /// Dispatches to the correct parser for a single item inside a kernel or user block. Context
+    /// blocks cannot be nested, so kernel and user keywords are hard errors here.
     /// </summary>
     private TopLevel ParseContextItem()
     {
@@ -389,8 +394,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     #region Class and module
 
     /// <summary>
-    /// Parses a class declaration. The name is mangled with the generic parameter list
-    /// so the Monomorphizer can match self-references. "class List[T]" becomes "List_T" in the AST.
+    /// Parses a class declaration. The name is mangled with the generic parameter list so the
+    /// Monomorphizer can match self-references. "class List[T]" becomes "List_T" in the AST.
     /// </summary>
     private ClassDecl ParseClassDecl(Annotation[] anns, int s)
     {
@@ -418,8 +423,9 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Reads a single bare identifier as a generic parameter name. Type arguments at use sites
-    /// may nest (List[Map[K,V]]); class parameter declarations may not (class Foo[Bar[Baz]] is rejected).
+    /// Reads a single bare identifier as a generic parameter name. Type arguments at use sites may
+    /// nest (List[Map[K,V]]); class parameter declarations may not (class Foo[Bar[Baz]] is
+    /// rejected).
     /// </summary>
     private string ExpectBareGenericParam()
     {
@@ -448,9 +454,9 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     #region Enum and union
 
     /// <summary>
-    /// Parses an enum declaration. Members may carry explicit integer values; if absent the
-    /// C compiler applies the usual increment rule. A trailing comma after the last member
-    /// is a hard error.
+    /// Parses an enum declaration. Members may carry explicit integer values; if absent the C
+    /// compiler applies the usual increment rule. A trailing comma after the last member is a hard
+    /// error.
     /// </summary>
     private EnumDecl ParseEnumDecl(Annotation[] anns, int s)
     {
@@ -482,7 +488,24 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     private UnionDecl ParseUnionDecl(Annotation[] anns, int s)
     {
         Expect(TK.Union);
+        int ns = Cur.Span.Start;
         var name = Expect(TK.Ident).Value;
+
+        // Type parameters, registered and mangled exactly as ParseClassDecl does, so the
+        // Monomorphizer discovers the template through the same GenericUse channel.
+        List<string> generics = [];
+        if (At(TK.LBrack))
+        {
+            Advance();
+            generics.Add(ExpectBareGenericParam());
+            while (Try(TK.Comma)) generics.Add(ExpectBareGenericParam());
+            Expect(TK.RBrack);
+
+            var genericsArray = generics.ToArray();
+            _gu.Add(new GenericUse(name, genericsArray, To(ns)));
+            name = name + "_" + string.Join("_", genericsArray);
+        }
+
         Expect(TK.LBrace);
         List<UnionVariant>? variants = null;
         if (!At(TK.RBrace) && !At(TK.EOF))
@@ -502,13 +525,13 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
             }
         }
         Expect(TK.RBrace);
-        return new UnionDecl(name, variants?.ToArray() ?? [], To(s), anns);
+        return new UnionDecl(name, [.. generics], variants?.ToArray() ?? [], To(s), anns);
     }
 
     /// <summary>
-    /// Parses a union variant's parenthesised field list. A trailing comma right
-    /// before the closing paren is a hard error with a specific message, since the
-    /// shared ParseParamList used for function parameters does not check for one.
+    /// Parses a union variant's parenthesised field list. A trailing comma right before the closing
+    /// paren is a hard error with a specific message, since the shared ParseParamList used for
+    /// function parameters does not check for one.
     /// </summary>
     private Param[] ParseUnionFieldList()
     {
@@ -529,8 +552,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     #region Type specs
 
     /// <summary>
-    /// Parses a named type, keeping any generic arguments structurally on the NamedSpec.
-    /// Generic uses are registered in _gu for the Monomorphizer to consume.
+    /// Parses a named type, keeping any generic arguments structurally on the NamedSpec. Generic
+    /// uses are registered in _gu for the Monomorphizer to consume.
     /// </summary>
     private NamedSpec ParseTypeName()
     {
@@ -553,13 +576,13 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         var spec = new NamedSpec(name, [.. args], To(s));
         var mangledArgs = new string[args.Count];
         for (int i = 0; i < args.Count; i++) mangledArgs[i] = args[i].Mangled;
-        _gu.Add(new GenericUse(name, mangledArgs, To(s)));
+        _gu.Add(new GenericUse(name, mangledArgs, To(s), [.. args]));
         return spec;
     }
 
     /// <summary>
-    /// Parses the base name of a type, like an identifier (Process/Thread are ordinary
-    /// identifiers, resolved as builtin types later) or a primitive keyword.
+    /// Parses the base name of a type, like an identifier (Process/Thread are ordinary identifiers,
+    /// resolved as builtin types later) or a primitive keyword.
     /// </summary>
     private string ParseSimpleTypeName()
     {
@@ -570,8 +593,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Parses a full type specifier. Fixed-array prefix [N], function pointer type, plain type name,
-    /// and optional pointer suffixes.
+    /// Parses a full type specifier. Fixed-array prefix [N], function pointer type, plain type
+    /// name, and optional pointer suffixes.
     /// </summary>
     private TypeSpec ParseTypeSpec()
     {
@@ -630,8 +653,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Maps a primitive token to its canonical type name string.
-    /// TPrim tokens carry their own value (eg. "uint64"), so those fall through to the default.
+    /// Maps a primitive token to its canonical type name string. TPrim tokens carry their own value
+    /// (eg. "uint64"), so those fall through to the default.
     /// </summary>
     private static string PrimName(Token t)
     {
@@ -653,7 +676,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     #region Class members
 
     /// <summary>
-    /// Parses a single class member: a fields block, operator overload, method, or field declaration.
+    /// Parses a single class member: a fields block, operator overload, method, or field
+    /// declaration.
     /// </summary>
     private ClassMember ParseClassMember()
     {
@@ -724,8 +748,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Parses an operator symbol for an operator overload declaration.
-    /// Handles arithmetic, comparison, bitwise, and indexer operators.
+    /// Parses an operator symbol for an operator overload declaration. Handles arithmetic,
+    /// comparison, bitwise, and indexer operators.
     /// </summary>
     private string ParseOperatorSymbol()
     {
@@ -746,8 +770,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Returns true if the current position looks like the start of a method declaration.
-    /// 'func Name' with no return type is a method; 'func(' starts a func-pointer type (a field).
+    /// Returns true if the current position looks like the start of a method declaration. 'func
+    /// Name' with no return type is a method; 'func(' starts a func-pointer type (a field).
     /// Speculatively parses the type spec and checks what follows; restores position either way.
     /// </summary>
     private bool LooksLikeMethod()
@@ -776,8 +800,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Parses zero or more access/storage modifiers into a single flags value.
-    /// A repeated modifier and the contradictory 'public private' pair are hard errors.
+    /// Parses zero or more access/storage modifiers into a single flags value. A repeated modifier
+    /// and the contradictory 'public private' pair are hard errors.
     /// </summary>
     private Modifiers ParseMods()
     {
@@ -806,10 +830,9 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     #region Process and thread
 
     /// <summary>
-    /// Parses a process declaration. Requires exactly one foreground/background mode, spelled
-    /// either as a leading keyword or a trailing colon-suffixed one -- never both, never neither.
-    /// The mode is a real semantic choice (TTY/keyboard focus ownership, scheduling visibility),
-    /// not cosmetic, so it does not default silently.
+    /// Parses a process declaration, requiring exactly one foreground/background mode - leading
+    /// keyword or trailing colon form, never both, never neither. The mode owns TTY focus and
+    /// scheduling visibility, so it is not allowed to default silently.
     /// </summary>
     private ProcessDecl ParseProcessDeclTop()
     {
@@ -839,10 +862,9 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Parses a thread declaration inside a process body. A foreground or background keyword
-    /// before 'thread' is syntactically accepted and captured in Mode; the type resolver
-    /// rejects it as G043, since threads don't have their own deployment mode, only the
-    /// process does.
+    /// Parses a thread declaration inside a process body. A foreground or background keyword before
+    /// 'thread' is syntactically accepted and captured in Mode; the type resolver rejects it as
+    /// G043, since threads don't have their own deployment mode, only the process does.
     /// </summary>
     private ThreadDecl ParseThreadDecl()
     {
@@ -861,9 +883,9 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Parses the entry function of a thread. Threads are pure topology, not scopes, so nested
-    /// threads and helper functions defined inside the body are hard errors. A thread entry is
-    /// invoked through a fixed void(*)(void*) ABI so return types and access modifiers are rejected.
+    /// Parses the entry function of a thread. Threads are pure topology, not scopes, so a nested
+    /// thread or helper function in the body is a hard error, and the fixed void(*)(void*) ABI
+    /// means return types and access modifiers are rejected too.
     /// </summary>
     private EntryFuncDecl ParseThreadEntry()
     {
@@ -956,7 +978,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         if (At(TK.Break)) { Advance(); Expect(TK.Semi); return new BreakStmt(To(s)); }
         if (At(TK.Continue)) { Advance(); Expect(TK.Semi); return new ContinueStmt(To(s)); }
 
-        // Throw and debug statements are not expressions, so they must be handled here instead of in ParseExprOrAssign.
+        // Throw and debug statements are not expressions, so they must be handled here instead of
+        // in ParseExprOrAssign.
         if (At(TK.Throw)) {
             Advance();
             Expect(TK.Semi);
@@ -979,7 +1002,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
             return new DebugStmt(raw, To(s));
         }
 
-        // Panic is a statement, not an expression, so it must be handled here instead of in ParseExprOrAssign.
+        // Panic is a statement, not an expression, so it must be handled here instead of in
+        // ParseExprOrAssign.
         if (At(TK.Panic)) {
             Advance();
             if (!At(TK.StrLit)) Fail("'panic' takes a string literal", hints: ["e.g. panic \"message\";"]);
@@ -997,8 +1021,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
 
     /// <summary>
     /// Parses a let declaration. The type is optional; LooksLikeTypeAndIdent is the single
-    /// lookahead deciding whether a declared type precedes the name, shared with the
-    /// for-init form so the two positions can never disagree.
+    /// lookahead deciding whether a declared type precedes the name, shared with the for-init form
+    /// so the two positions can never disagree.
     /// </summary>
     private LetStmt ParseLetStmt(int s)
     {
@@ -1011,8 +1035,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Returns the index just past a balanced "[...]" run starting at token offset n, or -1 if
-    /// it never closes before EOF. Used by SkipTypeSpec to jump over generic argument lists.
+    /// Returns the index just past a balanced "[...]" run starting at token offset n, or -1 if it
+    /// never closes before EOF. Used by SkipTypeSpec to jump over generic argument lists.
     /// </summary>
     private int SkipBrackets(int n)
     {
@@ -1057,8 +1081,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Lookahead mirror of ParseTypeSpec. Returns the index just past the type starting at
-    /// offset n (Peek(0) = Cur), or -1 if offset n is not the start of a valid type.
+    /// Lookahead mirror of ParseTypeSpec. Returns the index just past the type starting at offset n
+    /// (Peek(0) = Cur), or -1 if offset n is not the start of a valid type.
     /// </summary>
     private int SkipTypeSpec(int n)
     {
@@ -1084,9 +1108,9 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Returns true if the current position looks like a type spec immediately followed by
-    /// an identifier, which is always a missing 'let' and never valid expression syntax.
-    /// Pure lookahead; never consumes tokens.
+    /// Returns true if the current position looks like a type spec immediately followed by an
+    /// identifier, which is always a missing 'let' and never valid expression syntax. Pure
+    /// lookahead; never consumes tokens.
     /// </summary>
     private bool LooksLikeMissingLet()
     {
@@ -1096,8 +1120,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Returns true if the current position looks like a type specifier followed by an
-    /// identifier, meaning the let statement has an explicit type annotation.
+    /// Returns true if the current position looks like a type specifier followed by an identifier,
+    /// meaning the let statement has an explicit type annotation.
     /// </summary>
     private bool LooksLikeTypeAndIdent()
     {
@@ -1111,8 +1135,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Parses a let declaration without consuming its trailing semicolon. Used in for-loop
-    /// init clauses where the semicolon belongs to the for syntax, not the let.
+    /// Parses a let declaration without consuming its trailing semicolon. Used in for-loop init
+    /// clauses where the semicolon belongs to the for syntax, not the let.
     /// </summary>
     private LetStmt ParseLetNoSemi()
     {
@@ -1125,8 +1149,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Parses an if/else statement. The then and else branches are full statements, so a
-    /// bare block, a single statement, or a nested if are all valid without extra rules.
+    /// Parses an if/else statement. The then and else branches are full statements, so a bare
+    /// block, a single statement, or a nested if are all valid without extra rules.
     /// </summary>
     private IfStmt ParseIfStmt(int s)
     {
@@ -1150,8 +1174,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Parses a for loop. Disambiguates between 'for x in col { }' (ForInStmt, no parens) and
-    /// the C-style 'for (init; cond; step) { }' (ForStmt) by peeking for the 'in' keyword.
+    /// Parses a for loop. Disambiguates between 'for x in col { }' (ForInStmt, no parens) and the
+    /// C-style 'for (init; cond; step) { }' (ForStmt) by peeking for the 'in' keyword.
     /// </summary>
     private Stmt ParseForStmt(int s)
     {
@@ -1213,8 +1237,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Parses an unsafe block. Pointer operations inside are permitted; the type checker
-    /// rejects them everywhere else.
+    /// Parses an unsafe block. Pointer operations inside are permitted; the type checker rejects
+    /// them everywhere else.
     /// </summary>
     private UnsafeBlock ParseUnsafeBlock(int s)
     {
@@ -1224,8 +1248,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Parses a defer statement. The deferred action is a single statement that runs on
-    /// every exit from the enclosing block, in LIFO order with other defers.
+    /// Parses a defer statement. The deferred action is a single statement that runs on every exit
+    /// from the enclosing block, in LIFO order with other defers.
     /// </summary>
     private DeferStmt ParseDeferStmt(int s)
     {
@@ -1234,8 +1258,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Parses an expression statement or assignment. After parsing the left-hand expression,
-    /// any assignment operator promotes the result to an AssignStmt; otherwise it's an ExprStmt.
+    /// Parses an expression statement or assignment. After parsing the left-hand expression, any
+    /// assignment operator promotes the result to an AssignStmt; otherwise it's an ExprStmt.
     /// </summary>
     private Stmt ParseExprOrAssign(int s)
     {
@@ -1317,7 +1341,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Parses '&&' chains.
+    /// Parses '&amp;&amp;' chains.
     /// </summary>
     private Expr ParseAnd()
     {
@@ -1350,7 +1374,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Parses bitwise '&' chains.
+    /// Parses bitwise '&amp;' chains.
     /// </summary>
     private Expr ParseBitAnd()
     {
@@ -1393,7 +1417,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Parses '<<' and '>>' chains.
+    /// Parses '&lt;&lt;' and '&gt;&gt;' chains.
     /// </summary>
     private Expr ParseShift()
     {
@@ -1453,8 +1477,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Parses prefix unary operators. '&' and '*' are only legal inside unsafe blocks but
-    /// are accepted here; the type checker enforces the restriction.
+    /// Parses prefix unary operators. '&amp;' and '*' are only legal inside unsafe blocks but are
+    /// accepted here; the type checker enforces the restriction.
     /// </summary>
     private Expr ParseUnary()
     {
@@ -1487,7 +1511,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
             if (At(TK.Inc)) { Advance(); expr = new PostfixExpr(PostfixOp.Inc, expr, To(s)); }
             else if (At(TK.Dec)) { Advance(); expr = new PostfixExpr(PostfixOp.Dec, expr, To(s)); }
             else if (At(TK.Dot)) { Advance(); expr = new MemberAccessExpr(expr, Expect(TK.Ident).Value, To(s)); }
-            else if (At(TK.LBrack)) { Advance(); var idx = ParseExpr(); Expect(TK.RBrack); expr = new IndexExpr(expr, idx, To(s)); }
+            else if (At(TK.LBrack)) { expr = ParseBracketed(expr, s); }
             else if (At(TK.LParen)) { Advance(); var args = ParseArgList(); Expect(TK.RParen); expr = new CallExpr(expr, args, To(s)); }
             else if (At(TK.Catch))
             {
@@ -1503,6 +1527,92 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
+    /// Parses '[ ... ]' after an expression: an index, a generic type reference, or a node carrying
+    /// both for the resolver. Only 'Ident[...].' can be a type, and a failed reading is rolled back
+    /// whole - cursor, depth and generic-use registrations.
+    /// </summary>
+    private Expr ParseBracketed(Expr expr, int s)
+    {
+        if (expr is not IdentExpr id) return ParseIndexRest(expr, s);
+
+        var start = Mark();
+
+        // The type reading. It needs a '.' after the brackets: 'Maybe[int]' on its own is a type
+        // in value position, which is never legal, and reading it as one only worsens the error.
+        NamedSpec[]? typeArgs = null;
+        var typeEnd = start;
+        List<GenericUse> typeUses = [];
+        try
+        {
+            Advance();
+            var args = new List<NamedSpec> { ParseTypeName() };
+            while (Try(TK.Comma)) args.Add(ParseTypeName());
+            if (At(TK.RBrack))
+            {
+                Advance();
+                if (At(TK.Dot))
+                {
+                    typeArgs = [.. args];
+                    typeEnd = Mark();
+                    typeUses = _gu.GetRange(start.Uses, _gu.Count - start.Uses);
+                }
+            }
+        }
+        catch (ParseException) { /* not a type list; the index reading stands alone */ }
+
+        Rewind(start);
+        if (typeArgs == null) return ParseIndexRest(expr, s);
+
+        // The index reading, from the same starting token.
+        Expr? indexForm = null;
+        try
+        {
+            Advance();
+            var idx = ParseExpr();
+            if (At(TK.RBrack)) { Advance(); indexForm = idx; }
+        }
+        catch (ParseException) { /* not an expression; the type reading stands alone */ }
+
+        // Settle on the type reading: its registrations are restored from the copy taken above
+        // rather than by parsing the same tokens a third time.
+        Rewind(typeEnd with { Uses = start.Uses });
+        _gu.AddRange(typeUses);
+
+        return new GenericTypeRefExpr(id.Name, typeArgs, indexForm, To(s));
+    }
+
+    /// <summary>
+    /// Everything a speculative parse may advance, so it can be put back exactly.
+    /// </summary>
+    private readonly record struct Snapshot(int Pos, int End, int Depth, int Uses);
+
+    private Snapshot Mark() => new(_pp, _pe, _depth, _gu.Count);
+
+    /// <summary>
+    /// Restores the parser to a snapshot. Depth is part of it because a ParseException unwinds past
+    /// every ExitDepth, and the leak is cumulative: 195 ordinary 'a[0].x' expressions reached
+    /// MaxDepth and were rejected as nested too deeply.
+    /// </summary>
+    private void Rewind(Snapshot m)
+    {
+        _pp = m.Pos;
+        _pe = m.End;
+        _depth = m.Depth;
+        if (_gu.Count > m.Uses) _gu.RemoveRange(m.Uses, _gu.Count - m.Uses);
+    }
+
+    /// <summary>
+    /// Parses the remainder of an index expression, with '[' as the current token.
+    /// </summary>
+    private Expr ParseIndexRest(Expr obj, int s)
+    {
+        Advance();
+        var idx = ParseExpr();
+        Expect(TK.RBrack);
+        return new IndexExpr(obj, idx, To(s));
+    }
+
+    /// <summary>
     /// Parses a comma-separated argument list terminated by ')'. Returns an empty array immediately
     /// if ')' is already the current token, avoiding an allocation on every empty call.
     /// </summary>
@@ -1515,8 +1625,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Parses a single call argument. 'ref' is only valid at the call-argument level, not as
-    /// a general unary prefix, so it is handled here rather than in ParseUnary.
+    /// Parses a single call argument. 'ref' is only valid at the call-argument level, not as a
+    /// general unary prefix, so it is handled here rather than in ParseUnary.
     /// </summary>
     private Expr ParseArg()
     {
@@ -1538,8 +1648,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Dispatches to the correct primary form: literal, ident, sizeof, default, new,
-    /// array literal, grouped expression, primitive cast, or interpolated string.
+    /// Dispatches to the correct primary form: literal, ident, sizeof, default, new, array literal,
+    /// grouped expression, primitive cast, or interpolated string.
     /// </summary>
     private Expr ParsePrimaryInner()
     {
@@ -1554,7 +1664,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         if (At(TK.Null)) { Advance(); return new NullExpr(To(s)); }
         if (At(TK.InterpStrStart)) return ParseInterpStr(s);
 
-        // sizeof(Type) and default(Type) are special forms that take a type specifier in parentheses.
+        // sizeof(Type) and default(Type) are special forms that take a type specifier in
+        // parentheses.
         if (At(TK.Sizeof))
         {
             Advance(); Expect(TK.LParen);
@@ -1584,10 +1695,9 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
             return new ArrayLitExpr([.. elems], To(s));
         }
 
-        // Parenthesised expression or primitive cast. The type specifier is unambiguous because
-        // it must be a primitive keyword or identifier, and the cast is unambiguous because
-        // it must be followed by a unary expression. The parser does not allow user-defined
-        // types in parentheses because that would be ambiguous with a grouped expression.
+        // Parenthesised expression or primitive cast. Unambiguous because the type must be a
+        // primitive keyword or identifier and the cast must be followed by a unary expression.
+        // User-defined types are not allowed here - they would collide with a grouped expression.
         if (At(TK.LParen))
         {
             Advance();
@@ -1610,8 +1720,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Parses an interpolated string. The lexer emits InterpStrStart, then alternating StrLit
-    /// and Punct("{") ... Punct("}") pairs for embedded expressions, then InterpStrEnd.
+    /// Parses an interpolated string. The lexer emits InterpStrStart, then alternating StrLit and
+    /// Punct("{") ... Punct("}") pairs for embedded expressions, then InterpStrEnd.
     /// </summary>
     private InterpStrExpr ParseInterpStr(int s)
     {
@@ -1628,11 +1738,9 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Parses a 'new' expression. After the type spec, an optional '(' constructor arg list
-    /// and an optional collection initializer (either '{' or '[' delimited) may each follow,
-    /// independently of one another - 'new Foo(args) { init }' is legal. A bare 'new Type'
-    /// with neither parses too; the type resolver decides what that means, and rejects it
-    /// with NewOnNonClass for anything that is not a class.
+    /// Parses a 'new' expression. An optional constructor arg list and an optional collection
+    /// initializer may each follow the type spec, independently. A bare 'new Type' parses too; the
+    /// resolver rejects it with NewOnNonClass for anything but a class.
     /// </summary>
     private NewExpr ParseNewExpr(int s)
     {
@@ -1643,16 +1751,16 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         {
             Advance(); args = ParseArgList(); Expect(TK.RParen);
         }
-        if (At(TK.LBrace)) return new NewExpr(type, args, ParseCollectionInit(TK.LBrace, TK.RBrace), To(s));
-        if (At(TK.LBrack)) return new NewExpr(type, args, ParseCollectionInit(TK.LBrack, TK.RBrack), To(s));
+        if (At(TK.LBrace)) return new NewExpr(type, args, ParseCollectionInit(TK.RBrace), To(s));
+        if (At(TK.LBrack)) return new NewExpr(type, args, ParseCollectionInit(TK.RBrack), To(s));
         return new NewExpr(type, args, [], To(s));
     }
 
     /// <summary>
-    /// Parses a delimited, comma-separated element list for a 'new' collection initializer.
-    /// Returns an empty array for an empty delimiter pair.
+    /// Parses a delimited, comma-separated element list for a 'new' collection initializer. Returns
+    /// an empty array for an empty delimiter pair.
     /// </summary>
-    private Expr[] ParseCollectionInit(TK open, TK close)
+    private Expr[] ParseCollectionInit(TK close)
     {
         Advance(); // opening delimiter
         if (At(close)) { Advance(); return []; }
@@ -1667,8 +1775,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     #region Switch and match
 
     /// <summary>
-    /// Parses a switch statement. Each 'case' arm carries one or more comma-separated labels
-    /// and a block body. An optional 'default' arm catches all unmatched values.
+    /// Parses a switch statement. Each 'case' arm carries one or more comma-separated labels and a
+    /// block body. An optional 'default' arm catches all unmatched values.
     /// </summary>
     private SwitchStmt ParseSwitchStmt(int s)
     {
@@ -1696,8 +1804,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Parses a match statement. Each 'case' arm names a union variant and optionally binds
-    /// its payload fields. An optional 'default' arm catches unmatched variants.
+    /// Parses a match statement. Each 'case' arm names a union variant and optionally binds its
+    /// payload fields. An optional 'default' arm catches unmatched variants.
     /// </summary>
     private MatchStmt ParseMatchStmt(int s)
     {

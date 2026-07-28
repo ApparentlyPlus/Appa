@@ -3,10 +3,9 @@ namespace Appa.Tests;
 using System.Diagnostics;
 
 /// <summary>
-/// End-to-end boot regression: build a full GatOS ISO from a comprehensive program and boot it
-/// headless in QEMU, asserting the kernel reaches its idle loop and that every section of the
-/// program announced itself. Needs the GatOS toolchain + template that 'appa setup' installs;
-/// skips gracefully when that isn't present.
+/// End-to-end boot regression: builds a full GatOS ISO and boots it headless in QEMU, asserting the
+/// kernel reaches its idle loop and every section announced itself. Needs what 'appa setup'
+/// installs, and skips gracefully without it.
 /// </summary>
 [Collection("Boot")]
 public class BootTests(BootFixture fixture)
@@ -31,6 +30,9 @@ public class BootTests(BootFixture fixture)
         "M:generic-throws",     // a generic throws function's Result typedef
         "M:cross-file-generic", // a generic from another file over a class declared here
         "M:enum-union",         // cross-file enum and union, switch and match
+        "M:managed-union",      // reference-counted union payloads, nested and in a class field
+        "M:union-equality",     // generated structural equality, including through a payload's '=='
+        "M:generic-union",      // a union template stamped per instantiation, including a recursive one
         "M:aggregates",         // default([4]int) and nested unary operators
         "M:c-keywords",         // locals named struct/register/signed, and a ref parameter
         "M:private-mangling",   // two files' same-named private functions
@@ -39,10 +41,9 @@ public class BootTests(BootFixture fixture)
     ];
 
     /// <summary>
-    /// User-realm trace markers. A user 'debug' is a SYS_DEBUG_WRITE syscall that bypasses the
-    /// TTY and goes straight to COM3 (sys/syscall.c), which appa points at artifacts/user-debug.log.
-    /// Checking that file is what proves the userspace _env_dbg bind works at all, rather than
-    /// inferring it from the thread's ordinary console output.
+    /// User-realm trace markers. A user 'debug' is a syscall bypassing the TTY for COM3, which appa
+    /// points at artifacts/user-debug.log - checking that file is what proves the userspace
+    /// _env_dbg bind works, rather than inferring it from console output.
     /// </summary>
     private static readonly string[] UserMarkers =
     [
@@ -52,10 +53,9 @@ public class BootTests(BootFixture fixture)
     ];
 
     /// <summary>
-    /// Exact output lines the program prints. Every value is derived rather than constant, so
-    /// each one pins a computation: 'neg=-5' is a nested unary minus, 'scaled=10' is the two
-    /// private Scale functions resolving to their own file's, 'crate=4' is the cross-file
-    /// generic, 'keywords=3' is a C-keyword local passed by ref across a file boundary.
+    /// Exact output lines. Every value is derived rather than constant, so each pins a computation:
+    /// 'neg=-5' a nested unary minus, 'scaled=10' two private Scale functions, 'crate=4' the
+    /// cross-file generic, 'keywords=3' a C-keyword local passed by ref.
     /// </summary>
     private static readonly string[] ExpectedOutput =
     [
@@ -65,6 +65,18 @@ public class BootTests(BootFixture fixture)
         "grade=5 read=7 zeros=0 neg=-5 flip=9",
         "keywords=3 scaled=10 deref=42 crate=4",
         "recursed=20100 strchurn=3835",
+        // Managed unions. 'ulive'/'uchurnlive' are load-bearing: the live population once every
+        // owner is out of scope, so anything but 0 means a release did not run. 'umade' against
+        // the weights pins the other direction - a double release changes a weight.
+        "uweights=22 umade=7 ulive=0 uchurn=400 uchurnlive=0",
+        // Structural equality. 125 is bits 1+4+8+16+32+64 - the two comparisons that must be
+        // false are exactly the bits left clear, so an equality answering true for everything
+        // reads 255. 'ueqlive=0' pins that the inline-built operands were released.
+        "ueq=125 ueqlive=0",
+        // Generic unions. 107 = 6 (Found) - 1 (Missing) + 2 (a counted payload's id) + 100
+        // (equality within one instantiation); the cross-instantiation comparison adds nothing.
+        // 'leaves=3' walks a recursive Tree[int] through a generic function inferring from it.
+        "gsum=107 leaves=3",
         "REGRESSION_OK",
         "pi*2=6 load=3",
     ];
@@ -134,7 +146,9 @@ public class BootTests(BootFixture fixture)
                 $"expected output line not found: '{expected}'{Logs(log, userLog)}");
     }
 
-    /// <summary>Asserts every marker, with its realm's prefix, reached the channel it belongs on.</summary>
+    /// <summary>
+    /// Asserts every marker, with its realm's prefix, reached the channel it belongs on.
+    /// </summary>
     private static void AssertMarkers(
         string[] markers, string prefix, string channel, string channelName, string log, string userLog)
     {
@@ -147,7 +161,9 @@ public class BootTests(BootFixture fixture)
     private static string Logs(string log, string userLog) =>
         $"\n\n--- COM1/stdio ---\n{log}\n--- COM3/user-debug.log ---\n{userLog}";
 
-    /// <summary>Reads a serial capture, tolerating QEMU never having created it.</summary>
+    /// <summary>
+    /// Reads a serial capture, tolerating QEMU never having created it.
+    /// </summary>
     private static string ReadIfPresent(string path)
     {
         try { return File.Exists(path) ? File.ReadAllText(path) : "<not written>"; }

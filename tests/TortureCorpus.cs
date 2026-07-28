@@ -1,48 +1,41 @@
 namespace Appa.Tests;
 
 /// <summary>
-/// What a torture case is expected to do. The corpus deliberately contains programs
-/// that are syntactically plausible but semantically nonsense, so most cases are
-/// <see cref="Rejected"/>: the point of the suite is that the compiler says *why*
-/// instead of crashing, silently accepting, or emitting broken C.
+/// What a torture case is expected to do. The corpus is full of syntactically plausible nonsense,
+/// so most cases are <see cref="Rejected"/> - the point being that the compiler says *why* rather
+/// than crashing, silently accepting, or emitting broken C.
 /// </summary>
 public enum Expect
 {
-    /// <summary>The compiler must produce at least one error diagnostic.</summary>
+    /// <summary>
+    /// The compiler must produce at least one error diagnostic.
+    /// </summary>
     Rejected,
 
-    /// <summary>The program is legal and must check without any error.</summary>
+    /// <summary>
+    /// The program is legal and must check without any error.
+    /// </summary>
     Accepted,
 
     /// <summary>
-    /// Either outcome is defensible; only the no-crash / well-formed-output
-    /// properties are asserted. Used for machine-generated combinations whose
-    /// legality depends on context.
+    /// Either outcome is defensible; only the no-crash / well-formed-output properties are
+    /// asserted. Used for machine-generated combinations whose legality depends on context.
     /// </summary>
     Any
 }
 
-/// <summary>One torture case: a name for failure messages, a source program, and its expectation.</summary>
+/// <summary>
+/// One torture case: a name for failure messages, a source program, and its expectation.
+/// </summary>
 public sealed record TortureCase(string Name, string Source, Expect Expect, string? Code = null)
 {
     public override string ToString() => Name;
 }
 
 /// <summary>
-/// Builds the torture corpus.
-///
-/// Three generators feed it:
-///
-/// 1. <see cref="Curated"/>   -- hand-written cases pinning one specific rule each.
-/// 2. <see cref="StatementMatrix"/> -- every "weird statement" placed in every
-///    syntactic position a statement can occupy. This is what catches the
-///    "does an 'assign' inside a try/catch block parse, and is the diagnostic
-///    good?" class of hole, where a construct is only rejected in the position
-///    its author happened to think about.
-/// 3. <see cref="ExpressionMatrix"/> -- the same idea for expression positions.
-///
-/// The matrices are combinatorial rather than exhaustive over the grammar: they
-/// cross the positions that actually differ in how they reach the checker.
+/// Builds the torture corpus from <see cref="Curated"/> cases pinning one rule each and the <see
+/// cref="StatementMatrix"/>/<see cref="ExpressionMatrix"/> crossings, which catch the "only
+/// rejected where its author thought about it" hole across positions that differ.
 /// </summary>
 public static class TortureCorpus
 {
@@ -50,7 +43,9 @@ public static class TortureCorpus
     // arrays declared further down, which a field initializer here would run before.
     private static IReadOnlyList<TortureCase>? _all;
 
-    /// <summary>The full corpus: curated cases plus every generated matrix.</summary>
+    /// <summary>
+    /// The full corpus: curated cases plus every generated matrix.
+    /// </summary>
     public static IReadOnlyList<TortureCase> All =>
         _all ??= [.. Curated(), .. Curated2(), .. StatementMatrix(), .. ExpressionMatrix(),
                   .. DeclarationMatrix(), .. TypeMatrix(), .. BinaryOperatorMatrix(),
@@ -58,9 +53,9 @@ public static class TortureCorpus
 
     #region Statement matrix
     /// <summary>
-    /// Every syntactic position that can hold a statement. "%S%" is the hole.
-    /// Each template is otherwise a complete, valid program, so any diagnostic
-    /// produced is attributable to the injected statement.
+    /// Every syntactic position that can hold a statement. "%S%" is the hole. Each template is
+    /// otherwise a complete, valid program, so any diagnostic produced is attributable to the
+    /// injected statement.
     /// </summary>
     private static readonly (string Name, string Template)[] StmtPositions =
     [
@@ -89,9 +84,9 @@ public static class TortureCorpus
     ];
 
     /// <summary>
-    /// Statements that are legal somewhere and nonsense elsewhere. Each must be
-    /// either accepted or rejected with a diagnostic in every position above --
-    /// never crash, never fall through into the emitter.
+    /// Statements that are legal somewhere and nonsense elsewhere. Each must be either accepted or
+    /// rejected with a diagnostic in every position above -- never crash, never fall through into
+    /// the emitter.
     /// </summary>
     private static readonly (string Name, string Stmt)[] StmtProbes =
     [
@@ -123,9 +118,9 @@ public static class TortureCorpus
     ];
 
     /// <summary>
-    /// Crosses every statement probe with every statement position. Legality varies
-    /// by position, so the expectation is <see cref="Expect.Any"/>: the assertions
-    /// that matter here are no-crash and well-formed output.
+    /// Crosses every statement probe with every statement position. Legality varies by position, so
+    /// the expectation is <see cref="Expect.Any"/> and the assertions that matter are no-crash and
+    /// well-formed output.
     /// </summary>
     private static IEnumerable<TortureCase> StatementMatrix()
     {
@@ -137,7 +132,9 @@ public static class TortureCorpus
     #endregion
 
     #region Expression matrix
-    /// <summary>Every syntactic position that can hold an expression. "%E%" is the hole.</summary>
+    /// <summary>
+    /// Every syntactic position that can hold an expression. "%E%" is the hole.
+    /// </summary>
     private static readonly (string Name, string Template)[] ExprPositions =
     [
         ("let-init",      "kernel { entry func Main() { let v = %E%; } }"),
@@ -172,7 +169,9 @@ public static class TortureCorpus
         ("member-target", "kernel { entry func Main() { let v = (%E%).Length; } }"),
     ];
 
-    /// <summary>Expressions ranging from legal to structurally invalid in most positions.</summary>
+    /// <summary>
+    /// Expressions ranging from legal to structurally invalid in most positions.
+    /// </summary>
     private static readonly (string Name, string Expr)[] ExprProbes =
     [
         ("int",            "1"),
@@ -208,9 +207,9 @@ public static class TortureCorpus
     ];
 
     /// <summary>
-    /// Crosses every expression probe with every expression position. Two helpers
-    /// (a void function and a throwing function) are prepended so the probes that
-    /// reference them resolve rather than failing for an unrelated reason.
+    /// Crosses every expression probe with every expression position. Two helpers (a void function
+    /// and a throwing function) are prepended so the probes that reference them resolve rather than
+    /// failing for an unrelated reason.
     /// </summary>
     private static IEnumerable<TortureCase> ExpressionMatrix()
     {
@@ -224,10 +223,9 @@ public static class TortureCorpus
 
     #region Declaration matrix
     /// <summary>
-    /// Every container a declaration can syntactically appear in. "%D%" is the hole.
-    /// Containers differ in which declaration forms they accept, and the rules are
-    /// spread across ParseTopLevel, ParseContextItem, ParseClassMember and the
-    /// process/thread parsers -- so a form rejected in one is easy to forget in another.
+    /// Every container a declaration can appear in, with "%D%" as the hole. Which forms each
+    /// accepts is spread across ParseTopLevel, ParseContextItem, ParseClassMember and the
+    /// process/thread parsers, so a form rejected in one is easy to forget in another.
     /// </summary>
     private static readonly (string Name, string Template)[] DeclPositions =
     [
@@ -241,7 +239,9 @@ public static class TortureCorpus
         ("func-body",  "kernel { entry func Main() { %D% } }"),
     ];
 
-    /// <summary>Declaration forms, each legal in some containers and not others.</summary>
+    /// <summary>
+    /// Declaration forms, each legal in some containers and not others.
+    /// </summary>
     private static readonly (string Name, string Decl)[] DeclProbes =
     [
         ("free-func",     "void func Helper() { }"),
@@ -269,7 +269,9 @@ public static class TortureCorpus
         ("generic-func",  "T func Gen[T](T v) { return v; }"),
     ];
 
-    /// <summary>Crosses every declaration form with every container that could hold one.</summary>
+    /// <summary>
+    /// Crosses every declaration form with every container that could hold one.
+    /// </summary>
     private static IEnumerable<TortureCase> DeclarationMatrix()
     {
         foreach (var (pn, tpl) in DeclPositions)
@@ -281,10 +283,9 @@ public static class TortureCorpus
 
     #region Type matrix
     /// <summary>
-    /// Every position that takes a type specifier. "%T%" is the hole. Types reach the
-    /// checker through several different paths (ResolveType, CheckType, the parser's
-    /// SkipTypeSpec lookahead), and a type that is nonsense in one has to be caught in
-    /// all of them.
+    /// Every position that takes a type specifier. "%T%" is the hole. Types reach the checker
+    /// through several different paths (ResolveType, CheckType, the parser's SkipTypeSpec
+    /// lookahead), and a type that is nonsense in one has to be caught in all of them.
     /// </summary>
     private static readonly (string Name, string Template)[] TypePositions =
     [
@@ -305,7 +306,9 @@ public static class TortureCorpus
         ("union-field",  "union U { A(%T% x) } kernel { entry func Main() { } }"),
     ];
 
-    /// <summary>Type specifiers ranging from ordinary to structurally invalid.</summary>
+    /// <summary>
+    /// Type specifiers ranging from ordinary to structurally invalid.
+    /// </summary>
     private static readonly (string Name, string Type)[] TypeProbes =
     [
         ("int",         "int"),
@@ -331,8 +334,8 @@ public static class TortureCorpus
     ];
 
     /// <summary>
-    /// Crosses every type probe with every type position. A generic Box is prepended so
-    /// the generic probes name a real template rather than failing as an unknown type.
+    /// Crosses every type probe with every type position. A generic Box is prepended so the generic
+    /// probes name a real template rather than failing as an unknown type.
     /// </summary>
     private static IEnumerable<TortureCase> TypeMatrix()
     {
@@ -352,10 +355,9 @@ public static class TortureCorpus
 
     #region Binary operator matrix
     /// <summary>
-    /// Every binary operator crossed with every pair drawn from a set of operand
-    /// expressions covering each type family. Most combinations are type errors; the
-    /// invariant is that each one is either rejected or emits valid C, never silently
-    /// lowered to a C operator that means something else.
+    /// Every binary operator crossed with operand pairs covering each type family. Most
+    /// combinations are type errors; the invariant is that each is either rejected or emits valid
+    /// C, never silently lowered to a C operator meaning something else.
     /// </summary>
     private static IEnumerable<TortureCase> BinaryOperatorMatrix()
     {
@@ -383,11 +385,9 @@ public static class TortureCorpus
 
     #region Assignment matrix
     /// <summary>
-    /// Every assignment operator crossed with every kind of assignment target. Plain '=' and
-    /// the compound forms take different resolver paths (the compound ones hoist, re-read the
-    /// target, and can dispatch to an operator overload), and indexed and field targets take
-    /// different paths again -- so a target that is illegal for one form is easy to leave
-    /// legal for another.
+    /// Every assignment operator crossed with every kind of target. Plain '=' and the compound
+    /// forms take different resolver paths, as do indexed and field targets, so a target illegal
+    /// for one form is easy to leave legal for another.
     /// </summary>
     private static IEnumerable<TortureCase> AssignmentMatrix()
     {
@@ -431,10 +431,9 @@ public static class TortureCorpus
 
     #region Member access matrix
     /// <summary>
-    /// Field reads, method calls, and static-vs-instance access crossed with every kind of
-    /// receiver. Member resolution has one path per receiver shape (enum name, module name,
-    /// class name, instance, primitive), and the emitter prints '->' for all of them, so a
-    /// receiver nobody checked produces C that dereferences a non-pointer.
+    /// Field reads, method calls and static-vs-instance access crossed with every kind of receiver.
+    /// Resolution has one path per receiver shape and the emitter prints '->' for all of them, so a
+    /// receiver nobody checked dereferences a non-pointer in C.
     /// </summary>
     private static IEnumerable<TortureCase> MemberAccessMatrix()
     {
@@ -475,14 +474,9 @@ public static class TortureCorpus
 
     #region Identifier matrix
     /// <summary>
-    /// Awkward identifiers placed in every kind of declaration.
-    ///
-    /// Locals and parameters are the only names the emitter prints as written, so they are
-    /// the only ones that can collide with C's own vocabulary or with the temporaries the
-    /// compiler generates. Classes, functions, fields and enum members all carry a gata_
-    /// prefix or a dense token and are safe by construction -- but the matrix covers them
-    /// anyway, because "safe by construction" is exactly the kind of claim that stops being
-    /// true when someone changes the mangler.
+    /// Awkward identifiers in every kind of declaration. Locals and parameters are the only names
+    /// printed as written, so the only ones that can collide; everything else is safe by
+    /// construction, which is what stops being true when someone changes the mangler.
     /// </summary>
     private static IEnumerable<TortureCase> IdentifierMatrix()
     {
@@ -519,8 +513,8 @@ public static class TortureCorpus
 
     #region Curated cases
     /// <summary>
-    /// Hand-written cases, each pinning exactly one rule. Unlike the matrices these
-    /// carry a real expectation, and where the diagnostic identity matters, the code.
+    /// Hand-written cases, each pinning exactly one rule. Unlike the matrices these carry a real
+    /// expectation, and where the diagnostic identity matters, the code.
     /// </summary>
     private static IEnumerable<TortureCase> Curated()
     {
@@ -663,10 +657,157 @@ public static class TortureCorpus
         yield return new("enum/string-value", "enum E { A = \"s\" } kernel { entry func Main() { } }", Expect.Rejected);
         yield return new("union/empty", "union U { } kernel { entry func Main() { } }", Expect.Rejected);
         yield return new("union/dup-variant", "union U { A, A } kernel { entry func Main() { } }", Expect.Rejected);
+        // Managed payloads are legal now, so these are Accepted. They pin the declaration only:
+        // this corpus builds without libgata, so no reference counting is generated.
+        // ManagedUnionTests covers that half by running programs and watching destructors.
         yield return new("union/managed-payload",
-            "union U { A(String s) } kernel { entry func Main() { } }", Expect.Any);
-        yield return new("union/self-payload", "union U { A(U u) } kernel { entry func Main() { } }", Expect.Any);
+            "union U { A(String s) } kernel { entry func Main() { } }", Expect.Accepted);
+        // A user-class payload is exercised in ManagedUnionTests instead: declaring a class here
+        // makes the module ARC-managed, and this corpus builds without libgata, so the run would
+        // fail on missing @intrinsic bindings rather than on anything union-related.
+        yield return new("union/multi-managed-payload",
+            "union U { A(String s, String t) } kernel { entry func Main() { } }", Expect.Accepted);
+        yield return new("union/nested-managed-union",
+            "union Inner { A(String s) } union Outer { W(Inner i), P(int n) } kernel { entry func Main() { } }",
+            Expect.Accepted);
+        yield return new("union/managed-payload-in-class-field",
+            "union U { A(String s) } class C { U u; } kernel { entry func Main() { } }", Expect.Accepted);
+        // A union cannot hold itself by value: the two would have no size. Rejected, not Any -
+        // allowing managed payloads did not weaken this, and a regression here is a compiler
+        // that recurses forever or emits an incomplete type.
+        yield return new("union/self-payload", "union U { A(U u) } kernel { entry func Main() { } }",
+            Expect.Rejected);
+        yield return new("union/mutual-payload",
+            "union A { X(B b) } union B { Y(A a) } kernel { entry func Main() { } }", Expect.Rejected);
         yield return new("union/dup-field", "union U { A(int x, int x) } kernel { entry func Main() { } }", Expect.Rejected);
+
+        // Equality. Two unions of the same type compare structurally through a generated
+        // function; anything else keeps the error it always had, so that making unions
+        // comparable did not quietly make them comparable to everything.
+        yield return new("union/eq-same-type",
+            "union U { A(int n), B } kernel { entry func Main() { let bool b = U.B() == U.A(1); } }",
+            Expect.Accepted);
+        yield return new("union/ne-same-type",
+            "union U { A(int n), B } kernel { entry func Main() { let bool b = U.B() != U.A(1); } }",
+            Expect.Accepted);
+        yield return new("union/eq-two-different-unions",
+            "union U { A } union V { B } kernel { entry func Main() { let bool b = U.A() == V.B(); } }",
+            Expect.Rejected, Codes.TypeMismatch);
+        yield return new("union/eq-union-and-int",
+            "union U { A } kernel { entry func Main() { let bool b = U.A() == 1; } }",
+            Expect.Rejected, Codes.TypeMismatch);
+        yield return new("union/relational-still-rejected",
+            "union U { A } kernel { entry func Main() { let bool b = U.A() < U.A(); } }",
+            Expect.Rejected, Codes.TypeMismatch);
+        yield return new("union/eq-nested-union",
+            "union I { A(int n), B } union O { W(I i), K(int n) } " +
+            "kernel { entry func Main() { let bool b = O.K(1) == O.W(I.B()); } }", Expect.Accepted);
+        yield return new("union/eq-array-payload",
+            "union U { A([2]int a), B } kernel { entry func Main() { let bool b = U.A([1,2]) == U.B(); } }",
+            Expect.Accepted);
+        yield return new("union/eq-funcptr-payload",
+            "int func Id(int x) { return x; } union U { A(func(int) -> int f), B } " +
+            "kernel { entry func Main() { let bool b = U.A(Id) == U.B(); } }", Expect.Accepted);
+        yield return new("union/eq-enum-payload",
+            "enum E { X, Y } union U { A(E e), B } " +
+            "kernel { entry func Main() { let bool b = U.A(E.X) == U.B(); } }", Expect.Accepted);
+        yield return new("union/eq-in-condition",
+            "union U { A(int n), B } kernel { entry func Main() { if (U.B() == U.A(1)) { } } }",
+            Expect.Accepted);
+        // Generic unions. The template is replaced by one stamped union per instantiation, so
+        // these pin both that the stamping happens and that the rules the non-generic form is
+        // held to still apply to the result.
+        yield return new("union/generic-basic",
+            "union M[T] { S(T v), N } kernel { entry func Main() { let M[int] m = M.S(1); } }",
+            Expect.Accepted);
+        yield return new("union/generic-two-instantiations",
+            "union M[T] { S(T v), N } " +
+            "kernel { entry func Main() { let M[int] a = M.S(1); let M[bool] b = M.S(true); } }",
+            Expect.Accepted);
+        yield return new("union/generic-two-params",
+            "union E[A, B] { L(A a), R(B b) } " +
+            "kernel { entry func Main() { let E[int, bool] e = E.L(1); } }", Expect.Accepted);
+        yield return new("union/generic-payload-free-needs-target-type",
+            "union M[T] { S(T v), N } kernel { entry func Main() { let M[int] m = M.N(); } }",
+            Expect.Accepted);
+        yield return new("union/generic-nested-in-itself-by-value",
+            "union M[T] { S(M[T] v), N } kernel { entry func Main() { let M[int] m = M.N(); } }",
+            Expect.Rejected, Codes.TypeMismatch);
+        yield return new("union/generic-mutual-by-value",
+            "union A[T] { X(B[T] b), Y } union B[T] { Z(A[T] a), W } " +
+            "kernel { entry func Main() { let A[int] a = A.Y(); } }", Expect.Rejected, Codes.TypeMismatch);
+        yield return new("union/generic-duplicate-type-param",
+            "union M[T, T] { S(T v) } kernel { entry func Main() { let M[int, int] m = M.S(1); } }",
+            Expect.Rejected, Codes.DuplicateName);
+        yield return new("union/generic-clashes-with-generic-class",
+            "class M[T] { public T v; } union M[T] { S(T v) } kernel { entry func Main() { } }",
+            Expect.Rejected, Codes.DuplicateName);
+        yield return new("union/generic-void-argument",
+            "union M[T] { S(T v), N } kernel { entry func Main() { let M[void] m = M.N(); } }",
+            Expect.Rejected);
+        yield return new("union/generic-wrong-arity",
+            "union M[T] { S(T v), N } kernel { entry func Main() { let M[int, int] m = M.N(); } }",
+            Expect.Rejected);
+        yield return new("union/generic-unknown-variant",
+            "union M[T] { S(T v), N } kernel { entry func Main() { let M[int] m = M.Zzz(1); } }",
+            Expect.Rejected);
+        yield return new("union/generic-equality",
+            "union M[T] { S(T v), N } " +
+            "kernel { entry func Main() { let M[int] a = M.S(1); let bool b = a == M.S(2); } }",
+            Expect.Accepted);
+        // Type arguments are settled before any expression is resolved, so a construction on its
+        // own cannot ask for an instantiation - the type has to be named somewhere.
+        yield return new("union/generic-never-named-as-a-type",
+            "union M[T] { S(T v), N } kernel { entry func Main() { let bool b = M.S(1) == M.S(2); } }",
+            Expect.Rejected, Codes.CannotInfer);
+        yield return new("union/generic-match-all-arms-return",
+            "union M[T] { S(T v), N } " +
+            "int func W(M[int] m) { match (m) { case S(v) { return 1; } case N { return 0; } } } " +
+            "kernel { entry func Main() { let int r = W(M.N()); } }", Expect.Accepted);
+        // 'Name[Args].Variant(...)' - the instantiation named outright. The brackets read as
+        // both a type list and an index, so these pin that the resolver picks correctly in each
+        // direction and that ordinary indexing is untouched.
+        yield return new("union/generic-explicit-instantiation",
+            "union M[T] { S(T v), N } kernel { entry func Main() { let M[int] m = M[int].S(1); } }",
+            Expect.Accepted);
+        yield return new("union/generic-explicit-payload-free",
+            "union M[T] { S(T v), N } kernel { entry func Main() { let M[int] m = M[int].N(); } }",
+            Expect.Accepted);
+        yield return new("union/generic-explicit-two-params",
+            "union E[A, B] { L(A a), R(B b) } " +
+            "kernel { entry func Main() { let E[int, bool] e = E[int, bool].R(true); } }", Expect.Accepted);
+        // The index reading of the same shape. Declaring a class here would make the module
+        // ARC-managed, which this libgata-free corpus cannot bind, so the member-access form
+        // ('a[i].n') is covered in the execution tests instead.
+        yield return new("union/generic-explicit-index-still-parses",
+            "kernel { entry func Main() { let [2]int a = [1, 2]; let int i = 0; let int n = a[i]; } }",
+            Expect.Accepted);
+        yield return new("union/generic-explicit-unknown-instantiation",
+            "union M[T] { S(T v), N } kernel { entry func Main() { let M[int] m = M[bool].N(); } }",
+            Expect.Rejected);
+        yield return new("union/generic-type-used-as-a-value",
+            "union M[T] { S(T v), N } kernel { entry func Main() { let M[int] a = M[int].N(); let int n = M[int]; } }",
+            Expect.Rejected);
+
+        yield return new("union/generic-never-instantiated",
+            "union M[T] { S(T v), N } kernel { entry func Main() { } }", Expect.Accepted);
+
+        yield return new("union/eq-many-variants",
+            "union U { A(int a), B(int b), C(int c), D(int d), E(int e), F } " +
+            "kernel { entry func Main() { let bool b = U.F() == U.A(1); } }", Expect.Accepted);
+        // An exhaustive match whose every arm returns, with no default. Gata's return analysis
+        // knows it is total; gcc only does if the lowered chain ends in an else, which is why
+        // Desugar collapses the last arm. Without it, gcc sees a path falling off the end.
+        yield return new("union/match-all-arms-return",
+            "union U { A, B(int n), C(int x, int y) } " +
+            "int func W(U u) { match (u) { case A { return 0; } case B(n) { return n; } case C(x, y) { return x + y; } } } " +
+            "kernel { entry func Main() { let int r = W(U.A()); } }", Expect.Accepted);
+        // The same shape with a default arm, which was always fine, so the fix must not have
+        // been to special-case the defaultless form into something the default form loses.
+        yield return new("union/match-default-returns",
+            "union U { A, B(int n) } " +
+            "int func W(U u) { match (u) { case A { return 0; } default { return 1; } } } " +
+            "kernel { entry func Main() { let int r = W(U.A()); } }", Expect.Accepted);
 
         #endregion
 
@@ -892,9 +1033,9 @@ public static class TortureCorpus
     }
 
     /// <summary>
-    /// A second curated batch, covering the areas the first pass did not reach: 'ref'
-    /// parameters, the for..in protocol, interpolation, scoping, native blocks, and the
-    /// interactions between throws, generics, and catch handlers.
+    /// A second curated batch, covering the areas the first pass did not reach: 'ref' parameters,
+    /// the for..in protocol, interpolation, scoping, native blocks, and the interactions between
+    /// throws, generics, and catch handlers.
     /// </summary>
     private static IEnumerable<TortureCase> Curated2()
     {

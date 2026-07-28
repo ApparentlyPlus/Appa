@@ -2,27 +2,11 @@ namespace Appa;
 
 using System.Runtime.InteropServices;
 
-// Base for read-only IR analyses (Dce, CapabilityScan): the side-effecting twin of
-// IrRewriter. Default WalkStmt/WalkExpr recurse into every child unconditionally;
-// a pass overrides one or both to react to the node kinds it cares about, then
-// calls base.WalkStmt/base.WalkExpr to keep recursing into that node's children -
-// the same "override what matters, inherit the rest" shape IrRewriter uses.
-//
-// This exists because Dce and CapabilityScan used to hand-write nearly identical
-// recursive case lists, which meant every new IrStmt/IrExpr node type had to be
-// added to both by hand - miss one and the pass silently fails to look inside it.
-// Sharing one base means a future node type only needs handling here once.
-
-
-/// <summary>
-/// Abstract base for read-only IR traversal passes.
-/// Override WalkStmt or WalkExpr to react to specific node kinds; call base to continue recursing.
-/// </summary>
 internal abstract class IrWalker
 {
     /// <summary>
-    /// Dispatches a statement node to its children.
-    /// Override to intercept specific statement kinds; call base to recurse into children.
+    /// Dispatches a statement node to its children. Override to intercept specific statement kinds;
+    /// call base to recurse into children.
     /// </summary>
     protected virtual void WalkStmt(IrStmt s)
     {
@@ -97,8 +81,8 @@ internal abstract class IrWalker
     }
 
     /// <summary>
-    /// Dispatches an expression node to its children.
-    /// Override to intercept specific expression kinds; call base to recurse into children.
+    /// Dispatches an expression node to its children. Override to intercept specific expression
+    /// kinds; call base to recurse into children.
     /// </summary>
     protected virtual void WalkExpr(IrExpr e)
     {

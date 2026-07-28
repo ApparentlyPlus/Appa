@@ -3,24 +3,24 @@ namespace Appa.Tests;
 using Appa;
 
 /// <summary>
-/// Coverage for the lint-grade diagnostics: the warnings that flag code which compiles
-/// but almost certainly does not mean what it says (G070-G080), and the single
-/// undefined-behaviour error that is decidable from literals alone (G075).
-///
-/// Every warning here is paired with at least one negative case. A warning that cannot
-/// be silenced by writing the code correctly is worse than no warning at all, so the
-/// "clean" assertions are the load-bearing half of this file.
+/// The lint-grade diagnostics: warnings for code that compiles but almost certainly does not mean
+/// what it says, plus the one UB error decidable from literals. Each is paired with a negative
+/// case, since an unsilenceable warning is worse than none.
 /// </summary>
 public class WarningDiagnosticsTests
 {
-    /// <summary>Checks the source and returns every diagnostic carrying the given code.</summary>
+    /// <summary>
+    /// Checks the source and returns every diagnostic carrying the given code.
+    /// </summary>
     private static Diagnostic[] Of(string code, string src)
     {
         var (diag, _) = SingleFileCompile.Check(src);
         return [.. diag.All.Where(d => d.Code == code)];
     }
 
-    /// <summary>Asserts the source produces exactly one warning with the code, and returns it.</summary>
+    /// <summary>
+    /// Asserts the source produces exactly one warning with the code, and returns it.
+    /// </summary>
     private static Diagnostic AssertWarns(string code, string src)
     {
         var hits = Of(code, src);
@@ -31,7 +31,9 @@ public class WarningDiagnosticsTests
         return hits[0];
     }
 
-    /// <summary>Asserts the source produces no diagnostic at all with the given code.</summary>
+    /// <summary>
+    /// Asserts the source produces no diagnostic at all with the given code.
+    /// </summary>
     private static void AssertNoWarn(string code, string src)
     {
         var hits = Of(code, src);
@@ -39,7 +41,9 @@ public class WarningDiagnosticsTests
             $"expected no {code}, got: " + string.Join("; ", hits.Select(h => h.Message)));
     }
 
-    /// <summary>Asserts the source produces at least one error with the code.</summary>
+    /// <summary>
+    /// Asserts the source produces at least one error with the code.
+    /// </summary>
     private static void AssertError(string code, string src)
     {
         var hits = Of(code, src);
@@ -58,11 +62,11 @@ public class WarningDiagnosticsTests
     }
 
     /// <summary>
-    /// Sibling scopes do not nest, so reusing a name across them is not shadowing.
-    /// Redeclaring in the *same* scope stays a hard error, not a warning.
+    /// Sibling scopes do not nest, so reusing a name across them is not shadowing. Redeclaring in
+    /// the *same* scope stays a hard error, not a warning.
     /// </summary>
     [Fact]
-    public void SiblingScopesAndSameScopeRedeclarationAreNotShadowing()
+    public void SiblingScopesAreNotShadowing()
     {
         AssertNoWarn(Codes.ShadowedVariable,
             "kernel { entry func Main() { { let x = 1; let a = x; } { let x = 2; let b = x; } } }");
@@ -86,7 +90,7 @@ public class WarningDiagnosticsTests
     }
 
     [Fact]
-    public void FieldSelfAssignmentIsDistinguishedFromParameterAssignment()
+    public void FieldSelfAssignDiffersFromParam()
     {
         AssertWarns(Codes.SelfAssignment,
             "class C { int n; public void func M() { self.n = self.n; } } " +
@@ -97,7 +101,7 @@ public class WarningDiagnosticsTests
     }
 
     [Fact]
-    public void IndexSelfAssignmentRequiresLiteralIndices()
+    public void IndexSelfAssignNeedsLiterals()
     {
         // Computed indices may denote different elements on each side, so only two identical
         // literal subscripts are enough to call it a self-assignment.
@@ -119,7 +123,7 @@ public class WarningDiagnosticsTests
     }
 
     [Fact]
-    public void ComparisonStatementHintsAtAssignment()
+    public void ComparisonStatementHintsAssign()
     {
         var d = AssertWarns(Codes.NoEffect,
             "kernel { entry func Main() { let a = 1; let b = 2; a == b; } }");
@@ -166,7 +170,7 @@ public class WarningDiagnosticsTests
     }
 
     [Fact]
-    public void SelfComparisonWarnsIncludingInLoops()
+    public void SelfComparisonWarnsInLoopsToo()
     {
         AssertWarns(Codes.SelfComparison,
             "kernel { entry func Main() { let a = 1; if (a == a) { let b = 1; let c = b; } } }");
@@ -188,8 +192,8 @@ public class WarningDiagnosticsTests
     }
 
     /// <summary>
-    /// A cast on a literal pins that literal's width where inference would otherwise choose
-    /// it, which is deliberate in bit-manipulation code. libgata relies on this exemption.
+    /// A cast on a literal pins that literal's width where inference would otherwise choose it,
+    /// which is deliberate in bit-manipulation code. libgata relies on this exemption.
     /// </summary>
     [Fact]
     public void SameTypeCastOnALiteralIsExempt()
@@ -212,17 +216,17 @@ public class WarningDiagnosticsTests
     [Theory]
     [InlineData("kernel { entry func Main() { let a = 1; let b = a / 0; } }")]
     [InlineData("kernel { entry func Main() { let a = 1; let b = a % 0; } }")]
-    public void IntegerDivisionByLiteralZeroIsAnError(string src)
+    public void DivisionByLiteralZeroIsAnError(string src)
     {
         AssertError(Codes.DivisionByZero, src);
     }
 
     /// <summary>
-    /// Floating-point division by zero is defined as an infinity, and a non-literal divisor
-    /// cannot be judged here. Neither is reported.
+    /// Floating-point division by zero is defined as an infinity, and a non-literal divisor cannot
+    /// be judged here. Neither is reported.
     /// </summary>
     [Fact]
-    public void FloatAndVariableDivisorsAreNotReported()
+    public void FloatAndVariableDivisorsAreSilent()
     {
         AssertNoWarn(Codes.DivisionByZero,
             "kernel { entry func Main() { let double a = 1.0; let b = a / 0.0; } }");
@@ -244,7 +248,7 @@ public class WarningDiagnosticsTests
     }
 
     [Fact]
-    public void UnderscorePrefixOptsOutOfUnusedWarnings()
+    public void UnderscoreOptsOutOfUnusedWarnings()
     {
         AssertNoWarn(Codes.UnusedParameter,
             "int func F(int a, int _b) { return a; } " +
@@ -254,7 +258,7 @@ public class WarningDiagnosticsTests
     }
 
     [Fact]
-    public void NativeBodiesSuppressUnusedParameterWarnings()
+    public void NativeBodiesSuppressUnusedParams()
     {
         AssertNoWarn(Codes.UnusedParameter,
             "int func F(int a) native { return 0; } " +
@@ -284,7 +288,7 @@ public class WarningDiagnosticsTests
     }
 
     [Fact]
-    public void NeededDefaultIsSilentAndMissingOneStaysAnError()
+    public void NeededDefaultIsSilent()
     {
         AssertNoWarn(Codes.UnreachableCase,
             "union U { A(int x), B(int y) } " +
@@ -309,11 +313,11 @@ public class WarningDiagnosticsTests
     }
 
     /// <summary>
-    /// The bound follows the operand's own width, so a count illegal for 'int' is fine for
-    /// 'int64'. In-range counts and non-literal counts are never reported.
+    /// The bound follows the operand's own width, so a count illegal for 'int' is fine for 'int64'.
+    /// In-range counts and non-literal counts are never reported.
     /// </summary>
     [Fact]
-    public void ShiftCountBoundFollowsOperandWidth()
+    public void ShiftBoundFollowsOperandWidth()
     {
         AssertNoWarn(Codes.BadShiftCount,
             "kernel { entry func Main() { let int64 a = 1; let b = a << 32; } }");
@@ -328,7 +332,7 @@ public class WarningDiagnosticsTests
     #region G080 string that looks interpolated
 
     [Fact]
-    public void PlainStringNamingAnInScopeVariableWarns()
+    public void PlainStringNamingAVariableWarns()
     {
         var d = AssertWarns(Codes.MissingInterpolation,
             "kernel { entry func Main() { let count = 1; let s = \"n={count}\"; let t = s; } }");
@@ -336,7 +340,7 @@ public class WarningDiagnosticsTests
     }
 
     [Fact]
-    public void BracesThatCannotBeInterpolationAreSilent()
+    public void NonInterpolationBracesAreSilent()
     {
         AssertNoWarn(Codes.MissingInterpolation,
             "kernel { entry func Main() { let s = \"{notAVariable}\"; let t = s; } }");
@@ -351,7 +355,7 @@ public class WarningDiagnosticsTests
     #region Hint rendering
 
     [Fact]
-    public void HintsRenderOnTheirOwnLinesBelowTheCaret()
+    public void HintsRenderBelowTheCaret()
     {
         var (diag, _) = SingleFileCompile.Check(
             "kernel { entry func Main() { let a = 1; let b = a / 0; } }");
@@ -389,8 +393,8 @@ public class WarningDiagnosticsTests
     #region Regression guard
 
     /// <summary>
-    /// Collects every static-call target in a module, so a call can be checked against the
-    /// set of symbols the module actually defines.
+    /// Collects every static-call target in a module, so a call can be checked against the set of
+    /// symbols the module actually defines.
     /// </summary>
     private sealed class CallTargetCollector : IrWalker
     {
@@ -404,17 +408,14 @@ public class WarningDiagnosticsTests
     }
 
     /// <summary>
-    /// Calling a *private* generic function must emit a call to the symbol the instantiation is
-    /// actually defined under. The call site mangles the instantiation itself, while the body is
-    /// emitted later by the generic drain through the private-free-function mangling; when those
-    /// two disagreed the call named a symbol nothing defined, Dce then dropped the definition as
-    /// unreferenced, and the emitted C failed to link. Public generics never had the problem,
-    /// so both are checked here.
+    /// Calling a *private* generic must emit a call to the symbol its instantiation is defined
+    /// under. The call site and the later generic drain mangle separately, and when they disagreed
+    /// Dce dropped the definition and the C failed to link.
     /// </summary>
     [Theory]
     [InlineData("private")]
     [InlineData("public")]
-    public void GenericInstantiationsAreCalledUnderTheNameTheyAreDefinedAs(string vis)
+    public void InstancesAreCalledByTheirOwnName(string vis)
     {
         var (diag, module) = SingleFileCompile.Check(
             $"{vis} T func G[T](T a) {{ return a; }} " +
@@ -434,14 +435,207 @@ public class WarningDiagnosticsTests
 
     /// <summary>
     /// The lowered form of an ARC 'release' on an unmanaged value is a bare '(void)x' discard,
-    /// which is structurally pure. The user still wrote a call, so it must not be reported as
-    /// a no-effect statement - this shape appears throughout libgata's containers.
+    /// which is structurally pure. The user still wrote a call, so it must not be reported as a
+    /// no-effect statement - this shape appears throughout libgata's containers.
     /// </summary>
     [Fact]
-    public void ArcReleaseOfAnUnmanagedValueIsNotAPointlessStatement()
+    public void UnmanagedReleaseIsNotNoEffect()
     {
         AssertNoWarn(Codes.NoEffect,
             "kernel { entry func Main() { unsafe { let int x = 1; release(x); } } }");
+    }
+
+    #endregion
+
+    #region Union comparison hazards
+
+    // Union equality is generated, so what it does to each payload is invisible at the
+    // comparison. These two say so where it will not mean "holds the same value". Both are paired
+    // with a negative case, since an unsilenceable warning is worse than none.
+
+    private const string PlainClass = "class Plain { public int n; } ";
+    private const string ValuedClass =
+        "class Valued { public int n; public operator bool func ==(Valued o) { return self.n == o.n; } } ";
+
+    [Fact]
+    public void UncomparableClassPayloadWarns()
+    {
+        var w = AssertWarns(Codes.IdentityPayloadComparison,
+            PlainClass + "union U { P(Plain p), K(int n) } " +
+            "kernel { entry func Main() { let bool b = U.K(1) == U.K(2); } }");
+
+        Assert.Contains("'U'", w.Message);
+        Assert.Contains("'P.p'", w.Message);
+        Assert.Contains("identity", w.Message);
+        Assert.Contains(w.Hints, h => h.Contains("'=='"));
+    }
+
+    /// <summary>
+    /// The negative case that matters most: declaring '==' on the payload class is the fix the
+    /// warning suggests, so it has to actually silence it.
+    /// </summary>
+    [Fact]
+    public void ClassPayloadWithEqualityIsSilent()
+    {
+        AssertNoWarn(Codes.IdentityPayloadComparison,
+            ValuedClass + "union U { V(Valued v), K(int n) } " +
+            "kernel { entry func Main() { let bool b = U.K(1) == U.K(2); } }");
+    }
+
+    /// <summary>
+    /// A generic instantiation as a payload must not warn, however it is reached. This is the shape
+    /// of a recursive sum type, and putting one in a List stamps an IndexOf that made the warning
+    /// fire inside List.g - where nothing the author writes can silence it.
+    /// </summary>
+    [Fact]
+    public void GenericPayloadIsSilent()
+    {
+        AssertNoWarn(Codes.IdentityPayloadComparison,
+            "class Crate[T] { public T item; } union U { K(Crate[int] c), N(int n) } " +
+            "kernel { entry func Main() { let bool b = U.N(1) == U.N(2); } }");
+    }
+
+    /// <summary>
+    /// The exemption above is for generic instantiations only - an ordinary class payload with no
+    /// '==' is still actionable, and still reported, even alongside an exempt one.
+    /// </summary>
+    [Fact]
+    public void OrdinaryPayloadWarnsBesideExempt()
+    {
+        var w = AssertWarns(Codes.IdentityPayloadComparison,
+            PlainClass + "class Crate[T] { public T item; } " +
+            "union U { K(Crate[int] c), P(Plain p), N(int n) } " +
+            "kernel { entry func Main() { let bool b = U.N(1) == U.N(2); } }");
+
+        Assert.Contains("'P.p'", w.Message);
+        Assert.DoesNotContain("Crate", w.Message);
+    }
+
+    [Fact]
+    public void UnionWithNoClassPayloadIsSilent()
+    {
+        AssertNoWarn(Codes.IdentityPayloadComparison,
+            "union U { A(int n), B([2]int a), C } " +
+            "kernel { entry func Main() { let bool b = U.C() == U.A(1); } }");
+    }
+
+    /// <summary>
+    /// Declaring such a union is fine; only comparing one is worth a word. A union nobody compares
+    /// behaves exactly as before and must stay silent.
+    /// </summary>
+    [Fact]
+    public void UncomparedUnionIsSilent()
+    {
+        AssertNoWarn(Codes.IdentityPayloadComparison,
+            PlainClass + "union U { P(Plain p), K(int n) } " +
+            "kernel { entry func Main() { let U u = U.K(1); } }");
+    }
+
+    [Fact]
+    public void FloatPayloadWarns()
+    {
+        var w = AssertWarns(Codes.ImprecisePayloadComparison,
+            "union U { F(float f), K(int n) } " +
+            "kernel { entry func Main() { let bool b = U.K(1) == U.K(2); } }");
+
+        Assert.Contains("'F.f'", w.Message);
+        Assert.Contains("floating-point", w.Message);
+    }
+
+    [Fact]
+    public void IntegerPayloadIsSilent()
+    {
+        AssertNoWarn(Codes.ImprecisePayloadComparison,
+            "union U { A(int n), B(int64 m), C } " +
+            "kernel { entry func Main() { let bool b = U.C() == U.A(1); } }");
+    }
+
+    /// <summary>
+    /// Hazards inside a nested union are reported against the union actually being compared,
+    /// qualified by where they live. Reporting 'Ident.p' unqualified would read as a variant of the
+    /// outer union and send the author to the wrong declaration.
+    /// </summary>
+    [Fact]
+    public void NestedHazardsNameTheirOwner()
+    {
+        var w = AssertWarns(Codes.IdentityPayloadComparison,
+            PlainClass + "union Inner { P(Plain p), K(int n) } union Outer { W(Inner i), J(int n) } " +
+            "kernel { entry func Main() { let bool b = Outer.J(1) == Outer.J(2); } }");
+
+        Assert.Contains("'Outer'", w.Message);
+        Assert.Contains("'Inner.P.p'", w.Message);
+    }
+
+    /// <summary>
+    /// A union cannot contain itself by value, but it can be reached twice through two different
+    /// variants of a nested union. The walk must terminate rather than recurse forever.
+    /// </summary>
+    [Fact]
+    public void HazardWalkTerminatesOnSharing()
+    {
+        var w = AssertWarns(Codes.IdentityPayloadComparison,
+            PlainClass + "union Leaf { P(Plain p), K(int n) } " +
+            "union Mid { A(Leaf l), B(Leaf l2), C(int n) } " +
+            "union Top { X(Mid m), Y(Leaf l), Z(int n) } " +
+            "kernel { entry func Main() { let bool b = Top.Z(1) == Top.Z(2); } }");
+
+        Assert.Contains("'Top'", w.Message);
+    }
+
+    /// <summary>
+    /// '!=' generates the same comparison, so it must warn identically.
+    /// </summary>
+    [Fact]
+    public void NotEqualsWarnsAsEqualsDoes()
+    {
+        AssertWarns(Codes.IdentityPayloadComparison,
+            PlainClass + "union U { P(Plain p), K(int n) } " +
+            "kernel { entry func Main() { let bool b = U.K(1) != U.K(2); } }");
+    }
+
+    #endregion
+
+    #region Union comparisons keep the existing lint coverage
+
+    // Making unions comparable moved their '==' off IrBinOp onto a call, so every lint matching
+    // IrBinOp silently stopped seeing them - and a warning that stops firing breaks no test.
+    // These pin the parity: what is said about 'i == i' must be said about 'u == u'.
+
+    private const string SmallUnion = "union U { A(int n), B } ";
+
+    [Fact]
+    public void SelfUnionComparisonWarns()
+    {
+        AssertWarns(Codes.SelfComparison,
+            SmallUnion + "kernel { entry func Main() { let U u = U.B(); if (u == u) { } } }");
+    }
+
+    [Fact]
+    public void SelfUnionNotEqualsWarns()
+    {
+        AssertWarns(Codes.SelfComparison,
+            SmallUnion + "kernel { entry func Main() { let U u = U.B(); if (u != u) { } } }");
+    }
+
+    [Fact]
+    public void TwoUnionsAreNotSelfComparison()
+    {
+        AssertNoWarn(Codes.SelfComparison,
+            SmallUnion + "kernel { entry func Main() { let U u = U.B(); let U v = U.A(1); if (u == v) { } } }");
+    }
+
+    /// <summary>
+    /// A comparison written where an assignment was meant. The hint is asserted too: it is the
+    /// entire reason this warning is worth having, and it is selected by recognising the comparison
+    /// shape, which a union no longer matches by default.
+    /// </summary>
+    [Fact]
+    public void UnionComparisonStatementHintsAssign()
+    {
+        var w = AssertWarns(Codes.NoEffect,
+            SmallUnion + "kernel { entry func Main() { let U u = U.B(); let U v = U.A(1); u == v; } }");
+
+        Assert.Contains(w.Hints, h => h.Contains("use '=' to assign"));
     }
 
     #endregion

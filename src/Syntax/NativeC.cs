@@ -5,8 +5,8 @@ using System.Text.RegularExpressions;
 internal static partial class NativeC
 {
     /// <summary>
-    /// Same-length copy with C comments and string/char literals blanked to spaces
-    /// (newlines preserved). Real code is left untouched.
+    /// Same-length copy with C comments and string/char literals blanked to spaces (newlines
+    /// preserved). Real code is left untouched.
     /// </summary>
     public static string Mask(string s)
     {
@@ -46,8 +46,8 @@ internal static partial class NativeC
     }
 
     /// <summary>
-    /// Struct/typedef names declared in a native body (for the opaque-struct registry),
-    /// scanned over masked text so names in comments/strings are ignored.
+    /// Struct/typedef names declared in a native body (for the opaque-struct registry), scanned
+    /// over masked text so names in comments/strings are ignored.
     /// </summary>
     public static IEnumerable<string> ScanStructs(string raw)
     {

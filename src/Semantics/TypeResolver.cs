@@ -41,9 +41,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Picks the generic free-function template a bare call to <paramref name="name"/> should
-    /// resolve to from <paramref name="ctxFile"/>: an own-file private template always wins
-    /// unambiguously; otherwise the first in-scope public template is chosen.
+    /// Picks the generic free-function template a bare call resolves to: an own-file private
+    /// template always wins, otherwise the first in-scope public one.
     /// </summary>
     private (FuncDecl Decl, string File, string Context)? ResolveFuncTemplate(
         string name, string ctxFile, out List<string> collidingFiles)
@@ -64,11 +63,9 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Resolves a qualified call whose left-hand side isn't a real class/module: `ns.name(...)`
-    /// where `ns` is the basename of some in-scope file that declares a free function `name` -
-    /// the disambiguation escape hatch for a name collision that can't be qualified through a
-    /// class/module (e.g. two unrelated files each declaring a same-named generic). Returns null
-    /// if nothing matches, so the caller falls through to the ordinary instance-receiver path.
+    /// Resolves `ns.name(...)` where `ns` is an in-scope file's basename - the escape hatch for a
+    /// collision that cannot be qualified through a class or module. Null if nothing matches, so
+    /// the caller falls through to the instance-receiver path.
     /// </summary>
     private IrExpr? TryResolveFileNamespacedCall(string ns, string name, List<IrExpr> args, ResolveCtx ctx, CallExpr ce)
     {
@@ -177,9 +174,9 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Validates that a type spec refers to real, in-scope types, node by node.
-    /// Each node carries its own source span, so the caret lands on the offending part
-    /// of a compound type instead of the whole declaration.
+    /// Validates that a type spec refers to real, in-scope types, node by node. Each node carries
+    /// its own source span, so the caret lands on the offending part of a compound type instead of
+    /// the whole declaration.
     /// </summary>
     private void CheckType(TypeSpec? t, ResolveCtx ctx, TextSpan span, bool allowVoid = false)
     {
@@ -231,8 +228,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Prefers the spec node's own span; falls back to the declaration span when the
-    /// node was synthesized without one.
+    /// Prefers the spec node's own span; falls back to the declaration span when the node was
+    /// synthesized without one.
     /// </summary>
     private static TextSpan Sp(TypeSpec t, TextSpan fallback)
     {
@@ -240,8 +237,8 @@ internal sealed class TypeResolver(
     }
 
         /// <summary>
-    /// Validates that no two parameters in the list share the same name.
-    /// </summary>
+        /// Validates that no two parameters in the list share the same name.
+        /// </summary>
     private void CheckParams(Param[] ps, ResolveCtx ctx)
     {
         var seen = new HashSet<string>();
@@ -254,9 +251,9 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Rejects a local or parameter name that the compiler also generates for its own
-    /// temporaries. Both would be emitted verbatim into the same C scope, so the two
-    /// declarations would collide, and no renaming rule can separate them after the fact.
+    /// Rejects a local or parameter name that the compiler also generates for its own temporaries.
+    /// Both would be emitted verbatim into the same C scope, so the two declarations would collide,
+    /// and no renaming rule can separate them after the fact.
     /// </summary>
     private void CheckNotReservedLocal(string name, TextSpan span, string what, ResolveCtx ctx)
     {
@@ -304,8 +301,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Picks the best-matching overload from the candidates for the given argument list.
-    /// Reports a diagnostic when no overload matches or multiple overloads tie.
+    /// Picks the best-matching overload from the candidates for the given argument list. Reports a
+    /// diagnostic when no overload matches or multiple overloads tie.
     /// </summary>
     private Symbol? ChooseOverload(IReadOnlyList<Symbol> cands, Symbol? primary,
                            List<IrExpr> args, string display, ResolveCtx ctx, TextSpan span)
@@ -353,8 +350,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Returns the conversion cost from the argument's type to the target type,
-    /// or null when the types are incompatible.
+    /// Returns the conversion cost from the argument's type to the target type, or null when the
+    /// types are incompatible.
     /// </summary>
     private static int? ArgConvCost(IrExpr arg, IrType to)
     {
@@ -426,8 +423,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Returns true when value's type is assignment-compatible with the target type,
-    /// accounting for implicit numeric widening, null-to-reference, and pointer covariance.
+    /// Returns true when value's type is assignment-compatible with the target type, accounting for
+    /// implicit numeric widening, null-to-reference, and pointer covariance.
     /// </summary>
     private static bool Assignable(IrExpr value, IrType to)
     {
@@ -497,17 +494,22 @@ internal sealed class TypeResolver(
 
     /// <summary>
     /// Warns when an expression used as a statement computes a value and then throws it away
-    /// without doing anything else. IsPure is exactly the right test for the lowered form:
-    /// every shape it accepts is side-effect-free, so evaluating it for its own sake is dead
-    /// work.
+    /// without doing anything else. IsPure is exactly the right test for the lowered form: every
+    /// shape it accepts is side-effect-free, so evaluating it for its own sake is dead work.
     /// </summary>
     private void WarnIfNoEffect(Expr src, IrExpr e, ResolveCtx ctx)
     {
         if (src is CallExpr or NewExpr) return;
         if (!IsPure(e)) return;
+        // The "did you mean '='" hint has to recognise a union comparison too, which is a call
+        // by this point rather than an IrBinOp.
+        bool isComparison = e is IrBinOp { Op: BinOp.Eq or BinOp.Ne }
+                            || (e is IrStaticCall sc2 && IsUnionEqCall(sc2))
+                            || (e is IrUnaryOp { Op: UnOp.Not, Operand: IrStaticCall sc3 } && IsUnionEqCall(sc3));
+
         diag.Warn(Codes.NoEffect, ctx.File, e.Span,
             "this expression is computed as a statement but its value is never used",
-            e is IrBinOp { Op: BinOp.Eq or BinOp.Ne }
+            isComparison
                 ? ["'==' compares two values; use '=' to assign"]
                 : ["remove it, or use its result"]);
     }
@@ -528,8 +530,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Warns when a condition is a compile-time constant, or compares a value against itself.
-    /// Both mean the branch is decided before it is ever evaluated.
+    /// Warns when a condition is a compile-time constant, or compares a value against itself. Both
+    /// mean the branch is decided before it is ever evaluated.
     /// </summary>
     private void WarnConstCondition(IrExpr c, ResolveCtx ctx, bool allowConst)
     {
@@ -542,10 +544,29 @@ internal sealed class TypeResolver(
             diag.Warn(Codes.SelfComparison, ctx.File, c.Span,
                 "this compares a value against itself, so the result is constant",
                 ["did you mean to compare against a different value?"]);
+
+        // A union comparison lowered to a call, not an IrBinOp, so the test above walks straight
+        // past 'if (u == u)' while still catching 'if (i == i)'. Same mistake, same warning.
+        else if (IsSelfUnionComparison(c))
+            diag.Warn(Codes.SelfComparison, ctx.File, c.Span,
+                "this compares a value against itself, so the result is constant",
+                ["did you mean to compare against a different value?"]);
     }
 
     /// <summary>
-    /// Validates that the expression is a legal assignment target (variable, field, element, or deref).
+    /// True if the expression is a union equality, or its negation, over two operands naming the
+    /// same storage. Matched by shape: two same-typed union arguments dispatched to exactly that
+    /// union's generated equality, whose name is mangled.
+    /// </summary>
+    private static bool IsSelfUnionComparison(IrExpr c)
+    {
+        if (c is IrUnaryOp { Op: UnOp.Not } neg) c = neg.Operand;
+        return c is IrStaticCall call && IsUnionEqCall(call) && SameStorage(call.Args[0], call.Args[1]);
+    }
+
+    /// <summary>
+    /// Validates that the expression is a legal assignment target (variable, field, element, or
+    /// deref).
     /// </summary>
     private void CheckLValue(IrExpr target, ResolveCtx ctx)
     {
@@ -571,13 +592,9 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Finds the 'as' conversion operator declared on the destination class whose parameter type
-    /// matches the cast's source type, or null if none applies. 'as' has exactly one shape - a
-    /// static factory on the type being converted TO, converting its parameter to self - so this
-    /// is the only place a match can ever come from. Only a class can declare 'as' at all, and it
-    /// only ever converts INTO itself; a class converting itself to a primitive (or to a class
-    /// that doesn't declare a matching 'as') has no 'as' path at all - that's what a named
-    /// conversion method is for instead. Never chained through a second conversion.
+    /// Finds the destination class's 'as' operator whose parameter matches the source type, or
+    /// null. 'as' is always a static factory on the type converted TO, so this is the only place a
+    /// match comes from and it never chains.
     /// </summary>
     private Symbol? FindAsOperator(string destCls, IrType from)
     {
@@ -625,12 +642,29 @@ internal sealed class TypeResolver(
             return;
         }
         Reject();
-        void Reject() => diag.Error(Codes.InvalidCast, ctx.File, value.Span,
-            $"cannot cast '{Describe(from)}' to '{Describe(to)}'",
-            from is IrClassRef && to is IrPrimType or IrEnumType
-                ? [$"'as' only converts INTO a class, never out of one to a primitive - " +
-                   $"add a named conversion method on '{Describe(from)}' instead, e.g. '{Describe(to)} func ToSomething()'"]
-                : null);
+        void Reject()
+        {
+            var hints = new List<string>();
+            if (from is IrClassRef && to is IrPrimType or IrEnumType)
+                hints.Add($"'as' only converts INTO a class, never out of one to a primitive - " +
+                          $"add a named conversion method on '{Describe(from)}' instead, e.g. '{Describe(to)} func ToSomething()'");
+            AddInstantiationHint(hints, ctx);
+            diag.Error(Codes.InvalidCast, ctx.File, value.Span,
+                $"cannot cast '{Describe(from)}' to '{Describe(to)}'", hints.Count == 0 ? null : [.. hints]);
+        }
+    }
+
+    /// <summary>
+    /// Names the generic instantiation an error came from. A stamped instance lives in the
+    /// template's file, so 'Map[String, int]' reports a cast error inside Map.g with nothing to say
+    /// which of the author's types is at fault.
+    /// </summary>
+    private static void AddInstantiationHint(List<string> hints, ResolveCtx ctx)
+    {
+        if (string.IsNullOrEmpty(ctx.CurClass)) return;
+        if (!Mangler.TryGetGenericInstance(ctx.CurClass, out _, out _)) return;
+        hints.Add($"this comes from the instantiation '{Mangler.DisplayName(ctx.CurClass)}'; " +
+                  $"the type arguments have to satisfy what the generic's body does with them");
     }
 
     /// <summary>
@@ -663,8 +697,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Returns true for a bare constant, the one place a same-type cast is written on purpose
-    /// (to pin a literal's width where inference would otherwise decide it).
+    /// Returns true for a bare constant, the one place a same-type cast is written on purpose (to
+    /// pin a literal's width where inference would otherwise decide it).
     /// </summary>
     private static bool IsLiteral(IrExpr e)
     {
@@ -684,6 +718,7 @@ internal sealed class TypeResolver(
         if (a is IrPtrType && b is IrPtrType) return true;
         if (a is IrClassRef ca && b is IrClassRef cb) return ca.ClassName == cb.ClassName;
         if (a is IrEnumType ea && b is IrEnumType eb) return ea.Name == eb.Name;
+        if (a is IrUnionType ua && b is IrUnionType ub) return ua.Name == ub.Name;
         if (a is IrFuncPtrType && b is IrFuncPtrType) return SameType(a, b);
         return false;
     }
@@ -724,8 +759,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Returns true when the statement contains a 'break' that would exit the enclosing loop.
-    /// Does not descend into nested loops, whose breaks target the inner loop instead.
+    /// Returns true when the statement contains a 'break' that would exit the enclosing loop. Does
+    /// not descend into nested loops, whose breaks target the inner loop instead.
     /// </summary>
     private static bool HasLoopBreak(IrStmt s)
     {
@@ -743,9 +778,9 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Rejects 'throws' return types that have no valid Result_T typedef spelling.
-    /// Pointer, fixed-array, and function-pointer inner types would produce an illegal
-    /// C typedef name, so they are compile errors, not link surprises.
+    /// Rejects 'throws' return types that have no valid Result_T typedef spelling. Pointer,
+    /// fixed-array, and function-pointer inner types would produce an illegal C typedef name, so
+    /// they are compile errors, not link surprises.
     /// </summary>
     private void CheckThrowsReturn(IrType ret, bool isThrows, string display, ResolveCtx ctx, TextSpan span)
     {
@@ -756,7 +791,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Reports MissingReturn when a non-void function body does not definitely return on every path.
+    /// Reports MissingReturn when a non-void function body does not definitely return on every
+    /// path.
     /// </summary>
     private void CheckMissingReturn(IrBlock? body, IrType ret, bool isThrows, TextSpan span, string display, ResolveCtx ctx)
     {
@@ -766,8 +802,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Checks for a redundant trailing 'return;' in a void function, and warns about
-    /// unused local variables by walking the body.
+    /// Checks for a redundant trailing 'return;' in a void function, and warns about unused local
+    /// variables by walking the body.
     /// </summary>
     private void CheckBodyQuality(IrBlock body, IrType ret, TextSpan span, ResolveCtx ctx,
                                   Param[]? pars = null, TextSpan parSpan = default)
@@ -802,8 +838,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// A leading underscore is the conventional marker for a binding that exists only to
-    /// satisfy a shape and is not meant to be read. Such names opt out of unused warnings.
+    /// A leading underscore is the conventional marker for a binding that exists only to satisfy a
+    /// shape and is not meant to be read. Such names opt out of unused warnings.
     /// </summary>
     private static bool DeliberatelyUnused(string name) => name.Length > 0 && name[0] == '_';
 
@@ -876,7 +912,8 @@ internal sealed class TypeResolver(
         }
 
         /// <summary>
-        /// Records variable declarations and usages in the statement, recursing into nested statements.
+        /// Records variable declarations and usages in the statement, recursing into nested
+        /// statements.
         /// </summary>
         public void St(IrStmt s)
         {
@@ -931,8 +968,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Reports PrivateMember when a private operator overload is invoked from outside its
-    /// declaring class. Operators follow the same private-by-default rule as every other member.
+    /// Reports PrivateMember when a private operator overload is invoked from outside its declaring
+    /// class. Operators follow the same private-by-default rule as every other member.
     /// </summary>
     private void CheckOperatorAccess(string owner, string op, ResolveCtx ctx, TextSpan span)
     {
@@ -942,8 +979,9 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Reports ThrowsOutsideTry when a throwing call appears outside a try block or throws function.
-    /// A call carrying its own `catch` handler is the third handled form, alongside those two.
+    /// Reports ThrowsOutsideTry when a throwing call appears outside a try block or throws
+    /// function. A call carrying its own `catch` handler is the third handled form, alongside those
+    /// two.
     /// </summary>
     private void CheckThrowsHandled(ResolveCtx ctx, TextSpan span)
     {
@@ -954,8 +992,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Returns true when the statement list leaves its handler on every path - either by
-    /// supplying a value with `assign`, or by transferring control out entirely.
+    /// Returns true when the statement list leaves its handler on every path - either by supplying
+    /// a value with `assign`, or by transferring control out entirely.
     /// </summary>
     private static bool AssignsOrExitsList(IReadOnlyList<IrStmt> stmts)
     {
@@ -984,8 +1022,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Returns true when an `assign` appears anywhere inside the statement.
-    /// Used to reject one in a handler that has no declaration to assign to.
+    /// Returns true when an `assign` appears anywhere inside the statement. Used to reject one in a
+    /// handler that has no declaration to assign to.
     /// </summary>
     private static bool ContainsAssignValue(IrStmt s)
     {
@@ -1008,18 +1046,9 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Whole-body backstop for throws placement, run once per resolved function body.
-    ///
-    /// ForbidNestedThrows is opt-in: every expression position that must reject a nested
-    /// throwing call has to remember to call it, and a position nobody thought of (a
-    /// switch case label, say) lets an IrThrowsCall or IrCatchCall reach the emitter,
-    /// which has no case for either and dies. This walk is opt-out instead - it visits
-    /// the entire body and reports anything that is not in one of the two positions the
-    /// language actually permits, so a new expression form cannot silently open the hole
-    /// back up.
-    ///
-    /// Diagnostics already reported at the same span by ForbidNestedThrows are skipped,
-    /// so the precise per-site message stays the one the user sees.
+    /// Whole-body backstop for throws placement. ForbidNestedThrows is opt-in, so a position nobody
+    /// thought of lets an IrThrowsCall reach the emitter and die; this is opt-out, reporting
+    /// anything outside the two positions the language permits.
     /// </summary>
     private void CheckThrowsPlacement(IrBlock body, ResolveCtx ctx)
     {
@@ -1027,14 +1056,15 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// The walker behind CheckThrowsPlacement. Statements reached through WalkStmt route
-    /// their one legal root slot - a variable initializer or a bare expression statement -
-    /// through WalkRoot, which permits a throwing call there and keeps checking below it.
-    /// Every other path lands in WalkExpr, where a throwing call is by definition nested.
+    /// The walker behind CheckThrowsPlacement. WalkStmt routes the one legal root slot through
+    /// WalkRoot, which permits a throwing call and keeps checking below it; every other path lands
+    /// in WalkExpr, where a throwing call is by definition nested.
     /// </summary>
     private sealed class ThrowsPlacementCheck(DiagnosticBag diag, string file) : IrWalker
     {
-        /// <summary>Walks a resolved function body, reporting every misplaced throwing call.</summary>
+        /// <summary>
+        /// Walks a resolved function body, reporting every misplaced throwing call.
+        /// </summary>
         public void Check(IrBlock body) => WalkStmt(body);
 
         protected override void WalkStmt(IrStmt s)
@@ -1048,8 +1078,8 @@ internal sealed class TypeResolver(
         }
 
         /// <summary>
-        /// Visits an expression in a position where a throwing call is legal, then keeps
-        /// walking its children, where one no longer is.
+        /// Visits an expression in a position where a throwing call is legal, then keeps walking
+        /// its children, where one no longer is.
         /// </summary>
         private void WalkRoot(IrExpr e)
         {
@@ -1082,8 +1112,8 @@ internal sealed class TypeResolver(
         }
 
         /// <summary>
-        /// Reports the error unless the per-site check already produced one at this span,
-        /// which would otherwise print the same complaint twice.
+        /// Reports the error unless the per-site check already produced one at this span, which
+        /// would otherwise print the same complaint twice.
         /// </summary>
         private void Report(TextSpan span, string message, string[]? hints)
         {
@@ -1181,13 +1211,32 @@ internal sealed class TypeResolver(
             IrCast c => IsPure(c.Value),
             IrAddrOf a => IsPure(a.Target),
             IrDeref d => IsPure(d.Ptr),
+
+            // Calls are assumed impure, but this one is compiler-generated and only reads its
+            // two by-value arguments - so 'u == v;' written where 'u = v;' was meant is still
+            // reported as a statement with no effect, exactly as 'i == j;' is.
+            IrStaticCall sc when IsUnionEqCall(sc) => sc.Args.All(IsPure),
+
             _ => false
         };
     }
 
     /// <summary>
-    /// Structural equality for the pure expression forms that can name the same storage
-    /// twice: locals, self, fields, constant-indexed elements, and derefs.
+    /// Returns true if the call is a union's generated structural equality: two arguments of the
+    /// same union type, dispatched to exactly that union's mangled equality name.
+    /// </summary>
+    private static bool IsUnionEqCall(IrStaticCall call)
+    {
+        return call.Args.Count == 2
+               && call.Args[0].Type is IrUnionType ut
+               && call.Args[1].Type is IrUnionType ut2
+               && ut.Name == ut2.Name
+               && call.CName == Mangler.UnionEq(ut.Name);
+    }
+
+    /// <summary>
+    /// Structural equality for the pure expression forms that can name the same storage twice:
+    /// locals, self, fields, constant-indexed elements, and derefs.
     /// </summary>
     private static bool SameStorage(IrExpr a, IrExpr b)
     {
@@ -1208,8 +1257,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Returns the expression unchanged when it is pure, or hoists it into a fresh
-    /// declared temporary and returns a reference to that temp.
+    /// Returns the expression unchanged when it is pure, or hoists it into a fresh declared
+    /// temporary and returns a reference to that temp.
     /// </summary>
     private IrExpr HoistIfImpure(IrExpr e, string prefix, List<IrStmt> stmts)
     {
@@ -1258,8 +1307,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Coerces an expression to the expected type, currently narrowing fixed-array literal
-    /// element types when the destination declares a specific element type.
+    /// Coerces an expression to the expected type, currently narrowing fixed-array literal element
+    /// types when the destination declares a specific element type.
     /// </summary>
     private IrExpr Coerce(IrExpr e, IrType expected, ResolveCtx ctx)
     {
@@ -1287,8 +1336,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Coerces an expression to string by dispatching to the appropriate stringify intrinsic
-    /// or the class's ToString method. Reports a diagnostic when no conversion is available.
+    /// Coerces an expression to string by dispatching to the appropriate stringify intrinsic or the
+    /// class's ToString method. Reports a diagnostic when no conversion is available.
     /// </summary>
     private IrExpr EnsureString(IrExpr e, ResolveCtx ctx)
     {
@@ -1310,8 +1359,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Extracts the class name from a class-reference type, or null for non-class types.
-    /// Follows one level of pointer indirection for pointer-to-class patterns.
+    /// Extracts the class name from a class-reference type, or null for non-class types. Follows
+    /// one level of pointer indirection for pointer-to-class patterns.
     /// </summary>
     private static string? ClassNameOf(IrType t)
     {
@@ -1335,10 +1384,9 @@ internal sealed class TypeResolver(
         private readonly Dictionary<string, IrType> _vars;
         private readonly HashSet<string> _refs;
 
-        // True for the scope a function's parameters are declared in. It is the one scope
-        // with no matching pair of braces in the emitted C: parameters and the body's
-        // top-level locals share the function's compound statement, so a local that
-        // shadows a parameter is a redeclaration there rather than a new binding.
+        // The one scope with no matching braces in the emitted C: parameters and top-level
+        // locals share the function's compound statement, so a local shadowing a parameter is
+        // a redeclaration there rather than a new binding.
         private readonly bool _isParams;
 
         /// <summary>
@@ -1352,8 +1400,8 @@ internal sealed class TypeResolver(
         }
 
         /// <summary>
-        /// Creates a child scope nested inside this one. Set isParams for the scope holding
-        /// a function's parameters.
+        /// Creates a child scope nested inside this one. Set isParams for the scope holding a
+        /// function's parameters.
         /// </summary>
         public ScopeStack Push(bool isParams = false)
         {
@@ -1370,8 +1418,8 @@ internal sealed class TypeResolver(
         }
 
         /// <summary>
-        /// Declares a variable with the given name and type in the current scope.
-        /// When isRef is true, the variable is a ref parameter and emits pointer indirection.
+        /// Declares a variable with the given name and type in the current scope. When isRef is
+        /// true, the variable is a ref parameter and emits pointer indirection.
         /// </summary>
         public void Declare(string name, IrType type, bool isRef = false)
         {
@@ -1388,8 +1436,8 @@ internal sealed class TypeResolver(
         }
 
         /// <summary>
-        /// Returns true when the name is declared in an enclosing scope but not in this one,
-        /// i.e. declaring it here would shadow the outer binding.
+        /// Returns true when the name is declared in an enclosing scope but not in this one, i.e.
+        /// declaring it here would shadow the outer binding.
         /// </summary>
         public bool ShadowsOuter(string name)
         {
@@ -1400,8 +1448,8 @@ internal sealed class TypeResolver(
         }
 
         /// <summary>
-        /// Searches this scope and all parent scopes for the named variable.
-        /// Returns its type, or null when not found.
+        /// Searches this scope and all parent scopes for the named variable. Returns its type, or
+        /// null when not found.
         /// </summary>
         public IrType? Lookup(string name)
         {
@@ -1411,7 +1459,8 @@ internal sealed class TypeResolver(
         }
 
         /// <summary>
-        /// Returns true when the named variable resolves to a ref parameter in this or an enclosing scope.
+        /// Returns true when the named variable resolves to a ref parameter in this or an enclosing
+        /// scope.
         /// </summary>
         public bool IsRef(string name)
         {
@@ -1442,6 +1491,10 @@ internal sealed class TypeResolver(
         ScopeStack Scope,
         bool InDefer = false,
         IrType? AssignType = null,
+        // The type the enclosing construct wants this expression to have, when there is one:
+        // a let with a declared type, or a return. Only consulted where a value is otherwise
+        // under-determined - naming a generic union's variant without its type arguments.
+        IrType? Expected = null,
         bool CatchWrapped = false,
         IrType? RetType = null)
     {
@@ -1511,8 +1564,8 @@ internal sealed class TypeResolver(
 
         /// <summary>
         /// Returns a context marking the call about to be resolved as carrying its own `catch`
-        /// handler, so CheckThrowsHandled accepts it. Cleared again for the call's arguments,
-        /// which are ordinary sub-expressions and get no such dispensation.
+        /// handler, so CheckThrowsHandled accepts it. Cleared again for the call's arguments, which
+        /// are ordinary sub-expressions and get no such dispensation.
         /// </summary>
         public ResolveCtx WithCatchWrapped()
         {
@@ -1568,8 +1621,8 @@ internal sealed class TypeResolver(
     #region Module resolution
 
     /// <summary>
-    /// Resolves all programs in the compilation unit and returns the fully typed IrModule.
-    /// Generic template instances discovered during resolution are stamped after the main pass.
+    /// Resolves all programs in the compilation unit and returns the fully typed IrModule. Generic
+    /// template instances discovered during resolution are stamped after the main pass.
     /// </summary>
     public IrModule Resolve(List<(Program prog, string file)> programs)
     {
@@ -1592,16 +1645,23 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Returns the module scope a top-level item resolves under.
-    ///
-    /// Almost always this is just the enclosing file's scope. The exception is a stamped
-    /// generic instance: the Monomorphizer splices it into the file that declared the
-    /// template, but its type arguments were named at the use site.
+    /// Returns the module scope a top-level item resolves under - the enclosing file's, except for
+    /// a stamped generic instance, which the Monomorphizer splices into the template's file though
+    /// its type arguments were named at the use site.
     /// </summary>
     private HashSet<string> ScopeFor(TopLevel item, string file)
     {
-        if (item is not ClassDecl cd) return _fileScope;
-        if (!genericRequestFile.TryGetValue(cd.Name, out var requester)) return _fileScope;
+        // Both kinds of stamped instance need this. A union template is spliced into its own
+        // file exactly as a class template is, so 'Maybe[Payload]' lands beside the union
+        // declaration and resolves 'Payload' there - a file that has never heard of it.
+        string? name = item switch
+        {
+            ClassDecl cd => cd.Name,
+            UnionDecl ud => ud.Name,
+            _ => null,
+        };
+        if (name == null) return _fileScope;
+        if (!genericRequestFile.TryGetValue(name, out var requester)) return _fileScope;
         if (requester == file) return _fileScope;
         if (!visible.TryGetValue(requester, out var requesterScope)) return _fileScope;
 
@@ -1611,8 +1671,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Scans top-level items for generic function/method templates and registers them for
-    /// on-demand instantiation.
+    /// Scans top-level items for generic function/method templates and registers them for on-demand
+    /// instantiation.
     /// </summary>
     private void CollectFuncTemplates(TopLevel[] items, string context, string file)
     {
@@ -1776,6 +1836,11 @@ internal sealed class TypeResolver(
         var vis = VisOf(ctx.Context);
         var classCtx = ctx.WithClass(cd.Name);
 
+        // A stamped generic instance is a machine-generated copy, so one bad type argument is
+        // reported once rather than once per line of the template that happens to touch it.
+        using var instanceScope = diag.InstanceScope(
+            Mangler.TryGetGenericInstance(cd.Name, out _, out _) ? cd.Name : null);
+
         var rawFields = new List<RawFieldBlock>();
         var fields = new List<IrField>();
         var methods = new List<IrFunction>();
@@ -1829,8 +1894,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Resolves a method declaration, type-checking its signature and body,
-    /// and declaring parameters and optionally 'self' in the method's scope.
+    /// Resolves a method declaration, type-checking its signature and body, and declaring
+    /// parameters and optionally 'self' in the method's scope.
     /// </summary>
     private IrFunction ResolveMethod(string cls, MethodDecl md, ResolveCtx ctx, bool lib, Visibility vis, bool isModule)
     {
@@ -1861,8 +1926,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Resolves an operator declaration, type-checking its signature and body
-    /// and registering 'self' and all parameters in the operator's scope.
+    /// Resolves an operator declaration, type-checking its signature and body and registering
+    /// 'self' and all parameters in the operator's scope.
     /// </summary>
     private IrOperator ResolveOperator(string cls, OperatorDecl od, ResolveCtx ctx, bool lib, Visibility vis)
     {
@@ -1919,8 +1984,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Resolves a free function declaration, type-checking its signature and body,
-    /// and producing a fully typed IR function node.
+    /// Resolves a free function declaration, type-checking its signature and body, and producing a
+    /// fully typed IR function node.
     /// </summary>
     private IrFunction ResolveFreeFunc(FuncDecl fd, ResolveCtx ctx)
     {
@@ -2010,8 +2075,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Resolves a thread entry function declaration, checking parameter types and building the IR body.
-    /// Applies CheckBodyQuality so unused-variable warnings are emitted for entry code.
+    /// Resolves a thread entry function declaration, checking parameter types and building the IR
+    /// body. Applies CheckBodyQuality so unused-variable warnings are emitted for entry code.
     /// </summary>
     private IrFunction ResolveThreadEntry(string fullName, EntryFuncDecl ef, ResolveCtx ctx, Visibility vis)
     {
@@ -2035,9 +2100,9 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Resolves a call to a generic free function by inferring type arguments from the
-    /// supplied argument types, mangling the name, and queuing the instantiation for
-    /// resolution after the main pass completes.
+    /// Resolves a call to a generic free function by inferring type arguments from the supplied
+    /// argument types, mangling the name, and queuing the instantiation for resolution after the
+    /// main pass completes.
     /// </summary>
     private IrExpr ResolveGenericCall(
         (FuncDecl Decl, string File, string Context) t,
@@ -2088,8 +2153,8 @@ internal sealed class TypeResolver(
 
     /// <summary>
     /// Resolves a call to a generic method (on a module or a class, static or instance) by
-    /// inferring type arguments from the supplied argument types, mangling the name, and
-    /// queuing the instantiation for resolution after the main pass completes.
+    /// inferring type arguments from the supplied argument types, mangling the name, and queuing
+    /// the instantiation for resolution after the main pass completes.
     /// </summary>
     private IrExpr ResolveGenericMethodCall(
         (MethodDecl Decl, string File, string Context) t, string owner, bool isStatic,
@@ -2144,8 +2209,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Resolves every generic free-function instantiation queued during the main pass,
-    /// substituting concrete type bindings and registering the result in the module.
+    /// Resolves every generic free-function instantiation queued during the main pass, substituting
+    /// concrete type bindings and registering the result in the module.
     /// </summary>
     private void DrainGenericInstances(IrModule module)
     {
@@ -2193,8 +2258,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Checks whether a bare call is a retain/release ARC intrinsic and returns the appropriate
-    /// IR node. Returns null for all other names.
+    /// Checks whether a bare call is a retain/release ARC intrinsic and returns the appropriate IR
+    /// node. Returns null for all other names.
     /// </summary>
     private IrExpr? TryResolveArcIntrinsic(string name, List<IrExpr> args, ResolveCtx ctx, TextSpan span)
     {
@@ -2211,22 +2276,163 @@ internal sealed class TypeResolver(
             return new IrLitInt(0);
         }
         var a = args[0];
-        if (isRetain)
-            return IsManagedRef(a.Type) ? new IrStaticCall(fsym.CName, a.Type, [a]) : a;
-        return IsManagedRef(a.Type) ? new IrStaticCall(fsym.CName, IrType.Void, [a]) : new IrCast(IrType.Void, a);
+
+        // An unmanaged argument makes both calls vanish - retain to the value itself, release
+        // to a void cast that keeps the argument evaluated and silences an unused warning.
+        // That is what lets one generic body serve List[int] and List[String] alike.
+        if (!IsManagedRef(a.Type))
+            return isRetain ? a : new IrCast(IrType.Void, a);
+
+        // A union counts its live variant's payload through its own generated pair, not
+        // through the runtime intrinsic - which takes void* and would not accept an aggregate.
+        string cname = a.Type is IrUnionType ut
+            ? isRetain ? Mangler.UnionRetain(ut.Name) : Mangler.UnionRelease(ut.Name)
+            : fsym.CName;
+
+        return new IrStaticCall(cname, isRetain ? a.Type : IrType.Void, [a]);
     }
 
     /// <summary>
-    /// Returns true for class-type values that participate in ARC reference counting.
+    /// Reports the two ways a union comparison can mean something other than "these hold the same
+    /// value" - worth saying only because the comparison is generated. Reported at the comparison,
+    /// so a union nobody compares stays silent.
+    /// </summary>
+    private void WarnOnUnionComparison(string unionName, ResolveCtx ctx, TextSpan span)
+    {
+        var identity = new List<string>();
+        var imprecise = new List<string>();
+        CollectComparisonHazards(unionName, "", [], identity, imprecise);
+
+        if (identity.Count > 0)
+            diag.Warn(Codes.IdentityPayloadComparison, ctx.File, span,
+                $"comparing '{unionName}' compares {Describe(identity)} by identity, not by value",
+                [
+                    "two separately built payloads will differ even when they hold the same data",
+                    "declare an '==' operator on the payload class to compare it by value",
+                ]);
+
+        if (imprecise.Count > 0)
+            diag.Warn(Codes.ImprecisePayloadComparison, ctx.File, span,
+                $"comparing '{unionName}' compares {Describe(imprecise)} with floating-point '=='",
+                ["values produced by different arithmetic rarely compare equal; compare with a tolerance instead"]);
+
+        static string Describe(List<string> fields) =>
+            fields.Count == 1
+                ? $"variant field {fields[0]}"
+                : $"variant fields {string.Join(", ", fields.Take(3))}" +
+                  (fields.Count > 3 ? $" and {fields.Count - 3} more" : "");
+    }
+
+    /// <summary>
+    /// Collects the fields whose generated comparison is by identity or floating point, through
+    /// nested unions and arrays. <paramref name="qualifier"/> reports a nested field as
+    /// 'Mixed.Ident.p', since 'Ident.p' would point at the wrong declaration.
+    /// </summary>
+    private void CollectComparisonHazards(
+        string unionName, string qualifier, HashSet<string> visiting,
+        List<string> identity, List<string> imprecise)
+    {
+        if (!visiting.Add(unionName)) return;
+        if (sym.UnionDef(unionName) is not { } variants) { visiting.Remove(unionName); return; }
+
+        foreach (var v in variants)
+        {
+            foreach (var f in v.Fields)
+            {
+                Inspect(ResolveType(f.Type), $"'{qualifier}{v.Name}.{f.Name}'");
+            }
+        }
+        visiting.Remove(unionName);
+
+        void Inspect(IrType t, string label)
+        {
+            switch (t)
+            {
+                case IrArrayType a:
+                    // A fixed array compares element-wise, so a hazard in the element type is a
+                    // hazard in the field.
+                    Inspect(a.Elem, label);
+                    break;
+
+                case IrUnionType nested:
+                    CollectComparisonHazards(
+                        nested.Name, $"{qualifier}{nested.Name}.", visiting, identity, imprecise);
+                    break;
+
+                case IrClassRef cr when sym.IsClass(cr.ClassName) && !sym.Modules.Contains(cr.ClassName):
+                    if (sym.LookupOperator(cr.ClassName, "==", 1) == null
+                        && !Mangler.TryGetGenericInstance(cr.ClassName, out _, out _))
+                        identity.Add($"{label} ({Mangler.DisplayName(cr.ClassName)})");
+                    break;
+
+                case IrPrimType p when p.IsFloat:
+                    imprecise.Add($"{label} ({p.CName})");
+                    break;
+            }
+        }
+    }
+
+    /// <summary>
+    /// True for values that participate in ARC: a class reference, or a union with a managed
+    /// payload. What <see cref="ManagedTypes"/> answers for the back end, asked before the IR
+    /// exists - and the two disagreeing is a leak or a link error.
     /// </summary>
     private bool IsManagedRef(IrType t)
     {
-        return t is IrClassRef cr && sym.IsClass(cr.ClassName) && !sym.Modules.Contains(cr.ClassName);
+        return t switch
+        {
+            IrClassRef cr => sym.IsClass(cr.ClassName) && !sym.Modules.Contains(cr.ClassName),
+            IrUnionType ut => IsManagedUnion(ut.Name, []),
+            _ => false
+        };
+    }
+
+    private readonly Dictionary<string, bool> _managedUnionCache = [];
+
+    // Set while a recursive managed-union walk is standing on a cycle, so the partial answer
+    // that produced is not committed to the cache.
+    private bool _cycleCut;
+
+    /// <summary>
+    /// True if the named union stores a managed value in any variant, directly or nested. <paramref
+    /// name="visiting"/> guards the recursion, and an answer it cut short is conditioned on where
+    /// the walk started, so it is not cached.
+    /// </summary>
+    private bool IsManagedUnion(string name, HashSet<string> visiting)
+    {
+        if (_managedUnionCache.TryGetValue(name, out bool cached)) return cached;
+        if (!visiting.Add(name)) { _cycleCut = true; return false; }
+
+        bool outerCut = _cycleCut;
+        _cycleCut = false;
+        bool managed = false;
+
+        if (sym.UnionDef(name) is { } variants)
+            foreach (var v in variants)
+            {
+                foreach (var f in v.Fields)
+                {
+                    if (f.Type is not NamedSpec ns) continue;
+                    string fieldName = ns.Mangled;
+                    if (sym.IsUnion(fieldName) ? IsManagedUnion(fieldName, visiting)
+                                               : sym.IsClass(fieldName) && !sym.Modules.Contains(fieldName))
+                    {
+                        managed = true;
+                        break;
+                    }
+                }
+                if (managed) break;
+            }
+
+        visiting.Remove(name);
+        if (!_cycleCut) _managedUnionCache[name] = managed;
+        _cycleCut |= outerCut;
+        return managed;
     }
 
     /// <summary>
-    /// Resolves an enum declaration to its IR form.
-    /// Members may carry optional explicit integer values parsed from integer literals.
+    /// Resolves an enum declaration to its IR form. Members may carry optional explicit integer
+    /// values parsed from integer literals.
     /// </summary>
     private IrEnum ResolveEnum(EnumDecl ed, ResolveCtx ctx)
     {
@@ -2267,10 +2473,9 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Folds a constant integer expression at compile time. Supports integer and char
-    /// literals, unary negate/complement, the arithmetic/bitwise/shift binary operators,
-    /// and references to earlier members of the enclosing enum (bare or enum-qualified).
-    /// Returns false on any non-constant subexpression or a division by zero.
+    /// Folds a constant integer expression: literals, unary negate/complement, the arithmetic and
+    /// bitwise operators, and earlier members of the enclosing enum. False on any non-constant
+    /// subexpression or a division by zero.
     /// </summary>
     private static bool TryConstEval(Expr e, string enumName, Dictionary<string, long> members, out long v)
     {
@@ -2321,11 +2526,9 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Returns true if union <paramref name="from"/> stores a value of union
-    /// <paramref name="target"/> in any variant, directly or through other unions.
-    /// Only by-value fields count: a pointer to a union is a fixed-size field and breaks
-    /// the cycle. <paramref name="visited"/> keeps a union graph that is already cyclic
-    /// from looping here forever.
+    /// True if union <paramref name="from"/> stores <paramref name="target"/> by value, directly or
+    /// through other unions - a pointer is a fixed-size field and breaks the cycle. <paramref
+    /// name="visited"/> stops an already-cyclic graph looping forever.
     /// </summary>
     private bool UnionContains(string from, string target, HashSet<string> visited)
     {
@@ -2334,7 +2537,7 @@ internal sealed class TypeResolver(
         if (sym.UnionDef(from) is not { } variants) return false;
         foreach (var v in variants)
             foreach (var f in v.Fields)
-                if (f.Type is NamedSpec ns && UnionContains(ns.Name, target, visited))
+                if (f.Type is NamedSpec ns && UnionContains(ns.Mangled, target, visited))
                     return true;
         return false;
     }
@@ -2364,18 +2567,21 @@ internal sealed class TypeResolver(
             {
                 CheckType(f.Type, ctx, f.Span);
                 var ft = ResolveType(f.Type);
-                if (ft is IrClassRef)
+                if (ft is IrClassRef mcr && sym.Modules.Contains(mcr.ClassName))
                     diag.Error(Codes.TypeMismatch, ctx.File, f.Span,
-                        $"union variant field '{f.Name}' has type '{Describe(ft)}', but union variant fields must be unmanaged value types (no String/class types)");
+                        $"union variant field '{f.Name}' has type '{Describe(ft)}', which is a module",
+                        ["a module is a namespace for functions, not a value; it cannot be stored"]);
                 if (!seenFields.Add(f.Name))
                     diag.Error(Codes.DuplicateName, ctx.File, f.Span,
                         $"variant '{v.Name}' already declares a field '{f.Name}'");
-                if (f.Type is NamedSpec ns && UnionContains(ns.Name, ud.Name, []))
+                if (f.Type is NamedSpec ns && UnionContains(ns.Mangled, ud.Name, []))
                     diag.Error(Codes.TypeMismatch, ctx.File, f.Span,
-                        ns.Name == ud.Name
-                            ? $"variant field '{f.Name}' has type '{ud.Name}', the union being declared; a union cannot contain itself by value"
-                            : $"variant field '{f.Name}' has type '{ns.Name}', which contains '{ud.Name}' by value; the two would have no size",
-                        ["store a pointer, or split the recursive part into a class"]);
+                        ns.Mangled == ud.Name
+                            ? $"variant field '{f.Name}' has type '{Mangler.DisplayName(ud.Name)}', the union being " +
+                              $"declared; a union cannot contain itself by value"
+                            : $"variant field '{f.Name}' has type '{Mangler.DisplayName(ns.Mangled)}', which contains " +
+                              $"'{Mangler.DisplayName(ud.Name)}' by value; the two would have no size",
+                        ["store a pointer, or hold it through a container such as List"]);
                 fields.Add(new IrParam(f.Name, ft));
             }
             variants.Add(new IrUnionVariant(v.Name, Mangler.UnionTag(ud.Name, v.Name), fields));
@@ -2388,7 +2594,8 @@ internal sealed class TypeResolver(
     #region Statement resolvers
 
     /// <summary>
-    /// Resolves a block by pushing a new scope, resolving all statements, and warning on unreachable code.
+    /// Resolves a block by pushing a new scope, resolving all statements, and warning on
+    /// unreachable code.
     /// </summary>
     private IrBlock ResolveBlock(Block b, ResolveCtx ctx, IrType retType)
     {
@@ -2405,7 +2612,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Resolves a statement, propagating the source span to the result when the resolver did not set one.
+    /// Resolves a statement, propagating the source span to the result when the resolver did not
+    /// set one.
     /// </summary>
     private IrStmt ResolveStmt(Stmt s, ResolveCtx ctx, IrType retType)
     {
@@ -2484,7 +2692,12 @@ internal sealed class TypeResolver(
                             $"function must return '{Describe(retType)}'");
                     return new IrReturn(null);
                 }
-                var v = Coerce(ResolveExpr(rs.Value, ctx), retType, ctx);
+                // The declared return type is what the value is expected to be, which is what
+                // lets 'return Maybe.Missing();' pick an instantiation its arguments cannot.
+                var retCtx = retType is IrResultType rrt
+                    ? ctx with { Expected = rrt.Inner }
+                    : ctx with { Expected = retType };
+                var v = Coerce(ResolveExpr(rs.Value, retCtx), retType, ctx);
                 ForbidNestedThrows(v, ctx, allowRoot: false);
                 CheckAssign(v, retType, "the function's return", ctx, Codes.ReturnTypeMismatch);
                 return new IrReturn(v);
@@ -2615,8 +2828,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Wraps a single statement in an IrBlock, pushing a new scope.
-    /// When the statement is already a Block, resolves it directly without double-wrapping.
+    /// Wraps a single statement in an IrBlock, pushing a new scope. When the statement is already a
+    /// Block, resolves it directly without double-wrapping.
     /// </summary>
     private IrBlock WrapBlock(Stmt s, ResolveCtx ctx, IrType retType)
     {
@@ -2626,9 +2839,9 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Resolves a for statement, handling let, assignment, and expression init and step
-    /// clauses in a new scope with the loop depth incremented. Both clauses go through
-    /// the full statement resolver so assignments get lvalue, type, and throws checking.
+    /// Resolves a for statement, handling let, assignment, and expression init and step clauses in
+    /// a new scope with the loop depth incremented. Both clauses go through the full statement
+    /// resolver so assignments get lvalue, type, and throws checking.
     /// </summary>
     private IrFor ResolveFor(ForStmt fs, ResolveCtx ctx, IrType retType)
     {
@@ -2660,7 +2873,8 @@ internal sealed class TypeResolver(
             return new IrForIn(fi.Var, at.Elem, "", "", collection, abody, at.Size);
         }
 
-        // Structural for..in: any class with zero-arg Length() -> int and single-int-arg Get(int) -> T.
+        // Structural for..in: any class with zero-arg Length() -> int and single-int-arg Get(int)
+        // -> T.
         string? collClass = ClassNameOf(collection.Type);
         string lenCName = "", getCName = "";
         IrType elemType;
@@ -2692,8 +2906,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Resolves a switch statement on an integer or enum scrutinee,
-    /// validating that each case label is comparable to the scrutinee type.
+    /// Resolves a switch statement on an integer or enum scrutinee, validating that each case label
+    /// is comparable to the scrutinee type.
     /// </summary>
     private IrSwitch ResolveSwitch(SwitchStmt sw, ResolveCtx ctx, IrType retType)
     {
@@ -2728,9 +2942,9 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Returns a duplicate-detection key for a constant case label, or null for
-    /// non-constant labels that cannot be checked at compile time.
-    /// Int and char labels share a key space since C compares them as integers.
+    /// Returns a duplicate-detection key for a constant case label, or null for non-constant labels
+    /// that cannot be checked at compile time. Int and char labels share a key space since C
+    /// compares them as integers.
     /// </summary>
     private static string? ConstLabelKey(IrExpr lbl)
     {
@@ -2744,8 +2958,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Resolves a match statement on a union scrutinee, binding each variant's fields
-    /// into scope and checking exhaustiveness unless a default case is present.
+    /// Resolves a match statement on a union scrutinee, binding each variant's fields into scope
+    /// and checking exhaustiveness unless a default case is present.
     /// </summary>
     private IrMatch ResolveMatch(MatchStmt ms, ResolveCtx ctx, IrType retType)
     {
@@ -2811,8 +3025,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Resolves a try/catch statement, giving the try block a catch label so
-    /// throwing calls inside it know where to jump on failure.
+    /// Resolves a try/catch statement, giving the try block a catch label so throwing calls inside
+    /// it know where to jump on failure.
     /// </summary>
     private IrTryCatch ResolveTryCatch(TryCatchStmt tc, ResolveCtx ctx, IrType retType)
     {
@@ -2846,18 +3060,26 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Resolves a let declaration: infers or checks its type, resolves the initializer,
-    /// checks assignability, and declares the variable in the current scope.
+    /// Resolves a let declaration: infers or checks its type, resolves the initializer, checks
+    /// assignability, and declares the variable in the current scope.
     /// </summary>
     private IrDeclVar ResolveLet(LetStmt ls, ResolveCtx ctx)
     {
         IrType type;
-        IrExpr? init = ls.Init != null ? ResolveExpr(ls.Init, ctx) : null;
-
+        IrType? declared = null;
         if (ls.Type != null)
         {
             CheckType(ls.Type, ctx, ls.Span);
-            type = ResolveType(ls.Type);
+            declared = ResolveType(ls.Type);
+        }
+
+        IrExpr? init = ls.Init != null
+            ? ResolveExpr(ls.Init, declared == null ? ctx : ctx with { Expected = declared })
+            : null;
+
+        if (declared != null)
+        {
+            type = declared;
         }
         else if (init != null)
         {
@@ -2926,13 +3148,15 @@ internal sealed class TypeResolver(
     /// </summary>
     private IrExpr ResolveExpr(Expr e, ResolveCtx ctx)
     {
+        if (ctx.Expected != null && e is not (CallExpr or TernaryExpr)) ctx = ctx with { Expected = null };
+
         var r = ResolveExprCore(e, ctx);
         return r.Span.IsNone ? r with { Span = e.Span } : r;
     }
 
     /// <summary>
-    /// Core expression resolver. Handles literals, identifiers, casts, postfix, unary, and binary expressions.
-    /// Additional expression forms added in later commits.
+    /// Core expression resolver. Handles literals, identifiers, casts, postfix, unary, and binary
+    /// expressions. Additional expression forms added in later commits.
     /// </summary>
     private IrExpr ResolveExprCore(Expr e, ResolveCtx ctx)
     {
@@ -2957,7 +3181,8 @@ internal sealed class TypeResolver(
                 var inner = ResolveExpr(ce.Value, ctx);
                 var to = ResolveType(ce.TargetType);
 
-                // as should be a static call to the destination class's as operator if it exists, otherwise a normal cast
+                // as should be a static call to the destination class's as operator if it exists,
+                // otherwise a normal cast
                 if (!SameType(inner.Type, to) && ClassNameOf(to) is { } destCls
                     && FindAsOperator(destCls, inner.Type) is { } asOp)
                 {
@@ -2999,6 +3224,7 @@ internal sealed class TypeResolver(
             case NewExpr ne: return ResolveNew(ne, ctx);
             case ArrayLitExpr al: return ResolveArrayLit(al, ctx);
             case IndexExpr ix: return ResolveIndex(ix, ctx);
+            case GenericTypeRefExpr g: return ResolveGenericTypeRef(g, ctx);
             case SizeofExpr so:
                 CheckType(so.TypeName, ctx, so.Span);
                 return new IrSizeof(ResolveType(so.TypeName));
@@ -3062,7 +3288,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Resolves a unary expression, validating that the operand type is compatible with the operator.
+    /// Resolves a unary expression, validating that the operand type is compatible with the
+    /// operator.
     /// </summary>
     private IrExpr ResolveUnary(UnaryExpr un, ResolveCtx ctx)
     {
@@ -3090,8 +3317,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Coerces and type-checks the right-hand operand of a user-defined binary operator
-    /// against the operator's declared parameter type. Returns the coerced operand.
+    /// Coerces and type-checks the right-hand operand of a user-defined binary operator against the
+    /// operator's declared parameter type. Returns the coerced operand.
     /// </summary>
     private IrExpr CheckOpArg(Symbol op, IrExpr right, ResolveCtx ctx)
     {
@@ -3105,8 +3332,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Resolves a binary expression. Handles string concatenation, operator overloading,
-    /// pointer arithmetic, logical, equality, relational, bitwise, and arithmetic operators.
+    /// Resolves a binary expression. Handles string concatenation, operator overloading, pointer
+    /// arithmetic, logical, equality, relational, bitwise, and arithmetic operators.
     /// </summary>
     private IrExpr ResolveBin(BinExpr be, ResolveCtx ctx)
     {
@@ -3164,6 +3391,14 @@ internal sealed class TypeResolver(
                 diag.Error(Codes.TypeMismatch, ctx.File, be.Span,
                     $"operator '{be.Op.Sym()}' requires 'bool' operands, got '{Describe(left.Type)}' and '{Describe(right.Type)}'");
             return new IrBinOp(be.Op, left, right, IrType.Bool);
+        }
+
+        if (be.Op is BinOp.Eq or BinOp.Ne
+            && left.Type is IrUnionType lu && right.Type is IrUnionType ru && lu.Name == ru.Name)
+        {
+            WarnOnUnionComparison(lu.Name, ctx, be.Span);
+            IrExpr call = new IrStaticCall(Mangler.UnionEq(lu.Name), IrType.Bool, [left, right]) { Span = be.Span };
+            return be.Op == BinOp.Eq ? call : new IrUnaryOp(UnOp.Not, call, IrType.Bool);
         }
 
         if (be.Op is BinOp.Eq or BinOp.Ne)
@@ -3225,8 +3460,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Parses an integer literal lexeme into its bit pattern, IR type, and optional verbatim C text.
-    /// Returns false when the magnitude does not fit in 64 bits.
+    /// Parses an integer literal lexeme into its bit pattern, IR type, and optional verbatim C
+    /// text. Returns false when the magnitude does not fit in 64 bits.
     /// </summary>
     private static bool TryParseIntLit(ReadOnlySpan<char> raw, out long v, out IrType type, out string? ctext)
     {
@@ -3280,10 +3515,9 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Infers a field's type spec from its initializer. Fields register their type in the symbol
-    /// table before any body is resolved, so inference is limited to literals (optionally under a
-    /// unary minus) - the only initializers whose type is knowable without resolving expressions.
-    /// Returns null when the initializer is absent or not a literal.
+    /// Infers a field's type from its initializer. Fields register their type before any body is
+    /// resolved, so this is limited to literals, optionally under a unary minus - the only
+    /// initializers knowable without resolving expressions.
     /// </summary>
     internal static TypeSpec? InferFieldTypeSpec(Expr? init)
     {
@@ -3326,9 +3560,6 @@ internal sealed class TypeResolver(
 
         if (ClassInScope(name)) return new IrVar(name, new IrClassRef(name));
 
-        // A bare reference to an unambiguous, non-throws, non-entry free function
-        // decays to a function-pointer value. Ref-parameter functions are excluded
-        // because the func(...)->R type syntax has no position for 'ref'.
         var fsym = sym.LookupFreeFunc(name);
         if (fsym != null && FuncInScope(fsym))
         {
@@ -3391,6 +3622,23 @@ internal sealed class TypeResolver(
             return new IrEnumConst(eid.Name, ma.Member) { Span = ma.Span };
         }
 
+        if (ma.Object is IdentExpr uid && sym.IsUnion(uid.Name) && ctx.Scope.Lookup(uid.Name) == null)
+        {
+            var variants = sym.UnionDef(uid.Name)!;
+            bool known = variants.Exists(v => v.Name == ma.Member);
+            if (known)
+                diag.Error(Codes.UndefinedVariable, ctx.File, ma.Span,
+                    $"'{uid.Name}.{ma.Member}' is a union variant, not a field",
+                    [$"construct it by calling it: '{uid.Name}.{ma.Member}()'"]);
+            else
+                diag.Error(Codes.UndefinedVariable, ctx.File, ma.Span,
+                    $"union '{uid.Name}' has no variant '{ma.Member}'");
+
+            // Typed as the union so the enclosing statement checks against the type the author
+            // meant, rather than cascading a bogus 'int' through the rest of the expression.
+            return new IrUnionConstruct(new IrUnionType(uid.Name), 0, []) { Span = ma.Span };
+        }
+
         var obj = ResolveExpr(ma.Object, ctx);
         string? cls = ClassNameOf(obj.Type);
         IrType fieldType = IrType.Int;
@@ -3418,7 +3666,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Coerces each resolved argument to its declared parameter type and validates ref/non-ref passing.
+    /// Coerces each resolved argument to its declared parameter type and validates ref/non-ref
+    /// passing.
     /// </summary>
     private void CoerceArgs(List<IrExpr> args, MethodSig? sig, ResolveCtx ctx, Expr[]? astArgs = null)
     {
@@ -3456,12 +3705,28 @@ internal sealed class TypeResolver(
     /// </summary>
     private IrExpr ResolveCall(CallExpr ce, ResolveCtx ctx)
     {
-        var argCtx = ctx.CatchWrapped ? ctx with { CatchWrapped = false } : ctx;
+        // An argument's type is settled by the parameter it binds to, never by whatever the
+        // enclosing statement expects of the call's result.
+        var argCtx = ctx.CatchWrapped || ctx.Expected != null
+            ? ctx with { CatchWrapped = false, Expected = null }
+            : ctx;
         var args = new List<IrExpr>(ce.Args.Length);
         for (int i = 0; i < ce.Args.Length; i++)
         {
             var a = ce.Args[i];
             args.Add(ResolveExpr(a is RefArgExpr ra ? ra.Target : a, argCtx));
+        }
+
+        if (ce.Callee is MemberAccessExpr { Object: GenericTypeRefExpr gt } gma
+            && Mangler.IsGenericTemplate(gt.Name)
+            && (gt.IndexForm == null || ctx.Scope.Lookup(gt.Name) == null))
+        {
+            if (sym.IsUnion(gt.Mangled))
+                return ResolveUnionConstruct(gt.Mangled, gma.Member, args, ctx, ce.Span);
+
+            diag.Error(Codes.UndefinedType, ctx.File, gt.Span,
+                $"'{gt.Written}' is not a union, so it has no variant '{gma.Member}'");
+            return new IrVar(gt.Name, IrType.Int);
         }
 
         // member access call: obj.Method(args) or ClassName.StaticMethod(args)
@@ -3471,6 +3736,10 @@ internal sealed class TypeResolver(
 
             if (!string.IsNullOrEmpty(objName) && sym.IsUnion(objName) && ctx.Scope.Lookup(objName) == null)
                 return ResolveUnionConstruct(objName, ma.Member, args, ctx, ce.Span);
+
+            if (!string.IsNullOrEmpty(objName) && ctx.Scope.Lookup(objName) == null
+                && ResolveGenericUnionConstruct(objName, ma.Member, args, ctx, ce.Span) is { } gu)
+                return gu;
 
             if (!string.IsNullOrEmpty(objName) && ClassInScope(objName.AsSpan()) && ctx.Scope.Lookup(objName) == null)
             {
@@ -3656,7 +3925,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Resolves an indirect function-pointer call, checking argument count and types against the pointer's signature.
+    /// Resolves an indirect function-pointer call, checking argument count and types against the
+    /// pointer's signature.
     /// </summary>
     private IrExpr ResolveIndirectCallArgs(IrExpr target, IrFuncPtrType fpt, List<IrExpr> args, ResolveCtx ctx,
         TextSpan span, Expr[]? astArgs = null)
@@ -3679,10 +3949,9 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Reports a type error unless the subscript of a fixed-array or pointer index is an
-    /// integer. Only the operator-'[]' path type-checks its index, against the declared
-    /// parameter type; raw array and pointer indexing lowers straight to C "a[i]", so a
-    /// bool, a class reference, or a void call used to reach the C compiler as a subscript.
+    /// Requires an integer subscript for a fixed-array or pointer index. Only the operator-'[]'
+    /// path checks its index; raw indexing lowers straight to C "a[i]", so a bool or a class
+    /// reference used to reach the C compiler as a subscript.
     /// </summary>
     private void CheckIndexIsInteger(IrExpr idx, ResolveCtx ctx, TextSpan span)
     {
@@ -3692,8 +3961,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Resolves an index expression, dispatching to the class operator [] overload,
-    /// fixed-array element access, or unsafe pointer indexing.
+    /// Resolves an index expression, dispatching to the class operator [] overload, fixed-array
+    /// element access, or unsafe pointer indexing.
     /// </summary>
     private IrExpr ResolveIndex(IndexExpr ix, ResolveCtx ctx)
     {
@@ -3725,8 +3994,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Resolves an indexed assignment, handling operator []= overloads with compound
-    /// assignment hoisting, and plain fixed-array or pointer index targets.
+    /// Resolves an indexed assignment, handling operator []= overloads with compound assignment
+    /// hoisting, and plain fixed-array or pointer index targets.
     /// </summary>
     private IrStmt ResolveIndexAssign(IndexExpr ixt, AssignStmt asgn, ResolveCtx ctx)
     {
@@ -3838,8 +4107,8 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Resolves a new expression, validating the type is a class in scope and checking
-    /// the constructor argument count. Handles collection initializers via ResolveCollectionInit.
+    /// Resolves a new expression, validating the type is a class in scope and checking the
+    /// constructor argument count. Handles collection initializers via ResolveCollectionInit.
     /// </summary>
     private IrExpr ResolveNew(NewExpr ne, ResolveCtx ctx)
     {
@@ -3934,8 +4203,113 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Resolves a union variant construction call, validating the variant name and
-    /// coercing each argument to its declared field type.
+    /// Settles a 'Name[Args]' the parser could not: an index if the name denotes a value or nothing
+    /// at all, a generic type reference otherwise. Only the index path knows about fields needing
+    /// 'self.' and near-miss spellings, which are far commoner.
+    /// </summary>
+    private IrExpr ResolveGenericTypeRef(GenericTypeRefExpr g, ResolveCtx ctx)
+    {
+        bool isTemplate = Mangler.IsGenericTemplate(g.Name);
+        bool namesType = isTemplate || sym.IsUnion(g.Mangled) || sym.IsClass(g.Mangled);
+        if (g.IndexForm != null && (!namesType || ctx.Scope.Lookup(g.Name) != null))
+            return ResolveIndex(new IndexExpr(new IdentExpr(g.Name, g.Span), g.IndexForm, g.Span), ctx);
+
+        if (isTemplate)
+            diag.Error(Codes.TypeMismatch, ctx.File, g.Span,
+                $"'{g.Written}' is a type, not a value",
+                [$"to build one of its variants, call it: '{g.Written}.SomeVariant(...)'"]);
+        else if (sym.IsUnion(g.Name) || sym.IsClass(g.Name) || sym.IsEnum(g.Name))
+            diag.Error(Codes.TypeMismatch, ctx.File, g.Span,
+                $"'{g.Name}' is not generic, so it takes no type arguments");
+        else
+            diag.Error(Codes.UndefinedType, ctx.File, g.Span, $"unknown generic type '{g.Name}'");
+
+        return new IrVar(g.Name, IrType.Int);
+    }
+
+    /// <summary>
+    /// Resolves 'Maybe.Found(7)' by choosing which stamped instance is meant: the arguments where
+    /// they single one out, otherwise the expected type from the enclosing let or return. Null if
+    /// the name is not a generic union, so the caller falls through.
+    /// </summary>
+    private IrExpr? ResolveGenericUnionConstruct(
+        string baseName, string variant, List<IrExpr> args, ResolveCtx ctx, TextSpan span)
+    {
+        var instances = new List<string>();
+        foreach (var inst in Mangler.InstancesOf(baseName))
+            if (sym.IsUnion(inst)) instances.Add(inst);
+
+        if (instances.Count == 0)
+        {
+            // A template nothing named as a type was replaced by nothing, so the base name
+            // resolves to no declaration. What is missing is an instantiation, and only a type
+            // annotation can ask for one - type arguments are settled before expressions.
+            if (Mangler.IsGenericTemplate(baseName))
+            {
+                diag.Error(Codes.CannotInfer, ctx.File, span,
+                    $"generic '{baseName}' is never instantiated, so '{baseName}.{variant}' has no type",
+                    [$"name the type somewhere first, e.g. 'let {baseName}[int] x = {baseName}.{variant}(...);'"]);
+                return new IrUnionConstruct(new IrUnionType(baseName), 0, args);
+            }
+            return null;
+        }
+
+        // Only instances that actually declare this variant with a matching arity are candidates.
+        var candidates = new List<string>();
+        foreach (var inst in instances)
+        {
+            var variants = sym.UnionDef(inst);
+            if (variants == null) continue;
+            int idx = variants.FindIndex(v => v.Name == variant);
+            if (idx >= 0 && variants[idx].Fields.Length == args.Count) candidates.Add(inst);
+        }
+
+        if (candidates.Count == 0)
+        {
+            diag.Error(Codes.UndefinedVariable, ctx.File, span,
+                $"no instantiation of generic union '{baseName}' has a variant '{variant}' " +
+                $"taking {args.Count} argument(s)",
+                [$"instantiated as: {string.Join(", ", instances.Select(Mangler.DisplayName))}"]);
+            return new IrUnionConstruct(new IrUnionType(instances[0]), 0, args);
+        }
+
+        // The arguments decide it when exactly one candidate accepts them all.
+        var accepting = new List<string>();
+        foreach (var inst in candidates)
+        {
+            var fields = sym.UnionDef(inst)!.Find(v => v.Name == variant)!.Fields;
+            bool ok = true;
+            for (int i = 0; i < args.Count && ok; i++)
+                ok = Assignable(args[i], ResolveType(fields[i].Type));
+            if (ok) accepting.Add(inst);
+        }
+
+        string? chosen = accepting.Count == 1 ? accepting[0] : null;
+
+        // Otherwise the expected type, when it names an instantiation of this same generic.
+        if (chosen == null && ctx.Expected is IrUnionType want
+            && (accepting.Count == 0 ? candidates : accepting).Contains(want.Name))
+            chosen = want.Name;
+
+        if (chosen == null)
+        {
+            var shown = (accepting.Count > 0 ? accepting : candidates).Select(Mangler.DisplayName);
+            diag.Error(Codes.CannotInfer, ctx.File, span,
+                $"cannot tell which instantiation of '{baseName}' this means",
+                [
+                    $"it could be: {string.Join(", ", shown)}",
+                    $"give the target an explicit type, e.g. 'let {Mangler.DisplayName(candidates[0])} x = " +
+                    $"{baseName}.{variant}(...);'",
+                ]);
+            chosen = candidates[0];
+        }
+
+        return ResolveUnionConstruct(chosen, variant, args, ctx, span);
+    }
+
+    /// <summary>
+    /// Resolves a union variant construction call, validating the variant name and coercing each
+    /// argument to its declared field type.
     /// </summary>
     private IrExpr ResolveUnionConstruct(string unionName, string variant, List<IrExpr> args, ResolveCtx ctx, TextSpan span)
     {

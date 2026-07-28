@@ -3,19 +3,22 @@ namespace Appa.Tests;
 using Appa;
 
 /// <summary>
-/// Downloads envs/ and libgata/ from the Gata repo once per test run, into a
-/// run-scoped temp directory, so BootTests no longer needs a checked-in duplicate
-/// of env.GatOS.g. Only downloads when the GatOS toolchain is actually installed -
-/// BootTests skips otherwise, so there's no point doing the network fetch first.
+/// Downloads envs/ and libgata/ from the Gata repo once per run into a temp directory, so BootTests
+/// needs no checked-in duplicate of env.GatOS.g. Only when the toolchain is installed - BootTests
+/// skips otherwise, so the fetch would be wasted.
 /// </summary>
 public sealed class BootFixture : IAsyncLifetime
 {
     private TempDir? _root;
 
-    /// <summary>The downloaded envs/ directory, or null if the toolchain wasn't installed.</summary>
+    /// <summary>
+    /// The downloaded envs/ directory, or null if the toolchain wasn't installed.
+    /// </summary>
     public string? EnvsDir { get; private set; }
 
-    /// <summary>The downloaded libgata/ directory, or null if the toolchain wasn't installed.</summary>
+    /// <summary>
+    /// The downloaded libgata/ directory, or null if the toolchain wasn't installed.
+    /// </summary>
     public string? LibgataDir { get; private set; }
 
     public async ValueTask InitializeAsync()

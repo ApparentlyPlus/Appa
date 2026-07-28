@@ -3,8 +3,8 @@ namespace Appa.Tests;
 using System.Diagnostics;
 
 /// <summary>
-/// Cheap presence check for the GatOS cross toolchain that BootTests shells out to.
-/// Used to skip gracefully rather than fail when a machine lacks the toolchain.
+/// Cheap presence check for the GatOS cross toolchain that BootTests shells out to. Used to skip
+/// gracefully rather than fail when a machine lacks the toolchain.
 /// </summary>
 internal static class ToolchainProbe
 {
@@ -17,8 +17,8 @@ internal static class ToolchainProbe
         CanStart(AppaPaths.QemuExe, "--version");
 
     /// <summary>
-    /// Starts a process and returns true if it launched and exited, regardless of
-    /// exit code - false only when the executable itself could not be found/run.
+    /// Starts a process and returns true if it launched and exited, regardless of exit code - false
+    /// only when the executable itself could not be found/run.
     /// </summary>
     private static bool CanStart(string exe, string args)
     {

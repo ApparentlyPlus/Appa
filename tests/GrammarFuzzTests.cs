@@ -4,17 +4,9 @@ using System.Diagnostics;
 using System.Text;
 
 /// <summary>
-/// Grammar-directed fuzzer: generates random but *valid* Gata programs and checks that each
-/// one survives the whole compiler and emits C the host compiler accepts.
-///
-/// This complements the token-soup fuzzer in TortureTests, which is good at parser states and
-/// almost never produces a program that type-checks -- so it never reaches lowering, ARC, or
-/// the emitter at all. Building from the grammar instead means every generated program gets
-/// all the way through, and the random nesting reaches statement and expression combinations
-/// no hand-written case would think to write: a defer inside a match arm inside a catch
-/// handler inside a loop, and so on.
-///
-/// Seeds are fixed, so a failure is always reproducible from the seed in the message.
+/// Generates random but *valid* Gata programs and checks each survives the whole compiler and emits
+/// C gcc accepts. Complements TortureTests' token soup, which rarely type-checks and so never
+/// reaches lowering, ARC or the emitter. Seeds are fixed.
 /// </summary>
 public class GrammarFuzzTests
 {
@@ -26,8 +18,8 @@ public class GrammarFuzzTests
     private const int Seeds = 300;
 
     /// <summary>
-    /// A stand-in environment, matching EmittedCCompilesTests: corpus programs import no
-    /// libgata, so nothing declares a realm or binds the ARC roles.
+    /// A stand-in environment, matching EmittedCCompilesTests: corpus programs import no libgata,
+    /// so nothing declares a realm or binds the ARC roles.
     /// </summary>
     private const string StubEnvironment = """
         @preamble(kernel) native {
@@ -41,9 +33,9 @@ public class GrammarFuzzTests
         """;
 
     /// <summary>
-    /// The fixed preamble every generated program shares: the declarations its random body
-    /// draws on. Having them constant means a generated body is always well-scoped, so any
-    /// diagnostic is about the shape the fuzzer built rather than an undefined name.
+    /// The fixed preamble every generated program shares: the declarations its random body draws
+    /// on. Having them constant means a generated body is always well-scoped, so any diagnostic is
+    /// about the shape the fuzzer built rather than an undefined name.
     /// </summary>
     private const string Scaffold = """
         @intrinsic(obj_header)
@@ -86,7 +78,9 @@ public class GrammarFuzzTests
 
         private string Pick(params string[] xs) => xs[_r.Next(xs.Length)];
 
-        /// <summary>Builds a defer whose body knows it is inside one.</summary>
+        /// <summary>
+        /// Builds a defer whose body knows it is inside one.
+        /// </summary>
         private string Defer()
         {
             bool prev = _inDefer;
@@ -95,7 +89,9 @@ public class GrammarFuzzTests
             finally { _inDefer = prev; }
         }
 
-        /// <summary>Builds a random expression, bottoming out at a leaf past the depth cap.</summary>
+        /// <summary>
+        /// Builds a random expression, bottoming out at a leaf past the depth cap.
+        /// </summary>
         public string Expr()
         {
             if (_depth > 6) return Pick("1", "i", "n", "arr[0]", "obj.n", "Two(1)");
@@ -127,7 +123,9 @@ public class GrammarFuzzTests
             finally { _depth--; }
         }
 
-        /// <summary>Builds a random statement, bottoming out at an assignment past the depth cap.</summary>
+        /// <summary>
+        /// Builds a random statement, bottoming out at an assignment past the depth cap.
+        /// </summary>
         public string Stmt()
         {
             if (_depth > 5) return $"n = {Expr()};";
@@ -161,7 +159,9 @@ public class GrammarFuzzTests
         }
     }
 
-    /// <summary>Assembles one complete program from a seed.</summary>
+    /// <summary>
+    /// Assembles one complete program from a seed.
+    /// </summary>
     private static string Generate(int seed)
     {
         var gen = new Generator(seed);
@@ -180,7 +180,9 @@ public class GrammarFuzzTests
             """ + body + "} }\n";
     }
 
-    /// <summary>Locates a usable host C compiler, or null.</summary>
+    /// <summary>
+    /// Locates a usable host C compiler, or null.
+    /// </summary>
     private static string? FindCompiler()
     {
         foreach (var exe in (string[])["cc", "gcc", "clang"])
@@ -263,7 +265,12 @@ public class GrammarFuzzTests
 
             foreach (var unit in files.Where(f => f.Name.EndsWith(".c", StringComparison.Ordinal)))
             {
-                var psi = new ProcessStartInfo(cc, $"-fsyntax-only -std=c11 -I. {unit.Name}")
+                // A real compile, not -fsyntax-only: -Wreturn-type needs the control-flow graph
+                // gcc only builds while generating code, so a syntax-only run never reports a
+                // function that can fall off its end - which is how one shipped.
+                string devNull = OperatingSystem.IsWindows() ? "NUL" : "/dev/null";
+                var psi = new ProcessStartInfo(cc,
+                    $"-c -std=c11 -Werror=return-type -I. -o {devNull} {unit.Name}")
                 { WorkingDirectory = dir, RedirectStandardError = true, UseShellExecute = false };
                 using var p = Process.Start(psi)!;
                 var err = p.StandardError.ReadToEnd();

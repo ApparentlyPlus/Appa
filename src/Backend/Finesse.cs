@@ -8,8 +8,8 @@ internal static class Finesse
     private static Random _random => _randomTls ??= new Random();
 
     /// <summary>
-    /// Reseeds the header generator. Called once per build with a hash of the build's
-    /// emitted content, making rebuilds of identical input byte-identical.
+    /// Reseeds the header generator. Called once per build with a hash of the build's emitted
+    /// content, making rebuilds of identical input byte-identical.
     /// </summary>
     public static void Seed(int seed)
     {
@@ -367,8 +367,8 @@ internal static class Finesse
     }
 
     /// <summary>
-    /// Returns a randomly chosen decorative header comment for the given output file name.
-    /// One in 1000 calls returns the legendary header.
+    /// Returns a randomly chosen decorative header comment for the given output file name. One in
+    /// 1000 calls returns the legendary header.
     /// </summary>
     public static string GenerateKewlHeader(string fileName)
 	{

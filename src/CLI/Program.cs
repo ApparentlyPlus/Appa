@@ -46,8 +46,8 @@ catch (Exception ex)
 #region appa init
 
 /// <summary>
-/// Scaffolds a new GatOS project: a .gconf, an env.g copied from the installed
-/// environment, and a starter src/main.g, then prints a short file tree.
+/// Scaffolds a new GatOS project: a .gconf, an env.g copied from the installed environment, and a
+/// starter src/main.g, then prints a short file tree.
 /// </summary>
 static void RunInit(string[] args)
 {
@@ -97,8 +97,8 @@ static void RunInit(string[] args)
 #region appa build
 
 /// <summary>
-/// Parses build arguments, transpiles and lowers the project, then dispatches to
-/// the GatOS image builder or the hosted pure-transpile path.
+/// Parses build arguments, transpiles and lowers the project, then dispatches to the GatOS image
+/// builder or the hosted pure-transpile path.
 /// </summary>
 static void RunBuild(string[] args)
 {
@@ -170,8 +170,8 @@ static void RunBuild(string[] args)
 #region appa check
 
 /// <summary>
-/// Parses check arguments and runs the compiler front end only, reporting diagnostics
-/// without ever reaching emission.
+/// Parses check arguments and runs the compiler front end only, reporting diagnostics without ever
+/// reaching emission.
 /// </summary>
 static void RunCheck(string[] args)
 {
@@ -226,7 +226,7 @@ static (IrModule Module, IReadOnlyDictionary<string, string> Sourcemap, Capabili
         diag.Error(Codes.KernelBlockInHosted, "<environment>", TextSpan.None,
             "the active environment declares a kernel preamble, which is not allowed for a Hosted build");
     if (!diag.HasErrors) Pipeline.WarnReferenceCycles(module);
-    Pipeline.ReportGataFiles(attempted, diag, warnAsError);
+    Pipeline.ReportGataFiles(attempted, diag, warnAsError, stdlibDir);
 
     return (module, sourcemap, caps, diag);
 }
@@ -329,10 +329,6 @@ user {
 """;
 }
 
-// The GatOS gcc flag set. appa owns these - a .gconf carries none of them. This must
-// match the GatOS build.py exactly: kernel code uses the FPU freely (lazy save/restore
-// handles it), and SSE is disabled ONLY in the fixed set of files whose code runs from
-// interrupt context (where touching XMM would corrupt the interrupted thread's state).
 static class GatosFlags
 {
     public static readonly string[] Common =

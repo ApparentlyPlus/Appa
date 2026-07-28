@@ -1,11 +1,5 @@
 namespace Appa;
 
-// A disk-free path for a single Gata source string with no imports - tests want to
-// go from a string literal straight to tokens, AST, diagnostics, or emitted C without
-// touching the filesystem or requiring a real @environment/libgata dir.
-/// <summary>
-/// Compiles a single, import-free Gata source string in-process for tests.
-/// </summary>
 internal static class SingleFileCompile
 {
     /// <summary>
@@ -19,9 +13,9 @@ internal static class SingleFileCompile
     public static Program Parse(string src) => new Parser(Tokenize(src)).ParseProgram();
 
     /// <summary>
-    /// Runs the full semantic pipeline over a single source string with no imports,
-    /// skipping Pipeline.Transpile's disk-based import resolution entirely. A parse
-    /// failure is folded into the returned diagnostic bag rather than thrown.
+    /// Runs the full semantic pipeline over a single source string with no imports, skipping
+    /// Pipeline.Transpile's disk-based import resolution entirely. A parse failure is folded into
+    /// the returned diagnostic bag rather than thrown.
     /// </summary>
     public static (DiagnosticBag Diag, IrModule? Module) Check(string src, string path = "<test>")
     {
@@ -41,8 +35,8 @@ internal static class SingleFileCompile
     }
 
     /// <summary>
-    /// Runs Check and, if error-free, emits the final C output. Returns an empty
-    /// list if the source failed to parse or check.
+    /// Runs Check and, if error-free, emits the final C output. Returns an empty list if the source
+    /// failed to parse or check.
     /// </summary>
     public static IReadOnlyList<OutputFile> Emit(string src, string path = "<test>")
     {

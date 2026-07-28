@@ -3,20 +3,16 @@ namespace Appa.Tests;
 using Appa;
 
 /// <summary>
-/// Coverage for Pipeline.ValidateIntrinsics - the ARC runtime contract check.
-///
-/// This validation deliberately lives at the CLI front-end layer rather than inside
-/// BuildModule, because BuildModule legitimately runs over stdlib-free input (every other
-/// test file in this project does exactly that through SingleFileCompile). These tests
-/// therefore drive it the same way RunBuild/RunCheck do: check a source, then run the
-/// validator over the resulting module explicitly.
+/// Coverage for Pipeline.ValidateIntrinsics - the ARC runtime contract check. It lives at the CLI
+/// layer rather than in BuildModule, which legitimately runs over stdlib-free input, so these drive
+/// it the way RunBuild does: check a source, then run the validator over the module.
 /// </summary>
 public class IntrinsicValidationTests
 {
     /// <summary>
-    /// Checks a source with no libgata, then runs the intrinsic validator over the result.
-    /// Asserts the source itself was otherwise clean so a typo in a fixture can't masquerade
-    /// as the diagnostic under test.
+    /// Checks a source with no libgata, then runs the intrinsic validator over the result. Asserts
+    /// the source itself was otherwise clean so a typo in a fixture can't masquerade as the
+    /// diagnostic under test.
     /// </summary>
     private static List<Diagnostic> ValidateOf(string src)
     {
@@ -32,12 +28,12 @@ public class IntrinsicValidationTests
     }
 
     /// <summary>
-    /// A reference-counted class with nothing binding the ARC roles is a broken build: the
-    /// emitter reaches for all five, and the C would fail to link on undefined symbols.
-    /// One diagnostic names the whole missing set rather than leaking them one at a time.
+    /// A reference-counted class with nothing binding the ARC roles is a broken build: the emitter
+    /// reaches for all five, and the C would fail to link on undefined symbols. One diagnostic
+    /// names the whole missing set rather than leaking them one at a time.
     /// </summary>
     [Fact]
-    public void ManagedClassWithoutArcBindingsIsRejected()
+    public void ManagedClassNeedsArcBindings()
     {
         var found = ValidateOf("""
             class Box {
@@ -55,8 +51,8 @@ public class IntrinsicValidationTests
     }
 
     /// <summary>
-    /// The diagnostic carries actionable hints. These are what tell the reader the standard
-    /// library is at fault rather than their own program, so they are part of the contract.
+    /// The diagnostic carries actionable hints. These are what tell the reader the standard library
+    /// is at fault rather than their own program, so they are part of the contract.
     /// </summary>
     [Fact]
     public void MissingArcBindingsCarryHints()
@@ -72,9 +68,9 @@ public class IntrinsicValidationTests
     }
 
     /// <summary>
-    /// A program that declares no reference-counted class never touches the runtime, so an
-    /// unbound ARC role costs it nothing. Reporting here would fire on every libgata-free
-    /// snippet in this test suite.
+    /// A program that declares no reference-counted class never touches the runtime, so an unbound
+    /// ARC role costs it nothing. Reporting here would fire on every libgata-free snippet in this
+    /// test suite.
     /// </summary>
     [Fact]
     public void ProgramWithNoManagedClassIsClean()
@@ -106,12 +102,12 @@ public class IntrinsicValidationTests
     }
 
     /// <summary>
-    /// A partially-bound standard library is the case this check exists for: binding some of
-    /// the set is not partially working. Only the genuinely absent roles are named, so the
-    /// message points at what to add rather than restating the whole contract as missing.
+    /// A partially-bound standard library is the case this check exists for: binding some of the
+    /// set is not partially working. Only the genuinely absent roles are named, so the message
+    /// points at what to add rather than restating the whole contract as missing.
     /// </summary>
     [Fact]
-    public void PartialArcBindingNamesOnlyTheMissingRoles()
+    public void PartialArcNamesMissingRolesOnly()
     {
         var d = Assert.Single(ValidateOf("""
             @intrinsic(obj_header)

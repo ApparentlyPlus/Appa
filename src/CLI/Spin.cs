@@ -2,24 +2,14 @@ namespace Appa;
 
 using System.Diagnostics;
 
-// A single animated status line: a braille spinner over a label while a blocking
-// step runs, replaced in place by a checkmark + elapsed time when it finishes.
-// Single-threaded by design - it polls Process.WaitForExit(ms) in a loop rather
-// than waiting on a background thread, so there is no race with a worker thread
-// calling Environment.Exit() on failure: the spinner always finishes and clears
-// its own line before the caller decides whether to report success or call Fail().
-//
-// Falls back to a single plain line (no carriage-return redraw) when stdout is
-// redirected - test scripts capture appa's output, and control-character redraws
-// would show up as escape-code noise.
 static class Spin
 {
     static readonly char[] Frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
     static bool Tty => !Console.IsOutputRedirected;
 
     /// <summary>
-    /// Animates a label while a process runs, then clears the line.
-    /// The caller is responsible for reporting success or failure once it has the exit code.
+    /// Animates a label while a process runs, then clears the line. The caller is responsible for
+    /// reporting success or failure once it has the exit code.
     /// </summary>
     public static void WhileRunning(Process proc, string label)
     {

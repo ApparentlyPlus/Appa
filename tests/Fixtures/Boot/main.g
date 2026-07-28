@@ -1,11 +1,3 @@
-// Boot regression program.
-//
-// Every section ends in a `debug` marker, and the test asserts each marker reaches the serial
-// log. That distinguishes "the ISO booted" from "the ISO booted and every construct actually
-// ran": a section that is silently skipped or faults partway leaves its marker missing, which
-// checking only the final answers would never reveal. Kernel-realm markers land on COM1,
-// user-realm ones on COM3; the harness reads both.
-
 import List;
 import Console;
 import Int;
@@ -13,11 +5,9 @@ import String;
 import Math;
 import "src/lib.g";
 
-// overloaded free functions (selective mangling)
 int func combine(int a, int b) { return a + b; }
 int64 func combine(int64 a, int64 b) { return a + b; }
 
-// Same private name as lib.g's: the two must mangle apart or one silently wins.
 private int func Scale(int n) { return n * 3; }
 
 class Counter {
@@ -140,6 +130,84 @@ kernel {
         }
         debug "M:enum-union";
 
+        // Managed unions on the real target. Every payload reports into one Census, so the
+        // numbers below are the assertion: if any generated release is missing, 'live' ends
+        // non-zero; if any fires twice, 'created' and the observed weights disagree.
+        let Census census = new Census();
+        let int weights = 0;
+        {
+            let Signal s = MakeSignal(census, 3);
+            weights = weights + SignalWeight(s);
+
+            // reassignment must release the payload the slot was holding
+            s = MakeSignal(census, 4);
+            weights = weights + SignalWeight(s);
+
+            // two payloads in one variant, and a variant carrying none
+            let Signal pair = Signal.Both(new Tracked(census, 1), new Tracked(census, 2));
+            weights = weights + SignalWeight(pair);
+            let Signal quiet = Signal.Quiet();
+            weights = weights + SignalWeight(quiet);
+
+            // nested managed union, and a managed union held in a class field
+            let Envelope envelope = Envelope.Wrap(MakeSignal(census, 5));
+            weights = weights + EnvelopeWeight(envelope);
+            let Mailbox box = new Mailbox(MakeSignal(census, 6));
+            box.Put(MakeSignal(census, 7));
+            weights = weights + box.Weight();
+        }
+        // every payload above is now out of scope, so the population must be back to zero
+        let int unionLive = census.live;
+        let int unionMade = census.created;
+
+        // churn, to catch a pairing that is off by one only under repetition
+        let int churn = 0;
+        for (let int u = 0; u < 200; u++) {
+            let Signal s = MakeSignal(census, 1);
+            s = Signal.Level(2);
+            churn = churn + SignalWeight(s);
+        }
+        let int churnLive = census.live;
+        debug "M:managed-union";
+
+        // Structural equality, on the target the language exists for. Each bit of 'eqBits' is a
+        // different rule: same variant same payload, same variant different payload, two
+        // payload-free variants, different variants, a nested union, and a reference-counted
+        // payload compared through its own '==' rather than by address.
+        let int eqBits = 0;
+        if (Signal.Level(3) == Signal.Level(3)) { eqBits = eqBits + 1; }
+        if (Signal.Level(3) == Signal.Level(4)) { eqBits = eqBits + 2; }
+        if (Signal.Quiet() == Signal.Quiet()) { eqBits = eqBits + 4; }
+        if (Signal.Level(1) != Signal.Quiet()) { eqBits = eqBits + 8; }
+        if (Envelope.Sealed(2) == Envelope.Sealed(2)) { eqBits = eqBits + 16; }
+        if (Envelope.Wrap(Signal.Level(1)) == Envelope.Wrap(Signal.Level(1))) { eqBits = eqBits + 32; }
+        if (MakeSignal(census, 9) == MakeSignal(census, 9)) { eqBits = eqBits + 64; }
+        if (MakeSignal(census, 9) == MakeSignal(census, 8)) { eqBits = eqBits + 128; }
+        let int eqLive = census.live;
+        debug "M:union-equality";
+
+        // Generic unions on the real target: one template, two instantiations - one unmanaged,
+        // one reference-counted - plus a recursive one over a container.
+        let Maybe[int] someInt = Maybe.Found(6);
+        let Maybe[int] noInt = Maybe.Missing();
+        let Maybe[Tracked] someObj = Maybe.Found(new Tracked(census, 2));
+        let int gsum = 0;
+        match (someInt) { case Found(v) { gsum = gsum + v; } case Missing { gsum = gsum - 1; } }
+        match (noInt) { case Found(v) { gsum = gsum + v; } case Missing { gsum = gsum - 1; } }
+        match (someObj) { case Found(t) { gsum = gsum + t.id; } case Missing { gsum = gsum - 1; } }
+        if (someInt == Maybe.Found(6)) { gsum = gsum + 100; }
+        if (someInt == noInt) { gsum = gsum + 1000; }
+
+        let List[Tree[int]] leaves = new List[Tree[int]]();
+        leaves.Add(Tree.Leaf(1));
+        leaves.Add(Tree.Leaf(2));
+        let List[Tree[int]] top = new List[Tree[int]]();
+        top.Add(Tree.Fork(leaves));
+        top.Add(Tree.Leaf(3));
+        let Tree[int] tree = Tree.Fork(top);
+        let int leafCount = CountLeaves(tree);
+        debug "M:generic-union";
+
         // aggregates: a zero-valued fixed array, and nested unary minus
         let [4]int zeros = default([4]int);
         let int negated = -(-(-5));
@@ -173,6 +241,9 @@ kernel {
         Console.PrintLine($"grade={gradeVal} read={readSum} zeros={zeros[0]} neg={negated} flip={flipped}");
         Console.PrintLine($"keywords={signed} scaled={scaled} deref={deref} crate={crate.item.Value() as int}");
         Console.PrintLine($"recursed={recursed} strchurn={strChurn}");
+        Console.PrintLine($"uweights={weights} umade={unionMade} ulive={unionLive} uchurn={churn} uchurnlive={churnLive}");
+        Console.PrintLine($"ueq={eqBits} ueqlive={eqLive}");
+        Console.PrintLine($"gsum={gsum} leaves={leafCount}");
 
         if (acc == 9 && shown == 9900) { Console.PrintLine("REGRESSION_OK"); }
         debug "M:done";

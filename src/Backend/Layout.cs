@@ -10,16 +10,12 @@ internal sealed record EmitOutput(string SharedHeader, string KernelPreamble, st
 /// </summary>
 internal record OutputFile(string Name, string Content);
 
-/// <summary>
-/// Composes emitted sections into translation units. The realms a build emits
-/// come from the environment, never a command-line switch.
-/// </summary>
 internal static class Layout
 {
     /// <summary>
     /// Composes the emitter output into the set of translation-unit files for the build.
-    /// Kernel-only builds produce kmain.c; user-only produce program.c; both produce
-    /// kmain.c, uproc.c, uproc.h, and umain.c with a generated process launcher.
+    /// Kernel-only builds produce kmain.c; user-only produce program.c; both produce kmain.c,
+    /// uproc.c, uproc.h, and umain.c with a generated process launcher.
     /// </summary>
     public static IReadOnlyList<OutputFile> Compose(EmitOutput o, SymbolTable sym)
     {
@@ -85,7 +81,8 @@ internal static class Layout
     }
 
     /// <summary>
-    /// Concatenates non-empty sections into a single translation unit string with a file header comment.
+    /// Concatenates non-empty sections into a single translation unit string with a file header
+    /// comment.
     /// </summary>
     private static string Concat(string name, string s1, string s2, string s3, string s4, string s5 = "")
     {
@@ -125,10 +122,9 @@ internal static class Layout
     }
 
     /// <summary>
-    /// Builds the userspace launcher that creates processes and spawns their threads.
-    /// Process and thread spawning use environment bindings, so porting the OS is an
-    /// edit to env.*.g, never to this file. The C names themselves are never hardcoded
-    /// here - they come from whatever libgata's @intrinsic(env_proc_create) etc. bind to.
+    /// Builds the userspace launcher that creates processes and spawns their threads through
+    /// environment bindings, so porting the OS is an edit to env.*.g and never to this file. No C
+    /// name is hardcoded here; they come from whatever @intrinsic binds.
     /// </summary>
     private static string Launcher(IReadOnlyList<IrProcess> procs, SymbolTable sym)
     {

@@ -2,12 +2,6 @@ namespace Appa;
 
 using System.Text;
 
-/// <summary>
-/// Accumulates generated C text with indentation managed by the writer.
-/// Depth changes only through Block and Braces scopes, and every line of
-/// multi-line text is indented at the current depth so output cannot be
-/// misindented by hand.
-/// </summary>
 internal sealed class CodeWriter
 {
     private readonly StringBuilder _sb = new();
@@ -15,9 +9,9 @@ internal sealed class CodeWriter
     private const string Unit = "    ";
 
     /// <summary>
-    /// Appends a line of text at the current indentation depth.
-    /// Multi-line text is split and each line is indented individually.
-    /// An empty string appends a blank line with no leading whitespace.
+    /// Appends a line of text at the current indentation depth. Multi-line text is split and each
+    /// line is indented individually. An empty string appends a blank line with no leading
+    /// whitespace.
     /// </summary>
     public void Line(string text = "")
     {
@@ -56,8 +50,8 @@ internal sealed class CodeWriter
     }
 
     /// <summary>
-    /// Appends the header line, increases indentation, and returns a scope that
-    /// decreases indentation and writes the closer string on disposal.
+    /// Appends the header line, increases indentation, and returns a scope that decreases
+    /// indentation and writes the closer string on disposal.
     /// </summary>
     public Scope Block(string header, string closer = "}") { Line(header); _depth++; return new Scope(this, closer); }
 

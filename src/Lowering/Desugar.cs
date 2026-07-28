@@ -1,10 +1,5 @@
 namespace Appa;
 
-/// <summary>
-/// Desugaring pass that rewrites high-level convenience nodes into ordinary calls
-/// so the emitter never special-cases them.
-/// Lowers string interpolation, switch, and match; after this pass the emitter sees only if/else chains.
-/// </summary>
 internal sealed class Desugar(SymbolTable sym, DiagnosticBag diag) : IrRewriter
 {
     private int _seq;
@@ -33,8 +28,9 @@ internal sealed class Desugar(SymbolTable sym, DiagnosticBag diag) : IrRewriter
     }
 
     /// <summary>
-    /// Lowers a match to a scrutinee temp followed by a tag-equality if/else-if chain with payload bindings.
-    /// Mirrors the shape of LowerSwitch exactly, using the union's __tag field as the discriminant.
+    /// Lowers a match to a scrutinee temp followed by a tag-equality if/else-if chain with payload
+    /// bindings. Mirrors the shape of LowerSwitch exactly, using the union's __tag field as the
+    /// discriminant.
     /// </summary>
     private IrBlock LowerMatch(IrMatch ms)
     {
@@ -43,16 +39,25 @@ internal sealed class Desugar(SymbolTable sym, DiagnosticBag diag) : IrRewriter
         var vr = new IrVar(v, ms.Scrutinee.Type);
         stmts.Add(new IrDeclVar(v, ms.Scrutinee.Type, ms.Scrutinee));
 
+        bool closeLastArm = ms.Default == null && IsExhaustive(ms);
+
         IrStmt? chain = ms.Default;
         for (int i = ms.Cases.Count - 1; i >= 0; i--)
         {
             var c = ms.Cases[i];
-            IrExpr cond = new IrBinOp(BinOp.Eq,
-                new IrFieldLoad(vr, "__tag", IrType.Int), new IrLitInt(c.VariantIndex), IrType.Bool);
             var bodyStmts = new List<IrStmt>();
             foreach (var b in c.Binds)
                 bodyStmts.Add(new IrDeclVar(b.BindName, b.Type, new IrUnionField(vr, c.VariantIndex, b.FieldName, b.Type)));
             bodyStmts.AddRange(c.Body.Stmts);
+
+            if (closeLastArm && i == ms.Cases.Count - 1)
+            {
+                chain = new IrBlock(bodyStmts);
+                continue;
+            }
+
+            IrExpr cond = new IrBinOp(BinOp.Eq,
+                new IrFieldLoad(vr, "__tag", IrType.Int), new IrLitInt(c.VariantIndex), IrType.Bool);
             IrBlock? elseBlk = chain switch { null => null, IrBlock b2 => b2, var x => new IrBlock([x]) };
             chain = new IrIf(cond, new IrBlock(bodyStmts), elseBlk);
         }
@@ -61,8 +66,25 @@ internal sealed class Desugar(SymbolTable sym, DiagnosticBag diag) : IrRewriter
     }
 
     /// <summary>
-    /// Lowers a switch to a single-eval scrutinee temp followed by an if/else-if equality chain.
-    /// No fallthrough; break and continue inside a case reach the enclosing loop.
+    /// True if the match names every variant of its union exactly once. Always true for a
+    /// defaultless match in a clean build, but re-derived because this pass also runs over IR from
+    /// a source that failed to resolve, where the cases can cover nothing.
+    /// </summary>
+    private bool IsExhaustive(IrMatch ms)
+    {
+        if (sym.UnionDef(ms.UnionT.Name) is not { } variants) return false;
+        if (ms.Cases.Count != variants.Count) return false;
+
+        var seen = new HashSet<int>(ms.Cases.Count);
+        foreach (var c in ms.Cases)
+            if (c.VariantIndex < 0 || c.VariantIndex >= variants.Count || !seen.Add(c.VariantIndex))
+                return false;
+        return true;
+    }
+
+    /// <summary>
+    /// Lowers a switch to a single-eval scrutinee temp followed by an if/else-if equality chain. No
+    /// fallthrough; break and continue inside a case reach the enclosing loop.
     /// </summary>
     private IrBlock LowerSwitch(IrSwitch sw)
     {
@@ -88,12 +110,9 @@ internal sealed class Desugar(SymbolTable sym, DiagnosticBag diag) : IrRewriter
     }
 
     /// <summary>
-    /// Lowers an interpolated string. One part passes through and two parts fold into a single
-    /// '+' call, but three or more parts build through one StringBuilder instead of a concat
-    /// chain - a chain allocates (and copies into) a fresh String per fold, O(n^2) in the total
-    /// length, where the builder is one growable buffer plus one final String. The builder class
-    /// is resolved through @builtin(StringBuilder), never by name; if the active stdlib doesn't
-    /// bind one (or lacks Put/ToString), the concat chain remains as the fallback.
+    /// Lowers an interpolated string: one part passes through, two fold into a '+', three or more
+    /// build through one StringBuilder rather than a chain copying a String per fold. The builder
+    /// comes from @builtin(StringBuilder), with '+' as the fallback.
     /// </summary>
     private IrExpr LowerInterp(IrInterp ip)
     {
@@ -114,7 +133,8 @@ internal sealed class Desugar(SymbolTable sym, DiagnosticBag diag) : IrRewriter
     }
 
     /// <summary>
-    /// Returns the CName of String's '+' operator, or emits a diagnostic and returns a fallback name.
+    /// Returns the CName of String's '+' operator, or emits a diagnostic and returns a fallback
+    /// name.
     /// </summary>
     private string Concat(TextSpan span)
     {

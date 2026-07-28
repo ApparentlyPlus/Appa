@@ -3,12 +3,14 @@ namespace Appa.Tests;
 using Appa;
 
 /// <summary>
-/// Lex-time error coverage: every malformed input class carries its dedicated
-/// diagnostic code on the thrown ParseException, not the generic G000/G044.
+/// Lex-time error coverage: every malformed input class carries its dedicated diagnostic code on
+/// the thrown ParseException, not the generic G000/G044.
 /// </summary>
 public class LexerDiagnosticsTests
 {
-    /// <summary>Tokenizes and returns the ParseException the source must produce.</summary>
+    /// <summary>
+    /// Tokenizes and returns the ParseException the source must produce.
+    /// </summary>
     private static ParseException Lex(string src)
     {
         return Assert.Throws<ParseException>(() => SingleFileCompile.Tokenize(src));
@@ -49,7 +51,7 @@ public class LexerDiagnosticsTests
     }
 
     [Fact]
-    public void DotAfterIntegerIsNotPartOfTheNumber()
+    public void DotAfterIntegerIsNotTheNumber()
     {
         var tokens = SingleFileCompile.Tokenize("42.ToString");
         Assert.Equal(TK.IntLit, tokens[0].Kind);
@@ -62,13 +64,13 @@ public class LexerDiagnosticsTests
     [InlineData("@intrinsic()")]
     [InlineData("@intrinsic(alloc")]
     [InlineData("@preamble")]
-    public void MalformedAnnotationArgumentIsAnError(string src)
+    public void MalformedAnnotationArgIsAnError(string src)
     {
         Assert.Equal(Codes.BadAnnotation, Lex(src).Code);
     }
 
     [Fact]
-    public void UnknownAnnotationCarriesBadAnnotationCode()
+    public void UnknownAnnotationHasItsOwnCode()
     {
         Assert.Equal(Codes.BadAnnotation, Lex("@bogus").Code);
     }
@@ -81,7 +83,7 @@ public class LexerDiagnosticsTests
     [InlineData("$\"never closed")]
     [InlineData("$\"open {x\"")]
     [InlineData("native { int x;")]
-    public void UnterminatedLiteralsCarryTheirCode(string src)
+    public void UnterminatedLiteralsCarryACode(string src)
     {
         Assert.Equal(Codes.UnterminatedLiteral, Lex(src).Code);
     }
@@ -96,7 +98,7 @@ public class LexerDiagnosticsTests
     }
 
     [Fact]
-    public void InterpolationSegmentSpanPointsAtTheSegment()
+    public void SegmentSpanPointsAtItsSegment()
     {
         var tokens = SingleFileCompile.Tokenize("$\"ab{n}\"");
         Assert.Equal(TK.StrLit, tokens[1].Kind);

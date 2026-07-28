@@ -29,9 +29,9 @@ static class Urls
         Tc + "/x86_64-linux.zip";
 
     /// <summary>
-    /// Returns the self-update URL for the appa binary on the current platform, always
-    /// resolving to the latest GitHub release via the "releases/latest/download" alias.
-    /// Mac distinguishes Apple Silicon (amac) from Intel (imac).
+    /// Returns the self-update URL for the appa binary on the current platform, always resolving to
+    /// the latest GitHub release via the "releases/latest/download" alias. Mac distinguishes Apple
+    /// Silicon (amac) from Intel (imac).
     /// </summary>
     public static string AppaBinary() =>
         RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? AppaRel + "/appa-win.exe" :
@@ -48,7 +48,7 @@ static class Urls
 
 static class AppaVersion
 {
-    public const string Current = "1.7.5";
+    public const string Current = "1.7.7";
 }
 
 #endregion
@@ -170,7 +170,7 @@ static class Out
     /// Prints a finished step with elapsed time at a fixed column.
     /// </summary>
     public static void Step(string message, TimeSpan elapsed) =>
-        Console.WriteLine($"{Indent}{message.PadRight(MsgWidth)}{C.DIM}{Spin.Fmt(elapsed)}{C.NC}");
+        Console.WriteLine($"{Indent}{message,-MsgWidth}{C.DIM}{Spin.Fmt(elapsed)}{C.NC}");
 
     /// <summary>
     /// Prints a plain indented fact with no timing.

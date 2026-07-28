@@ -3,27 +3,16 @@ namespace Appa.Tests;
 using System.Diagnostics;
 
 /// <summary>
-/// Compiles the emitted C for every torture-corpus program that checks clean, and asserts
-/// the host C compiler accepts it.
-///
-/// This is the strongest robustness check in the suite and the one that finds what nobody
-/// thought to look for. The hand-written assertions in TortureTests can only catch invalid
-/// output someone predicted -- an empty enum body, an unbalanced brace. gcc catches the rest
-/// by construction: a struct that contains itself, a typedef used before it is defined, a
-/// subscript that is not an integer, a member load through a non-pointer, a function emitted
-/// twice under one name. Every one of those was a real defect found here rather than reasoned
-/// about, and each is now rejected in Gata's own terms before emission.
-///
-/// Skips when no C compiler is installed, so the suite still runs on a bare machine.
+/// Compiles the emitted C for every corpus program that checks clean. The strongest check here:
+/// hand-written assertions only catch output someone predicted, while gcc catches a self-containing
+/// struct or a non-integer subscript by construction.
 /// </summary>
 public class EmittedCCompilesTests
 {
     /// <summary>
-    /// A stand-in environment. Corpus cases are single files that import no libgata, so they
-    /// declare no realm and no floor: without this Layout.Compose emits only shared.h and
-    /// there is nothing to compile. The preamble supplies what a real environment would --
-    /// the libc headers, the include of shared.h, and definitions for the two ARC roles
-    /// Ownership resolves silently when libgata is absent.
+    /// A stand-in environment. Corpus cases import no libgata and so declare no realm, leaving
+    /// Layout.Compose nothing but shared.h to emit. This supplies the libc headers, the shared.h
+    /// include, and the two ARC roles Ownership resolves silently.
     /// </summary>
     private const string StubEnvironment = """
         @preamble(kernel) native {
@@ -39,19 +28,16 @@ public class EmittedCCompilesTests
         """;
 
     /// <summary>
-    /// True if a C diagnostic is an artifact of the stub environment rather than a compiler
-    /// defect.
-    ///
-    /// The only such artifact is libgata's String. A single-file corpus case imports no
-    /// stdlib, so String has no definition to emit, and anything that touches a string
-    /// literal or the String type produces C that names an incomplete type. Matching on the
-    /// diagnostic text rather than on case names keeps every other case in scope, including
-    /// the ones in those same families that have nothing to do with strings.
+    /// True if a C diagnostic is an artifact of the stub environment rather than a defect - only
+    /// libgata's String, since a corpus case imports no stdlib. Matching on the diagnostic text
+    /// rather than case names keeps unrelated cases in those families in scope.
     /// </summary>
     private static bool IsStubArtifact(string diagnostic) =>
         diagnostic.Contains("gata_String", StringComparison.Ordinal);
 
-    /// <summary>Locates a usable host C compiler, or null.</summary>
+    /// <summary>
+    /// Locates a usable host C compiler, or null.
+    /// </summary>
     private static string? FindCompiler()
     {
         foreach (var exe in (string[])["cc", "gcc", "clang"])
@@ -71,7 +57,7 @@ public class EmittedCCompilesTests
     }
 
     [Fact]
-    public void EveryCleanCorpusProgramEmitsCompilableC()
+    public void CleanCorpusEmitsCompilableC()
     {
         var cc = FindCompiler();
         if (cc == null)
@@ -97,7 +83,11 @@ public class EmittedCCompilesTests
             foreach (var unit in files.Where(f => f.Name.EndsWith(".c", StringComparison.Ordinal)))
             {
                 compiled++;
-                var psi = new ProcessStartInfo(cc, $"-fsyntax-only -std=c11 -I. {unit.Name}")
+                // A real compile: -Wreturn-type needs the CFG gcc builds only while generating
+                // code, so -fsyntax-only never sees a function falling off its end. Just that one
+                // warning is promoted, keeping this pinned to "broken", not C style.
+                var psi = new ProcessStartInfo(cc,
+                    $"-c -std=c11 -Werror=return-type -I. -o {(OperatingSystem.IsWindows() ? "NUL" : "/dev/null")} {unit.Name}")
                 { WorkingDirectory = dir, RedirectStandardError = true, UseShellExecute = false };
                 using var p = Process.Start(psi)!;
                 var err = p.StandardError.ReadToEnd();
@@ -119,9 +109,9 @@ public class EmittedCCompilesTests
     }
 
     /// <summary>
-    /// Runs the front end over a source and returns the emitted files, or null if the program
-    /// was rejected, crashed, or produced nothing. Only programs the compiler accepts are
-    /// interesting here: a rejected one was never going to be emitted.
+    /// Runs the front end over a source and returns the emitted files, or null if the program was
+    /// rejected, crashed, or produced nothing. Only programs the compiler accepts are interesting
+    /// here: a rejected one was never going to be emitted.
     /// </summary>
     private static IReadOnlyList<OutputFile>? FrontEnd(string src)
     {

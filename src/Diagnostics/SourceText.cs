@@ -1,9 +1,5 @@
 namespace Appa;
 
-/// <summary>
-/// SourceText is a class representing one source file. It stores the text, the path, 
-/// and a precomputed array of line start offsets for fast line/column lookups.
-/// </summary>
 internal sealed class SourceText
 {
     /// <summary>
@@ -64,8 +60,9 @@ internal sealed class SourceText
     }
 
     /// <summary>
-    /// Takes in an offset between 0 and Text.Length, and returns the corresponding (line, column) pair.
-    /// It treats \n as the line separator, and lines are 1-indexed. Columns are also 1-indexed.
+    /// Takes in an offset between 0 and Text.Length, and returns the corresponding (line, column)
+    /// pair. It treats \n as the line separator, and lines are 1-indexed. Columns are also
+    /// 1-indexed.
     /// </summary>
     public (int Line, int Col) LineCol(int offset)
     {
@@ -79,7 +76,8 @@ internal sealed class SourceText
     }
 
     /// <summary>
-    /// Returns the text of a given line number (1-indexed). If the line number is out of range, returns an empty span.
+    /// Returns the text of a given line number (1-indexed). If the line number is out of range,
+    /// returns an empty span.
     /// </summary>
     public ReadOnlySpan<char> LineSpan(int line)
     {
@@ -93,7 +91,8 @@ internal sealed class SourceText
     }
 
     /// <summary>
-    /// Returns the text of a given line number (1-indexed). If the line number is out of range, returns an empty string.
+    /// Returns the text of a given line number (1-indexed). If the line number is out of range,
+    /// returns an empty string.
     /// </summary>
     public string LineText(int line)
     {
@@ -104,8 +103,8 @@ internal sealed class SourceText
 }
 
 /// <summary>
-/// Every source file read during a build, keyed by absolute path, so the renderer
-/// can resolve a diagnostic's Span back to its text.
+/// Every source file read during a build, keyed by absolute path, so the renderer can resolve a
+/// diagnostic's Span back to its text.
 /// </summary>
 internal sealed class SourceSet
 {

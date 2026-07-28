@@ -2,7 +2,8 @@ namespace Appa;
 using System.Text;
 
 /// <summary>
-/// Severity of a diagnostic, either warning or error. Warnings do not prevent compilation, but errors do.
+/// Severity of a diagnostic, either warning or error. Warnings do not prevent compilation, but
+/// errors do.
 /// </summary>
 internal enum Severity { Warning, Error }
 
@@ -22,8 +23,8 @@ internal sealed record Diagnostic(Severity Severity, string Code, string Message
 }
 
 /// <summary>
-/// This class contains all the diagnostic codes used in the compiler. 
-/// Each code is a string that starts with "G" followed by a three digit number.
+/// This class contains all the diagnostic codes used in the compiler. Each code is a string that
+/// starts with "G" followed by a three digit number.
 /// </summary>
 internal static class Codes
 {
@@ -110,6 +111,8 @@ internal static class Codes
     public const string MissingInterpolation   = "G080";
     public const string AssignOutsideCatch     = "G081";
     public const string CatchHandlerNoAssign   = "G082";
+    public const string IdentityPayloadComparison  = "G083";
+    public const string ImprecisePayloadComparison = "G084";
 }
 
 /// <summary>
@@ -118,8 +121,8 @@ internal static class Codes
 internal static class Suggest
 {
     /// <summary>
-    /// Returns the candidate closest to typed by Levenshtein distance, or null if none is
-    /// close enough to plausibly be a typo of it (distance more than half of typed's length).
+    /// Returns the candidate closest to typed by Levenshtein distance, or null if none is close
+    /// enough to plausibly be a typo of it (distance more than half of typed's length).
     /// </summary>
     public static string? Closest(string typed, IEnumerable<string> candidates)
     {
@@ -137,10 +140,9 @@ internal static class Suggest
     }
 
     /// <summary>
-    /// Returns a one-element "did you mean 'X'?" hints array for Diagnostic's separate hints
-    /// line, or an empty array if typed has no close-enough match among candidates. Callers
-    /// pass this to diag.Error's hints parameter, not the message - it renders on its own
-    /// "= help:" line rather than appended to the error text.
+    /// A one-element "did you mean 'X'?" hints array, or empty if nothing is close enough. Goes to
+    /// diag.Error's hints parameter, not the message - it renders on its own "= help:" line rather
+    /// than appended to the error text.
     /// </summary>
     public static string[] Hints(string typed, IEnumerable<string> candidates)
     {
@@ -148,8 +150,8 @@ internal static class Suggest
     }
 
     /// <summary>
-    /// Classic iterative Levenshtein edit distance between two strings. Identifiers are
-    /// short, so the two work rows live on the stack. Absurdly long names fall back to heap.
+    /// Classic iterative Levenshtein edit distance between two strings. Identifiers are short, so
+    /// the two work rows live on the stack. Absurdly long names fall back to heap.
     /// </summary>
     private static int Distance(string a, string b)
     {
@@ -173,8 +175,8 @@ internal static class Suggest
 }
 
 /// <summary>
-/// Collects diagnostics during compilation. It can render them in a human readable format,
-/// with source code context and ANSI colors.
+/// Collects diagnostics during compilation. It can render them in a human readable format, with
+/// source code context and ANSI colors.
 /// </summary>
 internal sealed class DiagnosticBag(SourceSet sources)
 {
@@ -193,19 +195,42 @@ internal sealed class DiagnosticBag(SourceSet sources)
     public int ErrorCount => _errCount;
     public int WarningCount => _warnCount;
 
+    // The generic instantiation currently being resolved, or null outside one. Set by the
+    // resolver as it walks a stamped instance's members.
+    private string? _instanceScope;
+    private readonly HashSet<(string Scope, string Code, string Message)> _instanceSeen = [];
+
     /// <summary>
-    /// Adds an error diagnostic to the bag. Hints are optional "= help:" lines rendered after
-    /// the source snippet.
+    /// Marks diagnostics until disposal as coming from one generic instantiation, where the same
+    /// complaint is reported once: a stamped instance is a copy, so one bad type argument is one
+    /// mistake however many lines touch it. Errors only.
+    /// </summary>
+    public IDisposable InstanceScope(string? instance)
+    {
+        var previous = _instanceScope;
+        _instanceScope = instance;
+        return new ScopeReset(this, previous);
+    }
+
+    private sealed class ScopeReset(DiagnosticBag bag, string? previous) : IDisposable
+    {
+        public void Dispose() => bag._instanceScope = previous;
+    }
+
+    /// <summary>
+    /// Adds an error diagnostic to the bag. Hints are optional "= help:" lines rendered after the
+    /// source snippet.
     /// </summary>
     public void Error(string code, string file, TextSpan span, string message, string[]? hints = null)
     {
+        if (_instanceScope is { } scope && !_instanceSeen.Add((scope, code, message))) return;
         _d.Add(new Diagnostic(Severity.Error, code, message, new Loc(file, span), hints ?? []));
         _errCount++;
     }
 
     /// <summary>
-    /// Adds a warning diagnostic to the bag. Hints are optional "= help:" lines rendered after
-    /// the source snippet.
+    /// Adds a warning diagnostic to the bag. Hints are optional "= help:" lines rendered after the
+    /// source snippet.
     /// </summary>
     public void Warn(string code, string file, TextSpan span, string message, string[]? hints = null)
     {
@@ -222,8 +247,8 @@ internal sealed class DiagnosticBag(SourceSet sources)
     }
 
     /// <summary>
-    /// Renders a diagnostic as a string, with source code context and ANSI colors. 
-    /// If the source file is not available, it will render only the file name and message.
+    /// Renders a diagnostic as a string, with source code context and ANSI colors. If the source
+    /// file is not available, it will render only the file name and message.
     /// </summary>
     public string Render(Diagnostic d)
     {
@@ -258,10 +283,6 @@ internal sealed class DiagnosticBag(SourceSet sources)
                 .Append(": ")
                 .Append(d.Message);
 
-            // Spanless diagnostics have no snippet or gutter to hang help lines off, but they
-            // still carry hints, and those hints used to be dropped on the floor here - which hit
-            // exactly the diagnostics that need them most (G019 missing intrinsic, G020 missing
-            // floor bind, G002 no entry point), since none of those point at a source location.
             for (int i = 0; i < d.Hints.Length; i++)
                 sb.AppendLine()
                     .Append("  ")

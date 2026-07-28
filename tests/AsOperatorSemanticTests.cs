@@ -3,15 +3,9 @@ namespace Appa.Tests;
 using Appa;
 
 /// <summary>
-/// Semantic and codegen coverage for the 'as' conversion operator - user-defined explicit
-/// conversions, invoked with the same 'value as Target' syntax as built-in casts.
-///
-/// 'as' has exactly one shape: a static factory declared on the class being converted TO,
-/// converting its one parameter to self ('public operator func as(char c) -> String', String's
-/// equivalent of a FromChar factory). Only a class can declare it, and it only ever converts
-/// INTO itself - never out of itself to a primitive. That direction (class -> primitive) has
-/// no 'as' path at all; it's a named method's job instead (e.g. 'int func ToInt()'), since a
-/// primitive can never declare a conversion of its own to fall back to.
+/// Semantic and codegen coverage for 'as' - user-defined explicit conversions written like a
+/// built-in cast. Always a static factory on the class converted TO, so it only ever converts INTO
+/// itself; the other direction is a named method's job.
 /// </summary>
 public class AsOperatorSemanticTests
 {
@@ -69,8 +63,8 @@ public class AsOperatorSemanticTests
     }
 
     /// <summary>
-    /// The return type defaults to the owner class exactly like every other operator's does, so
-    /// it doesn't need to be written out - 'as' always converts INTO its declaring class, so the
+    /// The return type defaults to the owner class exactly like every other operator's does, so it
+    /// doesn't need to be written out - 'as' always converts INTO its declaring class, so the
     /// return type is never meaningfully anything else.
     /// </summary>
     [Fact]
@@ -88,7 +82,7 @@ public class AsOperatorSemanticTests
     }
 
     [Fact]
-    public void MultipleOverloadsDistinguishedByParameterTypeAreEachSelectable()
+    public void OverloadsSelectByParamType()
     {
         AssertClean("""
             class Box { public int v; }
@@ -108,11 +102,11 @@ public class AsOperatorSemanticTests
 
     /// <summary>
     /// A cast to the source's own type is identity (the existing SameType short-circuit in
-    /// CheckCast), so declaring 'public operator func as(Self s) -> Self' is legal even though it can
-    /// never fire - it's dead code, not an error.
+    /// CheckCast), so declaring 'public operator func as(Self s) -> Self' is legal even though it
+    /// can never fire - it's dead code, not an error.
     /// </summary>
     [Fact]
-    public void SelfConversionOperatorIsLegalButUnreachable()
+    public void SelfConversionIsLegalButUnused()
     {
         AssertClean("""
             class Box {
@@ -127,12 +121,12 @@ public class AsOperatorSemanticTests
     }
 
     /// <summary>
-    /// A generic class's 'as' operator is substituted per instantiation, same as any other
-    /// operator or method - Box[int]'s 'as' converts FROM int, independently of what other
-    /// instantiations of Box exist.
+    /// A generic class's 'as' operator is substituted per instantiation, same as any other operator
+    /// or method - Box[int]'s 'as' converts FROM int, independently of what other instantiations of
+    /// Box exist.
     /// </summary>
     [Fact]
-    public void GenericClassAsOperatorMonomorphizesPerInstantiation()
+    public void GenericAsOperatorMonomorphizes()
     {
         AssertClean("""
             class Box[T] {
@@ -146,7 +140,7 @@ public class AsOperatorSemanticTests
     }
 
     [Fact]
-    public void ClassSourceUsesDestinationDeclaredConversion()
+    public void ClassSourceUsesDestinationAs()
     {
         AssertClean("""
             class Box { public int v; }
@@ -181,11 +175,11 @@ public class AsOperatorSemanticTests
 
     /// <summary>
     /// 'as' always takes exactly one parameter - the source value being converted. There is no
-    /// zero-parameter form; a class can never declare how it converts itself OUT to something
-    /// else via 'as', only how another type converts IN to it.
+    /// zero-parameter form; a class can never declare how it converts itself OUT to something else
+    /// via 'as', only how another type converts IN to it.
     /// </summary>
     [Fact]
-    public void AsOperatorWithZeroParametersIsRejected()
+    public void AsWithNoParamsIsRejected()
     {
         AssertError(Codes.WrongArgCount, """
             class Box {
@@ -196,7 +190,7 @@ public class AsOperatorSemanticTests
     }
 
     [Fact]
-    public void AsOperatorWithTwoParametersIsRejected()
+    public void AsWithTwoParamsIsRejected()
     {
         AssertError(Codes.WrongArgCount, """
             class Box {
@@ -207,7 +201,7 @@ public class AsOperatorSemanticTests
     }
 
     [Fact]
-    public void DuplicateAsOverloadForSameSourceIsRejected()
+    public void DuplicateAsOverloadIsRejected()
     {
         AssertError(Codes.DuplicateName, """
             class Wrapper {
@@ -219,7 +213,7 @@ public class AsOperatorSemanticTests
     }
 
     [Fact]
-    public void DuplicateRegularOperatorIsRejected()
+    public void DuplicateOperatorIsRejected()
     {
         AssertError(Codes.DuplicateName, """
             class Box {
@@ -231,9 +225,9 @@ public class AsOperatorSemanticTests
     }
 
     /// <summary>
-    /// An explicit return type on 'as' that isn't the owner class is rejected - it would
-    /// otherwise let a cast's declared IR type disagree with what the C function actually
-    /// returns, since dispatch finds this operator purely by the destination class's name.
+    /// An explicit return type on 'as' that isn't the owner class is rejected - it would otherwise
+    /// let a cast's declared IR type disagree with what the C function actually returns, since
+    /// dispatch finds this operator purely by the destination class's name.
     /// </summary>
     [Fact]
     public void WrongExplicitReturnTypeIsRejected()
@@ -247,7 +241,7 @@ public class AsOperatorSemanticTests
     }
 
     [Fact]
-    public void CastWithNoMatchingAsOperatorIsStillRejected()
+    public void CastWithNoAsOperatorIsRejected()
     {
         AssertError(Codes.InvalidCast, """
             class Box { int v; }
@@ -260,7 +254,7 @@ public class AsOperatorSemanticTests
     }
 
     [Fact]
-    public void AsOnDestinationForAnUnrelatedSourceDoesNotApply()
+    public void AsForUnrelatedSourceDoesNotApply()
     {
         AssertError(Codes.InvalidCast, """
             class Box { int v; }
@@ -277,7 +271,7 @@ public class AsOperatorSemanticTests
     }
 
     [Fact]
-    public void PrimitiveSourceWithNoMatchingAsOperatorIsStillRejected()
+    public void PrimitiveWithNoAsIsRejected()
     {
         AssertError(Codes.InvalidCast, """
             class Wrapper { int v; }
@@ -293,7 +287,7 @@ public class AsOperatorSemanticTests
     /// declared, so this fails identically whether or not the class declares anything.
     /// </summary>
     [Fact]
-    public void ClassToPrimitiveConversionIsAlwaysRejected()
+    public void ClassToPrimitiveIsRejected()
     {
         AssertError(Codes.InvalidCast, """
             class Box { int v; func _init(int v) { self.v = v; } }
@@ -305,7 +299,7 @@ public class AsOperatorSemanticTests
     }
 
     [Fact]
-    public void ClassToPrimitiveRejectionHasAGuidingHint()
+    public void ClassToPrimitiveHasAHint()
     {
         var (diag, _) = SingleFileCompile.Check("""
             class Box { int v; func _init(int v) { self.v = v; } }
@@ -324,8 +318,8 @@ public class AsOperatorSemanticTests
 
     /// <summary>
     /// Finds the entry function's body statements among the module's free functions - 'kernel {
-    /// entry func Main() { ... } }' lowers to a free function with IsEntry set, not a class
-    /// member, so this is where 'let' statements inside Main live in the IR.
+    /// entry func Main() { ... } }' lowers to a free function with IsEntry set, not a class member,
+    /// so this is where 'let' statements inside Main live in the IR.
     /// </summary>
     private static IReadOnlyList<IrStmt> EntryBody(IrModule module)
     {
@@ -334,8 +328,8 @@ public class AsOperatorSemanticTests
     }
 
     /// <summary>
-    /// Finds the initializer expression of the 'let <name> = ...' declaration with the given
-    /// name inside the given statement list.
+    /// Finds the initializer of the 'let name = ...' declaration with the given name in the given
+    /// statement list.
     /// </summary>
     private static IrExpr DeclInit(IReadOnlyList<IrStmt> stmts, string name)
     {
@@ -346,11 +340,11 @@ public class AsOperatorSemanticTests
 
     /// <summary>
     /// A user-defined 'as' cast resolves to a direct call to the operator's C function
-    /// (IrStaticCall, the same IR shape every other operator overload already uses), not
-    /// IrCast - the raw C-style reinterpret cast that built-in numeric/pointer casts still use.
+    /// (IrStaticCall, the same IR shape every other operator overload already uses), not IrCast -
+    /// the raw C-style reinterpret cast that built-in numeric/pointer casts still use.
     /// </summary>
     [Fact]
-    public void AsCastResolvesToOperatorCallNotRawCast()
+    public void AsCastResolvesToOperatorCall()
     {
         var (diag, module) = SingleFileCompile.Check("""
             class Wrapper {
@@ -371,11 +365,11 @@ public class AsOperatorSemanticTests
 
     /// <summary>
     /// Two 'as' overloads on the same class get distinct C names, keyed by their parameter type,
-    /// since they'd otherwise collide under the single 'gata_Owner_op' name every other
-    /// operator uses - and the cast at each use site calls the one matching its own source type.
+    /// since they'd otherwise collide under the single 'gata_Owner_op' name every other operator
+    /// uses - and the cast at each use site calls the one matching its own source type.
     /// </summary>
     [Fact]
-    public void OverloadedAsOperatorsGetDistinctCNames()
+    public void OverloadedAsGetDistinctCNames()
     {
         var (diag, module) = SingleFileCompile.Check("""
             class Wrapper {

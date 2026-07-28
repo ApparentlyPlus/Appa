@@ -1,41 +1,16 @@
 namespace Appa;
 
-/// <summary>
-/// ARC lowering pass. Rewrites each function body into flat IR with ownership made
-/// explicit - owning locals are released at scope exit, return, break, and throw.
-/// After this pass the emitter prints the IR with no ARC logic of its own.
-/// </summary>
 internal sealed class Ownership(IrModule module)
 {
-    private readonly HashSet<string> _managed = InitializeManaged(module);
-
-    /// <summary>
-    /// Populates a set of managed class names from the module.
-    /// </summary>
-    private static HashSet<string> InitializeManaged(IrModule m)
-    {
-        var set = new HashSet<string>(m.Classes.Count);
-        for (int i = 0; i < m.Classes.Count; i++)
-        {
-            var c = m.Classes[i];
-            if (!c.IsModule)
-                set.Add(c.Name);
-        }
-        return set;
-    }
+    private readonly ManagedTypes _managed = new(module);
 
     private readonly string _retain = Role(module, Roles.Retain);
     private readonly string _release = Role(module, Roles.Release);
 
     /// <summary>
-    /// Returns the intrinsic symbol for a role, or a `gata_MISSING_*` placeholder if unbound.
-    ///
-    /// Deliberately silent, and the silence is load bearing. BuildModule (and therefore this
-    /// pass) legitimately runs over stdlib free input, SingleFileCompile checks an import-free
-    /// source string with no libgata at all, so an unbound ARC role here does not by itself
-    /// mean a broken build. A real build always imports libgata, which declares String and
-    /// therefore a non-module class, so Pipeline.ValidateIntrinsics requires the whole ARC
-    /// role set before emission and reports G019 there if any of it is unbound.
+    /// Returns the intrinsic symbol for a role, or a `gata_MISSING_*` placeholder. Silent by
+    /// design: this pass runs over stdlib-free input too, and a real build has
+    /// Pipeline.ValidateIntrinsics demand the whole role set before emission.
     /// </summary>
     private static string Role(IrModule m, string role)
     {
@@ -43,11 +18,12 @@ internal sealed class Ownership(IrModule module)
     }
 
     /// <summary>
-    /// Returns true if the type is a managed class reference, false otherwise.
+    /// Returns true if the type participates in reference counting - a managed class reference, or
+    /// a union whose live variant may hold one.
     /// </summary>
     private bool IsManaged(IrType t)
     {
-        return t is IrClassRef cr && _managed.Contains(cr.ClassName);
+        return _managed.IsManaged(t);
     }
 
     /// <summary>
@@ -85,7 +61,8 @@ internal sealed class Ownership(IrModule module)
         public bool Try;
 
         /// <summary>
-        /// Registers a local variable as an owner in this frame, lazily initializing the owner list.
+        /// Registers a local variable as an owner in this frame, lazily initializing the owner
+        /// list.
         /// </summary>
         public void AddOwner(string name, IrType type)
         {
@@ -114,10 +91,9 @@ internal sealed class Ownership(IrModule module)
     // handler; the resolver has already rejected any `assign` that could reach here with it unset.
     private IrVar? _assignTarget;
 
-    // Inside `unsafe`, automatic reference counting is suppressed: owning stores,
-    // owner tracking, consume-retains and producer hoisting all step aside, so the
-    // author manages element lifetimes by hand via retain/release. Exits (return /
-    // break / throw) still release owners from the enclosing safe frames.
+    // Inside `unsafe`, ARC is suppressed: owning stores, owner tracking, consume-retains and
+    // producer hoisting all step aside, and the author manages lifetimes by hand. Exits still
+    // release owners from the enclosing safe frames.
     private bool _inUnsafe;
 
     // Zero-allocation side-effect and cleanup lists
@@ -151,8 +127,8 @@ internal sealed class Ownership(IrModule module)
     }
 
     /// <summary>
-    /// Builds the `(Result_T){ .has_error = true }` literal a failed throws call returns.
-    /// The value field is deliberately omitted: C zero-initializes it.
+    /// Builds the `(Result_T){ .has_error = true }` literal a failed throws call returns. The value
+    /// field is deliberately omitted: C zero-initializes it.
     /// </summary>
     private IrStructLit ErrorResult()
     {
@@ -191,8 +167,8 @@ internal sealed class Ownership(IrModule module)
     private static IrVar IndexVar => new(IndexName, IrType.Int);
 
     /// <summary>
-    /// Builds `for (int _fi = 0; _fi &lt; limit; _fi++) body` - the counted loop both for-in
-    /// shapes iterate with.
+    /// Builds `for (int _fi = 0; _fi &lt; limit; _fi++) body` - the counted loop both for-in shapes
+    /// iterate with.
     /// </summary>
     private static IrFor CountedFor(IrExpr limit, IrBlock body)
     {
@@ -313,10 +289,9 @@ internal sealed class Ownership(IrModule module)
     }
 
     /// <summary>
-    /// Splices this frame's defers (in LIFO order) then releases its owning locals.
-    /// Deferred cleanup runs before owners are released so a defer can still use a local
-    /// before ARC touches its refcount. Re-lowered fresh at each splice site so each
-    /// occurrence gets its own hoisted-temp names.
+    /// Splices this frame's defers in LIFO order, then releases its owning locals - that order so a
+    /// defer can still use a local before ARC touches its refcount. Re-lowered at each splice site
+    /// so every occurrence gets its own hoisted-temp names.
     /// </summary>
     private void ReleaseFrame(Frame f, List<IrStmt> outs)
     {
@@ -332,13 +307,9 @@ internal sealed class Ownership(IrModule module)
     }
 
     /// <summary>
-    /// Releases all frames from innermost outward, stopping after the first frame where stopAfter returns true.
-    /// Used by early-exit statements such as return, break, and throw.
-    ///
-    /// The frame stack is snapshotted first because ReleaseFrame re-lowers deferred
-    /// actions, and a block-bodied 'defer { ... }' lowers through LowerBlock, which
-    /// pushes and pops a frame. Iterating the live stack instead would invalidate the
-    /// enumerator on the first such defer.
+    /// Releases frames innermost outward until stopAfter returns true; used by return, break and
+    /// throw. The stack is snapshotted first because ReleaseFrame re-lowers defers, and a
+    /// block-bodied one pushes a frame that would invalidate the enumerator.
     /// </summary>
     private void ReleaseForExit(List<IrStmt> outs, Func<Frame, bool> stopAfter)
     {
@@ -350,8 +321,8 @@ internal sealed class Ownership(IrModule module)
     }
 
     /// <summary>
-    /// Registers a local variable as an owner in the current frame.
-    /// Skipped inside unsafe blocks where lifetimes are managed by hand.
+    /// Registers a local variable as an owner in the current frame. Skipped inside unsafe blocks
+    /// where lifetimes are managed by hand.
     /// </summary>
     private void RegisterOwner(string name, IrType type)
     {
@@ -360,26 +331,32 @@ internal sealed class Ownership(IrModule module)
     }
 
     /// <summary>
-    /// Wraps an expression in a release call, returning a statement that discards the result.
+    /// Wraps an expression in a release call. A class goes to the runtime intrinsic, a managed
+    /// union to its own generated release - both plain static calls, so every exit path here gets
+    /// union support without a union case of its own.
     /// </summary>
     private IrExprStmt ReleaseStmt(IrExpr e)
     {
-        return new IrExprStmt(new IrStaticCall(_release, IrType.Void, [e]));
+        string fn = e.Type is IrUnionType ut ? Mangler.UnionRelease(ut.Name) : _release;
+        return new IrExprStmt(new IrStaticCall(fn, IrType.Void, [e]));
     }
 
     /// <summary>
-    /// Wraps an expression in a retain call, returning a new expression that owns the value.
+    /// Wraps an expression in a retain call, returning a new expression that owns the value. The
+    /// generated union retain returns the union by value so it composes here exactly as the runtime
+    /// intrinsic does for a pointer.
     /// </summary>
     private IrStaticCall Retain(IrExpr e)
     {
-        return new IrStaticCall(_retain, e.Type, [e]) { Span = e.Span };
+        string fn = e.Type is IrUnionType ut ? Mangler.UnionRetain(ut.Name) : _retain;
+        return new IrStaticCall(fn, e.Type, [e]) { Span = e.Span };
     }
 
 
     /// <summary>
     /// Registers the unlowered defer action with the enclosing frame for splicing at every exit.
-    /// Kept unlowered so each splice site re-lowers it fresh with its own temp names.
-    /// Prepended for LIFO order against other defers already in the frame.
+    /// Kept unlowered so each splice site re-lowers it fresh with its own temp names. Prepended for
+    /// LIFO order against other defers already in the frame.
     /// </summary>
     private void LowerDefer(IrDefer d)
     {
@@ -487,21 +464,9 @@ internal sealed class Ownership(IrModule module)
     }
 
     /// <summary>
-    /// Lowers `let T x = f() catch { ... };` into a declaration plus a two armed branch:
-    ///
-    ///     T x;                              (NULL/{0} for managed and aggregate types)
-    ///     Result_T _res_x = f(...);
-    ///     if (_res_x.has_error) { &lt;handler, with 'assign v' lowered to 'x = v'&gt; }
-    ///     else                  { x = _res_x.value; }
-    ///
-    /// The variable is declared in the enclosing block and registered as an owner there, which
-    /// is the whole point of the construct: unlike a try block, the handler introduces no scope
-    /// the value can be trapped inside, so everything after this statement still sees x.
-    ///
-    /// Declaring it without an initializer also makes the give-up path safe. A handler that
-    /// leaves through `throw`/`return` never assigns, but x is already in the frame's owner list
-    /// by then; the emitter's NULL-initialization means the unwind releases a null pointer, which
-    /// the runtime's release() ignores.
+    /// Lowers `let T x = f() catch {...};` to a bare `T x;` plus an if/else over the Result,
+    /// `assign v` becoming `x = v`. x is owned by the enclosing block - the whole point, since a
+    /// try would trap it - and starts null, so the give-up path is safe.
     /// </summary>
     private void LowerCatchDecl(IrDeclVar dv, IrCatchCall cc, bool managed, List<IrStmt> outs)
     {
@@ -547,15 +512,9 @@ internal sealed class Ownership(IrModule module)
     }
 
     /// <summary>
-    /// Lowers `f() catch { ... };` in statement position, where the call's result is discarded:
-    ///
-    ///     Result_T _res_tmp_N = f(...);
-    ///     if (_res_tmp_N.has_error) { &lt;handler&gt; }
-    ///     else                      { release(_res_tmp_N.value); }   // managed inner type only
-    ///
-    /// There is no variable here, so the resolver rejects `assign` in this position. The success
-    /// arm still has to release: the call handed back a +1 reference that nothing else will own.
-    /// The failure arm must not - on that path the Result's value field was never set.
+    /// Lowers `f() catch { ... };` in statement position, where the result is discarded. No
+    /// variable, so the resolver rejects `assign` here. The success arm still releases the +1
+    /// nothing else will own; the failure arm must not, since value was never set.
     /// </summary>
     private void LowerCatchExprStmt(IrCatchCall cc, List<IrStmt> outs)
     {
@@ -963,7 +922,8 @@ internal sealed class Ownership(IrModule module)
     }
 
     /// <summary>
-    /// Lowers a try-catch statement, hoisting any pre- or post-allocations into the surrounding block.
+    /// Lowers a try-catch statement, hoisting any pre- or post-allocations into the surrounding
+    /// block.
     /// </summary>
     private void LowerTryCatch(IrTryCatch tc, List<IrStmt> outs)
     {
@@ -996,8 +956,8 @@ internal sealed class Ownership(IrModule module)
     }
 
     /// <summary>
-    /// Emits the error-branch check after a throwing call's Result is captured into res.
-    /// Inside a try, routes to the catch label; otherwise propagates upward as a return.
+    /// Emits the error-branch check after a throwing call's Result is captured into res. Inside a
+    /// try, routes to the catch label; otherwise propagates upward as a return.
     /// </summary>
     private void ThrowsCheck(string res, IrResultType rt, List<IrStmt> outs)
     {
@@ -1039,8 +999,8 @@ internal sealed class Ownership(IrModule module)
     #region Expression flattening
 
     /// <summary>
-    /// Returns a simple IrExpr; hoists managed producers in borrow position into temps.
-    /// Mirrors the emitter's former EmitExprH.
+    /// Returns a simple IrExpr; hoists managed producers in borrow position into temps. Mirrors the
+    /// emitter's former EmitExprH.
     /// </summary>
     private IrExpr Flatten(IrExpr e, bool owned)
     {
@@ -1088,10 +1048,9 @@ internal sealed class Ownership(IrModule module)
     }
 
     /// <summary>
-    /// A ternary evaluates exactly one arm at runtime, so an arm's hoists/retains must
-    /// never spill into the surrounding unconditional pre. Non-managed arms with nothing
-    /// to sequence stay inline; otherwise both arms materialise into a temp via if/else.
-    /// A managed temp is owned (+1) and released by the caller's frame (borrow) or consumed.
+    /// A ternary evaluates one arm, so an arm's hoists must never spill into the unconditional pre.
+    /// Arms with nothing to sequence stay inline; otherwise both materialise into a temp via
+    /// if/else, owned at +1 and released by the caller's frame.
     /// </summary>
     private IrExpr FlattenTernary(IrTernary t, bool owned)
     {
@@ -1174,15 +1133,13 @@ internal sealed class Ownership(IrModule module)
 
 
     /// <summary>
-    /// Lowers a collection initializer into an alloc followed by Add-per-element calls.
-    /// Returns the new collection temp (a +1 producer).
+    /// Lowers a collection initializer into an alloc followed by Add-per-element calls. Returns the
+    /// new collection temp (a +1 producer).
     /// </summary>
     private IrVar LowerNewInit(IrNewInit ni)
     {
         string v = Tmp("_ci");
         var ct = new IrClassRef(ni.ClassName);
-
-        int apStart = _pre.Count;
         int acStart = _cl.Count;
         var args = FlattenArgs(ni.Args);
 
@@ -1195,7 +1152,6 @@ internal sealed class Ownership(IrModule module)
 
         foreach (var el in ni.Inits)
         {
-            int epStart = _pre.Count;
             int ecStart = _cl.Count;
             IrExpr es = Flatten(el, true);
             int ecCount = _cl.Count - ecStart;

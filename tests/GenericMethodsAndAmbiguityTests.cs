@@ -3,10 +3,9 @@ namespace Appa.Tests;
 using Appa;
 
 /// <summary>
-/// Regression coverage for generic methods on classes/modules (including real instance
-/// methods with `self`), the AmbiguousCall diagnostic for a generic free function silently
-/// shadowing an equally plausible sibling, and the file-basename-qualified call syntax that
-/// disambiguates it when no class/module qualifier applies.
+/// Regression coverage for generic methods on classes and modules, the AmbiguousCall diagnostic for
+/// a generic free function shadowing an equally plausible sibling, and the file-basename qualifier
+/// that disambiguates it.
 /// </summary>
 public class GenericMethodsAndAmbiguityTests
 {
@@ -27,8 +26,8 @@ public class GenericMethodsAndAmbiguityTests
 
     /// <summary>
     /// Compiles each file's source with every other file mutually visible, mirroring how
-    /// Pipeline.BuildModule is driven once real import resolution has already produced a
-    /// visibility map - the exact mechanism SingleFileCompile.Check uses for one file.
+    /// Pipeline.BuildModule is driven once real import resolution has already produced a visibility
+    /// map - the exact mechanism SingleFileCompile.Check uses for one file.
     /// </summary>
     private static (DiagnosticBag Diag, IrModule? Module) CheckMulti(params (string Path, string Src)[] files)
     {
@@ -55,7 +54,7 @@ public class GenericMethodsAndAmbiguityTests
     #region Generic methods
 
     [Fact]
-    public void GenericModuleMethodCompilesForMultipleInstantiations()
+    public void GenericModuleCompilesPerInstance()
     {
         AssertClean("""
             module Foo {
@@ -82,12 +81,12 @@ public class GenericMethodsAndAmbiguityTests
     }
 
     /// <summary>
-    /// A generic INSTANCE method has a real 'self', usable inside the instantiated body to
-    /// call an ordinary sibling instance method - the full "self instantiation" fix, not just
-    /// the static/module case.
+    /// A generic INSTANCE method has a real 'self', usable inside the instantiated body to call an
+    /// ordinary sibling instance method - the full "self instantiation" fix, not just the
+    /// static/module case.
     /// </summary>
     [Fact]
-    public void GenericInstanceMethodWithSelfCompiles()
+    public void GenericInstanceMethodCompiles()
     {
         var (diag, module) = SingleFileCompile.Check("""
             class Box {
@@ -118,7 +117,7 @@ public class GenericMethodsAndAmbiguityTests
     }
 
     [Fact]
-    public void GenericModuleMethodCallsGenericSiblingUnqualified()
+    public void GenericModuleCallsItsSibling()
     {
         AssertClean("""
             module Foo {
@@ -136,7 +135,7 @@ public class GenericMethodsAndAmbiguityTests
     #region AmbiguousCall (G069)
 
     [Fact]
-    public void AmbiguousCallBetweenGenericFreeFunctionAndSiblingMethodIsRejected()
+    public void FreeFuncVsSiblingIsAmbiguous()
     {
         AssertError(Codes.AmbiguousCall, """
             T func Min[T](T a, T b) { if (a < b) { return a; } return b; }
@@ -148,7 +147,7 @@ public class GenericMethodsAndAmbiguityTests
     }
 
     [Fact]
-    public void AmbiguousCallResolvedByQualifyingThroughModuleIsClean()
+    public void ModuleQualifierResolvesAmbiguity()
     {
         AssertClean("""
             T func Min[T](T a, T b) { if (a < b) { return a; } return b; }
@@ -160,7 +159,7 @@ public class GenericMethodsAndAmbiguityTests
     }
 
     [Fact]
-    public void AmbiguousCallResolvedByQualifyingThroughFileNameIsClean()
+    public void FileNameQualifierResolvesAmbiguity()
     {
         AssertClean("""
             T func Min[T](T a, T b) { if (a < b) { return a; } return b; }
@@ -172,7 +171,7 @@ public class GenericMethodsAndAmbiguityTests
     }
 
     [Fact]
-    public void AmbiguousCallAcrossTwoFilesPubliclyDeclaringSameGenericIsRejected()
+    public void GenericInTwoFilesIsAmbiguous()
     {
         var (diag, _) = CheckMulti(
             ("a.g", "T func Pick[T](T a, T b) { return a; }"),
@@ -182,7 +181,7 @@ public class GenericMethodsAndAmbiguityTests
     }
 
     [Fact]
-    public void FileNamespaceQualifiedCallResolvesCrossFileCollision()
+    public void FileQualifierResolvesCollision()
     {
         var (diag, _) = CheckMulti(
             ("a.g", "T func Pick[T](T a, T b) { return a; }"),
@@ -197,7 +196,7 @@ public class GenericMethodsAndAmbiguityTests
     #region Privacy/scope gating for generic templates
 
     [Fact]
-    public void PrivateGenericFunctionsInDifferentFilesDoNotClobberEachOther()
+    public void PrivateGenericsDoNotClobber()
     {
         var (diag, module) = CheckMulti(
             ("a.g", """

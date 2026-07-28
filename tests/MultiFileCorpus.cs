@@ -1,16 +1,10 @@
 namespace Appa.Tests;
 
 /// <summary>
-/// One multi-file torture case: a set of files written into a project directory, the file the
-/// build starts from, and what the compiler is expected to do with it.
-///
-/// The entry is always "src/main.g" and the environment always "env.g", matching the layout
-/// Pipeline discovers, so a case only has to spell out the files it actually cares about.
+/// One multi-file torture case: Files written into a project directory, Expect saying whether the
+/// build must be rejected or accepted, and Code the diagnostic required when it is. Entry and
+/// environment are always src/main.g and env.g, the layout Pipeline discovers.
 /// </summary>
-/// <param name="Name">Identifier used in failure messages.</param>
-/// <param name="Files">Project-relative path to file contents.</param>
-/// <param name="Expect">Whether the build must be rejected, accepted, or is unconstrained.</param>
-/// <param name="Code">Optional exact diagnostic code required when Expect is Rejected.</param>
 public sealed record MultiFileCase(
     string Name,
     (string Path, string Content)[] Files,
@@ -21,20 +15,16 @@ public sealed record MultiFileCase(
 }
 
 /// <summary>
-/// The multi-file torture corpus.
-///
-/// Everything else in the suite compiles a single source string, which leaves a whole tier of
-/// the compiler untested: import resolution and cycles, per-file visibility, cross-file name
-/// collisions, realm blocks split across files, and the mangling that has to keep two files'
-/// same-named private functions apart. None of that is reachable without real files on disk,
-/// because Pipeline.Transpile follows imports by reading them.
+/// The multi-file torture corpus. Everything else compiles a single source string, leaving import
+/// resolution, per-file visibility, cross-file collisions, split realms and private-name mangling
+/// untested - none of it reachable without files on disk.
 /// </summary>
 public static class MultiFileCorpus
 {
     /// <summary>
     /// The environment every case shares unless it supplies its own. Declares a user realm so
-    /// Layout emits a real translation unit, and provides the headers and ARC roles that a
-    /// project with no libgata would otherwise lack.
+    /// Layout emits a real translation unit, and provides the headers and ARC roles that a project
+    /// with no libgata would otherwise lack.
     /// </summary>
     public const string DefaultEnv = """
         @environment
@@ -71,16 +61,24 @@ public static class MultiFileCorpus
 
     private static IReadOnlyList<MultiFileCase>? _all;
 
-    /// <summary>Every multi-file case.</summary>
+    /// <summary>
+    /// Every multi-file case.
+    /// </summary>
     public static IReadOnlyList<MultiFileCase> All => _all ??= [.. Cases()];
 
-    /// <summary>Shorthand for a file tuple, so the case list stays readable.</summary>
+    /// <summary>
+    /// Shorthand for a file tuple, so the case list stays readable.
+    /// </summary>
     private static (string, string) F(string path, string content) => (path, content);
 
-    /// <summary>A minimal user realm with an entry point, for cases whose focus is elsewhere.</summary>
+    /// <summary>
+    /// A minimal user realm with an entry point, for cases whose focus is elsewhere.
+    /// </summary>
     private const string MainShell = "user {{ entry func Main() {{ {0} }} }}";
 
-    /// <summary>Builds src/main.g with the given imports and body.</summary>
+    /// <summary>
+    /// Builds src/main.g with the given imports and body.
+    /// </summary>
     private static string Main(string imports, string body) =>
         imports + "\n" + string.Format(MainShell, body) + "\n";
 
@@ -332,6 +330,152 @@ public static class MultiFileCorpus
                                  "let Shape s = Shape.Circle(2); match (s) { case Circle(r) { } case Square { } }")),
         ], Expect.Accepted);
 
+        // A managed union declared in one file and used from another. Its retain/release pair
+        // lives in the shared header, so every unit must agree on one definition - and the suite
+        // links all units, so a per-file copy shows up as a duplicate symbol.
+        yield return new("cross/managed-union-declared-elsewhere",
+        [
+            F("src/p.g", "class Payload { public int n; }"),
+            F("src/u.g", "import \"src/p.g\";\nunion Msg { Text(Payload p), Code(int n) }"),
+            F("src/main.g", Main("import \"src/p.g\";\nimport \"src/u.g\";",
+                                 "let Msg m = Msg.Text(new Payload()); match (m) { case Text(p) { } case Code(n) { } }")),
+        ], Expect.Accepted);
+
+        // Constructed in one file, consumed in a third: the union's ARC pair has to be reachable
+        // from every unit that owns one, not only from the one that declared the type.
+        yield return new("cross/managed-union-three-files",
+        [
+            F("src/p.g", "class Payload { public int n; }"),
+            F("src/u.g", "import \"src/p.g\";\nunion Msg { Text(Payload p), Code(int n) }"),
+            F("src/mk.g", "import \"src/p.g\";\nimport \"src/u.g\";\npublic Msg func Make() { return Msg.Text(new Payload()); }"),
+            F("src/main.g", Main("import \"src/p.g\";\nimport \"src/u.g\";\nimport \"src/mk.g\";",
+                                 "let Msg m = Make(); match (m) { case Text(p) { } case Code(n) { } }")),
+        ], Expect.Accepted);
+
+        // A managed union nested inside another, across files: release has to recurse into the
+        // inner union's pair, which is only emitted if the outer file's dependency is seen.
+        yield return new("cross/nested-managed-union",
+        [
+            F("src/p.g", "class Payload { public int n; }"),
+            F("src/i.g", "import \"src/p.g\";\nunion Inner { A(Payload p), B }"),
+            F("src/o.g", "import \"src/i.g\";\nunion Outer { W(Inner i), P(int n) }"),
+            F("src/main.g", Main("import \"src/p.g\";\nimport \"src/i.g\";\nimport \"src/o.g\";",
+                                 "let Outer o = Outer.W(Inner.A(new Payload()));")),
+        ], Expect.Accepted);
+
+        // A managed union stored in a class field declared in another file: the class destructor
+        // is generated in the class's own file and must call the union's release.
+        yield return new("cross/managed-union-as-class-field",
+        [
+            F("src/p.g", "class Payload { public int n; }"),
+            F("src/u.g", "import \"src/p.g\";\nunion Msg { Text(Payload p), Code(int n) }"),
+            F("src/c.g", "import \"src/u.g\";\nclass Box { Msg m; public func _init(Msg m) { self.m = m; } }"),
+            F("src/main.g", Main("import \"src/p.g\";\nimport \"src/u.g\";\nimport \"src/c.g\";",
+                                 "let Box b = new Box(Msg.Text(new Payload()));")),
+        ], Expect.Accepted);
+
+        // Union equality is generated into every translation unit. These pin that its definition
+        // and uses stay consistent across files: the suite links all units, so a disagreement is
+        // a duplicate or missing symbol rather than a quiet pass.
+        yield return new("cross/union-compared-in-another-file",
+        [
+            F("src/u.g", "union Msg { Text(int n), Code(int c) }"),
+            F("src/main.g", Main("import \"src/u.g\";",
+                                 "let bool b = Msg.Text(1) == Msg.Code(1);")),
+        ], Expect.Accepted);
+
+        // Compared from two different files: each unit defines the equality it uses.
+        yield return new("cross/union-compared-in-two-files",
+        [
+            F("src/u.g", "union Msg { Text(int n), Code(int c) }"),
+            F("src/a.g", "import \"src/u.g\";\npublic bool func SameA(Msg x, Msg y) { return x == y; }"),
+            F("src/b.g", "import \"src/u.g\";\npublic bool func SameB(Msg x, Msg y) { return x != y; }"),
+            F("src/main.g", Main("import \"src/u.g\";\nimport \"src/a.g\";\nimport \"src/b.g\";",
+                                 "let bool b = SameA(Msg.Text(1), Msg.Code(1)) || SameB(Msg.Text(1), Msg.Code(1));")),
+        ], Expect.Accepted);
+
+        // The payload's '==' operator lives in a third file. The generated equality has to call
+        // it, which means that operator must be declared before the equality body in every unit
+        // that emits one.
+        yield return new("cross/union-payload-equality-operator-elsewhere",
+        [
+            F("src/v.g", "class Valued { public int n; public operator bool func ==(Valued o) { return self.n == o.n; } }"),
+            F("src/u.g", "import \"src/v.g\";\nunion Msg { V(Valued v), Code(int c) }"),
+            F("src/main.g", Main("import \"src/v.g\";\nimport \"src/u.g\";",
+                                 "let bool b = Msg.Code(1) == Msg.Code(2);")),
+        ], Expect.Accepted);
+
+        // A nested managed union compared across files: equality recurses into the inner union's
+        // generated function, and ARC recurses into its release.
+        yield return new("cross/nested-union-compared",
+        [
+            F("src/p.g", "class Payload { public int n; }"),
+            F("src/i.g", "import \"src/p.g\";\nunion Inner { A(Payload p), B(int n) }"),
+            F("src/o.g", "import \"src/i.g\";\nunion Outer { W(Inner i), K(int n) }"),
+            F("src/main.g", Main("import \"src/p.g\";\nimport \"src/i.g\";\nimport \"src/o.g\";",
+                                 "let bool b = Outer.K(1) == Outer.W(Inner.B(2));")),
+        ], Expect.Accepted);
+
+        // One generic reaching for another, over a type from a third file. Outer[Res] is asked
+        // for in main.g but the Inner[T] use sits in Outer's file, so Inner[Res] was attributed
+        // there - which never heard of Res. Map.Values() hit this, breaking Map[int, UserClass].
+        yield return new("cross/generic-reaching-for-generic",
+        [
+            F("src/g.g", "class Inner[T] { public T v; }\n" +
+                         "class Outer[T] { public T item; " +
+                         "public Inner[T] func Wrap() { let Inner[T] i = new Inner[T](); i.v = self.item; return i; } }"),
+            F("src/main.g", Main("import \"src/g.g\";\nimport \"src/r.g\";",
+                                 "let Outer[Res] o = new Outer[Res](); o.item = new Res(); let Res r = o.Wrap().v;")),
+            F("src/r.g", "class Res { public int id; }"),
+        ], Expect.Accepted);
+
+        // Three levels deep: the requester has to propagate along the whole chain, not one hop.
+        yield return new("cross/generic-chain-three-deep",
+        [
+            F("src/g.g", "class A[T] { public T v; }\n" +
+                         "class B[T] { public A[T] a; }\n" +
+                         "class C[T] { public B[T] b; }"),
+            F("src/main.g", Main("import \"src/g.g\";\nimport \"src/r.g\";", "let C[Res] c = new C[Res]();")),
+            F("src/r.g", "class Res { public int id; }"),
+        ], Expect.Accepted);
+
+        // A generic union template declared in one file and instantiated from others. Stamped
+        // instances are spliced into the template's file, so each must resolve its arguments
+        // under the file that named them, and different arguments must give separate unions.
+        yield return new("cross/generic-union-instantiated-elsewhere",
+        [
+            F("src/m.g", "union Maybe[V] { Found(V v), Missing }"),
+            F("src/main.g", Main("import \"src/m.g\";",
+                                 "let Maybe[int] a = Maybe.Found(1); let Maybe[bool] b = Maybe.Found(true);")),
+        ], Expect.Accepted);
+
+        yield return new("cross/generic-union-over-a-class-from-another-file",
+        [
+            F("src/p.g", "class Payload { public int n; }"),
+            F("src/m.g", "union Maybe[V] { Found(V v), Missing }"),
+            F("src/main.g", Main("import \"src/p.g\";\nimport \"src/m.g\";",
+                                 "let Maybe[Payload] a = Maybe.Found(new Payload());")),
+        ], Expect.Accepted);
+
+        // Instantiated from two different files over two different arguments.
+        yield return new("cross/generic-union-two-requesters",
+        [
+            F("src/m.g", "union Maybe[V] { Found(V v), Missing }"),
+            F("src/a.g", "import \"src/m.g\";\npublic Maybe[int] func MakeInt() { return Maybe.Found(1); }"),
+            F("src/b.g", "import \"src/m.g\";\npublic Maybe[bool] func MakeBool() { return Maybe.Found(true); }"),
+            F("src/main.g", Main("import \"src/m.g\";\nimport \"src/a.g\";\nimport \"src/b.g\";",
+                                 "let Maybe[int] x = MakeInt(); let Maybe[bool] y = MakeBool();")),
+        ], Expect.Accepted);
+
+        // A generic union reaching for a generic class through its own parameter, across files.
+        yield return new("cross/generic-union-holding-a-generic-class",
+        [
+            F("src/c.g", "class Bag[T] { public T item; }"),
+            F("src/m.g", "import \"src/c.g\";\nunion Holder[V] { Some(Bag[V] b), None }"),
+            F("src/main.g", Main("import \"src/c.g\";\nimport \"src/m.g\";",
+                                 "let Holder[int] h = Holder.None();")),
+        ], Expect.Accepted);
+
         yield return new("cross/operator-overload",
         [
             F("src/v.g", "class Vec { public int n; public operator Vec func +(Vec o) { return o; } }"),
@@ -416,10 +560,9 @@ public static class MultiFileCorpus
     }
 
     /// <summary>
-    /// A second batch, covering what the first pass did not reach: collisions between the
-    /// different kinds of type declaration, private-function mangling across many files,
-    /// processes and threads declared away from the entry, generics instantiated from several
-    /// files at once, and the shapes an import path can take.
+    /// A second batch covering what the first did not reach: collisions between the kinds of type
+    /// declaration, private-function mangling across many files, processes declared away from the
+    /// entry, generics instantiated from several files, and import-path shapes.
     /// </summary>
     private static IEnumerable<MultiFileCase> MoreCases()
     {

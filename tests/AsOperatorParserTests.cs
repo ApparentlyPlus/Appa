@@ -3,16 +3,14 @@ namespace Appa.Tests;
 using Appa;
 
 /// <summary>
-/// Parser coverage for the 'as' conversion operator: 'operator Target func as(Source s)'.
-/// 'as' is always a one-parameter static factory (converting its parameter to self); arity
-/// itself is a semantic concern (see AsOperatorSemanticTests), but this covers that the 'as'
-/// keyword is accepted at all as an operator symbol, and that its declaration shape parses like
-/// any other operator's.
+/// Parser coverage for 'operator Target func as(Source s)'. Arity is a semantic concern (see
+/// AsOperatorSemanticTests); this covers that 'as' is accepted as an operator symbol at all, and
+/// that its declaration parses like any other operator's.
 /// </summary>
 public class AsOperatorParserTests
 {
     [Fact]
-    public void AsOperatorParsesWithParameterAndReturnType()
+    public void AsParsesWithParamAndReturn()
     {
         var prog = SingleFileCompile.Parse("""
             class Wrapper {
@@ -29,7 +27,7 @@ public class AsOperatorParserTests
     }
 
     [Fact]
-    public void AsOperatorAcceptsClassParameterType()
+    public void AsAcceptsClassParam()
     {
         var prog = SingleFileCompile.Parse("""
             class Box { int v; }
@@ -45,7 +43,7 @@ public class AsOperatorParserTests
     }
 
     [Fact]
-    public void AsOperatorReturnTypeIsOptionalInGrammar()
+    public void AsReturnTypeIsOptional()
     {
         var prog = SingleFileCompile.Parse("""
             class Wrapper {
@@ -60,7 +58,7 @@ public class AsOperatorParserTests
     }
 
     [Fact]
-    public void MultipleAsOperatorsParseAsSeparateMembers()
+    public void MultipleAsOperatorsStaySeparate()
     {
         var prog = SingleFileCompile.Parse("""
             class Wrapper {
@@ -77,7 +75,7 @@ public class AsOperatorParserTests
     }
 
     [Fact]
-    public void AsIsRecognizedAsAnOperatorKeywordNotAnIdentifier()
+    public void AsLexesAsAKeyword()
     {
         var prog = SingleFileCompile.Parse("""
             class Wrapper {

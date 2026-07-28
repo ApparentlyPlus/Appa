@@ -3,12 +3,14 @@ namespace Appa.Tests;
 using Appa;
 
 /// <summary>
-/// Parse-time error coverage: targeted messages and dedicated codes for the
-/// mistakes users actually make, instead of a generic "expected X, found Y".
+/// Parse-time error coverage: targeted messages and dedicated codes for the mistakes users actually
+/// make, instead of a generic "expected X, found Y".
 /// </summary>
 public class ParserDiagnosticsTests
 {
-    /// <summary>Parses and returns the ParseException the source must produce.</summary>
+    /// <summary>
+    /// Parses and returns the ParseException the source must produce.
+    /// </summary>
     private static ParseException Parse(string src)
     {
         return Assert.Throws<ParseException>(() => SingleFileCompile.Parse(src));
@@ -36,7 +38,7 @@ public class ParserDiagnosticsTests
     [InlineData("func F() { let int x = 1; if (x = 3) { } }")]
     [InlineData("func F() { let int x = 1; while (x = 3) { } }")]
     [InlineData("func F() { for (let int i = 0; i = 5; i++) { } }")]
-    public void AssignmentInConditionSuggestsEquality(string src)
+    public void AssignInConditionSuggestsEquality(string src)
     {
         var ex = Parse(src);
         Assert.Equal(Codes.AssignInExpr, ex.Code);
@@ -49,7 +51,7 @@ public class ParserDiagnosticsTests
     [InlineData("func F() { G(1, 2; }", "expected ')'")]
     [InlineData("func F(int x", "expected ')'")]
     [InlineData("class C int x; }", "expected '{'")]
-    public void ExpectedTokenMessagesAreHumanReadable(string src, string expected)
+    public void ExpectedTokenMessagesAreReadable(string src, string expected)
     {
         Assert.Contains(expected, Parse(src).Message);
     }
@@ -69,7 +71,7 @@ public class ParserDiagnosticsTests
     }
 
     [Fact]
-    public void ProcessModeSpecifiedTwiceIsRejected()
+    public void DuplicateProcessModeIsRejected()
     {
         var ex = Parse("user { foreground process App : background { } }");
         Assert.Equal(Codes.BadDeclHeader, ex.Code);
@@ -77,9 +79,9 @@ public class ParserDiagnosticsTests
     }
 
     /// <summary>
-    /// A process declaration without a foreground/background mode -- in either the leading or
-    /// the trailing colon spelling -- is rejected outright rather than silently defaulting, since
-    /// the mode is a real semantic choice (TTY/keyboard focus, scheduling visibility).
+    /// A process declaration without a foreground/background mode -- in either the leading or the
+    /// trailing colon spelling -- is rejected outright rather than silently defaulting, since the
+    /// mode is a real semantic choice (TTY/keyboard focus, scheduling visibility).
     /// </summary>
     [Fact]
     public void ProcessWithoutModeIsRejected()
@@ -96,7 +98,7 @@ public class ParserDiagnosticsTests
     }
 
     [Fact]
-    public void MissingProcessKeywordHintsAtFreeFuncError()
+    public void MissingProcessKeywordHints()
     {
         var ex = Parse("user { TicTacToe { thread T { entry func Run() { } } } }");
         Assert.Equal(Codes.BadDeclHeader, ex.Code);
@@ -137,7 +139,7 @@ public class ParserDiagnosticsTests
     }
 
     [Fact]
-    public void RejectedAnnotationPointsAtTheAnnotation()
+    public void RejectionPointsAtTheAnnotation()
     {
         var ex = Parse("@keep\nenum Color { Red }");
         Assert.Equal(Codes.BadAnnotation, ex.Code);
@@ -145,7 +147,7 @@ public class ParserDiagnosticsTests
     }
 
     [Fact]
-    public void TrailingReturnTypeNamesTheFunction()
+    public void TrailingReturnNamesTheFunction()
     {
         var ex = Parse("func Foo() -> int { return 1; }");
         Assert.Equal(Codes.BadDeclHeader, ex.Code);
@@ -154,12 +156,12 @@ public class ParserDiagnosticsTests
     }
 
     /// <summary>
-    /// The trailing-return-type mistake gets the same targeted message inside a class as it
-    /// does for a free function - not the generic "expected '{'" a bare unhandled '->' would
-    /// otherwise produce.
+    /// The trailing-return-type mistake gets the same targeted message inside a class as it does
+    /// for a free function - not the generic "expected '{'" a bare unhandled '->' would otherwise
+    /// produce.
     /// </summary>
     [Fact]
-    public void TrailingReturnTypeOnMethodNamesTheMethod()
+    public void TrailingReturnOnMethodNames()
     {
         var ex = Parse("class C { func Foo() -> int { return 1; } }");
         Assert.Equal(Codes.BadDeclHeader, ex.Code);
@@ -168,7 +170,7 @@ public class ParserDiagnosticsTests
     }
 
     [Fact]
-    public void TrailingReturnTypeOnOperatorNamesTheOperator()
+    public void TrailingReturnOnOperatorNames()
     {
         var ex = Parse("class C { operator func +(C other) -> C { return self; } }");
         Assert.Equal(Codes.BadDeclHeader, ex.Code);
@@ -187,7 +189,7 @@ public class ParserDiagnosticsTests
     }
 
     [Fact]
-    public void TrailingReturnTypeOnExternNamesTheFunction()
+    public void TrailingReturnOnExternNames()
     {
         var ex = Parse("@extern func F() -> int;");
         Assert.Equal(Codes.BadDeclHeader, ex.Code);
@@ -205,11 +207,11 @@ public class ParserDiagnosticsTests
 
     /// <summary>
     /// An operator whose return type is itself a function-pointer type is not mistaken for the
-    /// no-return-type form - 'func(' after 'operator' is a type, 'func' followed by a symbol is
-    /// the declaration keyword.
+    /// no-return-type form - 'func(' after 'operator' is a type, 'func' followed by a symbol is the
+    /// declaration keyword.
     /// </summary>
     [Fact]
-    public void FunctionPointerReturnTypeOnOperatorParses()
+    public void FuncPtrOperatorReturnParses()
     {
         var prog = SingleFileCompile.Parse("class C { operator func(int) -> int func +(C other) { return null; } }");
         var cls = Assert.IsType<ClassDecl>(prog.Items[0]);

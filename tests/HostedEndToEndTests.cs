@@ -3,27 +3,15 @@ namespace Appa.Tests;
 using System.Diagnostics;
 
 /// <summary>
-/// End-to-end regression over the real standard library, without the GatOS cross toolchain.
-///
-/// BootTests already proves the GatOS path, but it needs an installed toolchain and QEMU and
-/// skips on most machines, which leaves the everyday question unanswered: does a program that
-/// actually uses libgata still compile and run? A Hosted build answers it with nothing but the
-/// host C compiler - it transpiles the whole stdlib, hands the result to gcc with warnings as
-/// errors, and runs the binary.
-///
-/// This is the check that catches an over-eager new diagnostic. A rule added to reject some
-/// nonsense program is only correct if libgata itself still passes it, and libgata exercises
-/// generics, ARC, operator overloading, unsafe pointers and native blocks far harder than any
-/// synthetic corpus case does.
-///
-/// Skips when the Gata checkout or a C compiler is missing.
+/// End-to-end regression over the real standard library with nothing but a host C compiler. This is
+/// what catches an over-eager new diagnostic: a rule rejecting nonsense is only correct if libgata
+/// still passes it, and libgata exercises everything harder.
 /// </summary>
 public class HostedEndToEndTests
 {
     /// <summary>
-    /// Finds the sibling Gata checkout by walking up from the test binary, looking for a
-    /// directory holding both libgata/ and envs/. Returns null if this is not a source
-    /// checkout.
+    /// Finds the sibling Gata checkout by walking up from the test binary, looking for a directory
+    /// holding both libgata/ and envs/. Returns null if this is not a source checkout.
     /// </summary>
     private static string? FindGataCheckout()
     {
@@ -38,7 +26,9 @@ public class HostedEndToEndTests
         return null;
     }
 
-    /// <summary>Locates a usable host C compiler, or null.</summary>
+    /// <summary>
+    /// Locates a usable host C compiler, or null.
+    /// </summary>
     private static string? FindCompiler()
     {
         foreach (var exe in (string[])["cc", "gcc", "clang"])
@@ -57,19 +47,30 @@ public class HostedEndToEndTests
     }
 
     /// <summary>
-    /// A program that touches the parts of libgata most likely to break: generic containers,
-    /// reference-counted strings, interpolation, fixed arrays, and an unsafe pointer round trip.
-    /// Its output is asserted exactly, so a miscompile shows up as a wrong answer rather than
-    /// only as a compile failure.
+    /// A program touching the parts of libgata most likely to break: generic containers, counted
+    /// strings, interpolation, fixed arrays, an unsafe pointer round trip. Its output is asserted
+    /// exactly, so a miscompile is a wrong answer, not just a build failure.
     /// </summary>
     private const string ProgramSource = """
         import Console;
         import List;
         import Map;
+        import Set;
+        import Optional;
         import String;
         import Math;
 
         int func Twice(int n) { return n * 2; }
+
+        union Note { Blank, Titled(String t), Numbered(int v) }
+
+        int func NoteWeight(Note n) {
+            match (n) {
+                case Blank { return 0; }
+                case Titled(t) { return t.Length(); }
+                case Numbered(v) { return v; }
+            }
+        }
 
         class Counter {
             int n;
@@ -107,6 +108,52 @@ public class HostedEndToEndTests
                     deref = *p + 1;
                 }
 
+                // A managed union over stdlib types: its payload is a reference-counted String,
+                // so this only prints the right thing if the generated retain/release pair keeps
+                // the string alive exactly as long as the union owns it.
+                let Note n1 = Note.Titled("hi");
+                let Note n2 = Note.Numbered(7);
+                let String label = "?";
+                let int number = 0;
+                match (n1) { case Titled(t) { label = t; } case Numbered(v) { number = v; } case Blank { } }
+                match (n2) { case Titled(t) { label = t; } case Numbered(v) { number = v; } case Blank { } }
+
+                // Single-probe lookups: one hash and one scan instead of Has-then-Get.
+                let int got = 0;
+                let bool hit = m.TryGet(5, ref got);
+                let bool miss = m.TryGet(99, ref got);
+
+                let StringMap[int] sm = new StringMap[int]();
+                sm.Put("k", 4);
+                let int sgot = 0;
+                let bool shit = sm.TryGet("k", ref sgot);
+
+                let Set[int] set = new Set[int]();
+                let bool fresh = set.AddNew(1);
+                let bool dupe = set.AddNew(1);
+
+                // Optional[V]: the lookup that can say "absent" as distinct from "stored zero".
+                // m holds 5 -> 1, so Find(5) is Some and Find(99) is None, where Get answers 0
+                // for the missing key and could not be told apart from a stored 0.
+                m.Put(7, 0);
+                let int found = ValueOr(m.Find(5), -1);
+                let int storedZero = ValueOr(m.Find(7), -1);
+                let int absent = ValueOr(m.Find(99), -1);
+                let bool some = IsSome(m.Find(5));
+                let bool none = IsNone(m.Find(99));
+                let int firstEl = ValueOr(xs.At(0), -1);
+                let int oob = ValueOr(xs.At(99), -1);
+
+                // A map whose value type is a class declared in this file. Map.Values() returns
+                // List[V], so this only compiles if that nested instantiation resolves under the
+                // file that named the type argument rather than the one declaring Map.
+                let Map[int, Counter] byId = new Map[int, Counter]();
+                byId.Put(1, c);
+
+                Console.PrintLine($"opt={found}{storedZero}{absent} {some}{none} at={firstEl}{oob}");
+                Console.PrintLine($"probe={hit}{miss}{shit} v={got}{sgot} set={fresh}{dupe} " +
+                                  $"or={m.GetOr(5, -1)}{m.GetOr(99, -1)} vals={byId.Values().Length()}");
+                Console.PrintLine($"note={label}{number} weight={NoteWeight(n1)}{NoteWeight(n2)}");
                 Console.PrintLine($"len={xs.Length()} map={m.Length()} bumps={c.Value()}");
                 Console.PrintLine($"arr={arr[2]} deref={deref} abs={Math.Abs(-9)}");
                 Console.PrintLine($"generic={cs.Length()} first={cs.Get(0).Value()}");
@@ -114,10 +161,16 @@ public class HostedEndToEndTests
         }
         """;
 
-    private const string ExpectedOutput = "len=2 map=1 bumps=2\narr=7 deref=42 abs=9\ngeneric=2 first=2\n";
+    private const string ExpectedOutput =
+        "opt=10-1 11 at=3-1\n" +
+        "probe=101 v=14 set=10 or=1-1 vals=1\n" +
+        "note=hi7 weight=27\n" +
+        "len=2 map=2 bumps=2\n" +
+        "arr=7 deref=42 abs=9\n" +
+        "generic=2 first=2\n";
 
     [Fact]
-    public void StdlibProgramTranspilesCompilesAndRuns()
+    public void StdlibProgramCompilesAndRuns()
     {
         var gata = FindGataCheckout();
         if (gata == null) { Assert.Skip("no sibling Gata checkout found; skipping hosted end-to-end"); return; }
@@ -161,7 +214,9 @@ public class HostedEndToEndTests
         Assert.Equal(ExpectedOutput, runOut.Replace("\r\n", "\n"));
     }
 
-    /// <summary>Runs a process to completion, returning its exit code and combined output.</summary>
+    /// <summary>
+    /// Runs a process to completion, returning its exit code and combined output.
+    /// </summary>
     private static (int Code, string Output) Run(string exe, string args, string cwd)
     {
         var psi = new ProcessStartInfo(exe, args)

@@ -3,8 +3,8 @@ namespace Appa.Tests;
 using Appa;
 
 /// <summary>
-/// Inline string-literal coverage of the lexer: every token kind reachable from a
-/// minimal source snippet, plus the interpolation/escape edge cases.
+/// Inline string-literal coverage of the lexer: every token kind reachable from a minimal source
+/// snippet, plus the interpolation/escape edge cases.
 /// </summary>
 public class LexerTests
 {
@@ -152,7 +152,7 @@ public class LexerTests
     [InlineData(":", nameof(TK.Colon))]
     [InlineData(".", nameof(TK.Dot))]
     [InlineData("=", nameof(TK.Eq))]
-    public void StructuralPunctuationLexesToItsOwnKind(string src, string expectedKind)
+    public void PunctuationLexesToItsOwnKind(string src, string expectedKind)
     {
         var tokens = SingleFileCompile.Tokenize(src);
         Assert.Equal(Enum.Parse<TK>(expectedKind), tokens[0].Kind);
@@ -194,7 +194,7 @@ public class LexerTests
     [InlineData("\"a\\nb\"")]
     [InlineData("\"tab\\ttab\"")]
     [InlineData("\"quote\\\"quote\"")]
-    public void RecognizedStringEscapesAreAccepted(string src)
+    public void KnownStringEscapesAreAccepted(string src)
     {
         var tokens = SingleFileCompile.Tokenize(src);
         Assert.Equal(TK.StrLit, tokens[0].Kind);
@@ -227,7 +227,7 @@ public class LexerTests
     }
 
     [Fact]
-    public void InterpolatedStringSplitsIntoSegmentsAndExprTokens()
+    public void InterpolationSplitsIntoTokens()
     {
         var tokens = SingleFileCompile.Tokenize("$\"count={n}\"");
         Assert.Equal(TK.InterpStrStart, tokens[0].Kind);
@@ -243,7 +243,7 @@ public class LexerTests
     }
 
     [Fact]
-    public void DoubledBracesInInterpolationAreLiteral()
+    public void DoubledBracesAreLiteral()
     {
         var tokens = SingleFileCompile.Tokenize("$\"{{literal}}\"");
         Assert.Equal(TK.InterpStrStart, tokens[0].Kind);
@@ -253,12 +253,12 @@ public class LexerTests
     }
 
     /// <summary>
-    /// A backslash escape inside an interpolated string's literal segment is validated
-    /// but kept raw in the token value, same as a plain string literal - decoding is a
-    /// later stage's job, not the lexer's.
+    /// A backslash escape inside an interpolated string's literal segment is validated but kept raw
+    /// in the token value, same as a plain string literal - decoding is a later stage's job, not
+    /// the lexer's.
     /// </summary>
     [Fact]
-    public void EscapeInsideInterpolationLiteralSegmentIsKeptRaw()
+    public void EscapeInLiteralSegmentStaysRaw()
     {
         var tokens = SingleFileCompile.Tokenize("$\"line1\\nline2\"");
         Assert.Equal(TK.StrLit, tokens[1].Kind);
@@ -266,7 +266,7 @@ public class LexerTests
     }
 
     [Fact]
-    public void UnrecognizedEscapeInsideInterpolationThrows()
+    public void BadEscapeInInterpolationThrows()
     {
         Assert.Throws<ParseException>(() => SingleFileCompile.Tokenize("$\"bad\\qescape\""));
     }
@@ -291,8 +291,8 @@ public class LexerTests
     }
 
     /// <summary>
-    /// A native { ... } block is captured verbatim as one NativeContent token; braces
-    /// inside a string or comment within the block do not affect the balance count.
+    /// A native { ... } block is captured verbatim as one NativeContent token; braces inside a
+    /// string or comment within the block do not affect the balance count.
     /// </summary>
     [Fact]
     public void NativeBlockCapturesBodyVerbatim()
@@ -303,8 +303,8 @@ public class LexerTests
     }
 
     /// <summary>
-    /// native type Name { ... } packs the type name and body into one NativeTypeDecl
-    /// token, separated by the unit-separator sentinel.
+    /// native type Name { ... } packs the type name and body into one NativeTypeDecl token,
+    /// separated by the unit-separator sentinel.
     /// </summary>
     [Fact]
     public void NativeTypeDeclPacksNameAndBody()
@@ -315,8 +315,7 @@ public class LexerTests
     }
 
     /// <summary>
-    /// fields { ... } is captured verbatim as one Fields token, same shape as a
-    /// native block.
+    /// fields { ... } is captured verbatim as one Fields token, same shape as a native block.
     /// </summary>
     [Fact]
     public void FieldsBlockCapturesBodyVerbatim()

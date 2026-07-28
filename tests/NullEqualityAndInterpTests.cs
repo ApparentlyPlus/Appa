@@ -3,25 +3,16 @@ namespace Appa.Tests;
 using Appa;
 
 /// <summary>
-/// Coverage for two lowerings that share a theme - the compiler picking a cheaper/safer
-/// shape than the source's surface form:
-///
-/// 1. Null-literal equality: 'x == null' / 'x != null' always compiles to a pointer
-///    identity check, never to a declared 'operator =='. Without this, a class's own
-///    equality operator captures the null comparisons inside its body (every operator
-///    null-guards its operand with '== null') and recurses into itself forever.
-///
-/// 2. Interpolation: three or more parts lower through one @builtin(StringBuilder)
-///    (Put chain + ToString) instead of a concat chain that allocates a String per fold;
-///    one and two parts keep their direct forms, and a stdlib with no StringBuilder
-///    binding falls back to the concat chain.
+/// Two lowerings that pick a cheaper or safer shape than the source's surface form: null equality
+/// always compiling to a pointer check, so a class's own '==' cannot recurse through its null
+/// guards; and interpolation past two parts going through a StringBuilder.
 /// </summary>
 public class NullEqualityAndInterpTests
 {
     /// <summary>
-    /// IR walker that records every call CName plus every IrNew class name reachable
-    /// from a statement, so tests can assert which lowering was chosen after the full
-    /// pipeline (including Densifier renaming) has run.
+    /// IR walker that records every call CName plus every IrNew class name reachable from a
+    /// statement, so tests can assert which lowering was chosen after the full pipeline (including
+    /// Densifier renaming) has run.
     /// </summary>
     private sealed class CallCollector : IrWalker
     {
@@ -62,16 +53,15 @@ public class NullEqualityAndInterpTests
     }
 
     /// <summary>
-    /// The CNames of every '==' / '!=' operator in the module, post-renaming, so a test
-    /// can assert their presence or absence among the entry function's calls.
+    /// The CNames of every '==' / '!=' operator in the module, post-renaming, so a test can assert
+    /// their presence or absence among the entry function's calls.
     /// </summary>
     private static HashSet<string> EqOperatorCNames(IrModule module)
     {
-        return module.Classes
+        return [.. module.Classes
             .SelectMany(c => c.Operators)
             .Where(o => o.Op is "==" or "!=")
-            .Select(o => o.CName)
-            .ToHashSet();
+            .Select(o => o.CName)];
     }
 
     #region Null-literal equality

@@ -1,13 +1,11 @@
 namespace Appa;
 
-
-/// <summary>
-/// Rewrites generic class templates into concrete instantiated classes before
-/// symbol collection and type resolution run.
-/// </summary>
 internal sealed class Monomorphizer(DiagnosticBag diag)
 {
-    private sealed record Template(ClassDecl Decl, string[] Params, string BaseName);
+    // A generic template, either a class or a union. Both are stamped through the same
+    // worklist so one can reach for the other - a union variant holding a List[T], a class
+    // field holding a Maybe[T] - and so the two share one namespace for duplicate detection.
+    private sealed record Template(TopLevel Decl, string[] Params, string BaseName);
 
     internal sealed class SubstitutionContext(Dictionary<string, TypeSpec> g, Dictionary<string, string>? c)
     {
@@ -15,8 +13,8 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
         public readonly Dictionary<string, string> CMap = c ?? [];
 
         /// <summary>
-        /// Substitutes type parameters in raw native C text, replacing whole words that match
-        /// a type parameter with its concrete C type. Native bodies are the one place where
+        /// Substitutes type parameters in raw native C text, replacing whole words that match a
+        /// type parameter with its concrete C type. Native bodies are the one place where
         /// substitution is genuinely textual. Everything else is rewritten structurally.
         /// </summary>
         public string SubWords(string text)
@@ -53,8 +51,8 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
         }
 
         /// <summary>
-        /// Structurally substitutes type parameters in a type spec tree. Returns the same
-        /// reference when nothing changed so callers can cheaply detect no-ops.
+        /// Structurally substitutes type parameters in a type spec tree. Returns the same reference
+        /// when nothing changed so callers can cheaply detect no-ops.
         /// </summary>
         public TypeSpec? SubType(TypeSpec? t)
         {
@@ -75,7 +73,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
                             newArgs = new NamedSpec[n.Args.Length];
                             Array.Copy(n.Args, newArgs, i);
                         }
-                        if (newArgs != null) newArgs[i] = na;
+                        newArgs?[i] = na;
                     }
                     return newArgs == null ? t : n with { Args = newArgs };
                 }
@@ -100,7 +98,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
                             newPs = new TypeSpec[f.Params.Length];
                             Array.Copy(f.Params, newPs, i);
                         }
-                        if (newPs != null) newPs[i] = np;
+                        newPs?[i] = np;
                     }
                     var nr = SubType(f.Ret)!;
                     if (newPs == null && ReferenceEquals(nr, f.Ret)) return t;
@@ -113,8 +111,8 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
 
         /// <summary>
         /// Substitutes one generic argument slot. Argument slots hold named types only, so a
-        /// binding to a non named spec (like a pointer bound by generic-function inference)
-        /// folds to its sanitized mangled fragment to stay a valid slot.
+        /// binding to a non named spec (like a pointer bound by generic-function inference) folds
+        /// to its sanitized mangled fragment to stay a valid slot.
         /// </summary>
         private NamedSpec SubArg(NamedSpec a)
         {
@@ -127,10 +125,9 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     }
 
     /// <summary>
-    /// Scans GenericUses in all programs, stamps a concrete class for each distinct
-    /// instantiation breadth-first, and rewrites each program's Items to replace templates
-    /// with instances. Deferred inner uses (template bodies that reference other templates
-    /// via their own type parameters) are replayed once their owning instantiation is done.
+    /// Stamps a concrete class per distinct instantiation breadth-first, rewriting each program's
+    /// Items to replace templates with instances. A use deferred because one template reaches
+    /// another through its own parameters replays once its owner is stamped.
     /// </summary>
     public Dictionary<string, string> Process(List<(string path, Program prog)> programs)
     {
@@ -138,15 +135,33 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
         var tmplNames = new HashSet<string>();
         foreach (var (path, prog) in programs)
             foreach (var item in prog.Items)
-                if (item is ClassDecl cd && cd.GenericParams.Length > 0)
+            {
+                var (declName, genericParams) = item switch
                 {
-                    string baseName = BaseNameOf(cd);
-                    if (templates.ContainsKey(baseName))
-                        diag.Error(Codes.DuplicateName, path, cd.Span,
-                            $"generic type '{baseName}' is already declared");
-                    templates[baseName] = new Template(cd, cd.GenericParams, baseName);
-                    tmplNames.Add(cd.Name);
-                }
+                    ClassDecl cd when cd.GenericParams.Length > 0 => (cd.Name, cd.GenericParams),
+                    UnionDecl ud when ud.GenericParams.Length > 0 => (ud.Name, ud.GenericParams),
+                    _ => ((string?)null, (string[]?)null),
+                };
+                if (declName == null) continue;
+
+                string baseName = BaseNameOf(declName, genericParams!);
+
+                // 'C[T, T]' names one parameter twice, so the second argument is unreachable and
+                // the mangled name collides with the single-parameter form. Silently accepted
+                // before, for classes and unions alike.
+                var seenParams = new HashSet<string>(genericParams!.Length);
+                foreach (var gp in genericParams!)
+                    if (!seenParams.Add(gp))
+                        diag.Error(Codes.DuplicateName, path, item.Span,
+                            $"generic type '{baseName}' declares the type parameter '{gp}' twice");
+
+                if (templates.ContainsKey(baseName))
+                    diag.Error(Codes.DuplicateName, path, item.Span,
+                        $"generic type '{baseName}' is already declared");
+                templates[baseName] = new Template(item, genericParams!, baseName);
+                Mangler.RegisterGenericTemplate(baseName);
+                tmplNames.Add(declName);
+            }
 
         if (templates.Count == 0) return [];
 
@@ -155,10 +170,6 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
         foreach (var (path, prog) in programs)
         {
             var ownersInFile = templates.Values.Where(t => prog.Items.Contains(t.Decl)).ToList();
-            // Generic *function* templates also own uses whose args are their own type
-            // parameters (e.g. 'Pair[T, T]' in 'func GetFirst[T](Pair[T, T] p)'). Those are
-            // not instantiable here - ResolveGenericCall stamps the function against concrete
-            // types during resolution - so they must not become bogus Pair_T_T requests.
             var funcOwners = new List<FuncDecl>();
             void CollectFuncOwners(TopLevel[] items)
             {
@@ -173,12 +184,12 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
             {
                 if (funcOwners.Any(fd =>
                         use.Span.Start >= fd.Span.Start && use.Span.End <= fd.Span.End &&
-                        use.Args.Any(a => Array.IndexOf(fd.GenericParams, a) >= 0)))
+                        MentionsParam(use, fd.GenericParams)))
                     continue;
                 var owner = ownersInFile.FirstOrDefault(t =>
                     t.BaseName != use.Base &&
                     use.Span.Start >= t.Decl.Span.Start && use.Span.End <= t.Decl.Span.End &&
-                    use.Args.All(a => Array.IndexOf(t.Params, a) >= 0));
+                    MentionsParam(use, t.Params));
                 if (owner != null)
                 {
                     if (!deferredByOwner.TryGetValue(owner.BaseName, out var l))
@@ -190,16 +201,20 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
         }
 
         var requests = new Dictionary<string, (string Base, string[] Args, TextSpan Span, string File)>();
-        bool AddRequest(string b, string[] a, TextSpan sp, string file)
+        var scopeRequester = new Dictionary<string, string>();
+
+        bool AddRequest(string b, string[] a, TextSpan sp, string file, string requester)
         {
             if (!templates.ContainsKey(b)) return false;
             string mangled = b + "_" + string.Join("_", a);
             if (tmplNames.Contains(mangled)) return false;
-            return requests.TryAdd(mangled, (b, a, sp, file));
+            if (!requests.TryAdd(mangled, (b, a, sp, file))) return false;
+            scopeRequester[mangled] = requester;
+            return true;
         }
-        foreach (var (use, file) in directUses) AddRequest(use.Base, use.Args, use.Span, file);
+        foreach (var (use, file) in directUses) AddRequest(use.Base, use.Args, use.Span, file, file);
 
-        var instancesByBase = new Dictionary<string, List<ClassDecl>>();
+        var instancesByBase = new Dictionary<string, List<TopLevel>>();
         var requestedFrom = new Dictionary<string, string>();
         var pending = new Queue<string>(requests.Keys);
         var done = new HashSet<string>();
@@ -226,7 +241,8 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
             }
             var (concrete, binds) = Instantiate(tmpl, args, mangled);
             Mangler.RegisterGenericInstance(mangled, baseName, [..args]);
-            requestedFrom[mangled] = file;
+            string requester = scopeRequester.GetValueOrDefault(mangled, file);
+            requestedFrom[mangled] = requester;
             if (!instancesByBase.TryGetValue(baseName, out var list))
                 instancesByBase[baseName] = list = [];
             list.Add(concrete);
@@ -234,8 +250,8 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
             if (deferredByOwner.TryGetValue(baseName, out var deferred))
                 foreach (var (du, dfile) in deferred)
                 {
-                    var concreteArgs = du.Args.Select(a => binds.GetValueOrDefault(a, a)).ToArray();
-                    if (AddRequest(du.Base, concreteArgs, du.Span, dfile))
+                    var concreteArgs = SubstituteArgs(du, binds);
+                    if (AddRequest(du.Base, concreteArgs, du.Span, dfile, requester))
                         pending.Enqueue(du.Base + "_" + string.Join("_", concreteArgs));
                 }
         }
@@ -247,10 +263,16 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
             var rewritten = new List<TopLevel>(prog.Items.Length);
             foreach (var item in prog.Items)
             {
-                if (item is ClassDecl cd && cd.GenericParams.Length > 0)
+                string? tmplBase = item switch
+                {
+                    ClassDecl cd when cd.GenericParams.Length > 0 => BaseNameOf(cd.Name, cd.GenericParams),
+                    UnionDecl ud when ud.GenericParams.Length > 0 => BaseNameOf(ud.Name, ud.GenericParams),
+                    _ => null,
+                };
+                if (tmplBase != null)
                 {
                     changed = true;
-                    if (instancesByBase.TryGetValue(BaseNameOf(cd), out var instances))
+                    if (instancesByBase.TryGetValue(tmplBase, out var instances))
                         rewritten.AddRange(instances);
                 }
                 else rewritten.Add(item);
@@ -262,19 +284,60 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     }
 
     /// <summary>
-    /// Returns the base name of a generic class by stripping the trailing type-parameter suffix.
+    /// True if any type argument mentions one of the given parameters, at any depth. Testing
+    /// whether an argument *is* one caught 'List[T]' in 'Foo[T]' but not 'List[Node[T]]' in
+    /// 'Node[T]'; requiring *every* argument to be one missed 'Pair[T, int]'.
     /// </summary>
-    private static string BaseNameOf(ClassDecl cd)
+    private static bool MentionsParam(GenericUse use, string[] parameters)
     {
-        string suffix = "_" + string.Join("_", cd.GenericParams);
-        return cd.Name.EndsWith(suffix) ? cd.Name[..^suffix.Length] : cd.Name;
+        if (parameters.Length == 0) return false;
+        if (use.ArgSpecs is not { } specs || specs.Length != use.Args.Length)
+            return use.Args.Any(a => Array.IndexOf(parameters, a) >= 0);
+
+        foreach (var spec in specs)
+            if (Mentions(spec)) return true;
+        return false;
+
+        bool Mentions(NamedSpec s)
+        {
+            if (s.Args.Length == 0) return Array.IndexOf(parameters, s.Name) >= 0;
+            foreach (var a in s.Args)
+                if (Mentions(a)) return true;
+            return false;
+        }
     }
 
     /// <summary>
-    /// Clones a generic class template with concrete type arguments, substituting type
-    /// parameters throughout signatures, native fields, and statement bodies.
+    /// Rewrites a deferred use's type arguments against its owner's bindings, so 'List[T]' in
+    /// 'Foo[T]' becomes 'List[int]' when Foo[int] is stamped. Structural where the parse kept the
+    /// shape, since a whole-string lookup only catches a bare parameter.
     /// </summary>
-    private (ClassDecl Concrete, Dictionary<string, string> Binds) Instantiate(
+    private static string[] SubstituteArgs(GenericUse du, Dictionary<string, string> binds)
+    {
+        if (du.ArgSpecs is not { } specs || specs.Length != du.Args.Length)
+            return [.. du.Args.Select(a => binds.GetValueOrDefault(a, a))];
+
+        var specMap = new Dictionary<string, TypeSpec>(binds.Count);
+        foreach (var (param, concrete) in binds) specMap[param] = new NamedSpec(concrete);
+        var ctx = new SubstitutionContext(specMap, null);
+
+        var result = new string[specs.Length];
+        for (int i = 0; i < specs.Length; i++)
+            result[i] = ctx.SubType(specs[i]) is NamedSpec ns ? ns.Mangled : du.Args[i];
+        return result;
+    }
+
+    private static string BaseNameOf(string name, string[] genericParams)
+    {
+        string suffix = "_" + string.Join("_", genericParams);
+        return name.EndsWith(suffix) ? name[..^suffix.Length] : name;
+    }
+
+    /// <summary>
+    /// Clones a generic class template with concrete type arguments, substituting type parameters
+    /// throughout signatures, native fields, and statement bodies.
+    /// </summary>
+    private (TopLevel Concrete, Dictionary<string, string> Binds) Instantiate(
         Template tmpl, string[] args, string mangled)
     {
         var gataMap = new Dictionary<string, string>(tmpl.Params.Length);
@@ -290,19 +353,39 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
         }
         var ctx = new SubstitutionContext(specMap, cMap);
 
-        var members = new ClassMember[tmpl.Decl.Members.Length];
+        // A union has no members, only variants, and a variant's fields are plain params - so
+        // stamping one is just substituting every field's type spec.
+        if (tmpl.Decl is UnionDecl utd)
+        {
+            var variants = new UnionVariant[utd.Variants.Length];
+            for (int i = 0; i < variants.Length; i++)
+            {
+                var v = utd.Variants[i];
+                var fields = new Param[v.Fields.Length];
+                for (int j = 0; j < fields.Length; j++)
+                {
+                    var f = v.Fields[j];
+                    fields[j] = f with { Type = ctx.SubType(f.Type)! };
+                }
+                variants[i] = v with { Fields = fields };
+            }
+            return (new UnionDecl(mangled, [], variants, utd.Span, utd.Annotations), gataMap);
+        }
+
+        var classTmpl = (ClassDecl)tmpl.Decl;
+        var members = new ClassMember[classTmpl.Members.Length];
         bool changed = false;
         for (int i = 0; i < members.Length; i++)
         {
-            var m = tmpl.Decl.Members[i];
+            var m = classTmpl.Members[i];
             var sm = SubMember(m, ctx);
             members[i] = sm;
             if (!ReferenceEquals(m, sm)) changed = true;
         }
 
         var concrete = changed
-            ? new ClassDecl(mangled, [], tmpl.Decl.Annotations, members, tmpl.Decl.Span)
-            : tmpl.Decl with { Name = mangled };
+            ? new ClassDecl(mangled, [], classTmpl.Annotations, members, classTmpl.Span)
+            : classTmpl with { Name = mangled };
         return (concrete, gataMap);
     }
 
@@ -323,7 +406,8 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     }
 
     /// <summary>
-    /// Substitutes type parameters in a field declaration, including its type and initializer expression.
+    /// Substitutes type parameters in a field declaration, including its type and initializer
+    /// expression.
     /// </summary>
     private static FieldDecl SubFieldDecl(FieldDecl fd, SubstitutionContext ctx)
     {
@@ -335,7 +419,8 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     }
 
     /// <summary>
-    /// Substitutes type parameters in a method declaration, including its return type, parameters, and body.
+    /// Substitutes type parameters in a method declaration, including its return type, parameters,
+    /// and body.
     /// </summary>
     private static MethodDecl SubMethodDecl(MethodDecl md, SubstitutionContext ctx)
     {
@@ -348,7 +433,8 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     }
 
     /// <summary>
-    /// Substitutes type parameters in an operator declaration, including its return type, parameters, and body.
+    /// Substitutes type parameters in an operator declaration, including its return type,
+    /// parameters, and body.
     /// </summary>
     private static OperatorDecl SubOperatorDecl(OperatorDecl od, SubstitutionContext ctx)
     {
@@ -431,8 +517,8 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     }
 
     /// <summary>
-    /// Returns the C-type spelling for a Gata type argument, used when substituting
-    /// type parameters inside native struct fields and native bodies.
+    /// Returns the C-type spelling for a Gata type argument, used when substituting type parameters
+    /// inside native struct fields and native bodies.
     /// </summary>
     internal static string CTypeOf(TypeSpec t)
     {
@@ -456,7 +542,8 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     }
 
     /// <summary>
-    /// Substitutes type parameters in a block of statements, returning a new block if any substitutions occurred.
+    /// Substitutes type parameters in a block of statements, returning a new block if any
+    /// substitutions occurred.
     /// </summary>
     private static Block SubBlock(Block b, SubstitutionContext ctx)
     {
@@ -480,7 +567,8 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     }
 
     /// <summary>
-    /// Substitutes type parameters in a single statement, recursively processing any nested statements or expressions.
+    /// Substitutes type parameters in a single statement, recursively processing any nested
+    /// statements or expressions.
     /// </summary>
     private static Stmt SubStmt(Stmt s, SubstitutionContext ctx)
     {
@@ -659,7 +747,8 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     }
 
     /// <summary>
-    /// Substitutes type parameters in an expression, recursively processing any sub-expressions and types.
+    /// Substitutes type parameters in an expression, recursively processing any sub-expressions and
+    /// types.
     /// </summary>
     private static Expr SubExpr(Expr e, SubstitutionContext ctx)
     {
@@ -671,6 +760,20 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
                 if (ReferenceEquals(newType, ce.TargetType) && ReferenceEquals(newVal, ce.Value))
                     return e;
                 return new CastExpr(newType!, newVal, ce.Span) { Span = e.Span };
+
+            case GenericTypeRefExpr gt:
+            {
+                var subArgs = new NamedSpec[gt.Args.Length];
+                bool argsChanged = false;
+                for (int i = 0; i < gt.Args.Length; i++)
+                {
+                    subArgs[i] = ctx.SubType(gt.Args[i]) as NamedSpec ?? gt.Args[i];
+                    argsChanged |= !ReferenceEquals(subArgs[i], gt.Args[i]);
+                }
+                var subIndex = gt.IndexForm == null ? null : SubExpr(gt.IndexForm, ctx);
+                if (!argsChanged && ReferenceEquals(subIndex, gt.IndexForm)) return e;
+                return new GenericTypeRefExpr(gt.Name, subArgs, subIndex, gt.Span) { Span = e.Span };
+            }
 
             case TernaryExpr te:
                 var newCond = SubExpr(te.Cond, ctx);
@@ -860,8 +963,11 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
                 when Array.IndexOf(gparams, pn.Name) >= 0 && argType is IrPtrType ptr:
                 return Bind(pn.Name, SpecOf(ptr.Inner), binds);
 
-            case NamedSpec gn when gn.Args.Length > 0 && argType is IrClassRef cr
-                && Mangler.TryGetGenericInstance(cr.ClassName, out var instBase, out var instArgs)
+            // A generic instantiation in parameter position, matched against the stamped
+            // instance passed in. Both a class and a union arrive here - 'Count[T](Node[T] n)'
+            // called with a Node[int] carries an IrUnionType, not an IrClassRef.
+            case NamedSpec gn when gn.Args.Length > 0 && NameOfInstance(argType) is { } instName
+                && Mangler.TryGetGenericInstance(instName, out var instBase, out var instArgs)
                 && instBase == gn.Name && instArgs.Count == gn.Args.Length:
             {
                 for (int i = 0; i < gn.Args.Length; i++)
@@ -876,6 +982,20 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
         }
     }
 
+    /// <summary>
+    /// Returns the declared name of a type that could be a stamped generic instance - a class
+    /// reference or a union - or null for anything that could not be one.
+    /// </summary>
+    private static string? NameOfInstance(IrType t)
+    {
+        return t switch
+        {
+            IrClassRef cr => cr.ClassName,
+            IrUnionType ut => ut.Name,
+            _ => null,
+        };
+    }
+
     private static bool Bind(string param, TypeSpec spec, Dictionary<string, TypeSpec> binds)
     {
         if (binds.TryGetValue(param, out var prev)) return prev.ToSpecString() == spec.ToSpecString();
@@ -884,8 +1004,8 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     }
 
     /// <summary>
-    /// Returns the type spec for a resolved IR type, used as the binding value
-    /// when inferring type arguments from call-site argument types.
+    /// Returns the type spec for a resolved IR type, used as the binding value when inferring type
+    /// arguments from call-site argument types.
     /// </summary>
     internal static TypeSpec SpecOf(IrType t)
     {

@@ -7,8 +7,8 @@ internal static class Cli
     #region Utilities
 
     /// <summary>
-    /// Resolves the environment file, entry file, project root, and libgata directory for a
-    /// build or check invocation.
+    /// Resolves the environment file, entry file, project root, and libgata directory for a build
+    /// or check invocation.
     /// </summary>
     internal static (Manifest? manifest, string envPath, string entryPath, string projectRoot, string stdlibDir) ResolveInputs(
         string? manifestArg, string? envOverride, string? entryOverride, string? stdlibOverride,
@@ -32,14 +32,14 @@ internal static class Cli
         else if (manifestArg != null)
             Log.Warn($"project argument '{manifestArg}' is ignored with {looseHint} (loose-file mode discovers nothing from a project)");
 
-        var unreadableEnvCandidates = new List<string>();
+        var unreadableEnvs = new List<string>();
         string? envPath = envOverride
-            ?? (manifest != null ? Pipeline.DiscoverEnv(manifest.Dir, unreadableEnvCandidates) : null);
+            ?? (manifest != null ? Pipeline.DiscoverEnv(manifest.Dir, unreadableEnvs) : null);
         string? entryPath = entryOverride ?? (manifest != null ? Pipeline.DiscoverEntry(manifest.Dir) : null);
         if (envPath == null)
             Cli.Fail("no environment found - mark one project file @environment, or pass --env",
-                 unreadableEnvCandidates.Count > 0
-                     ? $"could not parse {string.Join(", ", unreadableEnvCandidates)}; if the environment is declared there, fix the syntax error first"
+                 unreadableEnvs.Count > 0
+                     ? $"could not parse {string.Join(", ", unreadableEnvs)}; if the environment is declared there, fix the syntax error first"
                      : null);
         if (entryPath == null) Cli.Fail("no entry point - expected src/main.g, or pass --entry");
 
@@ -88,8 +88,8 @@ internal static class Cli
     }
 
     /// <summary>
-    /// Parses a timeout argument of the form "30s", "5m", or "1h" into seconds.
-    /// An unrecognized format is a hard error, never a silent default.
+    /// Parses a timeout argument of the form "30s", "5m", or "1h" into seconds. An unrecognized
+    /// format is a hard error, never a silent default.
     /// </summary>
     internal static int ParseTimeout(string val)
     {

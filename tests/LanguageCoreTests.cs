@@ -3,8 +3,8 @@ namespace Appa.Tests;
 using Appa;
 
 /// <summary>
-/// Data-driven language-core coverage: every torture fixture that needs no
-/// import, run in-process via SingleFileCompile with no disk, no libgata.
+/// Data-driven language-core coverage: every torture fixture that needs no import, run in-process
+/// via SingleFileCompile with no disk, no libgata.
 /// </summary>
 public class LanguageCoreTests
 {

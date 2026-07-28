@@ -3,17 +3,12 @@ namespace Appa;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
-/// <summary>
-/// Everything between a finished C emission and a bootable image: process spawning, capability
-/// resolution, cross-compilation, linking, ISO mastering, and the QEMU run. Split out of Program.cs
-/// so the CLI file is argument parsing and orchestration only.
-/// </summary>
 internal static class Toolchain
 {
 
     /// <summary>
-    /// Runs an external process, optionally capturing its output and animating a spinner.
-    /// Reads must drain async before waiting to avoid a full-pipe deadlock.
+    /// Runs an external process, optionally capturing its output and animating a spinner. Reads
+    /// must drain async before waiting to avoid a full-pipe deadlock.
     /// </summary>
     internal static (int ExitCode, string Stdout, string Stderr) Exec(
         string exe, string arguments, string? workDir,
@@ -40,8 +35,8 @@ internal static class Toolchain
     }
 
     /// <summary>
-    /// Resolves the final Mem/Input/Threads/Discover capability set for a build,
-    /// combining the scanned capabilities with the manifest's discovery setting.
+    /// Resolves the final Mem/Input/Threads/Discover capability set for a build, combining the
+    /// scanned capabilities with the manifest's discovery setting.
     /// </summary>
     internal static (bool Mem, bool Input, bool Threads, bool Time, bool Discover) ResolveCaps(CapabilityScan caps, Manifest m)
     {
@@ -112,8 +107,8 @@ internal static class Toolchain
     }
 
     /// <summary>
-    /// Stages the GatOS template, compiles and links the kernel, builds the ISO,
-    /// copies it to the project build dir, and optionally runs QEMU.
+    /// Stages the GatOS template, compiles and links the kernel, builds the ISO, copies it to the
+    /// project build dir, and optionally runs QEMU.
     /// </summary>
     internal static void BuildGatOSImage(IReadOnlyList<OutputFile> output, Manifest manifest,
                                 string projectRoot, List<string> defines, string capsNote,
@@ -155,7 +150,7 @@ internal static class Toolchain
             string kernelBin = Path.Combine(distDir, "kernel.bin");
             LinkKernel(objFiles, kernelBin, targetsDir);
 
-            string isoPath = MakeIso(kernelBin, isoDir, distDir, buildDir);
+            string isoPath = MakeIso(kernelBin, isoDir, distDir);
 
             string projectBuildDir = Path.Combine(projectRoot, "build");
             Directory.CreateDirectory(projectBuildDir);
@@ -176,15 +171,15 @@ internal static class Toolchain
     }
 
     /// <summary>
-    /// Returns true if the given translation unit path belongs to the userspace
-    /// realm rather than the kernel.
+    /// Returns true if the given translation unit path belongs to the userspace realm rather than
+    /// the kernel.
     /// </summary>
     internal static bool IsUserspace(string rel) =>
         rel.StartsWith("ulibc/") || rel == "kernel/uproc.c";
 
     /// <summary>
-    /// Compiles all C and assembly files in parallel, reporting in-place progress.
-    /// On the first failure, stops scheduling new jobs and prints the failure block.
+    /// Compiles all C and assembly files in parallel, reporting in-place progress. On the first
+    /// failure, stops scheduling new jobs and prints the failure block.
     /// </summary>
     internal static List<string> CompileAll(List<string> cFiles, List<string> asmFiles,
                                    string srcDir, string objDir, Mode mode, List<string> defines)
@@ -262,8 +257,8 @@ internal static class Toolchain
     }
 
     /// <summary>
-    /// Links all object files into a kernel.bin using the cross-gcc linker script.
-    /// macOS links with ld directly (no LTO); every other host links through cross-gcc with LTO.
+    /// Links all object files into a kernel.bin using the cross-gcc linker script. macOS links with
+    /// ld directly (no LTO); every other host links through cross-gcc with LTO.
     /// </summary>
     internal static void LinkKernel(List<string> objFiles, string kernelBin, string targetsDir)
     {
@@ -285,10 +280,10 @@ internal static class Toolchain
     }
 
     /// <summary>
-    /// Creates a bootable ISO from a kernel.bin using grub-mkstandalone and grub-mkrescue.
-    /// Returns the path to the created ISO.
+    /// Creates a bootable ISO from a kernel.bin using grub-mkstandalone and grub-mkrescue. Returns
+    /// the path to the created ISO.
     /// </summary>
-    internal static string MakeIso(string kernelBin, string isoDir, string distDir, string buildDir)
+    internal static string MakeIso(string kernelBin, string isoDir, string distDir)
     {
         string bootDir = Path.Combine(isoDir, "boot");
         string uefiDir = Path.Combine(isoDir, "EFI", "BOOT");

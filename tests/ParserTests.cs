@@ -3,8 +3,8 @@ namespace Appa.Tests;
 using Appa;
 
 /// <summary>
-/// Inline string-literal coverage of the parser: AST shape for representative
-/// top-level declarations, statements, and expressions.
+/// Inline string-literal coverage of the parser: AST shape for representative top-level
+/// declarations, statements, and expressions.
 /// </summary>
 public class ParserTests
 {
@@ -27,14 +27,14 @@ public class ParserTests
     }
 
     [Fact]
-    public void EnvironmentAnnotationParsesAsMarkerDecl()
+    public void EnvironmentParsesAsAMarker()
     {
         var prog = SingleFileCompile.Parse("@environment");
         Assert.IsType<EnvironmentDecl>(prog.Items[0]);
     }
 
     [Fact]
-    public void FreeFuncDeclCapturesNameParamsAndReturnType()
+    public void FreeFuncCapturesItsSignature()
     {
         var prog = SingleFileCompile.Parse("int func Add(int a, int b) { return a + b; }");
         var func = Assert.IsType<FuncDecl>(prog.Items[0]);
@@ -54,7 +54,7 @@ public class ParserTests
     }
 
     [Fact]
-    public void GenericFuncDeclCollectsGenericParams()
+    public void GenericFuncCollectsItsParams()
     {
         var prog = SingleFileCompile.Parse("func Identity[T](T x) { return x; }");
         var func = Assert.IsType<FuncDecl>(prog.Items[0]);
@@ -91,7 +91,7 @@ public class ParserTests
     }
 
     [Fact]
-    public void UserBlockParsesProcessAndThreadTopology()
+    public void UserBlockParsesItsTopology()
     {
         var prog = SingleFileCompile.Parse("""
             user {
@@ -157,7 +157,7 @@ public class ParserTests
     }
 
     [Fact]
-    public void BinExprCapturesOperatorAndOperands()
+    public void BinExprCapturesItsOperands()
     {
         var prog = SingleFileCompile.Parse("func F() { let int x = 1 + 2; }");
         var func = (FuncDecl)prog.Items[0];
@@ -188,7 +188,7 @@ public class ParserTests
     }
 
     [Fact]
-    public void InterpolatedStringAlternatesLiteralAndExprParts()
+    public void InterpolationAlternatesParts()
     {
         var prog = SingleFileCompile.Parse("func F() { let s = $\"count={n}\"; }");
         var func = (FuncDecl)prog.Items[0];
@@ -200,7 +200,7 @@ public class ParserTests
     }
 
     [Fact]
-    public void MissingSemicolonThrowsParseException()
+    public void MissingSemicolonFails()
     {
         Assert.Throws<ParseException>(() => SingleFileCompile.Parse("func F() { let int x = 5 }"));
     }

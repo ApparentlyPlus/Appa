@@ -1,19 +1,12 @@
 namespace Appa;
 
-/// <summary>
-/// The single authority for C identifiers. Every emitted name is produced here from
-/// a symbol's identity; no other pass spells a gata_ name. Definition and call
-/// sites read the same Symbol.CName assigned via this class once declarations are
-/// collected, so a definition and its callers can never disagree on a name.
-/// </summary>
 internal static class Mangler
 {
     public const string KernelEntry = "gata_kernelspace_main";
 
-    // C keywords and the handful of standard macros that behave like them. None of these
-    // is a Gata keyword, so all of them are ordinary identifiers a Gata program may use -
-    // and locals and parameters are the only names emitted verbatim, so they are the only
-    // names that can collide. Everything else already carries a gata_ prefix.
+    // C keywords and the standard macros that behave like them. None is a Gata keyword, so a
+    // program may use them all - and locals and parameters, the only names emitted verbatim, are
+    // therefore the only ones that can collide.
     private static readonly System.Collections.Frozen.FrozenSet<string> CReserved =
         System.Collections.Frozen.FrozenSet.ToFrozenSet(
         [
@@ -28,27 +21,18 @@ internal static class Mangler
         ], StringComparer.Ordinal);
 
     /// <summary>
-    /// Returns the C spelling of a local variable or parameter name.
-    ///
-    /// Locals and parameters are the one category of name the emitter prints as written -
-    /// keeping them readable is the point, since they are what a person reads the generated
-    /// C for. That makes them the one category that can collide with C's own vocabulary:
-    /// 'struct', 'register' and 'signed' are all perfectly good Gata identifiers, and each
-    /// one used to produce C that would not parse. A trailing underscore is appended in
-    /// exactly those cases, which C guarantees is never itself reserved.
-    ///
-    /// Must be applied at every site that prints such a name - the declaration, the
-    /// parameter list, and each reference - so the three can never disagree.
+    /// Returns the C spelling of a local or parameter name. These are the only names printed as
+    /// written and so the only ones that can collide with C's vocabulary; those get a trailing
+    /// underscore. Apply at every site that prints the name.
     /// </summary>
     public static string Local(string name)
     {
         return CReserved.Contains(name) ? name + "_" : name;
     }
 
-    // Prefixes the compiler itself generates local names from: Ownership's hoisting temps,
-    // Desugar's switch and match scrutinee temps, the throws lowering's Result temps and
-    // labels, the constructor's self parameter, and the Densifier's dense function tokens.
-    // Each is followed by a sequence number, except the fixed names checked separately.
+    // Prefixes the compiler generates local names from: hoisting temps, scrutinee temps, Result
+    // temps and labels, the constructor's self parameter, dense function tokens. Each is followed
+    // by a sequence number, except the fixed names checked separately.
     private static readonly string[] GeneratedPrefixes =
     [
         "_g", "_a", "_arr", "_asg", "_ci", "_col", "_e", "_fc", "_fi", "_first", "_if",
@@ -56,14 +40,9 @@ internal static class Mangler
     ];
 
     /// <summary>
-    /// Returns true if a user-written local or parameter name would collide with a name the
-    /// compiler generates for its own temporaries.
-    ///
-    /// Renaming the user's version is not an option here: the generated names are emitted
-    /// through the same path, so any rule that moves one moves the other and the collision
-    /// survives. Rejecting the name instead is unambiguous and costs the user a rename of an
-    /// identifier they had no reason to pick. Ordinary leading-underscore names such as
-    /// '_unused' are unaffected - only an exact generated shape matches.
+    /// True if a user-written local would collide with a compiler temporary. Renaming the user's is
+    /// not an option - both go through this path, so any rule that moves one moves the other. Only
+    /// an exact generated shape matches, so '_unused' is fine.
     /// </summary>
     public static bool IsReservedLocal(string name)
     {
@@ -111,11 +90,12 @@ internal static class Mangler
     public static void ResetGenericDisplay()
     {
         _genericInfo.Clear();
+        _genericTemplates.Clear();
     }
 
     /// <summary>
-    /// Records the base name and type arguments for a generic instantiation so
-    /// diagnostics can display it in user-readable form.
+    /// Records the base name and type arguments for a generic instantiation so diagnostics can
+    /// display it in user-readable form.
     /// </summary>
     public static void RegisterGenericInstance(string mangled, string baseName, List<string> args)
     {
@@ -123,8 +103,8 @@ internal static class Mangler
     }
 
     /// <summary>
-    /// Returns the registered base name and type arguments for a mangled generic instance
-    /// name, such as Map_int_String, which yields ("Map", ["int", "String"]). Structural consumers
+    /// Returns the registered base name and type arguments for a mangled generic instance name,
+    /// such as Map_int_String, which yields ("Map", ["int", "String"]). Structural consumers
     /// (generic-function type inference) use this instead of re-splitting the mangled string.
     /// </summary>
     public static bool TryGetGenericInstance(string mangled, out string baseName, out List<string> args)
@@ -139,13 +119,46 @@ internal static class Mangler
         return false;
     }
 
+    // Base names of every generic template seen this build, whether or not anything
+    // instantiated them. Kept for diagnostics: a template nothing names as a type is replaced
+    // by nothing, so without this the base name looks like an undefined identifier.
+    [ThreadStatic] private static HashSet<string>? _genericTemplatesTls;
+    private static HashSet<string> _genericTemplates => _genericTemplatesTls ??= [];
+
     /// <summary>
-    /// Returns the user-readable display name for a type, expanding generic
-    /// instantiations recursively, e.g. List_int becomes List[int].
+    /// Records that a generic template with this base name was declared.
+    /// </summary>
+    public static void RegisterGenericTemplate(string baseName)
+    {
+        _genericTemplates.Add(baseName);
+    }
+
+    /// <summary>
+    /// Returns true if a generic template with this base name was declared.
+    /// </summary>
+    public static bool IsGenericTemplate(string baseName) => _genericTemplates.Contains(baseName);
+
+    /// <summary>
+    /// Every registered instantiation of a generic base name, mangled and ordinally sorted - which
+    /// stamped instance 'Maybe.Found(7)' means once the template is gone. Sorted because these
+    /// reach the user, and dictionary order is not stable.
+    /// </summary>
+    public static List<string> InstancesOf(string baseName)
+    {
+        var found = new List<string>();
+        foreach (var (mangled, info) in _genericInfo)
+            if (info.Base == baseName) found.Add(mangled);
+        found.Sort(StringComparer.Ordinal);
+        return found;
+    }
+
+    /// <summary>
+    /// Returns the user-readable display name for a type, expanding generic instantiations
+    /// recursively, e.g. List_int becomes List[int].
     /// </summary>
     public static string DisplayName(string name)
     {
-        if (!_genericInfo.TryGetValue(name, out var info))
+        if (!_genericInfo.TryGetValue(name, out _))
         {
             return name;
         }
@@ -240,6 +253,34 @@ internal static class Mangler
     }
 
     /// <summary>
+    /// The C name of a managed union's generated retain, which switches on the tag and returns the
+    /// union unchanged so it composes like the runtime intrinsic. Not densified, since unions keep
+    /// their readable typedef name and one type must be spelled one way.
+    /// </summary>
+    public static string UnionRetain(string name)
+    {
+        return $"gata_{name}__retain";
+    }
+
+    /// <summary>
+    /// Returns the C function name for a managed union's generated release, which switches on the
+    /// tag and releases whatever the live variant holds.
+    /// </summary>
+    public static string UnionRelease(string name)
+    {
+        return $"gata_{name}__release";
+    }
+
+    /// <summary>
+    /// Returns the C function name for a union's generated structural equality, which compares tags
+    /// first and then the live variant's fields.
+    /// </summary>
+    public static string UnionEq(string name)
+    {
+        return $"gata_{name}__eq";
+    }
+
+    /// <summary>
     /// Returns the C function name for a method, appending the overload suffix when overloaded.
     /// </summary>
     public static string Method(string owner, string name, IReadOnlyList<Param> ps, bool overloaded)
@@ -260,8 +301,8 @@ internal static class Mangler
     }
 
     /// <summary>
-    /// Returns the C function name for a file-local private free function, prefixed by a
-    /// stable per-file token so two files may reuse the same name without clashing.
+    /// Returns the C function name for a file-local private free function, prefixed by a stable
+    /// per-file token so two files may reuse the same name without clashing.
     /// </summary>
     public static string PrivateFreeFunc(string fileToken, string name, IReadOnlyList<Param> ps, bool overloaded)
     {
@@ -269,8 +310,8 @@ internal static class Mangler
     }
 
     /// <summary>
-    /// Returns a stable 8-hex C-identifier fragment derived from the declaring file path
-    /// via a 32-bit FNV-1a hash, used to namespace file-local function names.
+    /// Returns a stable 8-hex C-identifier fragment derived from the declaring file path via a
+    /// 32-bit FNV-1a hash, used to namespace file-local function names.
     /// </summary>
     public static string FileToken(string file)
     {
@@ -280,10 +321,9 @@ internal static class Mangler
     }
 
     /// <summary>
-    /// Returns the C operator function name for an operator overload on the given class.
-    /// 'overloaded' appends a disambiguating suffix - only 'as' can have more than one overload
-    /// per class today, distinguished by its parameter type the same way every other
-    /// parameterized operator or method overload already is.
+    /// The C name for an operator overload. 'overloaded' appends a disambiguating suffix - only
+    /// 'as' can have more than one per class today, distinguished by parameter type as every other
+    /// parameterized overload already is.
     /// </summary>
     public static string Operator(string owner, string op, IReadOnlyList<Param> ps, bool overloaded)
     {
@@ -329,8 +369,8 @@ internal static class Mangler
     }
 
     /// <summary>
-    /// Returns the overload suffix that distinguishes parameter-type combinations,
-    /// encoding each parameter's mangled type name joined by underscores.
+    /// Returns the overload suffix that distinguishes parameter-type combinations, encoding each
+    /// parameter's mangled type name joined by underscores.
     /// </summary>
     public static string OverloadSuffix(IReadOnlyList<Param> ps)
     {
@@ -348,9 +388,9 @@ internal static class Mangler
     }
 
     /// <summary>
-    /// Converts a Gata type name to a C-identifier fragment. Every non-identifier
-    /// character becomes a separating underscore (collapsed to prevent runs); pointer
-    /// stars become _p markers so distinct pointer types never collapse to the same suffix.
+    /// Converts a Gata type name to a C-identifier fragment. Every non-identifier character becomes
+    /// a separating underscore (collapsed to prevent runs); pointer stars become _p markers so
+    /// distinct pointer types never collapse to the same suffix.
     /// </summary>
     internal static string MangleTypeName(string t)
     {

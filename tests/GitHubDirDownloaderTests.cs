@@ -5,9 +5,9 @@ using System.Net.Http;
 using Appa;
 
 /// <summary>
-/// A fake HttpMessageHandler that dispatches by URL prefix, so tests never touch the
-/// real network. Each registered responder is a function from the request URL to a
-/// response, allowing per-call-count behavior (e.g. "fail once, then succeed").
+/// A fake HttpMessageHandler that dispatches by URL prefix, so tests never touch the real network.
+/// Each registered responder is a function from the request URL to a response, allowing
+/// per-call-count behavior (e.g. "fail once, then succeed").
 /// </summary>
 internal sealed class FakeGitHubHandler : HttpMessageHandler
 {
@@ -27,9 +27,8 @@ internal sealed class FakeGitHubHandler : HttpMessageHandler
 }
 
 /// <summary>
-/// Exercises GitHubDirDownloader's pure logic (tree filtering, the truncation fallback,
-/// LFS-pointer detection, and clear failures on 404/401) against a fake HTTP handler -
-/// no real network access.
+/// Exercises GitHubDirDownloader's pure logic (tree filtering, the truncation fallback, LFS-pointer
+/// detection, and clear failures on 404/401) against a fake HTTP handler - no real network access.
 /// </summary>
 public class GitHubDirDownloaderTests
 {

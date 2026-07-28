@@ -12,7 +12,8 @@ internal static class Installer
 {
 
     /// <summary>
-    /// Downloads and installs (or re-installs) the GatOS toolchain, libgata, template, and appa binary.
+    /// Downloads and installs (or re-installs) the GatOS toolchain, libgata, template, and appa
+    /// binary.
     /// </summary>
     internal static async Task RunSetup(bool isUpdate)
     {
@@ -110,9 +111,9 @@ internal static class Installer
     }
 
     /// <summary>
-    /// Adds the appa bin directory to the system PATH.
-    /// Unix creates a symlink in /usr/local/bin; Windows appends to the machine PATH variable.
-    /// Requires elevated privileges (checked by caller).
+    /// Adds the appa bin directory to the system PATH. Unix creates a symlink in /usr/local/bin;
+    /// Windows appends to the machine PATH variable. Requires elevated privileges (checked by
+    /// caller).
     /// </summary>
     internal static void AddToPath(bool isWin)
     {
@@ -165,9 +166,9 @@ internal static class Installer
     }
 
     /// <summary>
-    /// Downloads the latest appa binary and swaps it in after this process exits.
-    /// The replacement is deferred to a detached process because the installed binary
-    /// may be the one currently running.
+    /// Downloads the latest appa binary and swaps it in after this process exits. The replacement
+    /// is deferred to a detached process because the installed binary may be the one currently
+    /// running.
     /// </summary>
     internal static void UpdateAppaBinary(bool isWin, bool isMac)
     {
@@ -237,8 +238,8 @@ internal static class Installer
     }
 
     /// <summary>
-    /// Extracts the GatOS template zip into destDir, flattening GitHub's single wrapper
-    /// folder and keeping only its top-level directories (src/, targets/).
+    /// Extracts the GatOS template zip into destDir, flattening GitHub's single wrapper folder and
+    /// keeping only its top-level directories (src/, targets/).
     /// </summary>
     internal static void ExtractTemplate(string zipPath, string destDir)
     {

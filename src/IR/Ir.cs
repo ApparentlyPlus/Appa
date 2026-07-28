@@ -4,10 +4,9 @@ using System.Collections.Frozen;
 
 #region Primitive types
 
-// One source of truth for scalar types: a single frozen table carrying each primitive's
-// fixed-width C spelling, family, and numeric promotion rank. Every other predicate and
-// list (spelling set, integer family, promotion ranks) is derived from this table, so
-// adding a primitive is a one-line change that cannot drift across passes.
+// One source of truth for scalar types: a frozen table of each primitive's C spelling, family
+// and promotion rank. Every other predicate and list derives from it, so adding a primitive is
+// one line that cannot drift across passes.
 internal static class PrimTypes
 {
     internal readonly record struct PrimInfo(string CType, bool IsInt, bool IsFloatTy, int Rank);
@@ -60,8 +59,8 @@ internal static class PrimTypes
     }
 
     /// <summary>
-    /// Returns true if the canonical token belongs to the integer family (bool included,
-    /// matching C's integral treatment).
+    /// Returns true if the canonical token belongs to the integer family (bool included, matching
+    /// C's integral treatment).
     /// </summary>
     public static bool IsIntCanon(string canon)
     {
@@ -77,8 +76,8 @@ internal static class PrimTypes
     }
 
     /// <summary>
-    /// Returns the numeric promotion rank used to pick the wider operand type.
-    /// Unknown names take int's rank, mirroring the resolver's historical default.
+    /// Returns the numeric promotion rank used to pick the wider operand type. Unknown names take
+    /// int's rank, mirroring the resolver's historical default.
     /// </summary>
     public static int Rank(string name)
     {
@@ -154,8 +153,8 @@ internal record IrVoidType : IrType
 }
 
 /// <summary>
-/// A primitive scalar type. CName is the canonical token;
-/// ToCType lowers it to the corresponding fixed-width C type.
+/// A primitive scalar type. CName is the canonical token; ToCType lowers it to the corresponding
+/// fixed-width C type.
 /// </summary>
 internal record IrPrimType(string CName) : IrType
 {
@@ -176,8 +175,7 @@ internal record IrPrimType(string CName) : IrType
 }
 
 /// <summary>
-/// A reference to a named class type.
-/// Lowers to a mangled pointer in C output.
+/// A reference to a named class type. Lowers to a mangled pointer in C output.
 /// </summary>
 internal record IrClassRef(string ClassName) : IrType
 {
@@ -199,8 +197,8 @@ internal record IrClassRef(string ClassName) : IrType
 #region Composite types
 
 /// <summary>
-/// A named integer-backed enum type. Distinct from int with no implicit conversion,
-/// but comparable, assignable, and usable as a switch scrutinee. Lowers to a C enum.
+/// A named integer-backed enum type. Distinct from int with no implicit conversion, but comparable,
+/// assignable, and usable as a switch scrutinee. Lowers to a C enum.
 /// </summary>
 internal record IrEnumType(string Name) : IrType
 {
@@ -216,8 +214,7 @@ internal record IrEnumType(string Name) : IrType
 }
 
 /// <summary>
-/// A pointer type for unsafe Gata code.
-/// Lowers to a C pointer to the inner type.
+/// A pointer type for unsafe Gata code. Lowers to a C pointer to the inner type.
 /// </summary>
 internal record IrPtrType(IrType Inner) : IrType
 {
@@ -231,9 +228,9 @@ internal record IrPtrType(IrType Inner) : IrType
 }
 
 /// <summary>
-/// A fixed-size array type [N]T - a value aggregate, not a heap reference.
-/// Monomorphized per (element, size) pair into a named C struct.
-/// Copies, returns, and iterates by value with the length carried in the type.
+/// A fixed-size array type [N]T - a value aggregate, not a heap reference. Monomorphized per
+/// (element, size) pair into a named C struct. Copies, returns, and iterates by value with the
+/// length carried in the type.
 /// </summary>
 internal record IrArrayType(IrType Elem, int Size) : IrType
 {
@@ -246,8 +243,8 @@ internal record IrArrayType(IrType Elem, int Size) : IrType
     public override string MangledName => $"Arr_{Elem.MangledName}_{Size}";
 
     /// <summary>
-    /// Produces a stable C-identifier mangling of a type, used to name array structs
-    /// and function-pointer typedefs.
+    /// Produces a stable C-identifier mangling of a type, used to name array structs and
+    /// function-pointer typedefs.
     /// </summary>
     public static string Mangle(IrType t)
     {
@@ -256,15 +253,15 @@ internal record IrArrayType(IrType Elem, int Size) : IrType
 }
 
 /// <summary>
-/// A Result-of-T wrapper produced by throws functions.
-/// Lowers to a C struct with a bool tag and a value or error payload.
+/// A Result-of-T wrapper produced by throws functions. Lowers to a C struct with a bool tag and a
+/// value or error payload.
 /// </summary>
 internal record IrResultType(IrType Inner) : IrType
 {
     /// <summary>
-    /// The C typedef name for this result type, e.g. Result_int or Result_MyClass.
-    /// Derived from MangledName so it always agrees with the typedef registered by
-    /// SymbolTable.RegisterThrows (see SymbolTable.ResultInnerName). void folds to int.
+    /// The C typedef name for this result type, e.g. Result_int or Result_MyClass. Derived from
+    /// MangledName so it always agrees with the typedef registered by SymbolTable.RegisterThrows
+    /// (see SymbolTable.ResultInnerName). void folds to int.
     /// </summary>
     public string ResultName => $"Result_{(Inner is IrVoidType ? "int" : Inner.MangledName)}";
 
@@ -277,10 +274,9 @@ internal record IrResultType(IrType Inner) : IrType
 }
 
 /// <summary>
-/// A function-pointer type func(T1, T2) -> R.
-/// ToCType returns a stable typedef name rather than an inline C declarator,
-/// because inline declarators cannot be used with the type-then-name emission pattern.
-/// The typedef is emitted once per distinct signature from IrModule.FuncPtrTypes.
+/// A function-pointer type func(T1, T2) -> R. ToCType returns a stable typedef name rather than an
+/// inline C declarator, because inline declarators cannot be used with the type-then-name emission
+/// pattern. The typedef is emitted once per distinct signature from IrModule.FuncPtrTypes.
 /// </summary>
 internal record IrFuncPtrType(IrType Ret, List<IrType> Params) : IrType
 {
@@ -293,7 +289,7 @@ internal record IrFuncPtrType(IrType Ret, List<IrType> Params) : IrType
         }
     )}";
 
-    // Computed on every call - see IrEnumType.ToCType for why this can't be cached.
+    // Computed on every call
     public override string ToCType()
     {
         return Mangler.Class($"Fn_{Ret.MangledName}__{(
@@ -308,8 +304,8 @@ internal record IrFuncPtrType(IrType Ret, List<IrType> Params) : IrType
 }
 
 /// <summary>
-/// A named tagged-union type. Not generic, not ARC-managed.
-/// Lowers to a tag enum and a C struct containing the tag and a union of per-variant payload structs.
+/// A named tagged-union type. Not generic, not ARC-managed. Lowers to a tag enum and a C struct
+/// containing the tag and a union of per-variant payload structs.
 /// </summary>
 internal record IrUnionType(string Name) : IrType
 {
@@ -327,18 +323,10 @@ internal record IrUnionType(string Name) : IrType
 #region Expressions
 
 /// <summary>
-/// Base type for all IR expression nodes.
-/// Every expression carries its result type and an optional source span.
+/// Base type for all IR expression nodes. Every expression carries its result type and an optional
+/// source span.
 /// </summary>
 internal abstract record IrExpr(IrType Type) { public TextSpan Span { get; init; } = TextSpan.None; }
-
-// Note for literals:
-
-// IrLitInt - Value is the literal's 64-bit bit pattern. T is the type selected by
-// suffix or magnitude (int by default). CText, when set, is the exact C
-// text to emit (hex forms, suffixed forms); otherwise Value is printed.
-// IrLitFloat - Raw is emitted verbatim (valid C including exponent and trailing `f`).
-// T is double by default, float for an `f` suffix.
 
 /// <summary>
 /// An integer literal. Value is the 64-bit bit pattern; CText overrides the emitted text when set.
@@ -417,19 +405,15 @@ internal record IrThrowsCall(string CName, IrType InnerType, List<IrExpr> Args) 
 internal record IrThrowsInstanceCall(IrExpr Recv, string CName, IrType InnerType, List<IrExpr> Args) : IrExpr(new IrResultType(InnerType));
 
 /// <summary>
-/// A throwing call carrying its own inline failure handler (`f() catch { ... }`).
-///
-/// Note here that unlike IrThrowsCall, whose type is the Result wrapper because the caller still has to test
-/// it, this node's type is the inner type: the handler is guaranteed to have supplied a value
-/// on the failure path, so by the time control resumes the value is unconditionally there.
-/// Call is an IrThrowsCall or IrThrowsInstanceCall; the ARC pass splits the pair into a
-/// declaration plus an if/else and never lets this node reach the emitter.
+/// A throwing call carrying its own inline failure handler (`f() catch { ... }`). Its type is the
+/// inner type, not IrThrowsCall's Result wrapper, since the handler always supplies a value. The
+/// ARC pass splits it into a declaration plus an if/else before the emitter.
 /// </summary>
 internal record IrCatchCall(IrExpr Call, IrBlock Handler, IrType InnerType) : IrExpr(InnerType);
 
 /// <summary>
-/// A bare reference to a free function by name, decaying to a function-pointer value.
-/// CName is a valid C function-pointer value with no cast needed.
+/// A bare reference to a free function by name, decaying to a function-pointer value. CName is a
+/// valid C function-pointer value with no cast needed.
 /// </summary>
 internal record IrFuncRef(string CName, IrFuncPtrType T) : IrExpr(T);
 
@@ -444,8 +428,8 @@ internal record IrIndirectCall(IrExpr Target, IrType Ret, List<IrExpr> Args) : I
 internal record IrUnionConstruct(IrUnionType T, int VariantIndex, List<IrExpr> Args) : IrExpr(T);
 
 /// <summary>
-/// Reads one payload field of a union's active variant.
-/// Only emitted after the tag has already been tested.
+/// Reads one payload field of a union's active variant. Only emitted after the tag has already been
+/// tested.
 /// </summary>
 internal record IrUnionField(IrExpr Union, int VariantIndex, string Field, IrType FieldType) : IrExpr(FieldType);
 
@@ -481,8 +465,8 @@ internal record IrCast(IrType To, IrExpr Value) : IrExpr(To);
 internal record IrNew(string ClassName, List<IrExpr> Args) : IrExpr(new IrClassRef(ClassName));
 
 /// <summary>
-/// A heap allocation followed by repeated Add calls to populate a collection.
-/// Lowered to a GNU statement expression by the emitter.
+/// A heap allocation followed by repeated Add calls to populate a collection. Lowered to a GNU
+/// statement expression by the emitter.
 /// </summary>
 internal record IrNewInit(string ClassName, List<IrExpr> Args, string AddCName, List<IrExpr> Inits)
     : IrExpr(new IrClassRef(ClassName));
@@ -519,8 +503,8 @@ internal record IrDefault(IrType Of) : IrExpr(Of);
 
 /// <summary>
 /// A designated struct literal: `(T){ .field = value, ... }`. Fields left out of the list are
-/// zero-initialized by C's own rules, which is how a Result carrying only an error is built.
-/// The ARC pass uses this to construct the Result values a throws function returns.
+/// zero-initialized by C's own rules, which is how a Result carrying only an error is built. The
+/// ARC pass uses this to construct the Result values a throws function returns.
 /// </summary>
 internal record IrStructLit(IrType StructType, List<(string Field, IrExpr Value)> Fields) : IrExpr(StructType);
 
@@ -529,8 +513,7 @@ internal record IrStructLit(IrType StructType, List<(string Field, IrExpr Value)
 #region Statements
 
 /// <summary>
-/// Base type for all IR statement nodes.
-/// Every statement carries an optional source span.
+/// Base type for all IR statement nodes. Every statement carries an optional source span.
 /// </summary>
 internal abstract record IrStmt { public TextSpan Span { get; init; } = TextSpan.None; }
 
@@ -546,20 +529,20 @@ internal record IrNativeStmt(string C) : IrStmt;
 
 /// <summary>
 /// `assign v;` inside a catch handler: stores the replacement value into the declaration the
-/// handler is attached to. The ARC pass rewrites it into a plain store, since only that pass
-/// knows the target's name - the handler is lowered as part of the declaration it belongs to.
+/// handler is attached to. The ARC pass rewrites it into a plain store, since only that pass knows
+/// the target's name - the handler is lowered as part of the declaration it belongs to.
 /// </summary>
 internal record IrAssignValue(IrExpr Value) : IrStmt;
 
 /// <summary>
-/// A goto targeting an IrLabel. Only the ARC pass emits these, to route a failed throwing
-/// call or an explicit throw to its enclosing try's handler.
+/// A goto targeting an IrLabel. Only the ARC pass emits these, to route a failed throwing call or
+/// an explicit throw to its enclosing try's handler.
 /// </summary>
 internal record IrGoto(string Label) : IrStmt;
 
 /// <summary>
-/// A label an IrGoto can target. Emitted as `name:;` - the trailing empty statement keeps a
-/// label legal immediately before a closing brace, which C forbids otherwise.
+/// A label an IrGoto can target. Emitted as `name:;` - the trailing empty statement keeps a label
+/// legal immediately before a closing brace, which C forbids otherwise.
 /// </summary>
 internal record IrLabel(string Name) : IrStmt;
 
@@ -630,7 +613,8 @@ internal record IrSwitch(IrExpr Scrutinee, List<IrSwitchCase> Cases, IrBlock? De
 internal record IrSwitchCase(List<IrExpr> Labels, IrBlock Body);
 
 /// <summary>
-/// A match statement over a union type. Lowered to an if/else-if chain by Desugar; never reaches the backend.
+/// A match statement over a union type. Lowered to an if/else-if chain by Desugar; never reaches
+/// the backend.
 /// </summary>
 internal record IrMatch(IrExpr Scrutinee, IrUnionType UnionT, List<IrMatchCase> Cases, IrBlock? Default) : IrStmt;
 
@@ -660,12 +644,14 @@ internal record IrDefer(IrStmt Action) : IrStmt;
 internal record IrThrow() : IrStmt;
 
 /// <summary>
-/// A debug assertion. Emitted as a direct call to the env debug binding with a raw C string literal.
+/// A debug assertion. Emitted as a direct call to the env debug binding with a raw C string
+/// literal.
 /// </summary>
 internal record IrDebug(string Raw) : IrStmt;
 
 /// <summary>
-/// A panic statement. Emitted as a direct call to the env panic binding with a raw C string literal.
+/// A panic statement. Emitted as a direct call to the env panic binding with a raw C string
+/// literal.
 /// </summary>
 internal record IrPanic(string Raw) : IrStmt;
 
@@ -681,8 +667,8 @@ internal enum Visibility { Shared, Kernel, User }
 internal record IrParam(string Name, IrType Type, bool IsRef = false);
 
 /// <summary>
-/// An IR function - either a free function or a class method.
-/// Body is null for native functions; Native carries the C text instead.
+/// An IR function - either a free function or a class method. Body is null for native functions;
+/// Native carries the C text instead.
 /// </summary>
 internal record IrFunction(
     string Name,
@@ -711,11 +697,9 @@ internal record IrField(string Name, IrType Type, IrExpr? Init);
 internal record RawFieldBlock(string C);
 
 /// <summary>
-/// An operator overload defined on a class.
-/// Body is null for native operators; Native carries the C text instead.
-/// IsStatic is true only for the one parameter form of 'as' (a static factory converting its
-/// parameter to self, eg. String's 'operator String func as(char c)') - every other
-/// operator, including zero-parameter 'as', is an instance operator over self.
+/// An operator overload on a class; Body is null for native ones, which carry C text. IsStatic is
+/// true only for one-parameter 'as', a factory converting its parameter to self - every other
+/// operator, zero-parameter 'as' included, is an instance operator.
 /// </summary>
 internal record IrOperator(
     string Op,
@@ -731,8 +715,8 @@ internal record IrOperator(
 );
 
 /// <summary>
-/// An IR class declaration with its fields, methods, and operator overloads.
-/// Keep marks a class as exempt from Dce reachability and Densifier renaming.
+/// An IR class declaration with its fields, methods, and operator overloads. Keep marks a class as
+/// exempt from Dce reachability and Densifier renaming.
 /// </summary>
 internal record IrClass(
     string Name,
@@ -801,8 +785,8 @@ internal record IrUnionVariant(string Name, string TagCName, List<IrParam> Field
 internal record IrUnion(string Name, string CName, List<IrUnionVariant> Variants);
 
 /// <summary>
-/// The top-level IR module produced by the type resolver.
-/// Carries all classes, functions, native blocks, and supporting type lists.
+/// The top-level IR module produced by the type resolver. Carries all classes, functions, native
+/// blocks, and supporting type lists.
 /// </summary>
 internal record IrModule(
     List<IrNativeBlock> NativeBlocks,
@@ -817,19 +801,17 @@ internal record IrModule(
     List<IrUnion> Unions
 )
 {
-    // The realms a build emits are those the environment declared via @preamble:
-    // (kernel)/(boot) -> kernel realm; (user) -> user realm. Computed on every access,
-    // not cached at construction - NativeBlocks is populated by ResolveTop's Add calls
-    // on this same instance after the constructor already ran, so a get-only property
-    // initializer here would always see an empty list.
+    // Realms come from the environment's @preamble targets. Computed per access rather than
+    // cached, since ResolveTop populates NativeBlocks on this instance after the constructor ran.
     /// <summary>
-    /// Returns true if the module emits a kernel realm, determined by the presence of kernel preamble or boot blocks.
+    /// True if the module emits a kernel realm, from its preamble or boot blocks.
     /// </summary>
     public bool HasKernelRealm => NativeBlocks.Any(nb =>
         nb.Vis == Visibility.Kernel && nb.Section is NativeSection.Preamble or NativeSection.Boot);
 
     /// <summary>
-    /// Returns true if the module emits a user realm, determined by the presence of user preamble blocks.
+    /// Returns true if the module emits a user realm, determined by the presence of user preamble
+    /// blocks.
     /// </summary>
     public bool HasUserRealm => NativeBlocks.Any(nb =>
         nb.Vis == Visibility.User && nb.Section == NativeSection.Preamble);

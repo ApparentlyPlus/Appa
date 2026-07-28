@@ -1,14 +1,5 @@
 namespace Appa;
 
-/// <summary>
-/// Capability inference pass that walks the call graph from all program entry points
-/// and records which OS capabilities the program requires.
-/// Results become -D macros so GatOS can drop subsystems the program never uses.
-/// MEM: any reachable new expression or call to the heap allocator (_env_alloc).
-/// INPUT: any reachable call to _env_read.
-/// THREADS: the module declares at least one process or thread.
-/// TIME: any reachable call to the time source (_env_time_ns).
-/// </summary>
 internal sealed class CapabilityScan(IrModule m) : IrWalker
 {
     public bool Mem;
@@ -44,7 +35,8 @@ internal sealed class CapabilityScan(IrModule m) : IrWalker
     }
 
     /// <summary>
-    /// Runs the capability scan from all entry points and returns this instance with flags populated.
+    /// Runs the capability scan from all entry points and returns this instance with flags
+    /// populated.
     /// </summary>
     public CapabilityScan Run()
     {
@@ -75,7 +67,8 @@ internal sealed class CapabilityScan(IrModule m) : IrWalker
     }
 
     /// <summary>
-    /// Records capabilities implied by calling a given C name and follows into known function bodies.
+    /// Records capabilities implied by calling a given C name and follows into known function
+    /// bodies.
     /// </summary>
     private void Call(string cname)
     {
@@ -87,7 +80,8 @@ internal sealed class CapabilityScan(IrModule m) : IrWalker
     }
 
     /// <summary>
-    /// Handles for-in statements, which carry implicit len and get calls not visible in the expression tree.
+    /// Handles for-in statements, which carry implicit len and get calls not visible in the
+    /// expression tree.
     /// </summary>
     protected override void WalkStmt(IrStmt s)
     {
@@ -96,7 +90,8 @@ internal sealed class CapabilityScan(IrModule m) : IrWalker
     }
 
     /// <summary>
-    /// Handles expressions that have capability-specific meaning, then defers to the base structural walk.
+    /// Handles expressions that have capability-specific meaning, then defers to the base
+    /// structural walk.
     /// </summary>
     protected override void WalkExpr(IrExpr e)
     {

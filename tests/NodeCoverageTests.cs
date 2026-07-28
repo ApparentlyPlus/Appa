@@ -3,15 +3,9 @@ namespace Appa.Tests;
 using Appa;
 
 /// <summary>
-/// The guards on the four hand-written node dispatchers. These exist because a missing case
-/// in Monomorphizer's AST substituter or in IrRewriter/IrWalker is silent: the node is returned
-/// untouched and a whole subtree is quietly never visited. Two real bugs in this compiler had
-/// exactly that shape, so the inert set is asserted rather than assumed.
-///
-/// The guards are [Conditional("DEBUG")] on purpose -- a shipped compiler meeting an unexpected
-/// node should emit slightly wrong code rather than abort mid-build -- so the calls vanish
-/// entirely in Release and there is nothing left to assert. The rejection tests skip there
-/// instead of failing, and say why.
+/// The guards on the four hand-written node dispatchers, where a missing case is silent and two
+/// real bugs had that shape. They are [Conditional("DEBUG")] on purpose, so the calls vanish in
+/// Release and the rejection tests skip there rather than fail.
 /// </summary>
 public class NodeCoverageTests
 {

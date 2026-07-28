@@ -37,14 +37,9 @@ internal static class Roles
         EnvDebug, EnvPanic, EnvProcCreate, EnvProcHide, EnvThreadSpawn, EnvRead, EnvAlloc, EnvTime
     ]);
 
-    // The floor's canonical C names. Unlike the ARC/stringify roles, an unbound env role is not
-    // an error: the floor bind names are a fixed contract every environment implements (see the
-    // book, Ch. 23), and libgata binds them from Sys.g/Mem.g/Console.g/Time.g - none of which a
-    // program is obliged to import. A debug statement in a program that never imports Sys must
-    // still emit a call, so the role acts as an optional rename over a known default rather than
-    // as a required binding. Stated once here because the defaults were previously inlined at
-    // thirteen call sites, where env_time's default was already spelled inconsistently with its
-    // role name.
+    // The floor's canonical C names. Unlike the ARC roles an unbound env role is not an error -
+    // it is an optional rename over a known default, since libgata binds these from files a
+    // program need not import. Listed once here; inlining them had already let env_time's drift.
     private static readonly Dictionary<string, string> FloorDefaults = new()
     {
         [EnvDebug]       = "_env_dbg",
@@ -89,8 +84,8 @@ internal static class BuiltinTypes
 }
 
 /// <summary>
-/// The signature of a method or free function as collected from the AST.
-/// ReturnType is null for void (an omitted return type).
+/// The signature of a method or free function as collected from the AST. ReturnType is null for
+/// void (an omitted return type).
 /// </summary>
 internal record MethodSig(
     TypeSpec?        ReturnType,
@@ -108,8 +103,8 @@ internal record MethodSig(
 internal readonly record struct MemberKey(string Owner, string Name);
 
 /// <summary>
-/// A single declared symbol with its kind, declared type (null for void or for symbols
-/// that are not values, like classes), and optionally its method signature.
+/// A single declared symbol with its kind, declared type (null for void or for symbols that are not
+/// values, like classes), and optionally its method signature.
 /// </summary>
 internal sealed record Symbol(string Name, SymKind Kind, TypeSpec? Type, string? Owner, MethodSig? Sig)
 {
@@ -145,9 +140,9 @@ internal sealed class SymbolTable
     public Dictionary<string, string> Builtins { get; } = [];
 
     /// <summary>
-    /// Returns the IR type for a given builtin name (String/Process/Thread) if libgata
-    /// declared it via @builtin, or null if unbound. The single place that maps these
-    /// names to their IR shape - callers never hardcode the mapping themselves.
+    /// Returns the IR type for a given builtin name (String/Process/Thread) if libgata declared it
+    /// via @builtin, or null if unbound. The single place that maps these names to their IR shape -
+    /// callers never hardcode the mapping themselves.
     /// </summary>
     public IrType? ResolveBuiltinType(string name)
     {
@@ -172,9 +167,9 @@ internal sealed class SymbolTable
     }
 
     /// <summary>
-    /// Resolves an environment floor role to a C name: whatever libgata bound to it, or the
-    /// role's canonical floor name when nothing did. See Roles.FloorDefaults for why an unbound
-    /// env role is legitimate rather than a MissingIntrinsic error.
+    /// Resolves an environment floor role to a C name: whatever libgata bound to it, or the role's
+    /// canonical floor name when nothing did. See Roles.FloorDefaults for why an unbound env role
+    /// is legitimate rather than a MissingIntrinsic error.
     /// </summary>
     public string FloorName(string role)
     {
@@ -216,11 +211,9 @@ internal sealed class SymbolTable
     }
 
     /// <summary>
-    /// Registers an operator overload on the named class. Every operator except 'as' has
-    /// exactly one declaration per (class, symbol) in a well-formed program (the caller is
-    /// responsible for rejecting duplicates); 'as' alone can have several, one per distinct
-    /// return type, since it has no parameter to distinguish overloads by. CNames are assigned
-    /// later in AssignCNames, once every overload for the bucket is known.
+    /// Registers an operator overload. Every operator but 'as' has one declaration per (class,
+    /// symbol) in a well-formed program, the caller rejecting duplicates; 'as' can have several.
+    /// CNames are assigned in AssignCNames, once the whole bucket is known.
     /// </summary>
     public void RegisterOperator(string cls, string op, TypeSpec returnType, List<Param> @params)
     {
@@ -229,9 +222,9 @@ internal sealed class SymbolTable
     }
 
     /// <summary>
-    /// Records that a throws function returns the given type, ensuring a Result typedef is
-    /// emitted. The typedef's inner-name derivation is shared with IrResultType.ResultName
-    /// (void folds to int) so a declaration and its call sites can never disagree.
+    /// Records that a throws function returns the given type, ensuring a Result typedef is emitted.
+    /// The typedef's inner-name derivation is shared with IrResultType.ResultName (void folds to
+    /// int) so a declaration and its call sites can never disagree.
     /// </summary>
     public void RegisterThrows(TypeSpec? returnType)
     {
@@ -240,8 +233,8 @@ internal sealed class SymbolTable
     }
 
     /// <summary>
-    /// The single source of truth for the inner-type token of a Result_T typedef name,
-    /// mirroring IrResultType.ResultName's IrType-side derivation.
+    /// The single source of truth for the inner-type token of a Result_T typedef name, mirroring
+    /// IrResultType.ResultName's IrType-side derivation.
     /// </summary>
     public static string ResultInnerName(TypeSpec? t)
     {
@@ -264,8 +257,8 @@ internal sealed class SymbolTable
 
     /// <summary>
     /// Assigns C names to all methods and free functions once all declarations are collected.
-    /// Intrinsic bindings made during collection used a tentative (overload-unaware) name;
-    /// they are rebound here to the final CName so an overloaded intrinsic resolves correctly.
+    /// Intrinsic bindings made during collection used a tentative (overload-unaware) name; they are
+    /// rebound here to the final CName so an overloaded intrinsic resolves correctly.
     /// </summary>
     public void AssignCNames()
     {
@@ -312,8 +305,8 @@ internal sealed class SymbolTable
     }
 
     /// <summary>
-    /// Points a symbol's @intrinsic roles at its final CName. Only roles already bound by
-    /// the collector are updated, so its validation and duplicate diagnostics still stand.
+    /// Points a symbol's @intrinsic roles at its final CName. Only roles already bound by the
+    /// collector are updated, so its validation and duplicate diagnostics still stand.
     /// </summary>
     private void RebindIntrinsics(Symbol s)
     {
@@ -440,10 +433,9 @@ internal sealed class SymbolTable
     }
 
     /// <summary>
-    /// Returns the last registered overload of the given operator on the class, or null if not
-    /// found. Every operator except 'as' has at most one overload in a well-formed program, so
-    /// this is the whole answer for them; for 'as', callers that need to pick among several
-    /// return-type overloads should use OperatorOverloads instead.
+    /// The last registered overload of the given operator on the class, or null. Every operator but
+    /// 'as' has at most one in a well-formed program, so this is the whole answer; for 'as',
+    /// callers picking among several should use OperatorOverloads.
     /// </summary>
     public Symbol? LookupOperator(string cls, string op)
     {
@@ -451,8 +443,8 @@ internal sealed class SymbolTable
     }
 
     /// <summary>
-    /// Returns the overload of the given operator with the given parameter count, or null.
-    /// Unary and binary '-' share a bucket, so arity is what tells them apart.
+    /// Returns the overload of the given operator with the given parameter count, or null. Unary
+    /// and binary '-' share a bucket, so arity is what tells them apart.
     /// </summary>
     public Symbol? LookupOperator(string cls, string op, int arity)
     {
@@ -503,8 +495,8 @@ internal sealed class SymbolTable
     }
 
     /// <summary>
-    /// Returns the distinct method names declared directly on the given class/module,
-    /// for "did you mean" suggestions when a lookup misses.
+    /// Returns the distinct method names declared directly on the given class/module, for "did you
+    /// mean" suggestions when a lookup misses.
     /// </summary>
     public IEnumerable<string> MethodNames(string cls)
     {

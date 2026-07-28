@@ -1,12 +1,5 @@
 namespace Appa;
 
-/// <summary>
-/// Post-DCE dense naming pass that assigns short sequential identifiers (_g0, _g1, ...) to
-/// every reachable internal class and function, rewrites all call sites and definitions to use them,
-/// updates Mangler so the emitter only ever sees the short names, and produces a sourcemap from
-/// each dense token back to its original readable name.
-/// Exports, @keep symbols, and native type names keep their readable names.
-/// </summary>
 internal sealed class Densifier(IrModule m)
 {
     private int _seq;
@@ -49,8 +42,8 @@ internal sealed class Densifier(IrModule m)
     }
 
     /// <summary>
-    /// Runs the dense naming pass and returns the renamed module together with a sourcemap
-    /// that maps each dense token back to its original readable name.
+    /// Runs the dense naming pass and returns the renamed module together with a sourcemap that
+    /// maps each dense token back to its original readable name.
     /// </summary>
     public (IrModule Module, IReadOnlyDictionary<string, string> Sourcemap) Run()
     {
@@ -79,6 +72,7 @@ internal sealed class Densifier(IrModule m)
             foreach (var mm in c.Methods) MapFn(mm.CName);
             foreach (var o in c.Operators) MapFn(o.CName);
         }
+        
         // @keep classes keep their readable CName so native text that references
         // them by the readable gata_<Name> form continues to resolve correctly.
         foreach (var c in m.Classes)

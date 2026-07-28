@@ -12,49 +12,50 @@ internal record Program(TopLevel[] Items)
 }
 
 /// <summary>
-/// A generic instantiation site found during parsing, eg. List[int]. The Monomorphizer
-/// reads these to know which concrete copies to generate before the type resolver runs.
+/// A generic instantiation site found during parsing, telling the Monomorphizer which concrete
+/// copies to stamp. Args is mangled ("int"); ArgSpecs keeps the same arguments unflattened, so
+/// substituting inside them is structural rather than string surgery.
 /// </summary>
-internal record GenericUse(string Base, string[] Args, TextSpan Span);
+internal record GenericUse(string Base, string[] Args, TextSpan Span, NamedSpec[]? ArgSpecs = null);
 
 #region Top-level declarations
 
 /// <summary>
-/// Base class for all top-level declarations. Every subclass carries the source span
-/// of its full declaration via the primary constructor.
+/// Base class for all top-level declarations. Every subclass carries the source span of its full
+/// declaration via the primary constructor.
 /// </summary>
 internal abstract record TopLevel(TextSpan Span);
 
 /// <summary>
-/// import "path" or import name. Pulls another Gata source file into the build.
-/// IsPath distinguishes a filesystem path (true) from a bare module name (false).
+/// import "path" or import name. Pulls another Gata source file into the build. IsPath
+/// distinguishes a filesystem path (true) from a bare module name (false).
 /// </summary>
 internal record ImportDecl(string Name, bool IsPath, TextSpan Span) : TopLevel(Span);
 
 /// <summary>
-/// Marks exactly one file in the build as the environment definition.
-/// The environment file provides the intrinsic bindings (I/O, ARC, panic) for the target.
+/// Marks exactly one file in the build as the environment definition. The environment file provides
+/// the intrinsic bindings (I/O, ARC, panic) for the target.
 /// </summary>
 internal record EnvironmentDecl(TextSpan Span) : TopLevel(Span);
 
 /// <summary>
-/// A native { … } block containing raw C source captured verbatim. Routed to the
-/// kernel and/or user translation unit(s) by its enclosing context (top-level, or
-/// nested in a kernel { } / user { } block).
+/// A native { … } block containing raw C source captured verbatim. Routed to the kernel and/or user
+/// translation unit(s) by its enclosing context (top-level, or nested in a kernel { } / user { }
+/// block).
 /// </summary>
 internal record NativeBlock(NativeBody Body, TextSpan Span, Annotation[]? Annotations = null) : TopLevel(Span);
 
 /// <summary>
-/// class or module declaration. IsModule = true means all members are implicitly static, meaning
-/// no self parameter, no instances. GenericParams non-empty makes it a generic class
-/// monomorphized per concrete type argument set.
+/// class or module declaration. IsModule = true means all members are implicitly static, meaning no
+/// self parameter, no instances. GenericParams non-empty makes it a generic class monomorphized per
+/// concrete type argument set.
 /// </summary>
 internal record ClassDecl(string Name, string[] GenericParams, Annotation[] Annotations,
                  ClassMember[] Members, TextSpan Span, bool IsModule = false) : TopLevel(Span);
 
 /// <summary>
-/// kernel { … } or user { … } block. Groups top-level declarations that belong to one
-/// execution environment. Kind is the keyword ("kernel" or "user").
+/// kernel { … } or user { … } block. Groups top-level declarations that belong to one execution
+/// environment. Kind is the keyword ("kernel" or "user").
 /// </summary>
 internal record ContextDecl(string Kind, TopLevel[] Items, TextSpan Span) : TopLevel(Span);
 
@@ -68,27 +69,27 @@ internal record FuncDecl(Modifiers Modifiers, Annotation[] Annotations, TypeSpec
                 bool IsEntry, bool Throws, MethodBody Body, TextSpan Span) : TopLevel(Span);
 
 /// <summary>
-/// A process declaration is pure deployment topology. A process is a named bag of threads;
-/// it holds no logic of its own. Mode is the deployment mode ("foreground" or "background").
+/// A process declaration is pure deployment topology. A process is a named bag of threads; it holds
+/// no logic of its own. Mode is the deployment mode ("foreground" or "background").
 /// </summary>
 internal record ProcessDecl(string Name, string Mode, ThreadDecl[] Threads, TextSpan Span) : TopLevel(Span);
 
 /// <summary>
-/// An extern function pre-declaration that tells the compiler a C function exists so it can
-/// be called from Gata without a Gata body. Translated to a forward prototype in the backend.
+/// An extern function pre-declaration that tells the compiler a C function exists so it can be
+/// called from Gata without a Gata body. Translated to a forward prototype in the backend.
 /// </summary>
 internal record ExternFuncDecl(TypeSpec? ReturnType, string Name, Param[] Params,
                       TextSpan Span, Annotation[]? Annotations = null) : TopLevel(Span);
 
 /// <summary>
-/// native type Name { C body }. It registers a C struct as a named Gata type. The CBody is
-/// emitted verbatim as a typedef; the name becomes resolvable in type positions.
+/// native type Name { C body }. It registers a C struct as a named Gata type. The CBody is emitted
+/// verbatim as a typedef; the name becomes resolvable in type positions.
 /// </summary>
 internal record NativeTypeDecl(string Name, string CBody, TextSpan Span, Annotation[]? Annotations = null) : TopLevel(Span);
 
 /// <summary>
-/// enum Name { A, B = 2, C } is a distinct integer-backed type with named members.
-/// Members may carry explicit integer values; unspecified members follow C's increment rule.
+/// enum Name { A, B = 2, C } is a distinct integer-backed type with named members. Members may
+/// carry explicit integer values; unspecified members follow C's increment rule.
 /// </summary>
 internal record EnumDecl(string Name, EnumMember[] Members, TextSpan Span, Annotation[]? Annotations = null) : TopLevel(Span);
 
@@ -98,10 +99,12 @@ internal record EnumDecl(string Name, EnumMember[] Members, TextSpan Span, Annot
 internal record EnumMember(string Name, Expr? Value, TextSpan Span);
 
 /// <summary>
-/// union Name { Circle(float radius), Square(float side), Point } is a tagged union.
-/// Each variant either carries named fields or no payload. Lowered to a tag enum + C union.
+/// A tagged union; each variant carries named fields or no payload, lowered to a tag enum plus a C
+/// union. GenericParams is non-empty for a template, which the Monomorphizer replaces with one
+/// stamped UnionDecl per instantiation.
 /// </summary>
-internal record UnionDecl(string Name, UnionVariant[] Variants, TextSpan Span, Annotation[]? Annotations = null) : TopLevel(Span);
+internal record UnionDecl(string Name, string[] GenericParams, UnionVariant[] Variants,
+                          TextSpan Span, Annotation[]? Annotations = null) : TopLevel(Span);
 
 /// <summary>
 /// One variant of a union. Fields is empty for a payload-free variant like Point.
@@ -123,28 +126,28 @@ internal record NativeBody(string C);
 internal abstract record Annotation;
 
 /// <summary>
-/// @intrinsic(role): binds a function or method to a named compiler intrinsic.
-/// Role identifies which intrinsic slot this declaration fills, eg. "arc_retain".
+/// @intrinsic(role): binds a function or method to a named compiler intrinsic. Role identifies
+/// which intrinsic slot this declaration fills, eg. "arc_retain".
 /// </summary>
 internal record IntrinsicAnnotation(string Role, TextSpan Span) : Annotation;
 
 /// <summary>
-/// @preamble(target): marks a native block as a preamble to be emitted before all other
-/// generated output for the given target translation unit ("kernel" or "user").
+/// @preamble(target): marks a native block as a preamble to be emitted before all other generated
+/// output for the given target translation unit ("kernel" or "user").
 /// </summary>
 internal record PreambleAnnotation(string Target, TextSpan Span) : Annotation;
 
 /// <summary>
-/// @keep: exempts a class or free function from dead-code elimination and dense renaming.
-/// Use when native code references the Gata-mangled name directly and the compiler cannot
-/// see that reference through static analysis.
+/// @keep: exempts a class or free function from dead-code elimination and dense renaming. Use when
+/// native code references the Gata-mangled name directly and the compiler cannot see that reference
+/// through static analysis.
 /// </summary>
 internal record KeepAnnotation(TextSpan Span) : Annotation;
 
 /// <summary>
-/// @builtin(name): binds a class or native type declaration to a named compiler builtin
-/// type slot (eg. "String", "Process", "Thread"), the same way @intrinsic binds a role -
-/// the compiler never hardcodes these names, it resolves them from this declaration.
+/// @builtin(name): binds a class or native type declaration to a named compiler builtin type slot
+/// (eg. "String", "Process", "Thread"), the same way @intrinsic binds a role - the compiler never
+/// hardcodes these names, it resolves them from this declaration.
 /// </summary>
 internal record BuiltinAnnotation(string Name, TextSpan Span) : Annotation;
 
@@ -163,15 +166,15 @@ internal abstract record ClassMember(TextSpan Span);
 internal record FieldsBlock(NativeBody Body, TextSpan Span) : ClassMember(Span);
 
 /// <summary>
-/// A Gata field declaration. Init is the optional initializer expression; Type is null
-/// when inferred.
+/// A Gata field declaration. Init is the optional initializer expression; Type is null when
+/// inferred.
 /// </summary>
 internal record FieldDecl(Modifiers Modifiers, TypeSpec? Type, string Name, TextSpan Span, Expr? Init = null) : ClassMember(Span);
 
 /// <summary>
-/// A method declaration inside a class or module. IsEntry marks it as a thread entry point;
-/// Throws means it participates in the Result error-propagation protocol. GenericParams empty =
-/// ordinary method; non-empty = generic, monomorphized per call site like a generic free function.
+/// A method declaration inside a class or module. IsEntry marks it as a thread entry point; Throws
+/// means it participates in the Result error-propagation protocol. GenericParams empty = ordinary
+/// method; non-empty = generic, monomorphized per call site like a generic free function.
 /// </summary>
 internal record MethodDecl(Modifiers Modifiers, Annotation[] Annotations, TypeSpec? ReturnType,
                   string Name, string[] GenericParams, Param[] Params, bool IsEntry, bool Throws,
@@ -206,16 +209,15 @@ internal record NativeMethodBody(NativeBody Native) : MethodBody;
 #region Process / thread
 
 /// <summary>
-/// A thread inside a process. Points at exactly one entry function. Threads do not
-/// carry their own deployment mode, that belongs to the process. Mode is non-null
-/// only when the source explicitly (and invalidly) wrote 'foreground'/'background'
-/// before 'thread'; the type resolver rejects that as G043.
+/// A thread inside a process, pointing at exactly one entry function. Deployment mode belongs to
+/// the process, so Mode is non-null only when the source invalidly wrote one before 'thread' -
+/// which the resolver rejects as G043.
 /// </summary>
 internal record ThreadDecl(string Name, string? Mode, EntryFuncDecl Entry, TextSpan Span);
 
 /// <summary>
-/// The entry function of a thread. It consists of parameters and a single block body. Not a FuncDecl
-/// because it cannot be called from Gata code, only dispatched by the runtime.
+/// The entry function of a thread. It consists of parameters and a single block body. Not a
+/// FuncDecl because it cannot be called from Gata code, only dispatched by the runtime.
 /// </summary>
 internal record EntryFuncDecl(Modifiers Modifiers, TypeSpec? ReturnType, Param[] Params, Block Body, TextSpan Span);
 
@@ -224,9 +226,9 @@ internal record EntryFuncDecl(Modifiers Modifiers, TypeSpec? ReturnType, Param[]
 #region Type specifiers
 
 /// <summary>
-/// Structured type specifier. The parser builds it once; every later pass walks it
-/// structurally. ToSpecString() reproduces the legacy flat spelling used for mangling
-/// and duplicate-signature keys, so emitted C names stay byte identical.
+/// Structured type specifier. The parser builds it once; every later pass walks it structurally.
+/// ToSpecString() reproduces the legacy flat spelling used for mangling and duplicate-signature
+/// keys, so emitted C names stay byte identical.
 /// </summary>
 internal abstract record TypeSpec(TextSpan Span)
 {
@@ -235,10 +237,9 @@ internal abstract record TypeSpec(TextSpan Span)
 }
 
 /// <summary>
-/// A named type: a primitive, class, enum, union, or generic instantiation. Args holds
-/// the generic type arguments structurally (each itself a named type, since Gata type
-/// arguments cannot be pointers, arrays, or function types). Mangled flattens the name
-/// the way the rest of the compiler identifies the type: Base or Base_Arg1_Arg2.
+/// A named type: primitive, class, enum, union or generic instantiation. Args holds the type
+/// arguments structurally, each itself a named type. Mangled flattens the name the way the rest of
+/// the compiler identifies it: Base or Base_Arg1_Arg2.
 /// </summary>
 internal sealed record NamedSpec(string Name, NamedSpec[] Args, TextSpan Span) : TypeSpec(Span)
 {
@@ -268,8 +269,8 @@ internal sealed record PtrSpec(TypeSpec Inner, TextSpan Span) : TypeSpec(Span)
 }
 
 /// <summary>
-/// A fixed-size array type [N]T. SizeText is the literal size token as written
-/// (validated and parsed by the type resolver, like every other literal).
+/// A fixed-size array type [N]T. SizeText is the literal size token as written (validated and
+/// parsed by the type resolver, like every other literal).
 /// </summary>
 internal sealed record ArraySpec(string SizeText, TypeSpec Elem, TextSpan Span) : TypeSpec(Span)
 {
@@ -298,8 +299,8 @@ internal sealed record FuncSpec(TypeSpec[] Params, TypeSpec Ret, TextSpan Span) 
 #region Parameters
 
 /// <summary>
-/// A function or method parameter. IsRef = true means the argument is passed by reference;
-/// the call site must supply an lvalue prefixed with ref.
+/// A function or method parameter. IsRef = true means the argument is passed by reference; the call
+/// site must supply an lvalue prefixed with ref.
 /// </summary>
 internal record Param(TypeSpec Type, string Name, TextSpan Span, bool IsRef = false);
 
@@ -334,21 +335,21 @@ internal enum UnOp { Not, BitNot, Neg }
 internal enum PostfixOp { Inc, Dec }
 
 /// <summary>
-/// The kind of an assignment operator. Assign is plain '='; the rest are compound forms
-/// that combine a BinOp with the store, eg. AddAssign for '+='.
+/// The kind of an assignment operator. Assign is plain '='; the rest are compound forms that
+/// combine a BinOp with the store, eg. AddAssign for '+='.
 /// </summary>
 internal enum AssignOp { Assign, AddAssign, SubAssign, MulAssign, DivAssign, ModAssign, AndAssign, OrAssign, XorAssign, ShlAssign, ShrAssign }
 
 /// <summary>
-/// The one table of user-overloadable operator shape rules: required arity, default return
-/// type, and the bool/void return constraints. SymbolCollector (declaration keys and
-/// tentative signatures) and TypeResolver (validation) both read it, so they cannot drift.
+/// The one table of user-overloadable operator shape rules: required arity, default return type,
+/// and the bool/void return constraints. SymbolCollector (declaration keys and tentative
+/// signatures) and TypeResolver (validation) both read it, so they cannot drift.
 /// </summary>
 internal static class OperatorRules
 {
     /// <summary>
-    /// The parameter count the operator's declaration must have. '-' alone is dual-arity:
-    /// zero parameters declares unary negation, one declares binary subtraction.
+    /// The parameter count the operator's declaration must have. '-' alone is dual-arity: zero
+    /// parameters declares unary negation, one declares binary subtraction.
     /// </summary>
     public static int RequiredArity(string op, int declaredParams)
     {
@@ -362,8 +363,8 @@ internal static class OperatorRules
     }
 
     /// <summary>
-    /// True for the comparison operators, which must return bool (and whose '=='/'!=' pair
-    /// is derived by negation when only one is declared).
+    /// True for the comparison operators, which must return bool (and whose '=='/'!=' pair is
+    /// derived by negation when only one is declared).
     /// </summary>
     public static bool IsComparison(string op)
     {
@@ -462,8 +463,8 @@ internal static class Ops
     };
 
     /// <summary>
-    /// Returns the underlying binary operator a compound assignment combines with the store,
-    /// or null for plain '='.
+    /// Returns the underlying binary operator a compound assignment combines with the store, or
+    /// null for plain '='.
     /// </summary>
     public static BinOp? BaseOp(this AssignOp op) => op switch
     {
@@ -512,8 +513,8 @@ internal record Block(Stmt[] Stmts, TextSpan Span) : Stmt(Span);
 #region Expressions
 
 /// <summary>
-/// An integer literal, eg. 42 or 0xFF. Value holds the raw source spelling including
-/// any suffix (u, L) so the backend can emit the right C constant.
+/// An integer literal, eg. 42 or 0xFF. Value holds the raw source spelling including any suffix (u,
+/// L) so the backend can emit the right C constant.
 /// </summary>
 internal record IntLitExpr(string Value, TextSpan Span) : Expr(Span);
 
@@ -523,8 +524,8 @@ internal record IntLitExpr(string Value, TextSpan Span) : Expr(Span);
 internal record CharLitExpr(int Value, TextSpan Span) : Expr(Span);
 
 /// <summary>
-/// A floating-point literal, eg. 3.14 or 1e9f. Value holds the raw source spelling
-/// including any suffix so the backend can choose float vs double.
+/// A floating-point literal, eg. 3.14 or 1e9f. Value holds the raw source spelling including any
+/// suffix so the backend can choose float vs double.
 /// </summary>
 internal record FloatLitExpr(string Value, TextSpan Span) : Expr(Span);
 
@@ -544,9 +545,9 @@ internal record StrLitExpr(string Value, TextSpan Span) : Expr(Span);
 internal record NullExpr(TextSpan Span) : Expr(Span);
 
 /// <summary>
-/// An interpolated string. Parts alternates between StrLitExpr (literal segments) and
-/// arbitrary Expr (embedded expressions). Built by the parser from the InterpStrStart,
-/// StrLit, brace-delimited expr, and InterpStrEnd token stream the lexer emits.
+/// An interpolated string. Parts alternates between StrLitExpr (literal segments) and arbitrary
+/// Expr (embedded expressions). Built by the parser from the InterpStrStart, StrLit,
+/// brace-delimited expr, and InterpStrEnd token stream the lexer emits.
 /// </summary>
 internal record InterpStrExpr(Expr[] Parts, TextSpan Span) : Expr(Span);
 
@@ -581,6 +582,25 @@ internal record MemberAccessExpr(Expr Object, string Member, TextSpan Span) : Ex
 internal record IndexExpr(Expr Object, Expr Index, TextSpan Span) : Expr(Span);
 
 /// <summary>
+/// 'Name[Args]' where a value is expected, as in 'Maybe[int].Found(7)'. With one identifier in the
+/// brackets this is the same tokens as an index, so the parser keeps both readings - Args and
+/// IndexForm - and the resolver picks, knowing what is in scope.
+/// </summary>
+internal record GenericTypeRefExpr(string Name, NamedSpec[] Args, Expr? IndexForm, TextSpan Span) : Expr(Span)
+{
+    /// <summary>
+    /// The mangled instance name this reference denotes, e.g. Maybe_int.
+    /// </summary>
+    public string Mangled => new NamedSpec(Name, Args, Span).Mangled;
+
+    /// <summary>
+    /// The reference as written, e.g. Maybe[int] - for diagnostics, which must never show a mangled
+    /// name for a type the author never spelled that way.
+    /// </summary>
+    public string Written => $"{Name}[{string.Join(", ", Args.Select(a => Mangler.DisplayName(a.Mangled)))}]";
+}
+
+/// <summary>
 /// A binary expression. Op is the operator kind.
 /// </summary>
 internal record BinExpr(BinOp Op, Expr Left, Expr Right, TextSpan Span) : Expr(Span);
@@ -601,8 +621,8 @@ internal record UnaryExpr(UnOp Op, Expr Operand, TextSpan Span) : Expr(Span);
 internal record PostfixExpr(PostfixOp Op, Expr Operand, TextSpan Span) : Expr(Span);
 
 /// <summary>
-/// Object construction. Args holds constructor arguments for class instantiation;
-/// CollectionInit holds the bracketed element list for collection construction.
+/// Object construction. Args holds constructor arguments for class instantiation; CollectionInit
+/// holds the bracketed element list for collection construction.
 /// </summary>
 internal record NewExpr(TypeSpec Type, Expr[] Args, Expr[] CollectionInit, TextSpan Span) : Expr(Span);
 
@@ -617,8 +637,8 @@ internal record ArrayLitExpr(Expr[] Elems, TextSpan Span) : Expr(Span);
 internal record AddrOfExpr(Expr Target, TextSpan Span) : Expr(Span);
 
 /// <summary>
-/// A ref argument at a call site, eg. ref x. Passes an lvalue by reference.
-/// Only legal as a direct call argument, not in any other expression position.
+/// A ref argument at a call site, eg. ref x. Passes an lvalue by reference. Only legal as a direct
+/// call argument, not in any other expression position.
 /// </summary>
 internal record RefArgExpr(Expr Target, TextSpan Span) : Expr(Span);
 
@@ -647,8 +667,8 @@ internal record DefaultExpr(TypeSpec TypeName, TextSpan Span) : Expr(Span);
 internal record NativeStmt(NativeBody Body, TextSpan Span) : Stmt(Span);
 
 /// <summary>
-/// A local variable declaration. Type is null when the type is inferred from the initializer.
-/// Init is null for declarations without an initializer.
+/// A local variable declaration. Type is null when the type is inferred from the initializer. Init
+/// is null for declarations without an initializer.
 /// </summary>
 internal record LetStmt(TypeSpec? Type, string Name, Expr? Init, TextSpan Span) : Stmt(Span);
 
@@ -674,8 +694,8 @@ internal record IfStmt(Expr Cond, Stmt Then, Stmt? Else, TextSpan Span) : Stmt(S
 internal record WhileStmt(Expr Cond, Stmt Body, TextSpan Span) : Stmt(Span);
 
 /// <summary>
-/// A C-style for loop. Init, Cond, and Step are all optional. Init and Step are statements
-/// so both clauses accept a plain or compound assignment as well as an expression.
+/// A C-style for loop. Init, Cond, and Step are all optional. Init and Step are statements so both
+/// clauses accept a plain or compound assignment as well as an expression.
 /// </summary>
 internal record ForStmt(Stmt? Init, Expr? Cond, Stmt? Step, Block Body, TextSpan Span) : Stmt(Span);
 
@@ -700,14 +720,14 @@ internal record BreakStmt(TextSpan Span) : Stmt(Span);
 internal record ContinueStmt(TextSpan Span) : Stmt(Span);
 
 /// <summary>
-/// A try/catch statement for Result-based error propagation. The catch block receives
-/// control when the try block throws.
+/// A try/catch statement for Result-based error propagation. The catch block receives control when
+/// the try block throws.
 /// </summary>
 internal record TryCatchStmt(Block Try, Block Catch, TextSpan Span) : Stmt(Span);
 
 /// <summary>
-/// A switch statement. Cases is the list of arms; Default is the optional fallback block.
-/// There is no fallthrough: break and continue inside a case target the enclosing loop.
+/// A switch statement. Cases is the list of arms; Default is the optional fallback block. There is
+/// no fallthrough: break and continue inside a case target the enclosing loop.
 /// </summary>
 internal record SwitchStmt(Expr Scrutinee, SwitchCase[] Cases, Block? Default, TextSpan Span) : Stmt(Span);
 
@@ -717,14 +737,14 @@ internal record SwitchStmt(Expr Scrutinee, SwitchCase[] Cases, Block? Default, T
 internal record SwitchCase(Expr[] Labels, Block Body, TextSpan Span);
 
 /// <summary>
-/// A match statement that scrutinizes a union value by variant. Each case binds the
-/// variant's fields as locals in its body. Default is the optional fallback block.
+/// A match statement that scrutinizes a union value by variant. Each case binds the variant's
+/// fields as locals in its body. Default is the optional fallback block.
 /// </summary>
 internal record MatchStmt(Expr Scrutinee, MatchCase[] Cases, Block? Default, TextSpan Span) : Stmt(Span);
 
 /// <summary>
-/// One arm of a match statement. Variant is the union variant name; Bindings are the
-/// local names bound to the variant's fields in source order.
+/// One arm of a match statement. Variant is the union variant name; Bindings are the local names
+/// bound to the variant's fields in source order.
 /// </summary>
 internal record MatchCase(string Variant, string[] Bindings, Block Body, TextSpan Span);
 
@@ -734,8 +754,8 @@ internal record MatchCase(string Variant, string[] Bindings, Block Body, TextSpa
 internal record UnsafeBlock(Stmt[] Stmts, TextSpan Span) : Stmt(Span);
 
 /// <summary>
-/// A defer statement. Action runs on every exit from the enclosing block, in LIFO order
-/// with other defers. Action may not itself transfer control.
+/// A defer statement. Action runs on every exit from the enclosing block, in LIFO order with other
+/// defers. Action may not itself transfer control.
 /// </summary>
 internal record DeferStmt(Stmt Action, TextSpan Span) : Stmt(Span);
 
@@ -745,22 +765,21 @@ internal record DeferStmt(Stmt Action, TextSpan Span) : Stmt(Span);
 internal record ThrowStmt(TextSpan Span) : Stmt(Span);
 
 /// <summary>
-/// `assign expr;` - supplies the replacement value for the declaration a `catch` handler is
-/// attached to, then resumes execution after it. Legal only inside such a handler.
-/// Spelled with its own keyword rather than reusing `return` so it can never be misread as
+/// `assign expr;` supplies the replacement value for the declaration a `catch` handler is attached
+/// to, then resumes after it. Its own keyword rather than `return`, so it can never be misread as
 /// returning out of the enclosing function.
 /// </summary>
 internal record AssignValueStmt(Expr Value, TextSpan Span) : Stmt(Span);
 
 /// <summary>
-/// A debug statement. Raw is the raw string literal including quotes. Lowered to the
-/// environment's debug binding. Hard error in a release build.
+/// A debug statement. Raw is the raw string literal including quotes. Lowered to the environment's
+/// debug binding. Hard error in a release build.
 /// </summary>
 internal record DebugStmt(string Raw, TextSpan Span) : Stmt(Span);
 
 /// <summary>
-/// A panic statement. Raw is the raw string literal including quotes. Lowered to the
-/// environment's panic binding. Only legal in kernel context. Hard error in a release build.
+/// A panic statement. Raw is the raw string literal including quotes. Lowered to the environment's
+/// panic binding. Only legal in kernel context. Hard error in a release build.
 /// </summary>
 internal record PanicStmt(string Raw, TextSpan Span) : Stmt(Span);
 

@@ -4,12 +4,9 @@ using System.Net.Http;
 using System.Text.Json;
 
 /// <summary>
-/// Downloads one or more directory subtrees from a public GitHub repo at a given ref,
-/// writing files straight to local paths with each source prefix stripped - no zip
-/// involved. Uses the Trees API (one recursive call, shared across every requested
-/// directory) as the fast path, falling back to the Contents API (per-directory BFS)
-/// only if the tree response is truncated. Bounded concurrency, small retry/backoff,
-/// and GitHub rate-limit awareness on api.github.com calls.
+/// Downloads directory subtrees from a public GitHub repo straight to local paths, no zip involved.
+/// One recursive Trees call is the fast path, falling back to per-directory Contents BFS if
+/// truncated. Bounded concurrency, retry/backoff, and rate-limit awareness.
 /// </summary>
 internal static class GitHubDirDownloader
 {
@@ -20,20 +17,20 @@ internal static class GitHubDirDownloader
     private sealed record TreeEntry(string Path, string Type);
 
     /// <summary>
-    /// Downloads every file under each requested directory (keys of
-    /// <paramref name="directoryToLocalPath"/>, e.g. "envs/") into its paired local
-    /// directory, stripping the source prefix from each file's path.
+    /// Downloads every file under each requested directory (the keys of <paramref
+    /// name="toLocalPath"/>) into its paired local directory, stripping the source prefix from each
+    /// file's path.
     /// </summary>
     public static async Task DownloadDirectoriesAsync(
         string owner, string repo, string @ref,
-        IReadOnlyDictionary<string, string> directoryToLocalPath,
+        IReadOnlyDictionary<string, string> toLocalPath,
         HttpClient client,
         CancellationToken ct = default)
     {
         var (truncated, entries) = await FetchTreeAsync(owner, repo, @ref, client, ct);
 
         var files = new List<(TreeEntry Entry, string LocalPath)>();
-        foreach (var (prefix, localDir) in directoryToLocalPath)
+        foreach (var (prefix, localDir) in toLocalPath)
         {
             IReadOnlyList<TreeEntry> matches = truncated
                 ? await WalkContentsApiAsync(owner, repo, @ref, prefix.TrimEnd('/'), client, ct)
@@ -54,9 +51,9 @@ internal static class GitHubDirDownloader
     }
 
     /// <summary>
-    /// Fetches the full recursive tree at the given ref via the Git Trees API.
-    /// Returns (truncated, entries) - entries is empty when truncated, since a
-    /// truncated tree cannot be trusted for any directory's contents.
+    /// Fetches the full recursive tree at the given ref via the Git Trees API. Returns (truncated,
+    /// entries) - entries is empty when truncated, since a truncated tree cannot be trusted for any
+    /// directory's contents.
     /// </summary>
     private static async Task<(bool Truncated, List<TreeEntry> Entries)> FetchTreeAsync(
         string owner, string repo, string @ref, HttpClient client, CancellationToken ct)
@@ -86,9 +83,9 @@ internal static class GitHubDirDownloader
     }
 
     /// <summary>
-    /// Fallback for a truncated tree: walks the Contents API recursively, one request
-    /// per directory, following "dir"-typed children. Naturally bounded per-directory,
-    /// unlike the whole-repo Trees API call.
+    /// Fallback for a truncated tree: walks the Contents API recursively, one request per
+    /// directory, following "dir"-typed children. Naturally bounded per-directory, unlike the
+    /// whole-repo Trees API call.
     /// </summary>
     private static async Task<List<TreeEntry>> WalkContentsApiAsync(
         string owner, string repo, string @ref, string directory, HttpClient client, CancellationToken ct)
@@ -152,8 +149,8 @@ internal static class GitHubDirDownloader
 
     /// <summary>
     /// Escapes a repo-relative path for embedding in a raw.githubusercontent.com/
-    /// media.githubusercontent.com URL: literal '%' and '#' first (both CDNs choke on
-    /// them unescaped), then per-segment URI escaping for everything else.
+    /// media.githubusercontent.com URL: literal '%' and '#' first (both CDNs choke on them
+    /// unescaped), then per-segment URI escaping for everything else.
     /// </summary>
     private static string EscapePath(string path)
     {
@@ -162,8 +159,8 @@ internal static class GitHubDirDownloader
     }
 
     /// <summary>
-    /// Sends a GET to the GitHub REST API, attaching a bearer token from GITHUB_TOKEN
-    /// if one is set (optional - raises the rate limit from 60/hr to 5000/hr).
+    /// Sends a GET to the GitHub REST API, attaching a bearer token from GITHUB_TOKEN if one is set
+    /// (optional - raises the rate limit from 60/hr to 5000/hr).
     /// </summary>
     private static Task<HttpResponseMessage> SendApiRequestAsync(string url, HttpClient client, CancellationToken ct)
     {
@@ -175,8 +172,8 @@ internal static class GitHubDirDownloader
     }
 
     /// <summary>
-    /// If the GitHub API response reports the rate limit is exhausted, waits until the
-    /// reset time (capped at <see cref="MaxRateLimitWait"/>) rather than failing fast.
+    /// If the response reports the rate limit exhausted, waits until the reset time, capped at <see
+    /// cref="MaxRateLimitWait"/>, rather than failing fast.
     /// </summary>
     private static async Task RespectRateLimitAsync(HttpResponseMessage response, CancellationToken ct)
     {
@@ -194,9 +191,9 @@ internal static class GitHubDirDownloader
     }
 
     /// <summary>
-    /// Retries a transient failure a bounded number of times with exponential backoff.
-    /// Does not retry the explicit 401/404 failures raised by the callers above, since
-    /// those already threw before reaching a retryable state.
+    /// Retries a transient failure a bounded number of times with exponential backoff. Does not
+    /// retry the explicit 401/404 failures raised by the callers above, since those already threw
+    /// before reaching a retryable state.
     /// </summary>
     private static async Task<T> WithRetryAsync<T>(Func<Task<T>> action, CancellationToken ct)
     {

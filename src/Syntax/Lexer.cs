@@ -4,8 +4,8 @@ using System.Collections.Frozen;
 using System.Runtime.CompilerServices;
 
 /// <summary>
-/// Thrown by the lexer or parser when source text cannot be tokenized or parsed.
-/// Caught at every call site so it never escapes as an unhandled exception.
+/// Thrown by the lexer or parser when source text cannot be tokenized or parsed. Caught at every
+/// call site so it never escapes as an unhandled exception.
 /// </summary>
 internal sealed class ParseException(TextSpan span, string message, string code = Codes.Syntax, string[]? hints = null) : Exception(message)
 {
@@ -15,13 +15,13 @@ internal sealed class ParseException(TextSpan span, string message, string code 
 }
 
 /// <summary>
-/// Converts a Gata source string into a flat list of tokens.
-/// One instance per file. Call Tokenize() once and discard.
-/// Man, .NET 10 is rad. I love records and primary constructors.
+/// Converts a Gata source string into a flat list of tokens. One instance per file. Call Tokenize()
+/// once and discard. Man, .NET 10 is rad. I love records and primary constructors.
 /// </summary>
 internal sealed class Lexer(string src)
 {
-    // Position pointer into the source string. _pp points to the index of the next character to read.
+    // Position pointer into the source string. _pp points to the index of the next character to
+    // read.
     private int _pp;
     // Start index of the current token being read. _ts is set to _pp when a new token starts.
     private int _ts;
@@ -151,13 +151,15 @@ internal sealed class Lexer(string src)
         _pp += n;
     }
 
-    // Emits a token of the specified kind with the given value, using the current token start and position pointers to create a TextSpan.
+    // Emits a token of the specified kind with the given value, using the current token start and
+    // position pointers to create a TextSpan.
     private void Emit(TK kind, string value)
     {
         _tokens.Add(new Token(kind, value, new TextSpan(_ts, _pp - _ts)));
     }
 
-    // Throws a ParseException with the given message and a TextSpan covering the current token being read.
+    // Throws a ParseException with the given message and a TextSpan covering the current token
+    // being read.
     private void Fail(string m, string code = Codes.Syntax, string[]? hints = null)
     {
         throw new ParseException(new TextSpan(_ts, Math.Max(1, _pp - _ts)), m, code, hints);
@@ -218,8 +220,9 @@ internal sealed class Lexer(string src)
                 case "keep": Emit(TK.AtKeep, "@keep"); return;
                 case "builtin": Emit(TK.AtBuiltin, ReadParenArg("@builtin")); return;
                 default:
-                    // If we reach here, it means the annotation name is not recognized.
-                    // Throw a ParseException with a message indicating the unknown annotation and the expected ones.
+                    // If we reach here, it means the annotation name is not recognized. Throw a
+                    // ParseException with a message indicating the unknown annotation and the
+                    // expected ones.
                     Fail($"unknown annotation '@{nn}'; expected '@intrinsic', '@preamble', '@extern', '@environment', '@keep', or '@builtin'",
                         Codes.BadAnnotation);
                     return;
@@ -232,15 +235,18 @@ internal sealed class Lexer(string src)
             // Save the current position in case we need to backtrack
             int start = _pp; Advance(6); SkipWS();
 
-            // If the next character is '{', we have a native block. Read the balanced content and emit a NativeContent token.
+            // If the next character is '{', we have a native block. Read the balanced content and
+            // emit a NativeContent token.
             if (Cur == '{') { Emit(TK.NativeContent, ReadBalanced()); return; }
 
-            // If the next characters spell "type", we have a native type declaration. Read the type name and the balanced body, then emit a NativeTypeDecl token.
+            // If the next characters spell "type", we have a native type declaration. Read the type
+            // name and the balanced body, then emit a NativeTypeDecl token.
             if (MatchKw("type"))
             {
                 Advance(4); SkipWS();
 
-                // Read the type name, which must be a valid identifier. If we find a '{' after the type name, read the balanced body and emit a NativeTypeDecl token.
+                // Read the type name, which must be a valid identifier. If we find a '{' after the
+                // type name, read the balanced body and emit a NativeTypeDecl token.
                 int ns = _pp;
                 while (_pp < src.Length && IsIdentPart(Cur)) Advance();
                 string tname = src[ns.._pp]; SkipWS();
@@ -252,7 +258,8 @@ internal sealed class Lexer(string src)
                 }
             }
 
-            // If we didn't find a valid native block or type declaration, backtrack and read an identifier instead.
+            // If we didn't find a valid native block or type declaration, backtrack and read an
+            // identifier instead.
             _pp = start; 
             ReadID(); 
             
@@ -358,8 +365,8 @@ internal sealed class Lexer(string src)
     }
 
     /// <summary>
-    /// True when the next characters in src spell exactly kw and are not followed
-    /// by a letter, digit, or underscore (ie. it is a complete word boundary).
+    /// True when the next characters in src spell exactly kw and are not followed by a letter,
+    /// digit, or underscore (ie. it is a complete word boundary).
     /// </summary>
     private bool MatchKw(string kw)
     {
@@ -380,8 +387,8 @@ internal sealed class Lexer(string src)
     private void SkipWS() { while (_pp < src.Length && IsWhiteSpace(Cur)) Advance(); }
 
     /// <summary>
-    /// Reads the required (identifier) argument after an annotation keyword, like @intrinsic(retain).
-    /// A missing, empty, or unclosed argument list is a lex-time error.
+    /// Reads the required (identifier) argument after an annotation keyword, like
+    /// @intrinsic(retain). A missing, empty, or unclosed argument list is a lex-time error.
     /// </summary>
     private string ReadParenArg(string ann)
     {
@@ -391,7 +398,8 @@ internal sealed class Lexer(string src)
         SkipWS();
         int s = _pp;
 
-        // Read until we find a character that is not part of an identifier (letter, digit, or underscore)
+        // Read until we find a character that is not part of an identifier (letter, digit, or
+        // underscore)
         while (_pp < src.Length && IsIdentPart(Cur)) Advance();
         string arg = src[s.._pp];
         if (arg.Length == 0) Fail($"'{ann}' argument must be a name", Codes.BadAnnotation, [$"e.g. {ann}(name)"]);
@@ -402,9 +410,9 @@ internal sealed class Lexer(string src)
     }
 
     /// <summary>
-    /// Reads a balanced block of text enclosed in braces '{' and '}'.
-    /// Understands C style line comments, block comments, and string/char literals
-    /// so a brace inside any of those does not alter the nesting depth.
+    /// Reads a balanced block of text enclosed in braces '{' and '}'. Understands C style line
+    /// comments, block comments, and string/char literals so a brace inside any of those does not
+    /// alter the nesting depth.
     /// </summary>
     private string ReadBalanced()
     {
@@ -416,7 +424,8 @@ internal sealed class Lexer(string src)
             char cur = Cur;
             char peek = Peek();
 
-            // Handle comments, string literals, and character literals to avoid misinterpreting braces inside them
+            // Handle comments, string literals, and character literals to avoid misinterpreting
+            // braces inside them
             if (cur == '/' && peek == '/')
             {
                 while (_pp < src.Length && Cur != '\n') Advance();
@@ -446,7 +455,8 @@ internal sealed class Lexer(string src)
             else { Advance(); }
         }
 
-        // If we reached the end of the source string and depth is still greater than 0, it means we have an unterminated native block. Throw a ParseException in that case.
+        // If we reached the end of the source string and depth is still greater than 0, it means we
+        // have an unterminated native block. Throw a ParseException in that case.
         if (depth > 0) Fail("Unterminated native block, missing closing '}'", Codes.UnterminatedLiteral);
         return src[start..(_pp - 1)];
     }
@@ -467,11 +477,9 @@ internal sealed class Lexer(string src)
         // If it does, emit the corresponding keyword token. Otherwise, emit an identifier token.
         if (KeywordsLookup.TryGetValue(span, out var kw))
         {
-            // Several TK kinds have more than one valid spelling (true/false -> BoolLit;
-            // the whole TPrim family). The cached canonical spelling only matches the actual
-            // source text for single-spelling keywords; anywhere it differs, the
-            // token's value must carry the real spelling, not the cached one, or
-            // the two spellings collapse into whichever happened to be cached.
+            // Several TK kinds have more than one spelling (true/false, the whole TPrim family),
+            // and the cached canonical one only matches the source for single-spelling keywords.
+            // Elsewhere the token must carry the real spelling or the two collapse into one.
             string canonical = kwstr[(int)kw];
             Emit(kw, span.Equals(canonical, StringComparison.Ordinal) ? canonical : new string(span));
         }
@@ -482,8 +490,8 @@ internal sealed class Lexer(string src)
     }
 
     /// <summary>
-    /// Reads a numeric literal: hex (0x…), integer, or float with optional suffix.
-    /// The full lexeme including any suffix is stored verbatim as the token value.
+    /// Reads a numeric literal: hex (0x…), integer, or float with optional suffix. The full lexeme
+    /// including any suffix is stored verbatim as the token value.
     /// </summary>
     private void ReadNumber()
     {
@@ -567,8 +575,8 @@ internal sealed class Lexer(string src)
     }
 
     /// <summary>
-    /// Reads an interpolated string $"…{expr}…" as a sequence of distinct tokens.
-    /// Emits InterpStrStart, StrLit, Punct for braces, standard expression tokens, and InterpStrEnd.
+    /// Reads an interpolated string $"…{expr}…" as a sequence of distinct tokens. Emits
+    /// InterpStrStart, StrLit, Punct for braces, standard expression tokens, and InterpStrEnd.
     /// </summary>
     private void ReadInterp()
     {
@@ -600,16 +608,13 @@ internal sealed class Lexer(string src)
                 }
 
                 // If we reached the end of the source string and brdepth is still greater than 0,
-                // it means we have an unterminated '{' in the interpolated string. Throw a ParseException in that case.
+                // it means we have an unterminated '{' in the interpolated string. Throw a
+                // ParseException in that case.
                 if (brdepth > 0) Fail("unterminated '{' in interpolated string", Codes.UnterminatedLiteral);
 
-                // emit closing '}'
                 _ts = _pp; Advance();
                 Emit(TK.Punct, "}");
             }
-            // emit a string literal segment until the next real '{', '"', or newline.
-            // `{{`/`}}` are literal-brace escapes (C#-style) and collapse to a single
-            // brace in the emitted text rather than starting a real interpolation.
             else
             {
                 _ts = _pp;
@@ -665,7 +670,8 @@ internal sealed class Lexer(string src)
             else Advance();
         }
 
-        // If we reached the end of the source string or a newline without finding a closing quote, throw a ParseException for an unterminated string literal.
+        // If we reached the end of the source string or a newline without finding a closing quote,
+        // throw a ParseException for an unterminated string literal.
         if (Cur != '"') Fail("unterminated string literal", Codes.UnterminatedLiteral);
         Advance(); // closing "
         return src[start.._pp];

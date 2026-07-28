@@ -28,10 +28,8 @@ internal enum TK : byte
     // Primitive types
     TBool, TInt, TChar, TFloat, TDouble, TShort, TVoid, TPrim,
 
-    /// <Note>
-    /// TPrim is the width explicit family (int64/uint/uint64/ushort/byte/sbyte/usize/uintptr)
-    /// Its spelling is carried in the token value.
-    /// </Note>
+    // TPrim is the width-explicit family (int64/uint/uint64/ushort/byte/sbyte/usize/uintptr).
+    // Its spelling is carried in the token value.
 
     // Compound assignment
     PlusEq, MinusEq, StarEq, SlashEq, PercentEq,

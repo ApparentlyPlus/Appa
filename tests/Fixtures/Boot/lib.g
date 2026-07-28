@@ -1,7 +1,5 @@
-// A second translation unit, so the boot regression covers the multi-file front end on the
-// real target: cross-file imports, cross-file types, and a generic declared here but
-// instantiated over a class declared in main.g.
 import Console;
+import List;
 
 class Payload {
     public int weight;
@@ -21,15 +19,81 @@ union Reading {
     Bytes([4]int raw)
 }
 
-// A private free function: two files declaring this name must not collide in C.
+class Census {
+    public int live;
+    public int created;
+    func _init() { self.live = 0; self.created = 0; }
+}
+
+class Tracked {
+    Census census;
+    public int id;
+    public func _init(Census c, int id) {
+        self.census = c;
+        self.id = id;
+        c.live = c.live + 1;
+        c.created = c.created + 1;
+    }
+    func _deinit() { self.census.live = self.census.live - 1; }
+
+    public operator bool func ==(Tracked o) { return self.id == o.id; }
+}
+
+union Signal {
+    Quiet,
+    One(Tracked t),
+    Both(Tracked a, Tracked b),
+    Level(int n)
+}
+
+union Envelope { Wrap(Signal s), Sealed(int code) }
+
+class Mailbox {
+    Signal slot;
+    public func _init(Signal s) { self.slot = s; }
+    public void func Put(Signal s) { self.slot = s; }
+    public int func Weight() { return SignalWeight(self.slot); }
+}
+
+union Maybe[V] { Found(V v), Missing }
+
+union Tree[V] { Leaf(V v), Fork(List[Tree[V]] kids) }
+
+public int func CountLeaves[V](Tree[V] t) {
+    match (t) {
+        case Leaf(v) { return 1; }
+        case Fork(kids) {
+            let int n = 0;
+            for k in kids { n = n + CountLeaves(k); }
+            return n;
+        }
+    }
+}
+
+public Signal func MakeSignal(Census c, int id) { return Signal.One(new Tracked(c, id)); }
+
+public int func EnvelopeWeight(Envelope e) {
+    match (e) {
+        case Wrap(s) { return SignalWeight(s); }
+        case Sealed(code) { return code; }
+    }
+}
+
+public int func SignalWeight(Signal s) {
+    match (s) {
+        case Quiet { return 0; }
+        case One(t) { return t.id; }
+        case Both(a, b) { return a.id + b.id; }
+        case Level(n) { return n; }
+    }
+}
+
 private int func Scale(int n) { return n * 2; }
 
 public int func LibScale(int n) { return Scale(n); }
 
-// 'ref' across a file boundary.
 public void func Bump(ref int slot) { slot = slot + 1; }
 
-// A generic throws function, whose Result typedef is only known once instantiated.
 public throws T func Unwrap[T](T value, bool fail) {
     if (fail) { throw; }
     return value;

@@ -3,28 +3,17 @@ namespace Appa.Tests;
 using System.Text;
 
 /// <summary>
-/// Robustness suite. Where the other test files pin individual language rules,
-/// this one asserts whole-compiler invariants over a large generated corpus of
-/// syntactically plausible but semantically garbage programs:
-///
-///   * no input crashes the compiler (only ParseException may escape the parser,
-///     and SingleFileCompile already folds that into a diagnostic);
-///   * every diagnostic is well-formed -- known code, real message, span inside
-///     the file;
-///   * anything that checks clean emits structurally valid C.
-///
-/// Each invariant is one [Fact] that sweeps the whole corpus and reports every
-/// violation at once, rather than a Theory per case: a regression here is usually
-/// a whole class of inputs, and seeing all of them together is what makes it
-/// diagnosable. The corpus lives in <see cref="TortureCorpus"/>.
+/// Whole-compiler invariants over a corpus of plausible but garbage programs: nothing crashes,
+/// every diagnostic is well-formed, and anything clean emits valid C. One [Fact] sweeps the corpus
+/// and reports every violation at once, since a regression is usually a class.
 /// </summary>
 public class TortureTests
 {
     #region Sweep plumbing
 
     /// <summary>
-    /// Collects failure messages across a corpus sweep and turns them into a single
-    /// assertion, capped so one broken invariant can't produce a megabyte of output.
+    /// Collects failure messages across a corpus sweep and turns them into a single assertion,
+    /// capped so one broken invariant can't produce a megabyte of output.
     /// </summary>
     private sealed class Failures
     {
@@ -43,13 +32,9 @@ public class TortureTests
     }
 
     /// <summary>
-    /// Runs a source through the whole front end, converting any escaping exception
-    /// into a message rather than tearing down the sweep.
-    ///
-    /// This mirrors Program.RunFrontEnd rather than calling SingleFileCompile.Check,
-    /// because Check stops after BuildModule: the realm/entry-point/intrinsic rules
-    /// live in the Validate* passes after it, and skipping them would leave a whole
-    /// tier of the compiler untortured.
+    /// Runs a source through the whole front end, turning an escaping exception into a message
+    /// rather than tearing down the sweep. Mirrors Program.RunFrontEnd, not
+    /// SingleFileCompile.Check, which stops before the Validate* passes.
     /// </summary>
     private static (DiagnosticBag? Diag, IrModule? Module, string? Crash) TryCheck(string src)
     {
@@ -82,29 +67,35 @@ public class TortureTests
         }
     }
 
-    /// <summary>Emits a checked module, returning the crash description instead of throwing.</summary>
+    /// <summary>
+    /// Emits a checked module, returning the crash description instead of throwing.
+    /// </summary>
     private static (IReadOnlyList<OutputFile>? Files, string? Crash) TryEmit(IrModule module, DiagnosticBag diag)
     {
         try { return (Layout.Compose(new Emitter(module, diag).Build(), module.Symbols), null); }
         catch (Exception ex) { return (null, Describe(ex)); }
     }
 
-    /// <summary>Formats an exception as "Type: message @ top frame" for a failure message.</summary>
+    /// <summary>
+    /// Formats an exception as "Type: message @ top frame" for a failure message.
+    /// </summary>
     private static string Describe(Exception ex)
     {
         var frame = (ex.StackTrace ?? "").Split('\n').FirstOrDefault()?.Trim() ?? "<no stack>";
         return $"{ex.GetType().Name}: {ex.Message.Replace('\n', ' ')} @ {frame}";
     }
 
-    /// <summary>Trims a source down to something that fits in a failure message.</summary>
+    /// <summary>
+    /// Trims a source down to something that fits in a failure message.
+    /// </summary>
     private static string Excerpt(string src) =>
         src.Length <= 400 ? src : src[..400] + " ...";
 
     #endregion
 
     /// <summary>
-    /// The core invariant: no program, however malformed, makes the compiler throw.
-    /// A crash here is always a compiler bug, never a property of the input.
+    /// The core invariant: no program, however malformed, makes the compiler throw. A crash here is
+    /// always a compiler bug, never a property of the input.
     /// </summary>
     [Fact]
     public void NoCorpusCaseCrashesTheCompiler()
@@ -123,9 +114,9 @@ public class TortureTests
     }
 
     /// <summary>
-    /// Every diagnostic must be usable: a code the compiler declares, a non-empty
-    /// single-line message, and a span that actually points into the source. A span
-    /// of the wrong length or past the end of the file renders a caret under nothing.
+    /// Every diagnostic must be usable: a code the compiler declares, a non-empty single-line
+    /// message, and a span that actually points into the source. A span of the wrong length or past
+    /// the end of the file renders a caret under nothing.
     /// </summary>
     [Fact]
     public void AllDiagnosticsAreWellFormed()
@@ -161,9 +152,9 @@ public class TortureTests
     }
 
     /// <summary>
-    /// Cases the corpus marks <see cref="Expect.Rejected"/> must produce an error, and
-    /// where a code is named, that specific one. A case that silently passes is a
-    /// missing diagnostic -- the compiler is about to emit C for nonsense.
+    /// Cases the corpus marks <see cref="Expect.Rejected"/> must produce an error, and the named
+    /// one where a code is given. A case that silently passes is a missing diagnostic - the
+    /// compiler is about to emit C for nonsense.
     /// </summary>
     [Fact]
     public void CorpusExpectationsHold()
@@ -195,9 +186,9 @@ public class TortureTests
     }
 
     /// <summary>
-    /// Anything that checks clean must emit C that is at least structurally sound:
-    /// balanced delimiters, no placeholder names left over from a failed lookup, and
-    /// no empty aggregate bodies (a constraint violation gcc rejects).
+    /// Anything that checks clean must emit C that is at least structurally sound: balanced
+    /// delimiters, no placeholder names left over from a failed lookup, and no empty aggregate
+    /// bodies (a constraint violation gcc rejects).
     /// </summary>
     [Fact]
     public void EmittedCIsStructurallyValid()
@@ -225,16 +216,12 @@ public class TortureTests
     }
 
     /// <summary>
-    /// The same structural check, but with a realm forced on.
-    ///
-    /// Which translation units get emitted is decided by the @preamble targets the
-    /// environment declares, and a single-file corpus case declares none -- so
-    /// Layout.Compose produces only shared.h and every function body the compiler
-    /// generated goes unexamined. Prepending a kernel preamble turns kmain.c on and
-    /// puts the actual emitted code under the same balance/placeholder assertions.
+    /// The same structural check with a realm forced on. Units come from the environment's
+    /// @preamble targets and a single-file case declares none, so Layout.Compose emits only
+    /// shared.h; a kernel preamble puts the real emitted code under the same assertions.
     /// </summary>
     [Fact]
-    public void EmittedCIsStructurallyValidWithARealmDeclared()
+    public void EmittedCIsValidWithARealm()
     {
         const string realm = "@preamble(kernel) native { }\n";
         var fails = new Failures();
@@ -263,10 +250,9 @@ public class TortureTests
     }
 
     /// <summary>
-    /// Deterministic token-soup fuzzer. Concatenates random atoms from the real token
-    /// set, producing inputs no hand-written case would: unbalanced nesting, keywords
-    /// in operand position, declarations truncated mid-header. Nothing is asserted
-    /// about the result beyond "did not throw".
+    /// Deterministic token-soup fuzzer: random atoms from the real token set, producing unbalanced
+    /// nesting, keywords in operand position and declarations truncated mid-header. Nothing is
+    /// asserted beyond "did not throw".
     /// </summary>
     [Fact]
     public void RandomTokenSoupNeverCrashes()
@@ -305,9 +291,9 @@ public class TortureTests
     }
 
     /// <summary>
-    /// A large program exercising most of the grammar, used by the mutation fuzzers
-    /// below. Kept valid so that every mutation of it is exactly one step away from
-    /// a well-formed program -- which is where parser edge cases live.
+    /// A large program exercising most of the grammar, used by the mutation fuzzers below. Kept
+    /// valid so that every mutation of it is exactly one step away from a well-formed program --
+    /// which is where parser edge cases live.
     /// </summary>
     private const string Kitchen = """
     enum Color { Red, Green = 5 }
@@ -342,12 +328,11 @@ public class TortureTests
     """;
 
     /// <summary>
-    /// Truncation fuzzer: every prefix of a large valid program must fail cleanly.
-    /// Cutting a program mid-token is the cheapest way to reach parser states no
-    /// complete input produces.
+    /// Truncation fuzzer: every prefix of a large valid program must fail cleanly. Cutting a
+    /// program mid-token is the cheapest way to reach parser states no complete input produces.
     /// </summary>
     [Fact]
-    public void EveryPrefixOfAValidProgramFailsCleanly()
+    public void EveryPrefixFailsCleanly()
     {
         var fails = new Failures();
         for (int cut = 0; cut <= Kitchen.Length; cut++)
@@ -364,10 +349,9 @@ public class TortureTests
     }
 
     /// <summary>
-    /// Deletion fuzzer: blanking any single token out of a valid program must never
-    /// crash. This is the cheapest generator of "off by one token" parser states,
-    /// and it reaches lookahead helpers (SkipTypeSpec, LooksLikeMethod) that only
-    /// misbehave when the shape they are probing is one token short.
+    /// Deletion fuzzer: blanking any single token out of a valid program must never crash. The
+    /// cheapest generator of off-by-one-token parser states, reaching lookahead helpers that only
+    /// misbehave when the shape they probe is one token short.
     /// </summary>
     [Fact]
     public void SingleTokenDeletionsNeverCrash()
@@ -394,8 +378,8 @@ public class TortureTests
     #region Emitted-C helpers
 
     /// <summary>
-    /// Blanks out string literals, char literals, and comments so delimiter counting
-    /// isn't thrown off by a brace inside a message or a native block's comment.
+    /// Blanks out string literals, char literals, and comments so delimiter counting isn't thrown
+    /// off by a brace inside a message or a native block's comment.
     /// </summary>
     private static string StripLiteralsAndComments(string s)
     {
@@ -435,15 +419,9 @@ public class TortureTests
     }
 
     /// <summary>
-    /// Returns the first unresolved-symbol placeholder the emitter leaked into the output,
-    /// or null.
-    ///
-    /// gata_MISSING_retain / _release are excluded. Those two are the one placeholder the
-    /// compiler emits on purpose: Ownership resolves the ARC roles silently because a corpus
-    /// case imports no libgata and so binds none of them. A real build always imports libgata,
-    /// which declares String and therefore a reference-counted class, and Pipeline.ValidateIntrinsics
-    /// then requires the whole ARC role set before anything is emitted. Every other placeholder
-    /// means a lookup failed with no diagnostic, which is the bug this looks for.
+    /// The first unresolved-symbol placeholder the emitter leaked, or null.
+    /// gata_MISSING_retain/_release are the one pair emitted on purpose, since a corpus case binds
+    /// no ARC role. Any other means a lookup failed with no diagnostic.
     /// </summary>
     private static string? LeakedPlaceholder(string code)
     {
@@ -464,7 +442,9 @@ public class TortureTests
         return null;
     }
 
-    /// <summary>Returns true if open/close never go negative and end at zero.</summary>
+    /// <summary>
+    /// Returns true if open/close never go negative and end at zero.
+    /// </summary>
     private static bool Balanced(string s, char open, char close)
     {
         int depth = 0;
@@ -477,10 +457,9 @@ public class TortureTests
     }
 
     /// <summary>
-    /// Returns the keyword of the first "enum/struct/union [tag] { }" with nothing but
-    /// whitespace between the braces, or null. An empty aggregate body is a constraint
-    /// violation in C, and is what an empty Gata enum or union lowers to if nothing
-    /// upstream rejects it.
+    /// Returns the keyword of the first "enum/struct/union [tag] { }" with nothing but whitespace
+    /// between the braces, or null. An empty aggregate body is a constraint violation in C, and is
+    /// what an empty Gata enum or union lowers to if nothing upstream rejects it.
     /// </summary>
     private static string? EmptyAggregate(string code)
     {

@@ -7,8 +7,8 @@ internal static class Pipeline
     #region Project discovery
 
     /// <summary>
-    /// Finds the project file marked @environment in the project root.
-    /// Parses the top-level *.g files and returns the first one carrying the marker.
+    /// Finds the project file marked @environment in the project root. Parses the top-level *.g
+    /// files and returns the first one carrying the marker.
     /// </summary>
     public static string? DiscoverEnv(string projectRoot, List<string>? unreadable = null)
     {
@@ -44,8 +44,8 @@ internal static class Pipeline
     }
 
     /// <summary>
-    /// Resolves an unquoted library import name to a file path in the libgata directory.
-    /// Reports a diagnostic and returns an empty string if the module file is missing.
+    /// Resolves an unquoted library import name to a file path in the libgata directory. Reports a
+    /// diagnostic and returns an empty string if the module file is missing.
     /// </summary>
     public static string ResolveLibgata(string name, string libgataDir, string fromFile,
                                         DiagnosticBag diag, TextSpan span)
@@ -61,8 +61,8 @@ internal static class Pipeline
     #region Build pipeline
 
     /// <summary>
-    /// Runs the full front-end and lowering pipeline over a parsed program set and
-    /// returns the lowered module, its name sourcemap, and the scanned capability set.
+    /// Runs the full front-end and lowering pipeline over a parsed program set and returns the
+    /// lowered module, its name sourcemap, and the scanned capability set.
     /// </summary>
     public static (IrModule Module, IReadOnlyDictionary<string, string> Sourcemap, CapabilityScan Caps) BuildModule(
         List<(string path, Program prog)> programs,
@@ -76,13 +76,9 @@ internal static class Pipeline
                                       collected.PreDefinedStructs, collected.OpaqueFieldClasses, visible,
                                       genericRequestFile, releaseMode: mode == Mode.Release, diag)
                          .Resolve([.. programs.Select(t => (t.prog, t.path))]);
-        // The backend assumes well-typed IR. If the front-end reported any error, stop
-        // here: lowering an ill-typed program would otherwise fault.
         if (diag.HasErrors)
             return (module, new Dictionary<string, string>(), new CapabilityScan(module));
         module = new Desugar(collected.Sym, diag).Run(module);
-        // Infer the capability set here: interpolation is now explicit calls, names are
-        // still readable, and ARC has not yet sprayed retain/release everywhere.
         var caps = new CapabilityScan(module).Run();
         module = new Dce(module).Run();
         var (dense, sourcemap) = new Densifier(module).Run();
@@ -91,8 +87,8 @@ internal static class Pipeline
     }
 
     /// <summary>
-    /// Parses the given entry files and follows their imports transitively, returning
-    /// the parsed programs in dependency order along with the per-file import graph.
+    /// Parses the given entry files and follows their imports transitively, returning the parsed
+    /// programs in dependency order along with the per-file import graph.
     /// </summary>
     public static (List<(string path, Program prog)> programs, List<string> attempted,
             Dictionary<string, List<string>> imports, DiagnosticBag diag)
@@ -144,8 +140,8 @@ internal static class Pipeline
     }
 
     /// <summary>
-    /// For each file, computes the set of files whose top-level names it may reference:
-    /// itself plus the transitive closure of its imports.
+    /// For each file, computes the set of files whose top-level names it may reference: itself plus
+    /// the transitive closure of its imports.
     /// </summary>
     public static Dictionary<string, HashSet<string>> VisibleModules(Dictionary<string, List<string>> imports)
     {
@@ -178,8 +174,8 @@ internal static class Pipeline
     }
 
     /// <summary>
-    /// Validates that every _env_* floor bind referenced in the lowered IR is provided
-    /// by the active environment's @preamble. Turns missing-bind link errors into diagnostics.
+    /// Validates that every _env_* floor bind referenced in the lowered IR is provided by the
+    /// active environment's @preamble. Turns missing-bind link errors into diagnostics.
     /// </summary>
     public static void ValidateFloor(IrModule module, DiagnosticBag diag)
     {
@@ -208,22 +204,16 @@ internal static class Pipeline
                     $"the active environment's @preamble provides no definition of '{name}'; add one (the environment file, not your Gata source, is incomplete)");
     }
 
-    // The reference-counting runtime, as one contract rather than five independent knobs.
-    // A stdlib binding some-but-not-all of these is not partially working: every managed class
-    // gets an allocator (alloc + obj_init), a header field (obj_header), and a destructor whose
-    // field cleanup and whose callers go through retain/release.
+    // The reference-counting runtime as one contract, not five knobs. Binding some but not all
+    // is not partial working: every managed class needs alloc + obj_init, obj_header, and a
+    // destructor whose cleanup and callers go through retain/release.
     private static readonly string[] ArcRoles =
         [Roles.Alloc, Roles.Retain, Roles.Release, Roles.ObjHeader, Roles.ObjInit];
 
     /// <summary>
-    /// Validates that the standard library binds the whole ARC contract whenever the program
-    /// actually needs it - that is, whenever any reference-counted class survives to codegen.
-    ///
-    /// Note here that this deliberately lives at the CLI front-end layer beside ValidateFloor rather than
-    /// BuildModule: BuildModule legitimately runs over stdlib-free input (SingleFileCompile checks
-    /// an import-free source string with no libgata at all), where an unbound ARC role means only
-    /// "no standard library here", not "broken build". By the time a real build reaches this point
-    /// a real libgata has been resolved, so an unbound role is unambiguously an error.
+    /// Requires the standard library to bind the whole ARC contract whenever a reference-counted
+    /// class survives to codegen. Here rather than in BuildModule, which runs over stdlib-free
+    /// input where an unbound role means only "no standard library".
     /// </summary>
     public static void ValidateIntrinsics(IrModule module, DiagnosticBag diag)
     {
@@ -247,11 +237,9 @@ internal static class Pipeline
     }
 
     /// <summary>
-    /// Validates the build's realm structure against its target. GatOS requires exactly one
-    /// kernel block with exactly one entry func (any number of user blocks). Hosted forbids
-    /// any kernel block and requires exactly one user block with exactly one entry func. With
-    /// no target (loose --pure-transpile mode), the target-agnostic GatOS-shaped rule applies,
-    /// since there's no target signal to react to.
+    /// Validates realm structure against the target: GatOS wants one kernel block with one entry
+    /// func and any number of user blocks; Hosted forbids kernel blocks and wants one user block
+    /// with one entry func. With no target, the GatOS-shaped rule applies.
     /// </summary>
     public static void ValidateStructure(List<(string path, Program prog)> programs, Target? target, DiagnosticBag diag)
     {
@@ -336,8 +324,8 @@ internal static class Pipeline
     }
 
     /// <summary>
-    /// True when text contains name as a whole C identifier (not a substring of a longer
-    /// one). A span scan bevause I am obsessed with speed.
+    /// True when text contains name as a whole C identifier (not a substring of a longer one). A
+    /// span scan bevause I am obsessed with speed.
     /// </summary>
     private static bool ContainsWholeWord(string text, string name)
     {
@@ -356,8 +344,8 @@ internal static class Pipeline
     }
 
     /// <summary>
-    /// Warns about reference cycles among managed classes that will not be freed by ARC.
-    /// Uses Tarjan's SCC algorithm on the field-type graph.
+    /// Warns about reference cycles among managed classes that will not be freed by ARC. Uses
+    /// Tarjan's SCC algorithm on the field-type graph.
     /// </summary>
     public static void WarnReferenceCycles(IrModule module)
     {
@@ -409,11 +397,12 @@ internal static class Pipeline
     }
 
     /// <summary>
-    /// Per-file pass/fail report for the Gata check phase.
-    /// Redraws one "Checking [i/n] file" line in place as files clear.
-    /// On the first file with errors (or warnings under --werror) prints diagnostics and exits.
+    /// Per-file pass/fail report for the check phase, exiting on the first failing file -
+    /// preferring one the author wrote, since dependency order puts the library first and an error
+    /// there is nearly always a symptom. A null libgataDir treats every file as theirs.
     /// </summary>
-    public static void ReportGataFiles(List<string> attempted, DiagnosticBag diag, bool warnAsError)
+    public static void ReportGataFiles(List<string> attempted, DiagnosticBag diag, bool warnAsError,
+                                       string? libgataDir = null)
     {
         var known = new HashSet<string>(attempted);
         bool tty = !Console.IsOutputRedirected;
@@ -431,19 +420,45 @@ internal static class Pipeline
 
         var sw = Stopwatch.StartNew();
         var byFile = diag.All.ToLookup(d => d.Loc.File, StringComparer.OrdinalIgnoreCase);
+
+        // The trailing separator matters: without it a sibling directory whose name merely
+        // starts with the library's - 'libgata-extra' next to 'libgata' - reads as library code.
+        string? libRoot = libgataDir == null
+            ? null
+            : Path.TrimEndingDirectorySeparator(Path.GetFullPath(libgataDir)) + Path.DirectorySeparatorChar;
+        bool IsLibrary(string path) =>
+            libRoot != null && Path.GetFullPath(path).StartsWith(libRoot, StringComparison.OrdinalIgnoreCase);
+
+        bool Failing(string path)
+        {
+            bool err = false, warn = false;
+            foreach (var d in byFile[path])
+            {
+                if (d.Severity == Severity.Error) err = true;
+                else if (d.Severity == Severity.Warning) warn = true;
+            }
+            return err || (warnAsError && warn);
+        }
+
+        // Pick the file to report from before walking, preferring the author's own.
+        string? reportFrom = null;
+        foreach (var path in attempted)
+        {
+            if (!Failing(path)) continue;
+            reportFrom ??= path;
+            if (!IsLibrary(path)) { reportFrom = path; break; }
+        }
+        if (reportFrom != null)
+            Fail(byFile[reportFrom].Where(d => d.Severity == Severity.Error
+                                               || (warnAsError && d.Severity == Severity.Warning)));
+
         int i = 0;
         foreach (var path in attempted)
         {
             i++;
-            List<Diagnostic> errors = [], warnings = [];
+            List<Diagnostic> warnings = [];
             foreach (var d in byFile[path])
-            {
-                if (d.Severity == Severity.Error) errors.Add(d);
-                else if (d.Severity == Severity.Warning) warnings.Add(d);
-            }
-
-            if (errors.Count > 0 || (warnAsError && warnings.Count > 0))
-                Fail(errors.Concat(warnings));
+                if (d.Severity == Severity.Warning) warnings.Add(d);
 
             if (tty) Out.Redraw($"  {C.DIM}⠿ Checking [{i}/{attempted.Count}] {Path.GetFileName(path)}{C.NC}");
             if (warnings.Count > 0)
@@ -488,8 +503,8 @@ sealed class EnvProbe(SymbolTable sym) : IrRewriter
     }
 
     /// <summary>
-    /// Collects debug/panic statements' bound C names (never a hardcoded literal -
-    /// whatever libgata's @intrinsic(env_debug)/@intrinsic(env_panic) resolve to).
+    /// Collects debug/panic statements' bound C names (never a hardcoded literal - whatever
+    /// libgata's @intrinsic(env_debug)/@intrinsic(env_panic) resolve to).
     /// </summary>
     protected override IrStmt RewriteStmt(IrStmt s)
     {

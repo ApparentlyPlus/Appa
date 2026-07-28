@@ -3,11 +3,9 @@ namespace Appa.Tests;
 using Appa;
 
 /// <summary>
-/// Coverage for the operator-consistency rules: '!=' derives from '==' (and vice versa) by
-/// negation when only one of the pair is declared, so a class never silently gets reference
-/// identity for one spelling of equality while the other uses its declared value comparison;
-/// and comparison operators ('==', '!=', '&lt;', '&gt;', '&lt;=', '&gt;=') always return bool -
-/// defaulted when omitted, rejected when explicitly anything else.
+/// The operator-consistency rules: '!=' derives from '==' by negation when only one is declared, so
+/// a class never gets identity for one spelling and value comparison for the other; and every
+/// comparison operator returns bool, defaulted when omitted.
 /// </summary>
 public class OperatorConsistencyTests
 {
@@ -26,7 +24,9 @@ public class OperatorConsistencyTests
         Assert.Contains(diag.All, d => d.Severity == Severity.Error && d.Code == code);
     }
 
-    /// <summary>Finds the initializer of 'let <paramref name="name"/> = ...' in the entry function.</summary>
+    /// <summary>
+    /// Finds the initializer of 'let <paramref name="name"/> = ...' in the entry function.
+    /// </summary>
     private static IrExpr EntryDeclInit(IrModule module, string name)
     {
         var entry = module.FreeFunctions.Single(f => f.IsEntry);
@@ -39,9 +39,9 @@ public class OperatorConsistencyTests
     #region '!=' / '==' derivation
 
     /// <summary>
-    /// A class that declares '==' but not '!=' gets '!=' as the negation of its own '==' - a
-    /// direct call to the declared operator wrapped in '!' - never the old silent fallback to
-    /// reference identity.
+    /// A class that declares '==' but not '!=' gets '!=' as the negation of its own '==' - a direct
+    /// call to the declared operator wrapped in '!' - never the old silent fallback to reference
+    /// identity.
     /// </summary>
     [Fact]
     public void NotEqDerivesFromDeclaredEq()
@@ -111,7 +111,7 @@ public class OperatorConsistencyTests
     }
 
     [Fact]
-    public void NoDeclarationKeepsReferenceIdentity()
+    public void NoDeclarationKeepsIdentity()
     {
         var (diag, module) = SingleFileCompile.Check("""
             class Box { public int v; }
@@ -157,7 +157,7 @@ public class OperatorConsistencyTests
     [InlineData(">")]
     [InlineData("<=")]
     [InlineData(">=")]
-    public void ComparisonOperatorWithNonBoolReturnIsRejected(string op)
+    public void ComparisonNonBoolReturnIsRejected(string op)
     {
         AssertError(Codes.TypeMismatch, $$"""
             class Box {
@@ -168,7 +168,7 @@ public class OperatorConsistencyTests
     }
 
     [Fact]
-    public void ComparisonOperatorReturnTypeDefaultsToBool()
+    public void ComparisonReturnDefaultsToBool()
     {
         AssertClean("""
             class Box {
@@ -230,7 +230,7 @@ public class OperatorConsistencyTests
     }
 
     [Fact]
-    public void PostfixIncrementOverloadDispatches()
+    public void PostfixIncrementDispatches()
     {
         AssertClean("""
             class Counter {
@@ -250,7 +250,7 @@ public class OperatorConsistencyTests
     [InlineData("operator int func !() { return 1; }")]
     [InlineData("operator int func ++() { return 1; }")]
     [InlineData("operator int func --() { return 1; }")]
-    public void UnaryOverloadWrongReturnTypeIsRejected(string decl)
+    public void UnaryOverloadBadReturnIsRejected(string decl)
     {
         AssertError(Codes.TypeMismatch, $$"""
             class Box {
@@ -264,7 +264,7 @@ public class OperatorConsistencyTests
     [InlineData("operator func !(Box other) { return true; }")]
     [InlineData("operator Box func ~(Box other) { return other; }")]
     [InlineData("operator func ++(Box other) { }")]
-    public void UnaryOverloadWithParameterIsRejected(string decl)
+    public void UnaryOverloadWithParamIsRejected(string decl)
     {
         AssertError(Codes.WrongArgCount, $$"""
             class Box {
@@ -275,7 +275,7 @@ public class OperatorConsistencyTests
     }
 
     [Fact]
-    public void UnaryOnClassWithoutOverloadStillRejected()
+    public void UnaryWithoutOverloadIsRejected()
     {
         AssertError(Codes.TypeMismatch, """
             class Box { public int v; }
@@ -294,7 +294,7 @@ public class OperatorConsistencyTests
     [InlineData("let Box c = a + b;")]
     [InlineData("let bool e = a == b;")]
     [InlineData("let bool n = a != b;")] // derived from the private '==' - equally private
-    public void PrivateOperatorIsRejectedOutsideItsClass(string use)
+    public void PrivateOperatorIsRejectedOutside(string use)
     {
         AssertError(Codes.PrivateMember, $$"""
             class Box {
@@ -311,7 +311,7 @@ public class OperatorConsistencyTests
     }
 
     [Fact]
-    public void PrivateIndexOperatorIsRejectedOutsideItsClass()
+    public void PrivateIndexIsRejectedOutside()
     {
         AssertError(Codes.PrivateMember, """
             class Box {
@@ -326,7 +326,7 @@ public class OperatorConsistencyTests
     }
 
     [Fact]
-    public void PrivateAsOperatorIsRejectedOutsideItsClass()
+    public void PrivateAsIsRejectedOutside()
     {
         AssertError(Codes.PrivateMember, """
             class Wrapper {
@@ -340,7 +340,7 @@ public class OperatorConsistencyTests
     }
 
     [Fact]
-    public void PrivateOperatorIsUsableInsideItsClass()
+    public void PrivateOperatorWorksInside()
     {
         AssertClean("""
             class Box {
@@ -356,7 +356,7 @@ public class OperatorConsistencyTests
     }
 
     [Fact]
-    public void StaticModifierOnOperatorIsRejected()
+    public void StaticOnOperatorIsRejected()
     {
         AssertError(Codes.BadDeclHeader, """
             class Box {

@@ -4,24 +4,17 @@ using System.Diagnostics;
 using System.Text;
 
 /// <summary>
-/// Robustness suite for everything that only exists once a build spans more than one file:
-/// import resolution and cycles, per-file visibility, cross-file name collisions, realm blocks
-/// split across files, and the mangling that keeps two files' same-named private functions
-/// apart.
-///
-/// None of it is reachable from a source string. Pipeline.Transpile follows imports by reading
-/// them off disk, so every case here writes a real project directory and drives the same entry
-/// point the CLI does.
-///
-/// The linking test is the multi-file counterpart of EmittedCCompilesTests: syntax-checking one
-/// translation unit at a time cannot see a symbol defined twice across two of them, or declared
-/// in a header and never defined. Only the linker can.
+/// Robustness suite for what only exists once a build spans several files: imports and cycles,
+/// per-file visibility, cross-file collisions, split realms, private-name mangling. Every case
+/// writes a real project directory, since none of it is reachable from a string.
 /// </summary>
 public class MultiFileTests
 {
     #region Harness
 
-    /// <summary>The result of running the front end over a written-out project.</summary>
+    /// <summary>
+    /// The result of running the front end over a written-out project.
+    /// </summary>
     private sealed record BuildResult(
         DiagnosticBag? Diag,
         IrModule? Module,
@@ -30,8 +23,8 @@ public class MultiFileTests
 
     /// <summary>
     /// Writes a case's files into the given directory and runs the same front-end sequence
-    /// Program.RunFrontEnd does, minus the toolchain. The caller owns the directory, so it can
-    /// go on to compile what was emitted and still get cleanup from a single 'using'.
+    /// Program.RunFrontEnd does, minus the toolchain. The caller owns the directory, so it can go
+    /// on to compile what was emitted and still get cleanup from a single 'using'.
     /// </summary>
     private static BuildResult Build(MultiFileCase c, TempDir dir)
     {
@@ -74,11 +67,15 @@ public class MultiFileTests
         }
     }
 
-    /// <summary>Renders a case's files for a failure message.</summary>
+    /// <summary>
+    /// Renders a case's files for a failure message.
+    /// </summary>
     private static string Describe(MultiFileCase c) =>
         string.Join("\n", c.Files.Select(f => $"--- {f.Path} ---\n{f.Content}"));
 
-    /// <summary>Locates a usable host C compiler, or null.</summary>
+    /// <summary>
+    /// Locates a usable host C compiler, or null.
+    /// </summary>
     private static string? FindCompiler()
     {
         foreach (var exe in (string[])["cc", "gcc", "clang"])
@@ -96,7 +93,9 @@ public class MultiFileTests
         return null;
     }
 
-    /// <summary>Collects failure messages across a sweep and turns them into a single assertion.</summary>
+    /// <summary>
+    /// Collects failure messages across a sweep and turns them into a single assertion.
+    /// </summary>
     private sealed class Failures
     {
         private readonly List<string> _items = [];
@@ -115,11 +114,11 @@ public class MultiFileTests
     #endregion
 
     /// <summary>
-    /// No project, however tangled its imports, makes the compiler throw. Cycles, self-imports,
-    /// and files that fail to parse all have to come back as diagnostics.
+    /// No project, however tangled its imports, makes the compiler throw. Cycles, self-imports, and
+    /// files that fail to parse all have to come back as diagnostics.
     /// </summary>
     [Fact]
-    public void NoMultiFileProjectCrashesTheCompiler()
+    public void NoProjectCrashesTheCompiler()
     {
         var fails = new Failures();
         foreach (var c in MultiFileCorpus.All)
@@ -141,7 +140,7 @@ public class MultiFileTests
 
             using var work = TempDir.Create("appa-multifile-");
             var r = Build(c, work);
-            if (r.Crash != null) continue; // owned by NoMultiFileProjectCrashesTheCompiler
+            if (r.Crash != null) continue; // owned by NoProjectCrashesTheCompiler
 
             var errors = r.Diag!.All.Where(d => d.Severity == Severity.Error).ToList();
             var got = errors.Count == 0 ? "no errors" : string.Join("; ", errors.Select(e => $"{e.Code} {e.Message}"));
@@ -162,16 +161,12 @@ public class MultiFileTests
     }
 
     /// <summary>
-    /// Every diagnostic a multi-file build produces must point at a file that took part in the
-    /// build, with a span inside that file.
-    ///
-    /// Single-file cases cannot catch a wrong File on a Loc, because there is only one file to
-    /// name. With several in play, a pass that reports against the wrong one -- easy to do when
-    /// a symbol is declared in one file and used in another -- renders the caret under
-    /// unrelated source, or under nothing at all.
+    /// Every diagnostic must point at a file that took part in the build, with a span inside it. A
+    /// single-file case cannot catch a wrong Loc.File because there is only one file to name; with
+    /// several, a pass reporting against the wrong one puts the caret under unrelated source.
     /// </summary>
     [Fact]
-    public void MultiFileDiagnosticsPointAtRealSource()
+    public void DiagnosticsPointAtRealSource()
     {
         var fails = new Failures();
         foreach (var c in MultiFileCorpus.All)
@@ -202,15 +197,12 @@ public class MultiFileTests
     }
 
     /// <summary>
-    /// Every project that builds clean must emit C that compiles *and links*.
-    ///
-    /// This is what single-translation-unit syntax checking cannot do. Two files each declaring
-    /// a private function of the same name, one generic instantiated from two files, a class
-    /// used across a realm boundary -- each of those emits fine in isolation and fails only when
-    /// the objects are put together. Linking is the only check that sees it.
+    /// Every project that builds clean must emit C that compiles *and links* - what single-unit
+    /// checking cannot do. Two same-named private functions, one generic from two files, a class
+    /// across a realm boundary: each emits fine alone and fails together.
     /// </summary>
     [Fact]
-    public void EmittedTranslationUnitsCompileAndLink()
+    public void EmittedUnitsCompileAndLink()
     {
         var cc = FindCompiler();
         if (cc == null)
@@ -260,19 +252,9 @@ public class MultiFileTests
     }
 
     /// <summary>
-    /// Random import-graph fuzzer.
-    ///
-    /// The hand-written cases cover the graph shapes someone thought of -- a cycle, a diamond,
-    /// a chain. This generates arbitrary ones: any number of files, edges chosen at random, so
-    /// cycles, self-edges, multiple entry paths into the same file and repeated edges all turn
-    /// up in combination. Every file calls into the files it imports, so the graph has to
-    /// actually resolve rather than merely parse.
-    ///
-    /// Two properties are asserted. A generated project must never crash the compiler. And an
-    /// *acyclic* graph, where every call target is genuinely reachable through imports, must
-    /// build clean -- so a false rejection is a failure too, not just a false acceptance.
-    /// Cyclic graphs are only held to the no-crash property, since a call across a cycle may
-    /// legitimately be out of scope depending on which direction the edge runs.
+    /// Random import-graph fuzzer, so cycles, self-edges and repeated edges turn up together.
+    /// Nothing may crash, and an *acyclic* graph must build clean, so a false rejection fails too;
+    /// a cyclic one gets only no-crash, since a call across it may not resolve.
     /// </summary>
     [Fact]
     public void RandomImportGraphsBuildCleanly()
@@ -302,10 +284,9 @@ public class MultiFileTests
             var files = new List<(string, string)>();
             for (int i = 0; i < n; i++)
             {
-                // Each file declares a class, an enum and a generic, then uses its own types
-                // *and* its imports' types -- including instantiating its own generic over a
-                // class from another file, which is the shape that has to widen the stamped
-                // instance's scope to the requesting file.
+                // Each file declares a class, an enum and a generic, then uses its own types and
+                // its imports' - including its generic over another file's class, the shape that
+                // has to widen the stamped instance's scope to the requesting file.
                 var body = new StringBuilder();
                 foreach (var t in edges[i]) body.AppendLine($"import \"src/f{t}.g\";");
                 // Every file imports the one shared generic, declared in a file of its own.

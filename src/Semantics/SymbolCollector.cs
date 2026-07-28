@@ -2,13 +2,9 @@ using System.Runtime.InteropServices;
 
 namespace Appa;
 
-// Result of declaration collection: the populated SymbolTable and the auxiliary
-// set the resolver needs.
 internal record CollectionResult(SymbolTable Sym, HashSet<string> HasInit, HashSet<string> PreDefinedStructs,
                                                     HashSet<string> OpaqueFieldClasses, DiagnosticBag Diag);
 
-// Pass 1 - declaration collection. Populates the SymbolTable with classes, fields,
-// methods, operators, free functions, throws registrations, and @intrinsic bindings.
 internal sealed class SymbolCollector(DiagnosticBag diag)
 {
     private readonly SymbolTable _sym = new();
@@ -41,9 +37,9 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
     }
 
     /// <summary>
-    /// Bind any @intrinsic(role) annotations to the C name the symbol is emitted under.
-    /// Validates the role and rejects double-binding. @builtin(name) is bound the same
-    /// way when allowBuiltin is set (classes and native types only).
+    /// Bind any @intrinsic(role) annotations to the C name the symbol is emitted under. Validates
+    /// the role and rejects double-binding. @builtin(name) is bound the same way when allowBuiltin
+    /// is set (classes and native types only).
     /// </summary>
     private void BindIntrinsics(Annotation[]? anns, string cName, string file, TextSpan span,
         bool allowKeep = false, bool allowBuiltin = false)
@@ -137,7 +133,8 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
     /// </summary>
     private void P1Class(ClassDecl cd, string file)
     {
-        // Throw an error if the class name is already declared, but still register it so the resolver can find it.
+        // Throw an error if the class name is already declared, but still register it so the
+        // resolver can find it.
         if (!_declaredTypes.Add(cd.Name))
             diag.Error(Codes.DuplicateName, file, cd.Span, $"type '{Mangler.DisplayName(cd.Name)}' is already declared");
 
@@ -197,14 +194,16 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
                         break;
                     }
 
-                    // Register the method in the symbol table, and if it's private, add it to the private members set.
+                    // Register the method in the symbol table, and if it's private, add it to the
+                    // private members set.
                     methodNames.Add(md.Name);
                     var sig = new MethodSig(md.ReturnType, [.. md.Params],
                         (md.Modifiers & Modifiers.Static) != 0 || cd.IsModule, md.Throws, md.IsEntry, [.. md.Annotations]);
 
                     _sym.RegisterMethod(cd.Name, md.Name, sig);
 
-                    // Private by default. A member needs an explicit 'public' to be callable from outside its declaring class or module.
+                    // Private by default. A member needs an explicit 'public' to be callable from
+                    // outside its declaring class or module.
                     if ((md.Modifiers & Modifiers.Public) == 0) _sym.PrivateMembers.Add(new(cd.Name, md.Name));
 
                     // Bind any @intrinsic annotations to the C name the method is emitted under.
@@ -219,17 +218,12 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
                     // Track _init so the resolver can check constructor calls.
                     if (md.Name == Lifecycle.Init) _hasInit.Add(cd.Name);
 
-                    // If the method throws, register its return type in the symbol table so the resolver can check for missing result typedefs.
+                    // If the method throws, register its return type in the symbol table so the
+                    // resolver can check for missing result typedefs.
                     if (md.Throws) _sym.RegisterThrows(md.ReturnType);
                     break;
                 case OperatorDecl od:
                 {
-                    // Author's Note: 'as' has exactly one shape: a static factory on the class being converted
-                    // TO, converting its one parameter to self. Its return type always defaults
-                    // to the owner class like every other operator's does (TypeResolver rejects
-                    // an explicit mismatch), and its overloads are distinguished by parameter
-                    // type - same rule as every other operator except '[]='/'[]=', just spelled
-                    // out here since 'as' is the only one with more than one legal overload.
                     TypeSpec retType = od.ReturnType
                         ?? new NamedSpec(OperatorRules.DefaultReturn(od.Op, cd.Name), od.Span);
 
@@ -247,8 +241,8 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
                         break;
                     }
                     
-                    // Register the operator in the symbol table, using the operator name as the return type if it's not specified,
-                    // and using "void" for assignment operators.
+                    // Register the operator in the symbol table, using the operator name as the
+                    // return type if it's not specified, and using "void" for assignment operators.
                     _sym.RegisterOperator(cd.Name, od.Op, retType, [.. od.Params]);
 
                     // Private by default, same as every other member. Keyed as "operator <sym>"
