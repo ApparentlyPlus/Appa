@@ -70,6 +70,7 @@ internal static class Pipeline
     {
         Mangler.ResetDense();
         Mangler.ResetGenericDisplay();
+        var scopes = new ScopeBinder(diag).Bind(programs);
         var genericRequestFile = new Monomorphizer(diag).Process(programs);
         var collected = new SymbolCollector(diag).Collect([.. programs.Select(t => (t.path, t.prog))]);
         var module = new TypeResolver(collected.Sym, collected.HasInit,
@@ -250,23 +251,23 @@ internal static class Pipeline
 
         foreach (var (path, prog) in programs)
             foreach (var item in prog.Items)
-                if (item is ContextDecl c && c.Kind == "kernel")
+                if (item is ContextDecl c && c.Kind == Realm.Kernel)
                     kernelBlocks.Add((path, c.Span));
-                else if (item is ContextDecl u && u.Kind == "user")
+                else if (item is ContextDecl u && u.Kind == Realm.User)
                     userBlocks.Add((path, u.Span, u.Items));
 
         if (target == Target.Hosted)
         {
             foreach (var (file, span) in kernelBlocks)
-                diag.Error(Codes.KernelBlockInHosted, file, span, "a 'kernel { }' block is not allowed in a Hosted build");
+                diag.Error(Codes.KernelBlockInHosted, file, span, "a 'realm kernel { }' block is not allowed in a Hosted build");
 
             if (userBlocks.Count == 0)
             {
-                diag.Error(Codes.MissingUserRealm, "", TextSpan.None, "no 'user { }' block found in any .g file - a Hosted build requires exactly one");
+                diag.Error(Codes.MissingRealm, "", TextSpan.None, "no 'realm userspace { }' block found in any .g file - a Hosted build requires exactly one");
                 return;
             }
             foreach (var (file, span, _) in userBlocks.Skip(1))
-                diag.Error(Codes.DuplicateUserRealm, file, span, "only one 'user { }' block may exist in a Hosted build");
+                diag.Error(Codes.DuplicateRealm, file, span, "only one 'realm userspace { }' block may exist in a Hosted build");
 
             var entryFuncs = new List<(string file, TextSpan span)>();
             foreach (var inner in userBlocks[0].items)
@@ -274,53 +275,53 @@ internal static class Pipeline
                     entryFuncs.Add((userBlocks[0].file, ef.Span));
 
             if (entryFuncs.Count == 0)
-                diag.Error(Codes.MissingUserEntry, userBlocks[0].file, userBlocks[0].span,
-                    "the 'user { }' block declares no 'entry func'");
+                diag.Error(Codes.MissingEntry, userBlocks[0].file, userBlocks[0].span,
+                    "the 'realm userspace { }' block declares no 'entry func'");
             else
                 foreach (var (file, span) in entryFuncs.Skip(1))
-                    diag.Error(Codes.DuplicateUserEntry, file, span, "the 'user { }' block declares more than one 'entry func'");
+                    diag.Error(Codes.DuplicateEntry, file, span, "the 'realm userspace { }' block declares more than one 'entry func'");
             return;
         }
 
         var kernelEntryFuncs = new List<(string file, TextSpan span)>();
         foreach (var (path, prog) in programs)
             foreach (var item in prog.Items)
-                if (item is ContextDecl c && c.Kind == "kernel")
+                if (item is ContextDecl c && c.Kind == Realm.Kernel)
                 {
                     foreach (var inner in c.Items)
                         if (inner is FuncDecl { IsEntry: true } ef)
                             kernelEntryFuncs.Add((path, ef.Span));
                 }
-                else if (item is ContextDecl u && u.Kind == "user")
+                else if (item is ContextDecl u && u.Kind == Realm.User)
                 {
                     foreach (var inner in u.Items)
                         if (inner is FuncDecl { IsEntry: true } uef)
                             diag.Error(Codes.EntryOutsideKernel, path, uef.Span,
-                                "an 'entry func' inside a 'user { }' block is only valid in a Hosted build; " +
+                                "an 'entry func' inside a 'realm userspace { }' block is only valid in a Hosted build; " +
                                 "in a GatOS build, userspace entry points are the threads of a 'process'");
                 }
                 else if (item is FuncDecl { IsEntry: true } tef)
                 {
                     diag.Error(Codes.EntryOutsideKernel, path, tef.Span,
                         $"'{tef.Name}' is declared 'entry' outside any realm block",
-                        ["move it inside the 'kernel { }' block, or drop 'entry'"]);
+                        ["move it inside the 'realm kernel { }' block, or drop 'entry'"]);
                 }
 
         if (kernelBlocks.Count == 0)
         {
-            diag.Error(Codes.MissingEntryPoint, "", TextSpan.None, "no 'kernel { }' entry point found in any .g file");
+            diag.Error(Codes.MissingEntryPoint, "", TextSpan.None, "no 'realm kernel { }' entry point found in any .g file");
             return;
         }
 
         foreach (var (file, span) in kernelBlocks.Skip(1))
-            diag.Error(Codes.DuplicateContext, file, span, "only one 'kernel { }' block may exist in the project");
+            diag.Error(Codes.DuplicateRealm, file, span, "only one 'realm kernel { }' block may exist in the project");
 
         if (kernelEntryFuncs.Count == 0)
             diag.Error(Codes.MissingEntryPoint, kernelBlocks[0].file, kernelBlocks[0].span,
-                "the 'kernel { }' block declares no 'entry func'");
+                "the 'realm kernel { }' block declares no 'entry func'");
         else
             foreach (var (file, span) in kernelEntryFuncs.Skip(1))
-                diag.Error(Codes.DuplicateName, file, span, "the 'kernel { }' block declares more than one 'entry func'");
+                diag.Error(Codes.DuplicateEntry, file, span, "the 'realm kernel { }' block declares more than one 'entry func'");
     }
 
     /// <summary>

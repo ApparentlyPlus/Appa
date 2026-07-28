@@ -170,7 +170,7 @@ public class GrammarFuzzTests
 
         return StubEnvironment + Scaffold + """
 
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let int i = 0;
                 let int n = 0;
                 let arr = [1, 2, 3];

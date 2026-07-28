@@ -60,7 +60,7 @@ public class GenericMethodsAndAmbiguityTests
             module Foo {
                 public T func Id[T](T x) { return x; }
             }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let int a = Foo.Id(5);
                 let String b = Foo.Id("hi");
             } }
@@ -74,7 +74,7 @@ public class GenericMethodsAndAmbiguityTests
             class Foo {
                 public static T func Id[T](T x) { return x; }
             }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let int a = Foo.Id(5);
             } }
             """);
@@ -98,7 +98,7 @@ public class GenericMethodsAndAmbiguityTests
                     return seed;
                 }
             }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Box b = new Box(7);
                 let int r1 = b.Combine(5);
                 let String r2 = b.Combine("hi");
@@ -124,7 +124,7 @@ public class GenericMethodsAndAmbiguityTests
                 public T func Id[T](T x) { return x; }
                 public T func Wrap[T](T x) { return Id(x); }
             }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let int a = Foo.Wrap(5);
             } }
             """);
@@ -142,7 +142,7 @@ public class GenericMethodsAndAmbiguityTests
             module Foo {
                 public double func Min(double a, double b) { return Min(a, b); }
             }
-            kernel { entry func Main() { } }
+            realm kernel { entry func Main() { } }
             """);
     }
 
@@ -154,7 +154,7 @@ public class GenericMethodsAndAmbiguityTests
             module Foo {
                 public double func Min(double a, double b) { return Foo.Min(a, b); }
             }
-            kernel { entry func Main() { } }
+            realm kernel { entry func Main() { } }
             """, path: "collide.g");
     }
 
@@ -166,7 +166,7 @@ public class GenericMethodsAndAmbiguityTests
             module Foo {
                 public double func Min(double a, double b) { return collide.Min(a, b); }
             }
-            kernel { entry func Main() { } }
+            realm kernel { entry func Main() { } }
             """, path: "collide.g");
     }
 
@@ -176,7 +176,7 @@ public class GenericMethodsAndAmbiguityTests
         var (diag, _) = CheckMulti(
             ("a.g", "T func Pick[T](T a, T b) { return a; }"),
             ("b.g", "T func Pick[T](T a, T b) { return b; }"),
-            ("main.g", "kernel { entry func Main() { let int x = Pick(1, 2); } }"));
+            ("main.g", "realm kernel { entry func Main() { let int x = Pick(1, 2); } }"));
         Assert.Contains(diag.All, d => d.Severity == Severity.Error && d.Code == Codes.AmbiguousCall);
     }
 
@@ -186,7 +186,7 @@ public class GenericMethodsAndAmbiguityTests
         var (diag, _) = CheckMulti(
             ("a.g", "T func Pick[T](T a, T b) { return a; }"),
             ("b.g", "T func Pick[T](T a, T b) { return b; }"),
-            ("main.g", "kernel { entry func Main() { let int x = a.Pick(1, 2); let int y = b.Pick(1, 2); } }"));
+            ("main.g", "realm kernel { entry func Main() { let int x = a.Pick(1, 2); let int y = b.Pick(1, 2); } }"));
         Assert.False(diag.HasErrors, "expected no errors but got: " +
             string.Join("; ", diag.All.Where(d => d.Severity == Severity.Error).Select(d => $"{d.Code} {d.Message}")));
     }
@@ -208,7 +208,7 @@ public class GenericMethodsAndAmbiguityTests
                 int func UseB() { return Pick(1, 2); }
                 """),
             ("main.g", """
-                kernel { entry func Main() { } }
+                realm kernel { entry func Main() { } }
                 """));
         Assert.False(diag.HasErrors, "expected no errors but got: " +
             string.Join("; ", diag.All.Where(d => d.Severity == Severity.Error).Select(d => $"{d.Code} {d.Message}")));

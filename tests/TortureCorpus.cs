@@ -59,28 +59,28 @@ public static class TortureCorpus
     /// </summary>
     private static readonly (string Name, string Template)[] StmtPositions =
     [
-        ("free-func",     "void func H() { %S% } kernel { entry func Main() { H(); } }"),
-        ("entry",         "kernel { entry func Main() { %S% } }"),
-        ("class-method",  "class C { public void func M() { %S% } } kernel { entry func Main() { let C c = new C(); c.M(); } }"),
-        ("module-method", "module M { public static void func F() { %S% } } kernel { entry func Main() { M.F(); } }"),
-        ("ctor",          "class C { func _init() { %S% } } kernel { entry func Main() { let C c = new C(); } }"),
-        ("operator",      "class C { int n; public operator C func +(C o) { %S% return self; } } kernel { entry func Main() { let C a = new C(); let C b = a + a; } }"),
-        ("try",           "throws void func T() { throw; } kernel { entry func Main() { try { T(); %S% } catch { } } }"),
-        ("catch",         "throws void func T() { throw; } kernel { entry func Main() { try { T(); } catch { %S% } } }"),
-        ("catch-handler", "throws int func T() { throw; } kernel { entry func Main() { let int v = T() catch { %S% assign 0; }; } }"),
-        ("defer",         "kernel { entry func Main() { defer %S% } }"),
-        ("while-body",    "kernel { entry func Main() { while (false) { %S% } } }"),
-        ("for-body",      "kernel { entry func Main() { for (let int i = 0; i < 1; i++) { %S% } } }"),
-        ("forin-body",    "kernel { entry func Main() { let a = [1, 2]; for x in a { %S% } } }"),
-        ("if-then",       "kernel { entry func Main() { if (true) { %S% } } }"),
-        ("else",          "kernel { entry func Main() { if (true) { } else { %S% } } }"),
-        ("switch-case",   "kernel { entry func Main() { switch (1) { case 1 { %S% } } } }"),
-        ("switch-def",    "kernel { entry func Main() { switch (1) { case 1 { } default { %S% } } } }"),
-        ("match-case",    "union U { A, B } kernel { entry func Main() { let U u = U.A(); match (u) { case A { %S% } case B { } } } }"),
-        ("match-def",     "union U { A, B } kernel { entry func Main() { let U u = U.A(); match (u) { case A { } default { %S% } } } }"),
-        ("unsafe",        "kernel { entry func Main() { unsafe { %S% } } }"),
-        ("nested-block",  "kernel { entry func Main() { { { %S% } } } }"),
-        ("thread-entry",  "kernel { foreground process P { thread T { entry func Run() { %S% } } } entry func Main() { } }"),
+        ("free-func",     "void func H() { %S% } realm kernel { entry func Main() { H(); } }"),
+        ("entry",         "realm kernel { entry func Main() { %S% } }"),
+        ("class-method",  "class C { public void func M() { %S% } } realm kernel { entry func Main() { let C c = new C(); c.M(); } }"),
+        ("module-method", "module M { public static void func F() { %S% } } realm kernel { entry func Main() { M.F(); } }"),
+        ("ctor",          "class C { func _init() { %S% } } realm kernel { entry func Main() { let C c = new C(); } }"),
+        ("operator",      "class C { int n; public operator C func +(C o) { %S% return self; } } realm kernel { entry func Main() { let C a = new C(); let C b = a + a; } }"),
+        ("try",           "throws void func T() { throw; } realm kernel { entry func Main() { try { T(); %S% } catch { } } }"),
+        ("catch",         "throws void func T() { throw; } realm kernel { entry func Main() { try { T(); } catch { %S% } } }"),
+        ("catch-handler", "throws int func T() { throw; } realm kernel { entry func Main() { let int v = T() catch { %S% assign 0; }; } }"),
+        ("defer",         "realm kernel { entry func Main() { defer %S% } }"),
+        ("while-body",    "realm kernel { entry func Main() { while (false) { %S% } } }"),
+        ("for-body",      "realm kernel { entry func Main() { for (let int i = 0; i < 1; i++) { %S% } } }"),
+        ("forin-body",    "realm kernel { entry func Main() { let a = [1, 2]; for x in a { %S% } } }"),
+        ("if-then",       "realm kernel { entry func Main() { if (true) { %S% } } }"),
+        ("else",          "realm kernel { entry func Main() { if (true) { } else { %S% } } }"),
+        ("switch-case",   "realm kernel { entry func Main() { switch (1) { case 1 { %S% } } } }"),
+        ("switch-def",    "realm kernel { entry func Main() { switch (1) { case 1 { } default { %S% } } } }"),
+        ("match-case",    "union U { A, B } realm kernel { entry func Main() { let U u = U.A(); match (u) { case A { %S% } case B { } } } }"),
+        ("match-def",     "union U { A, B } realm kernel { entry func Main() { let U u = U.A(); match (u) { case A { } default { %S% } } } }"),
+        ("unsafe",        "realm kernel { entry func Main() { unsafe { %S% } } }"),
+        ("nested-block",  "realm kernel { entry func Main() { { { %S% } } } }"),
+        ("thread-entry",  "realm kernel { foreground process P { thread T { entry func Run() { %S% } } } entry func Main() { } }"),
     ];
 
     /// <summary>
@@ -137,36 +137,36 @@ public static class TortureCorpus
     /// </summary>
     private static readonly (string Name, string Template)[] ExprPositions =
     [
-        ("let-init",      "kernel { entry func Main() { let v = %E%; } }"),
-        ("let-typed",     "kernel { entry func Main() { let int v = %E%; } }"),
-        ("expr-stmt",     "kernel { entry func Main() { %E%; } }"),
-        ("if-cond",       "kernel { entry func Main() { if (%E%) { } } }"),
-        ("while-cond",    "kernel { entry func Main() { while (%E%) { } } }"),
-        ("for-cond",      "kernel { entry func Main() { for (let int i = 0; %E%; i++) { } } }"),
-        ("for-init",      "kernel { entry func Main() { for (%E%; false; ) { } } }"),
-        ("for-step",      "kernel { entry func Main() { for (; false; %E%) { } } }"),
-        ("forin-subject", "kernel { entry func Main() { for x in %E% { } } }"),
-        ("switch-scrut",  "kernel { entry func Main() { switch (%E%) { case 1 { } } } }"),
-        ("switch-label",  "kernel { entry func Main() { switch (1) { case %E% { } } } }"),
-        ("match-scrut",   "union U { A } kernel { entry func Main() { match (%E%) { case A { } } } }"),
-        ("return-val",    "int func H() { return %E%; } kernel { entry func Main() { H(); } }"),
-        ("call-arg",      "void func H(int n) { } kernel { entry func Main() { H(%E%); } }"),
-        ("ref-arg",       "void func H(ref int n) { } kernel { entry func Main() { H(ref %E%); } }"),
-        ("index",         "kernel { entry func Main() { let a = [1, 2]; let int v = a[%E%]; } }"),
-        ("array-elem",    "kernel { entry func Main() { let a = [%E%, 1]; } }"),
-        ("ternary-then",  "kernel { entry func Main() { let v = true ? %E% : 0; } }"),
-        ("ternary-cond",  "kernel { entry func Main() { let v = %E% ? 1 : 0; } }"),
-        ("interp",        "kernel { entry func Main() { let s = $\"v={%E%}\"; } }"),
-        ("field-init",    "class C { int n = %E%; } kernel { entry func Main() { let C c = new C(); } }"),
-        ("enum-value",    "enum E { A = %E% } kernel { entry func Main() { let E e = E.A; } }"),
-        ("new-arg",       "class C { func _init(int n) { } } kernel { entry func Main() { let C c = new C(%E%); } }"),
-        ("coll-init",     "kernel { entry func Main() { let a = new [2]int { %E%, 0 }; } }"),
-        ("assign-rhs",    "kernel { entry func Main() { let int v = 0; v = %E%; } }"),
-        ("assign-lhs",    "kernel { entry func Main() { %E% = 1; } }"),
-        ("binop-left",    "kernel { entry func Main() { let v = %E% + 1; } }"),
-        ("unary-not",     "kernel { entry func Main() { let v = !%E%; } }"),
-        ("cast-operand",  "kernel { entry func Main() { let v = %E% as bool; } }"),
-        ("member-target", "kernel { entry func Main() { let v = (%E%).Length; } }"),
+        ("let-init",      "realm kernel { entry func Main() { let v = %E%; } }"),
+        ("let-typed",     "realm kernel { entry func Main() { let int v = %E%; } }"),
+        ("expr-stmt",     "realm kernel { entry func Main() { %E%; } }"),
+        ("if-cond",       "realm kernel { entry func Main() { if (%E%) { } } }"),
+        ("while-cond",    "realm kernel { entry func Main() { while (%E%) { } } }"),
+        ("for-cond",      "realm kernel { entry func Main() { for (let int i = 0; %E%; i++) { } } }"),
+        ("for-init",      "realm kernel { entry func Main() { for (%E%; false; ) { } } }"),
+        ("for-step",      "realm kernel { entry func Main() { for (; false; %E%) { } } }"),
+        ("forin-subject", "realm kernel { entry func Main() { for x in %E% { } } }"),
+        ("switch-scrut",  "realm kernel { entry func Main() { switch (%E%) { case 1 { } } } }"),
+        ("switch-label",  "realm kernel { entry func Main() { switch (1) { case %E% { } } } }"),
+        ("match-scrut",   "union U { A } realm kernel { entry func Main() { match (%E%) { case A { } } } }"),
+        ("return-val",    "int func H() { return %E%; } realm kernel { entry func Main() { H(); } }"),
+        ("call-arg",      "void func H(int n) { } realm kernel { entry func Main() { H(%E%); } }"),
+        ("ref-arg",       "void func H(ref int n) { } realm kernel { entry func Main() { H(ref %E%); } }"),
+        ("index",         "realm kernel { entry func Main() { let a = [1, 2]; let int v = a[%E%]; } }"),
+        ("array-elem",    "realm kernel { entry func Main() { let a = [%E%, 1]; } }"),
+        ("ternary-then",  "realm kernel { entry func Main() { let v = true ? %E% : 0; } }"),
+        ("ternary-cond",  "realm kernel { entry func Main() { let v = %E% ? 1 : 0; } }"),
+        ("interp",        "realm kernel { entry func Main() { let s = $\"v={%E%}\"; } }"),
+        ("field-init",    "class C { int n = %E%; } realm kernel { entry func Main() { let C c = new C(); } }"),
+        ("enum-value",    "enum E { A = %E% } realm kernel { entry func Main() { let E e = E.A; } }"),
+        ("new-arg",       "class C { func _init(int n) { } } realm kernel { entry func Main() { let C c = new C(%E%); } }"),
+        ("coll-init",     "realm kernel { entry func Main() { let a = new [2]int { %E%, 0 }; } }"),
+        ("assign-rhs",    "realm kernel { entry func Main() { let int v = 0; v = %E%; } }"),
+        ("assign-lhs",    "realm kernel { entry func Main() { %E% = 1; } }"),
+        ("binop-left",    "realm kernel { entry func Main() { let v = %E% + 1; } }"),
+        ("unary-not",     "realm kernel { entry func Main() { let v = !%E%; } }"),
+        ("cast-operand",  "realm kernel { entry func Main() { let v = %E% as bool; } }"),
+        ("member-target", "realm kernel { entry func Main() { let v = (%E%).Length; } }"),
     ];
 
     /// <summary>
@@ -229,14 +229,18 @@ public static class TortureCorpus
     /// </summary>
     private static readonly (string Name, string Template)[] DeclPositions =
     [
-        ("top-level",  "%D% kernel { entry func Main() { } }"),
-        ("kernel",     "kernel { %D% entry func Main() { } }"),
-        ("user",       "kernel { entry func Main() { } } user { %D% }"),
-        ("class",      "class Holder { %D% } kernel { entry func Main() { } }"),
-        ("module",     "module Holder { %D% } kernel { entry func Main() { } }"),
-        ("process",    "kernel { foreground process P { %D% thread T { entry func R() { } } } entry func Main() { } }"),
-        ("thread",     "kernel { foreground process P { thread T { %D% entry func R() { } } } entry func Main() { } }"),
-        ("func-body",  "kernel { entry func Main() { %D% } }"),
+        ("top-level",  "%D% realm kernel { entry func Main() { } }"),
+        ("realm-kernel",    "realm kernel { %D% entry func Main() { } }"),
+        ("realm-userspace", "realm kernel { entry func Main() { } } realm userspace { %D% }"),
+        ("class",      "class Holder { %D% } realm kernel { entry func Main() { } }"),
+        ("module",     "module Holder { %D% } realm kernel { entry func Main() { } }"),
+        // The two process positions are deliberately a matched pair: a process body means the same
+        // thing in either realm, so every probe must get the same verdict in both. RealmSymmetry
+        // in TortureTests asserts exactly that.
+        ("process-kernel", "realm kernel { foreground process P { %D% thread T { entry func R() { } } } entry func Main() { } }"),
+        ("process-user",   "realm kernel { entry func Main() { } } realm userspace { foreground process P { %D% thread T { entry func R() { } } } }"),
+        ("thread",     "realm kernel { foreground process P { thread T { %D% entry func R() { } } } entry func Main() { } }"),
+        ("func-body",  "realm kernel { entry func Main() { %D% } }"),
     ];
 
     /// <summary>
@@ -254,8 +258,16 @@ public static class TortureCorpus
         ("module",        "module Inner { }"),
         ("enum",          "enum Inner { A }"),
         ("union",         "union Inner { A }"),
-        ("kernel-block",  "kernel { }"),
-        ("user-block",    "user { }"),
+        ("realm-kernel-block",    "realm kernel { }"),
+        ("realm-userspace-block", "realm userspace { }"),
+        ("bad-realm",     "realm potato { }"),
+        ("bare-kernel",   "kernel { }"),
+        // 'user', 'process' and 'thread' stopped being reserved words when 'realm' landed. These
+        // probes are the regression net: in a function body or class they must parse clean.
+        ("let-user",      "let int user = 5;"),
+        ("let-process",   "let int process = 5;"),
+        ("let-thread",    "let int thread = 5;"),
+        ("field-user",    "int user;"),
         ("process",       "foreground process Q { thread U { entry func R() { } } }"),
         ("thread",        "thread U { entry func R() { } }"),
         ("field",         "int n;"),
@@ -289,21 +301,21 @@ public static class TortureCorpus
     /// </summary>
     private static readonly (string Name, string Template)[] TypePositions =
     [
-        ("let",          "kernel { entry func Main() { let %T% v = default(%T%); } }"),
-        ("param",        "void func H(%T% p) { } kernel { entry func Main() { } }"),
-        ("ref-param",    "void func H(ref %T% p) { } kernel { entry func Main() { } }"),
-        ("return",       "%T% func H() { return default(%T%); } kernel { entry func Main() { } }"),
-        ("field",        "class C { %T% n; } kernel { entry func Main() { } }"),
-        ("cast",         "kernel { entry func Main() { let v = 1 as %T%; } }"),
-        ("sizeof",       "kernel { entry func Main() { let v = sizeof(%T%); } }"),
-        ("default",      "kernel { entry func Main() { let v = default(%T%); } }"),
-        ("new",          "kernel { entry func Main() { let v = new %T%(); } }"),
-        ("generic-arg",  "class Box[T] { T v; } kernel { entry func Main() { let Box[%T%] b = new Box[%T%](); } }"),
-        ("array-elem",   "kernel { entry func Main() { let [2]%T% a = new [2]%T%; } }"),
-        ("ptr",          "kernel { entry func Main() { unsafe { let %T%* p = null; } } }"),
-        ("funcptr-ret",  "kernel { entry func Main() { let func(int) -> %T% f = null; } }"),
-        ("funcptr-arg",  "kernel { entry func Main() { let func(%T%) -> int f = null; } }"),
-        ("union-field",  "union U { A(%T% x) } kernel { entry func Main() { } }"),
+        ("let",          "realm kernel { entry func Main() { let %T% v = default(%T%); } }"),
+        ("param",        "void func H(%T% p) { } realm kernel { entry func Main() { } }"),
+        ("ref-param",    "void func H(ref %T% p) { } realm kernel { entry func Main() { } }"),
+        ("return",       "%T% func H() { return default(%T%); } realm kernel { entry func Main() { } }"),
+        ("field",        "class C { %T% n; } realm kernel { entry func Main() { } }"),
+        ("cast",         "realm kernel { entry func Main() { let v = 1 as %T%; } }"),
+        ("sizeof",       "realm kernel { entry func Main() { let v = sizeof(%T%); } }"),
+        ("default",      "realm kernel { entry func Main() { let v = default(%T%); } }"),
+        ("new",          "realm kernel { entry func Main() { let v = new %T%(); } }"),
+        ("generic-arg",  "class Box[T] { T v; } realm kernel { entry func Main() { let Box[%T%] b = new Box[%T%](); } }"),
+        ("array-elem",   "realm kernel { entry func Main() { let [2]%T% a = new [2]%T%; } }"),
+        ("ptr",          "realm kernel { entry func Main() { unsafe { let %T%* p = null; } } }"),
+        ("funcptr-ret",  "realm kernel { entry func Main() { let func(int) -> %T% f = null; } }"),
+        ("funcptr-arg",  "realm kernel { entry func Main() { let func(%T%) -> int f = null; } }"),
+        ("union-field",  "union U { A(%T% x) } realm kernel { entry func Main() { } }"),
     ];
 
     /// <summary>
@@ -377,7 +389,7 @@ public static class TortureCorpus
                 {
                     string body = $"let Thing obj = new Thing(); let arr = [1, 2]; let v = {le} {op} {re};";
                     yield return new TortureCase($"binop/{op}/{ln}-{rn}",
-                        prelude + "kernel { entry func Main() { " + body + " } }", Expect.Any);
+                        prelude + "realm kernel { entry func Main() { " + body + " } }", Expect.Any);
                 }
     }
 
@@ -423,7 +435,7 @@ public static class TortureCorpus
                               "let Thing obj = new Thing(); let arr = [1, 2]; let Boxy box = new Boxy(); " +
                               $"{target} {op} 1;";
                 yield return new TortureCase($"assign/{op}/{tn}",
-                    prelude + "kernel { entry func Main() { " + body + " } }", Expect.Any);
+                    prelude + "realm kernel { entry func Main() { " + body + " } }", Expect.Any);
             }
     }
 
@@ -466,7 +478,7 @@ public static class TortureCorpus
             {
                 string body = $"let Thing obj = new Thing(); let arr = [1, 2]; let v = {recv}{suffix};";
                 yield return new TortureCase($"member/{rn}/{an}",
-                    prelude + "kernel { entry func Main() { " + body + " } }", Expect.Any);
+                    prelude + "realm kernel { entry func Main() { " + body + " } }", Expect.Any);
             }
     }
 
@@ -494,14 +506,14 @@ public static class TortureCorpus
         ];
         (string Name, string Template)[] shapes =
         [
-            ("local",  "void func Sink(int v) { } kernel { entry func Main() { let int NAME = 1; Sink(NAME); } }"),
-            ("param",  "void func H(int NAME) { } kernel { entry func Main() { H(1); } }"),
-            ("func",   "void func NAME() { } kernel { entry func Main() { NAME(); } }"),
-            ("class",  "class NAME { public int n; } kernel { entry func Main() { let NAME c = new NAME(); } }"),
-            ("field",  "class C { public int NAME; } kernel { entry func Main() { let C c = new C(); c.NAME = 1; } }"),
-            ("enum",   "enum E { NAME } kernel { entry func Main() { let E e = E.NAME; } }"),
-            ("forin",  "kernel { entry func Main() { for NAME in [1, 2] { } } }"),
-            ("bind",   "union U { A(int x) } kernel { entry func Main() { let U u = U.A(1); match (u) { case A(NAME) { } } } }"),
+            ("local",  "void func Sink(int v) { } realm kernel { entry func Main() { let int NAME = 1; Sink(NAME); } }"),
+            ("param",  "void func H(int NAME) { } realm kernel { entry func Main() { H(1); } }"),
+            ("func",   "void func NAME() { } realm kernel { entry func Main() { NAME(); } }"),
+            ("class",  "class NAME { public int n; } realm kernel { entry func Main() { let NAME c = new NAME(); } }"),
+            ("field",  "class C { public int NAME; } realm kernel { entry func Main() { let C c = new C(); c.NAME = 1; } }"),
+            ("enum",   "enum E { NAME } realm kernel { entry func Main() { let E e = E.NAME; } }"),
+            ("forin",  "realm kernel { entry func Main() { for NAME in [1, 2] { } } }"),
+            ("bind",   "union U { A(int x) } realm kernel { entry func Main() { let U u = U.A(1); match (u) { case A(NAME) { } } } }"),
         ];
 
         foreach (var n in names)
@@ -520,516 +532,516 @@ public static class TortureCorpus
     {
         #region 'assign' outside a catch handler
         yield return new("assign/bare-entry",
-            "kernel { entry func Main() { assign 1; } }", Expect.Rejected, Codes.AssignOutsideCatch);
+            "realm kernel { entry func Main() { assign 1; } }", Expect.Rejected, Codes.AssignOutsideCatch);
         yield return new("assign/in-try-block",
-            "throws void func T() { throw; } kernel { entry func Main() { try { T(); assign 1; } catch { } } }",
+            "throws void func T() { throw; } realm kernel { entry func Main() { try { T(); assign 1; } catch { } } }",
             Expect.Rejected, Codes.AssignOutsideCatch);
         yield return new("assign/in-catch-block",
-            "throws void func T() { throw; } kernel { entry func Main() { try { T(); } catch { assign 1; } } }",
+            "throws void func T() { throw; } realm kernel { entry func Main() { try { T(); } catch { assign 1; } } }",
             Expect.Rejected, Codes.AssignOutsideCatch);
         yield return new("assign/in-loop-in-handler",
-            "throws int func T() { throw; } kernel { entry func Main() { let int v = T() catch { while (true) { assign 0; } }; } }",
+            "throws int func T() { throw; } realm kernel { entry func Main() { let int v = T() catch { while (true) { assign 0; } }; } }",
             Expect.Any);
         yield return new("assign/nested-func-in-handler",
-            "throws int func T() { throw; } void func H() { assign 1; } kernel { entry func Main() { H(); } }",
+            "throws int func T() { throw; } void func H() { assign 1; } realm kernel { entry func Main() { H(); } }",
             Expect.Rejected, Codes.AssignOutsideCatch);
 
         #endregion
 
         #region catch handlers
         yield return new("catch/no-assign",
-            "throws int func T() { throw; } kernel { entry func Main() { let int v = T() catch { }; } }",
+            "throws int func T() { throw; } realm kernel { entry func Main() { let int v = T() catch { }; } }",
             Expect.Rejected, Codes.CatchHandlerNoAssign);
         yield return new("catch/partial-assign",
-            "throws int func T() { throw; } kernel { entry func Main() { let int v = T() catch { if (true) { assign 0; } }; } }",
+            "throws int func T() { throw; } realm kernel { entry func Main() { let int v = T() catch { if (true) { assign 0; } }; } }",
             Expect.Rejected, Codes.CatchHandlerNoAssign);
         yield return new("catch/both-branches-assign",
-            "throws int func T() { throw; } kernel { entry func Main() { let int v = T() catch { if (true) { assign 0; } else { assign 1; } }; } }",
+            "throws int func T() { throw; } realm kernel { entry func Main() { let int v = T() catch { if (true) { assign 0; } else { assign 1; } }; } }",
             Expect.Accepted);
         yield return new("catch/assign-wrong-type",
-            "throws int func T() { throw; } kernel { entry func Main() { let int v = T() catch { assign \"s\"; }; } }",
+            "throws int func T() { throw; } realm kernel { entry func Main() { let int v = T() catch { assign \"s\"; }; } }",
             Expect.Rejected);
         yield return new("catch/on-non-throws-call",
-            "int func H() { return 1; } kernel { entry func Main() { let int v = H() catch { assign 0; }; } }",
+            "int func H() { return 1; } realm kernel { entry func Main() { let int v = H() catch { assign 0; }; } }",
             Expect.Rejected);
         yield return new("catch/on-non-call",
-            "kernel { entry func Main() { let int v = 1 catch { assign 0; }; } }", Expect.Rejected);
+            "realm kernel { entry func Main() { let int v = 1 catch { assign 0; }; } }", Expect.Rejected);
         yield return new("catch/nested-in-handler",
-            "throws int func T() { throw; } kernel { entry func Main() { let int v = T() catch { let int w = T() catch { assign 1; }; assign w; }; } }",
+            "throws int func T() { throw; } realm kernel { entry func Main() { let int v = T() catch { let int w = T() catch { assign 1; }; assign w; }; } }",
             Expect.Any);
         yield return new("catch/subexpression",
-            "throws int func T() { throw; } void func H(int n) { } kernel { entry func Main() { H(T() catch { assign 0; }); } }",
+            "throws int func T() { throw; } void func H(int n) { } realm kernel { entry func Main() { H(T() catch { assign 0; }); } }",
             Expect.Any);
         yield return new("catch/on-void-throws",
-            "throws void func T() { throw; } kernel { entry func Main() { T() catch { assign 1; }; } }", Expect.Any);
+            "throws void func T() { throw; } realm kernel { entry func Main() { T() catch { assign 1; }; } }", Expect.Any);
         yield return new("catch/handler-falls-through-to-break",
-            "throws int func T() { throw; } kernel { entry func Main() { while (true) { let int v = T() catch { break; }; } } }",
+            "throws int func T() { throw; } realm kernel { entry func Main() { while (true) { let int v = T() catch { break; }; } } }",
             Expect.Any);
 
         #endregion
 
         #region try/catch
         yield return new("try/catch-missing",
-            "throws void func T() { throw; } kernel { entry func Main() { try { T(); } } }", Expect.Rejected);
+            "throws void func T() { throw; } realm kernel { entry func Main() { try { T(); } } }", Expect.Rejected);
         yield return new("try/empty-both",
-            "kernel { entry func Main() { try { } catch { } } }", Expect.Any);
+            "realm kernel { entry func Main() { try { } catch { } } }", Expect.Any);
         yield return new("try/return-in-catch",
-            "throws void func T() { throw; } int func H() { try { T(); return 1; } catch { return 0; } } kernel { entry func Main() { H(); } }",
+            "throws void func T() { throw; } int func H() { try { T(); return 1; } catch { return 0; } } realm kernel { entry func Main() { H(); } }",
             Expect.Accepted);
         yield return new("try/throw-in-catch-non-throws",
-            "throws void func T() { throw; } void func H() { try { T(); } catch { throw; } } kernel { entry func Main() { H(); } }",
+            "throws void func T() { throw; } void func H() { try { T(); } catch { throw; } } realm kernel { entry func Main() { H(); } }",
             Expect.Rejected);
         yield return new("throws/unhandled",
-            "throws void func T() { throw; } kernel { entry func Main() { T(); } }", Expect.Rejected, Codes.ThrowsOutsideTry);
+            "throws void func T() { throw; } realm kernel { entry func Main() { T(); } }", Expect.Rejected, Codes.ThrowsOutsideTry);
         yield return new("throws/void-return-type",
-            "throws void func T() { throw; } kernel { entry func Main() { try { T(); } catch { } } }", Expect.Accepted);
+            "throws void func T() { throw; } realm kernel { entry func Main() { try { T(); } catch { } } }", Expect.Accepted);
         yield return new("throws/on-entry",
-            "kernel { entry throws func Main() { throw; } }", Expect.Rejected);
+            "realm kernel { entry throws func Main() { throw; } }", Expect.Rejected);
         yield return new("throw/outside-throws-func",
-            "void func H() { throw; } kernel { entry func Main() { H(); } }", Expect.Rejected);
+            "void func H() { throw; } realm kernel { entry func Main() { H(); } }", Expect.Rejected);
 
         #endregion
 
         #region defer
-        yield return new("defer/return", "void func H() { defer return; } kernel { entry func Main() { H(); } }",
+        yield return new("defer/return", "void func H() { defer return; } realm kernel { entry func Main() { H(); } }",
             Expect.Rejected, Codes.DeferTransfer);
-        yield return new("defer/break", "kernel { entry func Main() { while (true) { defer break; } } }",
+        yield return new("defer/break", "realm kernel { entry func Main() { while (true) { defer break; } } }",
             Expect.Rejected, Codes.DeferTransfer);
-        yield return new("defer/continue", "kernel { entry func Main() { while (true) { defer continue; } } }",
+        yield return new("defer/continue", "realm kernel { entry func Main() { while (true) { defer continue; } } }",
             Expect.Rejected, Codes.DeferTransfer);
-        yield return new("defer/defer", "kernel { entry func Main() { defer defer VoidH(); } } void func VoidH() { }",
+        yield return new("defer/defer", "realm kernel { entry func Main() { defer defer VoidH(); } } void func VoidH() { }",
             Expect.Rejected);
-        yield return new("defer/let", "kernel { entry func Main() { defer let int x = 1; } }", Expect.Any);
+        yield return new("defer/let", "realm kernel { entry func Main() { defer let int x = 1; } }", Expect.Any);
         yield return new("defer/throw-in-throws",
-            "throws void func T() { defer throw; } kernel { entry func Main() { try { T(); } catch { } } }", Expect.Any);
+            "throws void func T() { defer throw; } realm kernel { entry func Main() { try { T(); } catch { } } }", Expect.Any);
         yield return new("defer/nested-defer-in-block",
-            "void func H() { } kernel { entry func Main() { defer { defer H(); } } }", Expect.Any);
+            "void func H() { } realm kernel { entry func Main() { defer { defer H(); } } }", Expect.Any);
 
         #endregion
 
         #region switch
         yield return new("switch/dup-label",
-            "kernel { entry func Main() { switch (1) { case 1 { } case 1 { } } } }", Expect.Rejected);
+            "realm kernel { entry func Main() { switch (1) { case 1 { } case 1 { } } } }", Expect.Rejected);
         yield return new("switch/no-cases",
-            "kernel { entry func Main() { switch (1) { } } }", Expect.Any);
+            "realm kernel { entry func Main() { switch (1) { } } }", Expect.Any);
         yield return new("switch/only-default",
-            "kernel { entry func Main() { switch (1) { default { } } } }", Expect.Any);
+            "realm kernel { entry func Main() { switch (1) { default { } } } }", Expect.Any);
         // Gata's switch desugars to an if/else-if equality chain, not a C switch, so a
         // case label is an ordinary expression and need not be a compile-time constant.
         yield return new("switch/non-constant-label",
-            "kernel { entry func Main() { let int n = 1; switch (n) { case n { } } } }", Expect.Any);
+            "realm kernel { entry func Main() { let int n = 1; switch (n) { case n { } } } }", Expect.Any);
         yield return new("switch/string-scrutinee",
-            "kernel { entry func Main() { switch (\"a\") { case \"a\" { } } } }", Expect.Any);
+            "realm kernel { entry func Main() { switch (\"a\") { case \"a\" { } } } }", Expect.Any);
         yield return new("switch/bool-scrutinee",
-            "kernel { entry func Main() { switch (true) { case true { } } } }", Expect.Any);
+            "realm kernel { entry func Main() { switch (true) { case true { } } } }", Expect.Any);
         yield return new("switch/break-in-case",
-            "kernel { entry func Main() { switch (1) { case 1 { break; } } } }", Expect.Any);
+            "realm kernel { entry func Main() { switch (1) { case 1 { break; } } } }", Expect.Any);
 
         #endregion
 
         #region match
         yield return new("match/non-union",
-            "kernel { entry func Main() { match (1) { case A { } } } }", Expect.Rejected);
+            "realm kernel { entry func Main() { match (1) { case A { } } } }", Expect.Rejected);
         yield return new("match/unknown-variant",
-            "union U { A } kernel { entry func Main() { let U u = U.A(); match (u) { case Zzz { } } } }", Expect.Rejected);
+            "union U { A } realm kernel { entry func Main() { let U u = U.A(); match (u) { case Zzz { } } } }", Expect.Rejected);
         yield return new("match/non-exhaustive",
-            "union U { A, B } kernel { entry func Main() { let U u = U.A(); match (u) { case A { } } } }",
+            "union U { A, B } realm kernel { entry func Main() { let U u = U.A(); match (u) { case A { } } } }",
             Expect.Rejected, Codes.NonExhaustiveMatch);
         yield return new("match/dup-variant",
-            "union U { A, B } kernel { entry func Main() { let U u = U.A(); match (u) { case A { } case A { } case B { } } } }",
+            "union U { A, B } realm kernel { entry func Main() { let U u = U.A(); match (u) { case A { } case A { } case B { } } } }",
             Expect.Rejected);
         yield return new("match/too-many-binds",
-            "union U { A(int n), B } kernel { entry func Main() { let U u = U.A(1); match (u) { case A(x, y) { } case B { } } } }",
+            "union U { A(int n), B } realm kernel { entry func Main() { let U u = U.A(1); match (u) { case A(x, y) { } case B { } } } }",
             Expect.Rejected);
         yield return new("match/binds-on-payloadless",
-            "union U { A, B } kernel { entry func Main() { let U u = U.A(); match (u) { case A(x) { } case B { } } } }",
+            "union U { A, B } realm kernel { entry func Main() { let U u = U.A(); match (u) { case A(x) { } case B { } } } }",
             Expect.Rejected);
         yield return new("match/no-cases",
-            "union U { A } kernel { entry func Main() { let U u = U.A(); match (u) { } } }", Expect.Any);
+            "union U { A } realm kernel { entry func Main() { let U u = U.A(); match (u) { } } }", Expect.Any);
 
         #endregion
 
         #region enum / union declarations
-        yield return new("enum/empty", "enum E { } kernel { entry func Main() { } }", Expect.Rejected);
-        yield return new("enum/dup-member", "enum E { A, A } kernel { entry func Main() { } }", Expect.Rejected);
+        yield return new("enum/empty", "enum E { } realm kernel { entry func Main() { } }", Expect.Rejected);
+        yield return new("enum/dup-member", "enum E { A, A } realm kernel { entry func Main() { } }", Expect.Rejected);
         yield return new("enum/non-constant-value",
-            "int func H() { return 1; } enum E { A = H() } kernel { entry func Main() { } }", Expect.Rejected);
-        yield return new("enum/string-value", "enum E { A = \"s\" } kernel { entry func Main() { } }", Expect.Rejected);
-        yield return new("union/empty", "union U { } kernel { entry func Main() { } }", Expect.Rejected);
-        yield return new("union/dup-variant", "union U { A, A } kernel { entry func Main() { } }", Expect.Rejected);
+            "int func H() { return 1; } enum E { A = H() } realm kernel { entry func Main() { } }", Expect.Rejected);
+        yield return new("enum/string-value", "enum E { A = \"s\" } realm kernel { entry func Main() { } }", Expect.Rejected);
+        yield return new("union/empty", "union U { } realm kernel { entry func Main() { } }", Expect.Rejected);
+        yield return new("union/dup-variant", "union U { A, A } realm kernel { entry func Main() { } }", Expect.Rejected);
         // Managed payloads are legal now, so these are Accepted. They pin the declaration only:
         // this corpus builds without libgata, so no reference counting is generated.
         // ManagedUnionTests covers that half by running programs and watching destructors.
         yield return new("union/managed-payload",
-            "union U { A(String s) } kernel { entry func Main() { } }", Expect.Accepted);
+            "union U { A(String s) } realm kernel { entry func Main() { } }", Expect.Accepted);
         // A user-class payload is exercised in ManagedUnionTests instead: declaring a class here
         // makes the module ARC-managed, and this corpus builds without libgata, so the run would
         // fail on missing @intrinsic bindings rather than on anything union-related.
         yield return new("union/multi-managed-payload",
-            "union U { A(String s, String t) } kernel { entry func Main() { } }", Expect.Accepted);
+            "union U { A(String s, String t) } realm kernel { entry func Main() { } }", Expect.Accepted);
         yield return new("union/nested-managed-union",
-            "union Inner { A(String s) } union Outer { W(Inner i), P(int n) } kernel { entry func Main() { } }",
+            "union Inner { A(String s) } union Outer { W(Inner i), P(int n) } realm kernel { entry func Main() { } }",
             Expect.Accepted);
         yield return new("union/managed-payload-in-class-field",
-            "union U { A(String s) } class C { U u; } kernel { entry func Main() { } }", Expect.Accepted);
+            "union U { A(String s) } class C { U u; } realm kernel { entry func Main() { } }", Expect.Accepted);
         // A union cannot hold itself by value: the two would have no size. Rejected, not Any -
         // allowing managed payloads did not weaken this, and a regression here is a compiler
         // that recurses forever or emits an incomplete type.
-        yield return new("union/self-payload", "union U { A(U u) } kernel { entry func Main() { } }",
+        yield return new("union/self-payload", "union U { A(U u) } realm kernel { entry func Main() { } }",
             Expect.Rejected);
         yield return new("union/mutual-payload",
-            "union A { X(B b) } union B { Y(A a) } kernel { entry func Main() { } }", Expect.Rejected);
-        yield return new("union/dup-field", "union U { A(int x, int x) } kernel { entry func Main() { } }", Expect.Rejected);
+            "union A { X(B b) } union B { Y(A a) } realm kernel { entry func Main() { } }", Expect.Rejected);
+        yield return new("union/dup-field", "union U { A(int x, int x) } realm kernel { entry func Main() { } }", Expect.Rejected);
 
         // Equality. Two unions of the same type compare structurally through a generated
         // function; anything else keeps the error it always had, so that making unions
         // comparable did not quietly make them comparable to everything.
         yield return new("union/eq-same-type",
-            "union U { A(int n), B } kernel { entry func Main() { let bool b = U.B() == U.A(1); } }",
+            "union U { A(int n), B } realm kernel { entry func Main() { let bool b = U.B() == U.A(1); } }",
             Expect.Accepted);
         yield return new("union/ne-same-type",
-            "union U { A(int n), B } kernel { entry func Main() { let bool b = U.B() != U.A(1); } }",
+            "union U { A(int n), B } realm kernel { entry func Main() { let bool b = U.B() != U.A(1); } }",
             Expect.Accepted);
         yield return new("union/eq-two-different-unions",
-            "union U { A } union V { B } kernel { entry func Main() { let bool b = U.A() == V.B(); } }",
+            "union U { A } union V { B } realm kernel { entry func Main() { let bool b = U.A() == V.B(); } }",
             Expect.Rejected, Codes.TypeMismatch);
         yield return new("union/eq-union-and-int",
-            "union U { A } kernel { entry func Main() { let bool b = U.A() == 1; } }",
+            "union U { A } realm kernel { entry func Main() { let bool b = U.A() == 1; } }",
             Expect.Rejected, Codes.TypeMismatch);
         yield return new("union/relational-still-rejected",
-            "union U { A } kernel { entry func Main() { let bool b = U.A() < U.A(); } }",
+            "union U { A } realm kernel { entry func Main() { let bool b = U.A() < U.A(); } }",
             Expect.Rejected, Codes.TypeMismatch);
         yield return new("union/eq-nested-union",
             "union I { A(int n), B } union O { W(I i), K(int n) } " +
-            "kernel { entry func Main() { let bool b = O.K(1) == O.W(I.B()); } }", Expect.Accepted);
+            "realm kernel { entry func Main() { let bool b = O.K(1) == O.W(I.B()); } }", Expect.Accepted);
         yield return new("union/eq-array-payload",
-            "union U { A([2]int a), B } kernel { entry func Main() { let bool b = U.A([1,2]) == U.B(); } }",
+            "union U { A([2]int a), B } realm kernel { entry func Main() { let bool b = U.A([1,2]) == U.B(); } }",
             Expect.Accepted);
         yield return new("union/eq-funcptr-payload",
             "int func Id(int x) { return x; } union U { A(func(int) -> int f), B } " +
-            "kernel { entry func Main() { let bool b = U.A(Id) == U.B(); } }", Expect.Accepted);
+            "realm kernel { entry func Main() { let bool b = U.A(Id) == U.B(); } }", Expect.Accepted);
         yield return new("union/eq-enum-payload",
             "enum E { X, Y } union U { A(E e), B } " +
-            "kernel { entry func Main() { let bool b = U.A(E.X) == U.B(); } }", Expect.Accepted);
+            "realm kernel { entry func Main() { let bool b = U.A(E.X) == U.B(); } }", Expect.Accepted);
         yield return new("union/eq-in-condition",
-            "union U { A(int n), B } kernel { entry func Main() { if (U.B() == U.A(1)) { } } }",
+            "union U { A(int n), B } realm kernel { entry func Main() { if (U.B() == U.A(1)) { } } }",
             Expect.Accepted);
         // Generic unions. The template is replaced by one stamped union per instantiation, so
         // these pin both that the stamping happens and that the rules the non-generic form is
         // held to still apply to the result.
         yield return new("union/generic-basic",
-            "union M[T] { S(T v), N } kernel { entry func Main() { let M[int] m = M.S(1); } }",
+            "union M[T] { S(T v), N } realm kernel { entry func Main() { let M[int] m = M.S(1); } }",
             Expect.Accepted);
         yield return new("union/generic-two-instantiations",
             "union M[T] { S(T v), N } " +
-            "kernel { entry func Main() { let M[int] a = M.S(1); let M[bool] b = M.S(true); } }",
+            "realm kernel { entry func Main() { let M[int] a = M.S(1); let M[bool] b = M.S(true); } }",
             Expect.Accepted);
         yield return new("union/generic-two-params",
             "union E[A, B] { L(A a), R(B b) } " +
-            "kernel { entry func Main() { let E[int, bool] e = E.L(1); } }", Expect.Accepted);
+            "realm kernel { entry func Main() { let E[int, bool] e = E.L(1); } }", Expect.Accepted);
         yield return new("union/generic-payload-free-needs-target-type",
-            "union M[T] { S(T v), N } kernel { entry func Main() { let M[int] m = M.N(); } }",
+            "union M[T] { S(T v), N } realm kernel { entry func Main() { let M[int] m = M.N(); } }",
             Expect.Accepted);
         yield return new("union/generic-nested-in-itself-by-value",
-            "union M[T] { S(M[T] v), N } kernel { entry func Main() { let M[int] m = M.N(); } }",
+            "union M[T] { S(M[T] v), N } realm kernel { entry func Main() { let M[int] m = M.N(); } }",
             Expect.Rejected, Codes.TypeMismatch);
         yield return new("union/generic-mutual-by-value",
             "union A[T] { X(B[T] b), Y } union B[T] { Z(A[T] a), W } " +
-            "kernel { entry func Main() { let A[int] a = A.Y(); } }", Expect.Rejected, Codes.TypeMismatch);
+            "realm kernel { entry func Main() { let A[int] a = A.Y(); } }", Expect.Rejected, Codes.TypeMismatch);
         yield return new("union/generic-duplicate-type-param",
-            "union M[T, T] { S(T v) } kernel { entry func Main() { let M[int, int] m = M.S(1); } }",
+            "union M[T, T] { S(T v) } realm kernel { entry func Main() { let M[int, int] m = M.S(1); } }",
             Expect.Rejected, Codes.DuplicateName);
         yield return new("union/generic-clashes-with-generic-class",
-            "class M[T] { public T v; } union M[T] { S(T v) } kernel { entry func Main() { } }",
+            "class M[T] { public T v; } union M[T] { S(T v) } realm kernel { entry func Main() { } }",
             Expect.Rejected, Codes.DuplicateName);
         yield return new("union/generic-void-argument",
-            "union M[T] { S(T v), N } kernel { entry func Main() { let M[void] m = M.N(); } }",
+            "union M[T] { S(T v), N } realm kernel { entry func Main() { let M[void] m = M.N(); } }",
             Expect.Rejected);
         yield return new("union/generic-wrong-arity",
-            "union M[T] { S(T v), N } kernel { entry func Main() { let M[int, int] m = M.N(); } }",
+            "union M[T] { S(T v), N } realm kernel { entry func Main() { let M[int, int] m = M.N(); } }",
             Expect.Rejected);
         yield return new("union/generic-unknown-variant",
-            "union M[T] { S(T v), N } kernel { entry func Main() { let M[int] m = M.Zzz(1); } }",
+            "union M[T] { S(T v), N } realm kernel { entry func Main() { let M[int] m = M.Zzz(1); } }",
             Expect.Rejected);
         yield return new("union/generic-equality",
             "union M[T] { S(T v), N } " +
-            "kernel { entry func Main() { let M[int] a = M.S(1); let bool b = a == M.S(2); } }",
+            "realm kernel { entry func Main() { let M[int] a = M.S(1); let bool b = a == M.S(2); } }",
             Expect.Accepted);
         // Type arguments are settled before any expression is resolved, so a construction on its
         // own cannot ask for an instantiation - the type has to be named somewhere.
         yield return new("union/generic-never-named-as-a-type",
-            "union M[T] { S(T v), N } kernel { entry func Main() { let bool b = M.S(1) == M.S(2); } }",
+            "union M[T] { S(T v), N } realm kernel { entry func Main() { let bool b = M.S(1) == M.S(2); } }",
             Expect.Rejected, Codes.CannotInfer);
         yield return new("union/generic-match-all-arms-return",
             "union M[T] { S(T v), N } " +
             "int func W(M[int] m) { match (m) { case S(v) { return 1; } case N { return 0; } } } " +
-            "kernel { entry func Main() { let int r = W(M.N()); } }", Expect.Accepted);
+            "realm kernel { entry func Main() { let int r = W(M.N()); } }", Expect.Accepted);
         // 'Name[Args].Variant(...)' - the instantiation named outright. The brackets read as
         // both a type list and an index, so these pin that the resolver picks correctly in each
         // direction and that ordinary indexing is untouched.
         yield return new("union/generic-explicit-instantiation",
-            "union M[T] { S(T v), N } kernel { entry func Main() { let M[int] m = M[int].S(1); } }",
+            "union M[T] { S(T v), N } realm kernel { entry func Main() { let M[int] m = M[int].S(1); } }",
             Expect.Accepted);
         yield return new("union/generic-explicit-payload-free",
-            "union M[T] { S(T v), N } kernel { entry func Main() { let M[int] m = M[int].N(); } }",
+            "union M[T] { S(T v), N } realm kernel { entry func Main() { let M[int] m = M[int].N(); } }",
             Expect.Accepted);
         yield return new("union/generic-explicit-two-params",
             "union E[A, B] { L(A a), R(B b) } " +
-            "kernel { entry func Main() { let E[int, bool] e = E[int, bool].R(true); } }", Expect.Accepted);
+            "realm kernel { entry func Main() { let E[int, bool] e = E[int, bool].R(true); } }", Expect.Accepted);
         // The index reading of the same shape. Declaring a class here would make the module
         // ARC-managed, which this libgata-free corpus cannot bind, so the member-access form
         // ('a[i].n') is covered in the execution tests instead.
         yield return new("union/generic-explicit-index-still-parses",
-            "kernel { entry func Main() { let [2]int a = [1, 2]; let int i = 0; let int n = a[i]; } }",
+            "realm kernel { entry func Main() { let [2]int a = [1, 2]; let int i = 0; let int n = a[i]; } }",
             Expect.Accepted);
         yield return new("union/generic-explicit-unknown-instantiation",
-            "union M[T] { S(T v), N } kernel { entry func Main() { let M[int] m = M[bool].N(); } }",
+            "union M[T] { S(T v), N } realm kernel { entry func Main() { let M[int] m = M[bool].N(); } }",
             Expect.Rejected);
         yield return new("union/generic-type-used-as-a-value",
-            "union M[T] { S(T v), N } kernel { entry func Main() { let M[int] a = M[int].N(); let int n = M[int]; } }",
+            "union M[T] { S(T v), N } realm kernel { entry func Main() { let M[int] a = M[int].N(); let int n = M[int]; } }",
             Expect.Rejected);
 
         yield return new("union/generic-never-instantiated",
-            "union M[T] { S(T v), N } kernel { entry func Main() { } }", Expect.Accepted);
+            "union M[T] { S(T v), N } realm kernel { entry func Main() { } }", Expect.Accepted);
 
         yield return new("union/eq-many-variants",
             "union U { A(int a), B(int b), C(int c), D(int d), E(int e), F } " +
-            "kernel { entry func Main() { let bool b = U.F() == U.A(1); } }", Expect.Accepted);
+            "realm kernel { entry func Main() { let bool b = U.F() == U.A(1); } }", Expect.Accepted);
         // An exhaustive match whose every arm returns, with no default. Gata's return analysis
         // knows it is total; gcc only does if the lowered chain ends in an else, which is why
         // Desugar collapses the last arm. Without it, gcc sees a path falling off the end.
         yield return new("union/match-all-arms-return",
             "union U { A, B(int n), C(int x, int y) } " +
             "int func W(U u) { match (u) { case A { return 0; } case B(n) { return n; } case C(x, y) { return x + y; } } } " +
-            "kernel { entry func Main() { let int r = W(U.A()); } }", Expect.Accepted);
+            "realm kernel { entry func Main() { let int r = W(U.A()); } }", Expect.Accepted);
         // The same shape with a default arm, which was always fine, so the fix must not have
         // been to special-case the defaultless form into something the default form loses.
         yield return new("union/match-default-returns",
             "union U { A, B(int n) } " +
             "int func W(U u) { match (u) { case A { return 0; } default { return 1; } } } " +
-            "kernel { entry func Main() { let int r = W(U.A()); } }", Expect.Accepted);
+            "realm kernel { entry func Main() { let int r = W(U.A()); } }", Expect.Accepted);
 
         #endregion
 
         #region classes
-        yield return new("class/dup-field", "class C { int n; int n; } kernel { entry func Main() { } }", Expect.Rejected);
+        yield return new("class/dup-field", "class C { int n; int n; } realm kernel { entry func Main() { } }", Expect.Rejected);
         yield return new("class/dup-method",
-            "class C { public void func M() { } public void func M() { } } kernel { entry func Main() { } }", Expect.Rejected);
-        yield return new("class/self-field", "class C { C c; } kernel { entry func Main() { } }", Expect.Any);
+            "class C { public void func M() { } public void func M() { } } realm kernel { entry func Main() { } }", Expect.Rejected);
+        yield return new("class/self-field", "class C { C c; } realm kernel { entry func Main() { } }", Expect.Any);
         yield return new("class/private-access",
-            "class C { int n; } kernel { entry func Main() { let C c = new C(); let int v = c.n; } }",
+            "class C { int n; } realm kernel { entry func Main() { let C c = new C(); let int v = c.n; } }",
             Expect.Rejected, Codes.PrivateMember);
         yield return new("class/static-on-instance",
-            "class C { public static void func S() { } } kernel { entry func Main() { let C c = new C(); c.S(); } }",
+            "class C { public static void func S() { } } realm kernel { entry func Main() { let C c = new C(); c.S(); } }",
             Expect.Rejected);
         yield return new("class/instance-on-static",
-            "class C { public void func M() { } } kernel { entry func Main() { C.M(); } }", Expect.Rejected);
+            "class C { public void func M() { } } realm kernel { entry func Main() { C.M(); } }", Expect.Rejected);
         yield return new("class/self-in-static",
-            "class C { int n; public static void func S() { self.n = 1; } } kernel { entry func Main() { } }", Expect.Rejected);
-        yield return new("class/empty", "class C { } kernel { entry func Main() { let C c = new C(); } }", Expect.Any);
+            "class C { int n; public static void func S() { self.n = 1; } } realm kernel { entry func Main() { } }", Expect.Rejected);
+        yield return new("class/empty", "class C { } realm kernel { entry func Main() { let C c = new C(); } }", Expect.Any);
         yield return new("module/instance-field",
-            "module M { int n; } kernel { entry func Main() { } }", Expect.Rejected, Codes.ModuleField);
+            "module M { int n; } realm kernel { entry func Main() { } }", Expect.Rejected, Codes.ModuleField);
         yield return new("module/new",
-            "module M { public static void func F() { } } kernel { entry func Main() { let M m = new M(); } }", Expect.Rejected);
+            "module M { public static void func F() { } } realm kernel { entry func Main() { let M m = new M(); } }", Expect.Rejected);
 
         #endregion
 
         #region operators
         yield return new("operator/wrong-arity",
-            "class C { public operator C func +(C a, C b) { return a; } } kernel { entry func Main() { } }", Expect.Rejected);
+            "class C { public operator C func +(C a, C b) { return a; } } realm kernel { entry func Main() { } }", Expect.Rejected);
         yield return new("operator/no-return",
-            "class C { public operator C func +(C o) { } } kernel { entry func Main() { } }", Expect.Rejected);
+            "class C { public operator C func +(C o) { } } realm kernel { entry func Main() { } }", Expect.Rejected);
         yield return new("operator/dup",
-            "class C { public operator C func +(C o) { return o; } public operator C func +(C o) { return o; } } kernel { entry func Main() { } }",
+            "class C { public operator C func +(C o) { return o; } public operator C func +(C o) { return o; } } realm kernel { entry func Main() { } }",
             Expect.Rejected);
         yield return new("operator/index-get-no-set",
-            "class C { public operator int func [](int k) { return k; } } kernel { entry func Main() { let C c = new C(); c[0] = 1; } }",
+            "class C { public operator int func [](int k) { return k; } } realm kernel { entry func Main() { let C c = new C(); c[0] = 1; } }",
             Expect.Rejected, Codes.NoIndexSetter);
         yield return new("operator/mod-not-overloadable",
-            "class C { public operator C func %(C o) { return o; } } kernel { entry func Main() { } }", Expect.Rejected);
+            "class C { public operator C func %(C o) { return o; } } realm kernel { entry func Main() { } }", Expect.Rejected);
         yield return new("operator/on-module",
-            "module M { public operator int func +(int a) { return a; } } kernel { entry func Main() { } }", Expect.Any);
+            "module M { public operator int func +(int a) { return a; } } realm kernel { entry func Main() { } }", Expect.Any);
 
         #endregion
 
         #region generics
         yield return new("generic/unknown-param",
-            "class Box[T] { T v; public void func Set(U x) { } } kernel { entry func Main() { let Box[int] b = new Box[int](); } }",
+            "class Box[T] { T v; public void func Set(U x) { } } realm kernel { entry func Main() { let Box[int] b = new Box[int](); } }",
             Expect.Rejected);
         yield return new("generic/arity-mismatch",
-            "class Box[T] { T v; } kernel { entry func Main() { let Box[int, int] b = new Box[int, int](); } }", Expect.Rejected);
+            "class Box[T] { T v; } realm kernel { entry func Main() { let Box[int, int] b = new Box[int, int](); } }", Expect.Rejected);
         yield return new("generic/uninstantiated",
-            "class Box[T] { T v; } kernel { entry func Main() { let Box b = new Box(); } }", Expect.Rejected);
+            "class Box[T] { T v; } realm kernel { entry func Main() { let Box b = new Box(); } }", Expect.Rejected);
         yield return new("generic/func-uninferable",
-            "T func Id[T](int n) { return default(T); } kernel { entry func Main() { Id(1); } }", Expect.Any);
+            "T func Id[T](int n) { return default(T); } realm kernel { entry func Main() { Id(1); } }", Expect.Any);
         yield return new("generic/recursive-instantiation",
-            "class Box[T] { T v; } kernel { entry func Main() { let Box[Box[int]] b = new Box[Box[int]](); } }", Expect.Any);
+            "class Box[T] { T v; } realm kernel { entry func Main() { let Box[Box[int]] b = new Box[Box[int]](); } }", Expect.Any);
 
         #endregion
 
         #region control flow
         yield return new("cf/break-outside-loop",
-            "kernel { entry func Main() { break; } }", Expect.Rejected, Codes.BreakOutsideLoop);
+            "realm kernel { entry func Main() { break; } }", Expect.Rejected, Codes.BreakOutsideLoop);
         yield return new("cf/continue-outside-loop",
-            "kernel { entry func Main() { continue; } }", Expect.Rejected, Codes.BreakOutsideLoop);
+            "realm kernel { entry func Main() { continue; } }", Expect.Rejected, Codes.BreakOutsideLoop);
         yield return new("cf/missing-return",
-            "int func H() { } kernel { entry func Main() { H(); } }", Expect.Rejected, Codes.MissingReturn);
+            "int func H() { } realm kernel { entry func Main() { H(); } }", Expect.Rejected, Codes.MissingReturn);
         yield return new("cf/return-value-from-void",
-            "void func H() { return 1; } kernel { entry func Main() { H(); } }", Expect.Rejected);
+            "void func H() { return 1; } realm kernel { entry func Main() { H(); } }", Expect.Rejected);
         yield return new("cf/return-nothing-from-int",
-            "int func H() { return; } kernel { entry func Main() { H(); } }", Expect.Rejected);
+            "int func H() { return; } realm kernel { entry func Main() { H(); } }", Expect.Rejected);
         yield return new("cf/unreachable",
-            "int func H() { return 1; VoidH(); } void func VoidH() { } kernel { entry func Main() { H(); } }", Expect.Any);
+            "int func H() { return 1; VoidH(); } void func VoidH() { } realm kernel { entry func Main() { H(); } }", Expect.Any);
         yield return new("cf/cond-not-bool",
-            "kernel { entry func Main() { if (1) { } } }", Expect.Rejected, Codes.ConditionNotBool);
+            "realm kernel { entry func Main() { if (1) { } } }", Expect.Rejected, Codes.ConditionNotBool);
         yield return new("cf/infinite-for-missing-cond",
-            "kernel { entry func Main() { for (;;) { break; } } }", Expect.Any);
+            "realm kernel { entry func Main() { for (;;) { break; } } }", Expect.Any);
         yield return new("cf/entry-call",
-            "kernel { entry func Main() { Main(); } }", Expect.Rejected, Codes.CallToEntry);
+            "realm kernel { entry func Main() { Main(); } }", Expect.Rejected, Codes.CallToEntry);
 
         #endregion
 
         #region realms / structure
         yield return new("struct/no-entry", "void func H() { }", Expect.Rejected);
         yield return new("struct/two-entries",
-            "kernel { entry func A() { } entry func B() { } }", Expect.Rejected);
-        yield return new("struct/nested-kernel", "kernel { kernel { } }", Expect.Rejected);
+            "realm kernel { entry func A() { } entry func B() { } }", Expect.Rejected);
+        yield return new("struct/nested-kernel", "realm kernel { realm kernel { } }", Expect.Rejected);
         yield return new("struct/dup-kernel",
-            "kernel { entry func Main() { } } kernel { }", Expect.Rejected);
+            "realm kernel { entry func Main() { } } realm kernel { }", Expect.Rejected);
         yield return new("struct/entry-outside-kernel",
             "entry func Main() { }", Expect.Rejected);
         yield return new("struct/panic-in-user",
-            "kernel { entry func Main() { } } user { void func H() { panic \"x\"; } }", Expect.Any);
+            "realm kernel { entry func Main() { } } realm userspace { void func H() { panic \"x\"; } }", Expect.Any);
 
         #endregion
 
         #region process / thread
-        yield return new("proc/no-mode", "kernel { process P { thread T { entry func R() { } } } entry func Main() { } }",
+        yield return new("proc/no-mode", "realm kernel { process P { thread T { entry func R() { } } } entry func Main() { } }",
             Expect.Rejected, Codes.MissingProcessMode);
         yield return new("proc/mode-twice",
-            "kernel { foreground process P : background { thread T { entry func R() { } } } entry func Main() { } }",
+            "realm kernel { foreground process P : background { thread T { entry func R() { } } } entry func Main() { } }",
             Expect.Rejected);
         yield return new("proc/thread-mode",
-            "kernel { foreground process P { background thread T { entry func R() { } } } entry func Main() { } }",
+            "realm kernel { foreground process P { background thread T { entry func R() { } } } entry func Main() { } }",
             Expect.Rejected, Codes.ThreadModeNotAllowed);
-        yield return new("proc/empty", "kernel { foreground process P { } entry func Main() { } }", Expect.Any);
+        yield return new("proc/empty", "realm kernel { foreground process P { } entry func Main() { } }", Expect.Any);
         yield return new("proc/thread-entry-params",
-            "kernel { foreground process P { thread T { entry func R(int n) { } } } entry func Main() { } }", Expect.Rejected);
+            "realm kernel { foreground process P { thread T { entry func R(int n) { } } } entry func Main() { } }", Expect.Rejected);
         yield return new("proc/dup-thread",
-            "kernel { foreground process P { thread T { entry func R() { } } thread T { entry func R() { } } } entry func Main() { } }",
+            "realm kernel { foreground process P { thread T { entry func R() { } } thread T { entry func R() { } } } entry func Main() { } }",
             Expect.Rejected);
 
         #endregion
 
         #region unsafe / pointers
         yield return new("unsafe/deref-outside",
-            "kernel { entry func Main() { let int n = 1; let int* p = &n; let int v = *p; } }",
+            "realm kernel { entry func Main() { let int n = 1; let int* p = &n; let int v = *p; } }",
             Expect.Rejected, Codes.UnsafeRequired);
         yield return new("unsafe/addrof-outside",
-            "kernel { entry func Main() { let int n = 1; let int* p = &n; } }", Expect.Any);
+            "realm kernel { entry func Main() { let int n = 1; let int* p = &n; } }", Expect.Any);
         yield return new("unsafe/nested",
-            "kernel { entry func Main() { unsafe { unsafe { } } } }", Expect.Any);
+            "realm kernel { entry func Main() { unsafe { unsafe { } } } }", Expect.Any);
         yield return new("unsafe/deref-int",
-            "kernel { entry func Main() { unsafe { let int n = 1; let int v = *n; } } }", Expect.Rejected);
+            "realm kernel { entry func Main() { unsafe { let int n = 1; let int v = *n; } } }", Expect.Rejected);
         yield return new("unsafe/addrof-literal",
-            "kernel { entry func Main() { unsafe { let int* p = &1; } } }", Expect.Rejected);
+            "realm kernel { entry func Main() { unsafe { let int* p = &1; } } }", Expect.Rejected);
 
         #endregion
 
         #region casts
-        yield return new("cast/int-to-bool", "kernel { entry func Main() { let bool b = 1 as bool; } }", Expect.Any);
-        yield return new("cast/to-void", "kernel { entry func Main() { let v = 1 as void; } }", Expect.Rejected);
+        yield return new("cast/int-to-bool", "realm kernel { entry func Main() { let bool b = 1 as bool; } }", Expect.Any);
+        yield return new("cast/to-void", "realm kernel { entry func Main() { let v = 1 as void; } }", Expect.Rejected);
         yield return new("cast/class-to-int",
-            "class C { } kernel { entry func Main() { let C c = new C(); let int v = c as int; } }", Expect.Rejected);
+            "class C { } realm kernel { entry func Main() { let C c = new C(); let int v = c as int; } }", Expect.Rejected);
         yield return new("cast/prim-paren-deref",
-            "kernel { entry func Main() { unsafe { let int n = 1; let int* p = &n; let int v = (int)*p; } } }", Expect.Any);
-        yield return new("cast/redundant", "kernel { entry func Main() { let int v = 1 as int; } }", Expect.Any);
+            "realm kernel { entry func Main() { unsafe { let int n = 1; let int* p = &n; let int v = (int)*p; } } }", Expect.Any);
+        yield return new("cast/redundant", "realm kernel { entry func Main() { let int v = 1 as int; } }", Expect.Any);
 
         #endregion
 
         #region literals / lexer edges
-        yield return new("lit/int-overflow", "kernel { entry func Main() { let int v = 99999999999999999999; } }", Expect.Rejected);
-        yield return new("lit/hex", "kernel { entry func Main() { let int v = 0xFF; } }", Expect.Accepted);
-        yield return new("lit/bad-hex", "kernel { entry func Main() { let int v = 0xZZ; } }", Expect.Rejected);
-        yield return new("lit/empty-char", "kernel { entry func Main() { let char c = ''; } }", Expect.Rejected);
-        yield return new("lit/multi-char", "kernel { entry func Main() { let char c = 'ab'; } }", Expect.Rejected);
-        yield return new("lit/bad-escape", "kernel { entry func Main() { let s = \"\\q\"; } }", Expect.Rejected);
-        yield return new("lit/unterminated-str", "kernel { entry func Main() { let s = \"abc; } }", Expect.Rejected);
-        yield return new("lit/interp-no-holes", "kernel { entry func Main() { let s = $\"plain\"; } }", Expect.Any);
-        yield return new("lit/interp-empty-hole", "kernel { entry func Main() { let s = $\"{}\"; } }", Expect.Rejected);
-        yield return new("lit/interp-unclosed-hole", "kernel { entry func Main() { let s = $\"{1\"; } }", Expect.Rejected);
+        yield return new("lit/int-overflow", "realm kernel { entry func Main() { let int v = 99999999999999999999; } }", Expect.Rejected);
+        yield return new("lit/hex", "realm kernel { entry func Main() { let int v = 0xFF; } }", Expect.Accepted);
+        yield return new("lit/bad-hex", "realm kernel { entry func Main() { let int v = 0xZZ; } }", Expect.Rejected);
+        yield return new("lit/empty-char", "realm kernel { entry func Main() { let char c = ''; } }", Expect.Rejected);
+        yield return new("lit/multi-char", "realm kernel { entry func Main() { let char c = 'ab'; } }", Expect.Rejected);
+        yield return new("lit/bad-escape", "realm kernel { entry func Main() { let s = \"\\q\"; } }", Expect.Rejected);
+        yield return new("lit/unterminated-str", "realm kernel { entry func Main() { let s = \"abc; } }", Expect.Rejected);
+        yield return new("lit/interp-no-holes", "realm kernel { entry func Main() { let s = $\"plain\"; } }", Expect.Any);
+        yield return new("lit/interp-empty-hole", "realm kernel { entry func Main() { let s = $\"{}\"; } }", Expect.Rejected);
+        yield return new("lit/interp-unclosed-hole", "realm kernel { entry func Main() { let s = $\"{1\"; } }", Expect.Rejected);
 
         #endregion
 
         #region trailing commas (each list form)
-        yield return new("comma/enum", "enum E { A, } kernel { entry func Main() { } }", Expect.Rejected, Codes.TrailingComma);
-        yield return new("comma/union", "union U { A, } kernel { entry func Main() { } }", Expect.Rejected, Codes.TrailingComma);
-        yield return new("comma/union-fields", "union U { A(int x,) } kernel { entry func Main() { } }", Expect.Rejected, Codes.TrailingComma);
-        yield return new("comma/params", "void func H(int a,) { } kernel { entry func Main() { } }", Expect.Rejected);
-        yield return new("comma/args", "void func H(int a) { } kernel { entry func Main() { H(1,); } }", Expect.Rejected);
-        yield return new("comma/array-lit", "kernel { entry func Main() { let a = [1,]; } }", Expect.Rejected);
-        yield return new("comma/coll-init", "kernel { entry func Main() { let a = new [2]int { 1, }; } }", Expect.Rejected);
-        yield return new("comma/generic-params", "class Box[T,] { T v; } kernel { entry func Main() { } }", Expect.Rejected);
+        yield return new("comma/enum", "enum E { A, } realm kernel { entry func Main() { } }", Expect.Rejected, Codes.TrailingComma);
+        yield return new("comma/union", "union U { A, } realm kernel { entry func Main() { } }", Expect.Rejected, Codes.TrailingComma);
+        yield return new("comma/union-fields", "union U { A(int x,) } realm kernel { entry func Main() { } }", Expect.Rejected, Codes.TrailingComma);
+        yield return new("comma/params", "void func H(int a,) { } realm kernel { entry func Main() { } }", Expect.Rejected);
+        yield return new("comma/args", "void func H(int a) { } realm kernel { entry func Main() { H(1,); } }", Expect.Rejected);
+        yield return new("comma/array-lit", "realm kernel { entry func Main() { let a = [1,]; } }", Expect.Rejected);
+        yield return new("comma/coll-init", "realm kernel { entry func Main() { let a = new [2]int { 1, }; } }", Expect.Rejected);
+        yield return new("comma/generic-params", "class Box[T,] { T v; } realm kernel { entry func Main() { } }", Expect.Rejected);
         yield return new("comma/match-binds",
-            "union U { A(int x) } kernel { entry func Main() { let U u = U.A(1); match (u) { case A(x,) { } } } }", Expect.Rejected);
-        yield return new("comma/switch-labels", "kernel { entry func Main() { switch (1) { case 1, { } } } }", Expect.Rejected);
+            "union U { A(int x) } realm kernel { entry func Main() { let U u = U.A(1); match (u) { case A(x,) { } } } }", Expect.Rejected);
+        yield return new("comma/switch-labels", "realm kernel { entry func Main() { switch (1) { case 1, { } } } }", Expect.Rejected);
 
         #endregion
 
         #region declaration headers
-        yield return new("decl/dup-modifier", "kernel { entry func Main() { } } public public void func H() { }", Expect.Rejected);
-        yield return new("decl/public-private", "class C { public private void func M() { } } kernel { entry func Main() { } }", Expect.Rejected);
-        yield return new("decl/static-free-func", "static void func H() { } kernel { entry func Main() { } }",
+        yield return new("decl/dup-modifier", "realm kernel { entry func Main() { } } public public void func H() { }", Expect.Rejected);
+        yield return new("decl/public-private", "class C { public private void func M() { } } realm kernel { entry func Main() { } }", Expect.Rejected);
+        yield return new("decl/static-free-func", "static void func H() { } realm kernel { entry func Main() { } }",
             Expect.Rejected, Codes.StaticOnFreeFunc);
-        yield return new("decl/return-type-after-params", "kernel { entry func Main() { } } func H() -> int { }", Expect.Rejected);
-        yield return new("decl/dup-param", "void func H(int a, int a) { } kernel { entry func Main() { } }", Expect.Rejected);
-        yield return new("decl/dup-free-func", "void func H() { } void func H() { } kernel { entry func Main() { } }", Expect.Rejected);
-        yield return new("decl/generic-param-generic", "class Box[T[U]] { } kernel { entry func Main() { } }", Expect.Rejected);
-        yield return new("decl/func-ptr-ptr", "kernel { entry func Main() { let func(int) -> int* f = null; } }", Expect.Any);
-        yield return new("decl/nested-class", "class A { class B { } } kernel { entry func Main() { } }", Expect.Rejected);
+        yield return new("decl/return-type-after-params", "realm kernel { entry func Main() { } } func H() -> int { }", Expect.Rejected);
+        yield return new("decl/dup-param", "void func H(int a, int a) { } realm kernel { entry func Main() { } }", Expect.Rejected);
+        yield return new("decl/dup-free-func", "void func H() { } void func H() { } realm kernel { entry func Main() { } }", Expect.Rejected);
+        yield return new("decl/generic-param-generic", "class Box[T[U]] { } realm kernel { entry func Main() { } }", Expect.Rejected);
+        yield return new("decl/func-ptr-ptr", "realm kernel { entry func Main() { let func(int) -> int* f = null; } }", Expect.Any);
+        yield return new("decl/nested-class", "class A { class B { } } realm kernel { entry func Main() { } }", Expect.Rejected);
 
         #endregion
 
         #region annotations
-        yield return new("ann/on-enum", "@keep enum E { A } kernel { entry func Main() { } }", Expect.Rejected, Codes.BadAnnotation);
-        yield return new("ann/on-field", "class C { @keep int n; } kernel { entry func Main() { } }", Expect.Rejected);
+        yield return new("ann/on-enum", "@keep enum E { A } realm kernel { entry func Main() { } }", Expect.Rejected, Codes.BadAnnotation);
+        yield return new("ann/on-field", "class C { @keep int n; } realm kernel { entry func Main() { } }", Expect.Rejected);
         yield return new("ann/unknown-intrinsic",
-            "@intrinsic(not_a_real_role) native { } kernel { entry func Main() { } }", Expect.Any);
+            "@intrinsic(not_a_real_role) native { } realm kernel { entry func Main() { } }", Expect.Any);
         yield return new("ann/env-misplaced",
-            "kernel { entry func Main() { } @environment }", Expect.Rejected);
+            "realm kernel { entry func Main() { } @environment }", Expect.Rejected);
 
         #endregion
 
         #region warnings that must not be errors
-        yield return new("warn/unused-var", "kernel { entry func Main() { let int unused = 1; } }", Expect.Accepted);
-        yield return new("warn/self-assign", "kernel { entry func Main() { let int v = 1; v = v; } }", Expect.Accepted);
-        yield return new("warn/const-cond", "kernel { entry func Main() { if (true) { VoidH(); } } void func VoidH() { } }", Expect.Any);
+        yield return new("warn/unused-var", "realm kernel { entry func Main() { let int unused = 1; } }", Expect.Accepted);
+        yield return new("warn/self-assign", "realm kernel { entry func Main() { let int v = 1; v = v; } }", Expect.Accepted);
+        yield return new("warn/const-cond", "realm kernel { entry func Main() { if (true) { VoidH(); } } void func VoidH() { } }", Expect.Any);
 
         #endregion
 
         #region deep but bounded nesting
-        yield return new("depth/parens", "kernel { entry func Main() { let int v = " +
+        yield return new("depth/parens", "realm kernel { entry func Main() { let int v = " +
             new string('(', 300) + "1" + new string(')', 300) + "; } }", Expect.Rejected);
-        yield return new("depth/blocks", "kernel { entry func Main() { " +
+        yield return new("depth/blocks", "realm kernel { entry func Main() { " +
             string.Concat(Enumerable.Repeat("{", 300)) + string.Concat(Enumerable.Repeat("}", 300)) + " } }", Expect.Rejected);
-        yield return new("depth/unary", "kernel { entry func Main() { let int v = " +
+        yield return new("depth/unary", "realm kernel { entry func Main() { let int v = " +
             new string('-', 300) + "1; } }", Expect.Rejected);
         yield return new("depth/generic-type",
-            "kernel { entry func Main() { let " + string.Concat(Enumerable.Repeat("Box[", 300)) + "int" +
+            "realm kernel { entry func Main() { let " + string.Concat(Enumerable.Repeat("Box[", 300)) + "int" +
             new string(']', 300) + " b = null; } }", Expect.Rejected);
 
         #endregion
 
         #region truncation / unbalanced input
-        yield return new("trunc/open-brace", "kernel { entry func Main() {", Expect.Rejected);
-        yield return new("trunc/open-paren", "kernel { entry func Main() { VoidH(", Expect.Rejected);
+        yield return new("trunc/open-brace", "realm kernel { entry func Main() {", Expect.Rejected);
+        yield return new("trunc/open-paren", "realm kernel { entry func Main() { VoidH(", Expect.Rejected);
         yield return new("trunc/empty", "", Expect.Rejected);
         yield return new("trunc/only-brace", "}", Expect.Rejected);
         yield return new("trunc/stray-semi", ";", Expect.Rejected);
         yield return new("trunc/keyword-only", "class", Expect.Rejected);
-        yield return new("trunc/dangling-else", "kernel { entry func Main() { else { } } }", Expect.Rejected);
-        yield return new("trunc/dangling-catch", "kernel { entry func Main() { catch { } } }", Expect.Rejected);
-        yield return new("trunc/dangling-case", "kernel { entry func Main() { case 1 { } } }", Expect.Rejected);
+        yield return new("trunc/dangling-else", "realm kernel { entry func Main() { else { } } }", Expect.Rejected);
+        yield return new("trunc/dangling-catch", "realm kernel { entry func Main() { catch { } } }", Expect.Rejected);
+        yield return new("trunc/dangling-case", "realm kernel { entry func Main() { case 1 { } } }", Expect.Rejected);
     }
 
     /// <summary>
@@ -1044,242 +1056,242 @@ public static class TortureCorpus
 
         #region ref parameters
         yield return new("ref/basic",
-            "void func Bump(ref int n) { n = n + 1; } kernel { entry func Main() { let int v = 1; Bump(ref v); } }",
+            "void func Bump(ref int n) { n = n + 1; } realm kernel { entry func Main() { let int v = 1; Bump(ref v); } }",
             Expect.Accepted);
         yield return new("ref/missing-keyword",
-            "void func Bump(ref int n) { } kernel { entry func Main() { let int v = 1; Bump(v); } }",
+            "void func Bump(ref int n) { } realm kernel { entry func Main() { let int v = 1; Bump(v); } }",
             Expect.Rejected, Codes.RefArgMismatch);
         yield return new("ref/unexpected-keyword",
-            "void func Take(int n) { } kernel { entry func Main() { let int v = 1; Take(ref v); } }",
+            "void func Take(int n) { } realm kernel { entry func Main() { let int v = 1; Take(ref v); } }",
             Expect.Rejected, Codes.RefArgMismatch);
         yield return new("ref/literal-arg",
-            "void func Bump(ref int n) { } kernel { entry func Main() { Bump(ref 1); } }", Expect.Rejected);
+            "void func Bump(ref int n) { } realm kernel { entry func Main() { Bump(ref 1); } }", Expect.Rejected);
         yield return new("ref/call-arg",
-            "int func Two() { return 2; } void func Bump(ref int n) { } kernel { entry func Main() { Bump(ref Two()); } }",
+            "int func Two() { return 2; } void func Bump(ref int n) { } realm kernel { entry func Main() { Bump(ref Two()); } }",
             Expect.Rejected);
         // Not Accepted: any class at all makes ValidateIntrinsics demand the ARC role set,
         // which a corpus case importing no libgata cannot bind.
         yield return new("ref/field-arg",
-            "class C { public int n; func _init() { self.n = 0; } } void func Bump(ref int n) { } kernel { entry func Main() { let C c = new C(); Bump(ref c.n); } }",
+            "class C { public int n; func _init() { self.n = 0; } } void func Bump(ref int n) { } realm kernel { entry func Main() { let C c = new C(); Bump(ref c.n); } }",
             Expect.Any);
         yield return new("ref/elem-arg",
-            "void func Bump(ref int n) { } kernel { entry func Main() { let a = [1, 2]; Bump(ref a[0]); } }",
+            "void func Bump(ref int n) { } realm kernel { entry func Main() { let a = [1, 2]; Bump(ref a[0]); } }",
             Expect.Accepted);
         yield return new("ref/type-mismatch",
-            "void func Bump(ref int n) { } kernel { entry func Main() { let bool b = true; Bump(ref b); } }",
+            "void func Bump(ref int n) { } realm kernel { entry func Main() { let bool b = true; Bump(ref b); } }",
             Expect.Rejected);
         yield return new("ref/on-class",
-            "class C { } void func Take(ref C c) { } kernel { entry func Main() { let C c = new C(); Take(ref c); } }",
+            "class C { } void func Take(ref C c) { } realm kernel { entry func Main() { let C c = new C(); Take(ref c); } }",
             Expect.Any);
         yield return new("ref/in-operator",
-            "class C { public operator C func +(ref C o) { return o; } } kernel { entry func Main() { } }", Expect.Any);
+            "class C { public operator C func +(ref C o) { return o; } } realm kernel { entry func Main() { } }", Expect.Any);
 
         #endregion
 
         #region for..in protocol
-        yield return new("forin/array", "kernel { entry func Main() { for x in [1, 2] { } } }", Expect.Any);
-        yield return new("forin/int", "kernel { entry func Main() { for x in 1 { } } }",
+        yield return new("forin/array", "realm kernel { entry func Main() { for x in [1, 2] { } } }", Expect.Any);
+        yield return new("forin/int", "realm kernel { entry func Main() { for x in 1 { } } }",
             Expect.Rejected, Codes.NotIterable);
         yield return new("forin/no-protocol",
-            "class C { } kernel { entry func Main() { let C c = new C(); for x in c { } } }",
+            "class C { } realm kernel { entry func Main() { let C c = new C(); for x in c { } } }",
             Expect.Rejected, Codes.NotIterable);
         yield return new("forin/length-only",
-            "class C { public int func Length() { return 0; } } kernel { entry func Main() { let C c = new C(); for x in c { } } }",
+            "class C { public int func Length() { return 0; } } realm kernel { entry func Main() { let C c = new C(); for x in c { } } }",
             Expect.Rejected);
         yield return new("forin/wrong-get-arity",
-            "class C { public int func Length() { return 0; } public int func Get() { return 0; } } kernel { entry func Main() { let C c = new C(); for x in c { } } }",
+            "class C { public int func Length() { return 0; } public int func Get() { return 0; } } realm kernel { entry func Main() { let C c = new C(); for x in c { } } }",
             Expect.Rejected);
         yield return new("forin/full-protocol",
-            "class C { public int func Length() { return 0; } public int func Get(int i) { return i; } } kernel { entry func Main() { for x in new C() { } } }",
+            "class C { public int func Length() { return 0; } public int func Get(int i) { return i; } } realm kernel { entry func Main() { for x in new C() { } } }",
             Expect.Any);
         yield return new("forin/assign-to-binding",
-            "kernel { entry func Main() { for x in [1, 2] { x = 5; } } }", Expect.Any);
+            "realm kernel { entry func Main() { for x in [1, 2] { x = 5; } } }", Expect.Any);
         yield return new("forin/shadow-outer",
-            "kernel { entry func Main() { let int x = 1; for x in [1, 2] { } } }", Expect.Any);
+            "realm kernel { entry func Main() { let int x = 1; for x in [1, 2] { } } }", Expect.Any);
         yield return new("forin/nested-same-name",
-            "kernel { entry func Main() { for x in [1, 2] { for x in [3, 4] { } } } }", Expect.Any);
+            "realm kernel { entry func Main() { for x in [1, 2] { for x in [3, 4] { } } } }", Expect.Any);
 
         #endregion
 
         #region interpolation
         yield return new("interp/class-operand",
-            "class C { } kernel { entry func Main() { let C c = new C(); let s = $\"{c}\"; } }", Expect.Any);
+            "class C { } realm kernel { entry func Main() { let C c = new C(); let s = $\"{c}\"; } }", Expect.Any);
         yield return new("interp/void-operand",
-            "void func H() { } kernel { entry func Main() { let s = $\"{H()}\"; } }", Expect.Rejected);
+            "void func H() { } realm kernel { entry func Main() { let s = $\"{H()}\"; } }", Expect.Rejected);
         yield return new("interp/array-operand",
-            "kernel { entry func Main() { let a = [1, 2]; let s = $\"{a}\"; } }", Expect.Any);
+            "realm kernel { entry func Main() { let a = [1, 2]; let s = $\"{a}\"; } }", Expect.Any);
         yield return new("interp/nested-interp",
-            "kernel { entry func Main() { let s = $\"{$\"{1}\"}\"; } }", Expect.Any);
+            "realm kernel { entry func Main() { let s = $\"{$\"{1}\"}\"; } }", Expect.Any);
         yield return new("interp/assign-inside",
-            "kernel { entry func Main() { let int v = 0; let s = $\"{v = 1}\"; } }", Expect.Rejected);
+            "realm kernel { entry func Main() { let int v = 0; let s = $\"{v = 1}\"; } }", Expect.Rejected);
         yield return new("interp/throws-inside",
-            "throws int func T() { throw; } kernel { entry func Main() { let s = $\"{T()}\"; } }", Expect.Rejected);
+            "throws int func T() { throw; } realm kernel { entry func Main() { let s = $\"{T()}\"; } }", Expect.Rejected);
         yield return new("interp/many-parts",
-            "kernel { entry func Main() { let s = $\"a{1}b{2}c{3}d{4}e\"; } }", Expect.Any);
+            "realm kernel { entry func Main() { let s = $\"a{1}b{2}c{3}d{4}e\"; } }", Expect.Any);
         yield return new("interp/plain-string-no-dollar",
-            "kernel { entry func Main() { let s = \"{1}\"; } }", Expect.Any);
+            "realm kernel { entry func Main() { let s = \"{1}\"; } }", Expect.Any);
 
         #endregion
 
         #region scoping and shadowing
         yield return new("scope/redeclare-same-block",
-            "kernel { entry func Main() { let int v = 1; let int v = 2; } }", Expect.Any);
+            "realm kernel { entry func Main() { let int v = 1; let int v = 2; } }", Expect.Any);
         yield return new("scope/shadow-param",
-            "void func H(int p) { let int p = 1; } kernel { entry func Main() { H(1); } }", Expect.Any);
+            "void func H(int p) { let int p = 1; } realm kernel { entry func Main() { H(1); } }", Expect.Any);
         yield return new("scope/shadow-self",
-            "class C { public void func M() { let int self = 1; } } kernel { entry func Main() { } }", Expect.Any);
+            "class C { public void func M() { let int self = 1; } } realm kernel { entry func Main() { } }", Expect.Any);
         yield return new("scope/use-before-decl",
-            "kernel { entry func Main() { let int a = b; let int b = 1; } }", Expect.Rejected);
+            "realm kernel { entry func Main() { let int a = b; let int b = 1; } }", Expect.Rejected);
         yield return new("scope/self-referential-init",
-            "kernel { entry func Main() { let int a = a; } }", Expect.Rejected);
+            "realm kernel { entry func Main() { let int a = a; } }", Expect.Rejected);
         yield return new("scope/leak-from-if",
-            "kernel { entry func Main() { if (true) { let int a = 1; } let int b = a; } }", Expect.Rejected);
+            "realm kernel { entry func Main() { if (true) { let int a = 1; } let int b = a; } }", Expect.Rejected);
         yield return new("scope/leak-from-for",
-            "kernel { entry func Main() { for (let int i = 0; i < 1; i++) { } let int j = i; } }", Expect.Rejected);
+            "realm kernel { entry func Main() { for (let int i = 0; i < 1; i++) { } let int j = i; } }", Expect.Rejected);
         yield return new("scope/name-shadows-class",
-            "class C { } kernel { entry func Main() { let int C = 1; } }", Expect.Any);
+            "class C { } realm kernel { entry func Main() { let int C = 1; } }", Expect.Any);
         yield return new("scope/name-shadows-func",
-            "void func H() { } kernel { entry func Main() { let int H = 1; } }", Expect.Any);
+            "void func H() { } realm kernel { entry func Main() { let int H = 1; } }", Expect.Any);
 
         #endregion
 
         #region throws x generics x catch
         yield return new("throws/generic-func",
-            "throws T func Pick[T](T v) { return v; } kernel { entry func Main() { let int x = Pick(1) catch { assign 0; }; } }",
+            "throws T func Pick[T](T v) { return v; } realm kernel { entry func Main() { let int x = Pick(1) catch { assign 0; }; } }",
             Expect.Any);
         yield return new("throws/generic-class-method",
-            "class Box[T] { public throws T func Get() { throw; } } kernel { entry func Main() { let Box[int] b = new Box[int](); let int v = b.Get() catch { assign 0; }; } }",
+            "class Box[T] { public throws T func Get() { throw; } } realm kernel { entry func Main() { let Box[int] b = new Box[int](); let int v = b.Get() catch { assign 0; }; } }",
             Expect.Any);
         yield return new("throws/returns-class",
-            "class C { } throws C func Make() { throw; } kernel { entry func Main() { let C c = Make() catch { assign new C(); }; } }",
+            "class C { } throws C func Make() { throw; } realm kernel { entry func Main() { let C c = Make() catch { assign new C(); }; } }",
             Expect.Any);
         yield return new("throws/in-operator",
-            "class C { public throws operator C func +(C o) { return o; } } kernel { entry func Main() { } }",
+            "class C { public throws operator C func +(C o) { return o; } } realm kernel { entry func Main() { } }",
             Expect.Rejected);
         // A constructor is a method named '_init'; 'func C()' on class C is just a method.
         yield return new("throws/in-ctor",
-            "class C { throws func _init() { throw; } } kernel { entry func Main() { } }",
+            "class C { throws func _init() { throw; } } realm kernel { entry func Main() { } }",
             Expect.Rejected, Codes.LifecycleThrows);
         yield return new("throws/in-dtor",
-            "class C { throws func _deinit() { throw; } } kernel { entry func Main() { } }",
+            "class C { throws func _deinit() { throw; } } realm kernel { entry func Main() { } }",
             Expect.Rejected, Codes.LifecycleThrows);
         yield return new("ctor/named-like-class",
-            "class C { public void func C() { } } kernel { entry func Main() { } }", Expect.Any);
+            "class C { public void func C() { } } realm kernel { entry func Main() { } }", Expect.Any);
         yield return new("throws/nested-call-arg",
-            "throws int func T() { throw; } void func H(int n) { } kernel { entry func Main() { try { H(T()); } catch { } } }",
+            "throws int func T() { throw; } void func H(int n) { } realm kernel { entry func Main() { try { H(T()); } catch { } } }",
             Expect.Rejected);
         yield return new("throws/in-condition",
-            "throws bool func T() { throw; } kernel { entry func Main() { try { if (T()) { } } catch { } } }",
+            "throws bool func T() { throw; } realm kernel { entry func Main() { try { if (T()) { } } catch { } } }",
             Expect.Rejected);
         yield return new("throws/in-return",
-            "throws int func T() { throw; } throws int func H() { return T(); } kernel { entry func Main() { try { H(); } catch { } } }",
+            "throws int func T() { throw; } throws int func H() { return T(); } realm kernel { entry func Main() { try { H(); } catch { } } }",
             Expect.Rejected);
         yield return new("throws/double-call-one-stmt",
-            "throws int func T() { throw; } kernel { entry func Main() { try { let int v = T() + T(); } catch { } } }",
+            "throws int func T() { throw; } realm kernel { entry func Main() { try { let int v = T() + T(); } catch { } } }",
             Expect.Rejected);
         yield return new("throws/catch-in-catch-block",
-            "throws int func T() { throw; } kernel { entry func Main() { try { T(); } catch { let int v = T() catch { assign 0; }; } } }",
+            "throws int func T() { throw; } realm kernel { entry func Main() { try { T(); } catch { let int v = T() catch { assign 0; }; } } }",
             Expect.Any);
 
         #endregion
 
         #region operator overload interactions
         yield return new("op/compound-uses-binary",
-            "class C { public operator C func +(C o) { return o; } } kernel { entry func Main() { let C a = new C(); a += a; } }",
+            "class C { public operator C func +(C o) { return o; } } realm kernel { entry func Main() { let C a = new C(); a += a; } }",
             Expect.Any);
         yield return new("op/compound-no-binary",
-            "class C { } kernel { entry func Main() { let C a = new C(); a += a; } }", Expect.Rejected);
+            "class C { } realm kernel { entry func Main() { let C a = new C(); a += a; } }", Expect.Rejected);
         yield return new("op/indexer-compound",
-            "class C { public operator int func [](int k) { return k; } public operator func []=(int k, int v) { } } kernel { entry func Main() { let C c = new C(); c[0] += 1; } }",
+            "class C { public operator int func [](int k) { return k; } public operator func []=(int k, int v) { } } realm kernel { entry func Main() { let C c = new C(); c[0] += 1; } }",
             Expect.Any);
         yield return new("op/setter-without-getter-compound",
-            "class C { public operator func []=(int k, int v) { } } kernel { entry func Main() { let C c = new C(); c[0] += 1; } }",
+            "class C { public operator func []=(int k, int v) { } } realm kernel { entry func Main() { let C c = new C(); c[0] += 1; } }",
             Expect.Rejected);
         yield return new("op/unary-not",
-            "class C { public operator bool func !() { return true; } } kernel { entry func Main() { let C c = new C(); let bool b = !c; } }",
+            "class C { public operator bool func !() { return true; } } realm kernel { entry func Main() { let C c = new C(); let bool b = !c; } }",
             Expect.Any);
         yield return new("op/as-conversion",
-            "class C { public operator C func as(int n) { return new C(); } } kernel { entry func Main() { let C c = 1 as C; } }",
+            "class C { public operator C func as(int n) { return new C(); } } realm kernel { entry func Main() { let C c = 1 as C; } }",
             Expect.Any);
         yield return new("op/as-wrong-direction",
-            "class C { public operator int func as(C c) { return 1; } } kernel { entry func Main() { } }", Expect.Any);
+            "class C { public operator int func as(C c) { return 1; } } realm kernel { entry func Main() { } }", Expect.Any);
         yield return new("op/private-access",
-            "class C { private operator C func +(C o) { return o; } } kernel { entry func Main() { let C a = new C(); let C b = a + a; } }",
+            "class C { private operator C func +(C o) { return o; } } realm kernel { entry func Main() { let C a = new C(); let C b = a + a; } }",
             Expect.Rejected, Codes.PrivateMember);
         yield return new("op/eq-returns-int",
-            "class C { public operator int func ==(C o) { return 1; } } kernel { entry func Main() { } }", Expect.Any);
+            "class C { public operator int func ==(C o) { return 1; } } realm kernel { entry func Main() { } }", Expect.Any);
 
         #endregion
 
         #region generics stress
         yield return new("gen/method-on-generic-class",
-            "class Box[T] { T v; public U func Map[U](U seed) { return seed; } } kernel { entry func Main() { let Box[int] b = new Box[int](); let int r = b.Map(1); } }",
+            "class Box[T] { T v; public U func Map[U](U seed) { return seed; } } realm kernel { entry func Main() { let Box[int] b = new Box[int](); let int r = b.Map(1); } }",
             Expect.Any);
         yield return new("gen/same-param-name-nested",
-            "class Box[T] { public T func Id[T](T v) { return v; } } kernel { entry func Main() { let Box[int] b = new Box[int](); } }",
+            "class Box[T] { public T func Id[T](T v) { return v; } } realm kernel { entry func Main() { let Box[int] b = new Box[int](); } }",
             Expect.Any);
         yield return new("gen/generic-throws-in-handler",
-            "throws T func Pick[T](T v) { return v; } kernel { entry func Main() { let int a = Pick(1) catch { let int b = Pick(2) catch { assign 0; }; assign b; }; } }",
+            "throws T func Pick[T](T v) { return v; } realm kernel { entry func Main() { let int a = Pick(1) catch { let int b = Pick(2) catch { assign 0; }; assign b; }; } }",
             Expect.Any);
         yield return new("gen/instantiate-with-void",
-            "class Box[T] { T v; } kernel { entry func Main() { let Box[void] b = new Box[void](); } }", Expect.Rejected);
+            "class Box[T] { T v; } realm kernel { entry func Main() { let Box[void] b = new Box[void](); } }", Expect.Rejected);
         yield return new("gen/instantiate-with-self",
-            "class Box[T] { T v; } kernel { entry func Main() { let Box[Box[Box[int]]] b = new Box[Box[Box[int]]](); } }",
+            "class Box[T] { T v; } realm kernel { entry func Main() { let Box[Box[Box[int]]] b = new Box[Box[Box[int]]](); } }",
             Expect.Any);
         yield return new("gen/param-shadows-class",
-            "class Thing { } class Box[Thing] { Thing v; } kernel { entry func Main() { let Box[int] b = new Box[int](); } }",
+            "class Thing { } class Box[Thing] { Thing v; } realm kernel { entry func Main() { let Box[int] b = new Box[int](); } }",
             Expect.Any);
         yield return new("gen/unused-param",
-            "class Box[T] { int n; } kernel { entry func Main() { let Box[int] b = new Box[int](); } }", Expect.Any);
+            "class Box[T] { int n; } realm kernel { entry func Main() { let Box[int] b = new Box[int](); } }", Expect.Any);
 
         #endregion
 
         #region native blocks and fields
-        yield return new("native/top-level", "native { int x; } kernel { entry func Main() { } }", Expect.Any);
+        yield return new("native/top-level", "native { int x; } realm kernel { entry func Main() { } }", Expect.Any);
         yield return new("native/method-body",
-            "class C { public int func M() native { return 1; } } kernel { entry func Main() { } }", Expect.Any);
+            "class C { public int func M() native { return 1; } } realm kernel { entry func Main() { } }", Expect.Any);
         yield return new("native/fields-block",
-            "class C { fields { int raw; } } kernel { entry func Main() { let C c = new C(); } }", Expect.Any);
+            "class C { fields { int raw; } } realm kernel { entry func Main() { let C c = new C(); } }", Expect.Any);
         yield return new("native/statement",
-            "kernel { entry func Main() { native { int local = 1; } } }", Expect.Any);
+            "realm kernel { entry func Main() { native { int local = 1; } } }", Expect.Any);
         yield return new("native/unbalanced-brace",
-            "kernel { entry func Main() { } } native { if (1) { }", Expect.Rejected);
-        yield return new("native/empty", "native { } kernel { entry func Main() { } }", Expect.Any);
+            "realm kernel { entry func Main() { } } native { if (1) { }", Expect.Rejected);
+        yield return new("native/empty", "native { } realm kernel { entry func Main() { } }", Expect.Any);
 
         #endregion
 
         #region compound and unary numeric edges
         yield return new("num/bitwise-on-double",
-            "kernel { entry func Main() { let double d = 1.5; let v = d & 1; } }", Expect.Rejected);
+            "realm kernel { entry func Main() { let double d = 1.5; let v = d & 1; } }", Expect.Rejected);
         yield return new("num/mod-on-double",
-            "kernel { entry func Main() { let double d = 1.5; let v = d % 2.0; } }", Expect.Any);
+            "realm kernel { entry func Main() { let double d = 1.5; let v = d % 2.0; } }", Expect.Any);
         yield return new("num/shift-negative",
-            "kernel { entry func Main() { let v = 1 << -1; } }", Expect.Any);
+            "realm kernel { entry func Main() { let v = 1 << -1; } }", Expect.Any);
         yield return new("num/not-on-int",
-            "kernel { entry func Main() { let v = !1; } }", Expect.Rejected);
+            "realm kernel { entry func Main() { let v = !1; } }", Expect.Rejected);
         yield return new("num/bitnot-on-bool",
-            "kernel { entry func Main() { let v = ~true; } }", Expect.Rejected);
+            "realm kernel { entry func Main() { let v = ~true; } }", Expect.Rejected);
         yield return new("num/neg-on-bool",
-            "kernel { entry func Main() { let v = -true; } }", Expect.Rejected);
+            "realm kernel { entry func Main() { let v = -true; } }", Expect.Rejected);
         yield return new("num/neg-on-string",
-            "kernel { entry func Main() { let v = -\"s\"; } }", Expect.Rejected);
+            "realm kernel { entry func Main() { let v = -\"s\"; } }", Expect.Rejected);
         // Nested unary minus: the two signs must not be printed adjacent, or C reads "--".
-        yield return new("num/double-negate", "kernel { entry func Main() { let v = -(-1); } }", Expect.Any);
-        yield return new("num/triple-negate", "kernel { entry func Main() { let int n = 1; let v = -(-(-n)); } }", Expect.Any);
-        yield return new("num/negate-postfix", "kernel { entry func Main() { let int n = 1; let v = -(n++); } }", Expect.Any);
-        yield return new("num/double-bitnot", "kernel { entry func Main() { let v = ~(~1); } }", Expect.Any);
-        yield return new("num/double-not", "kernel { entry func Main() { let v = !(!true); } }", Expect.Any);
+        yield return new("num/double-negate", "realm kernel { entry func Main() { let v = -(-1); } }", Expect.Any);
+        yield return new("num/triple-negate", "realm kernel { entry func Main() { let int n = 1; let v = -(-(-n)); } }", Expect.Any);
+        yield return new("num/negate-postfix", "realm kernel { entry func Main() { let int n = 1; let v = -(n++); } }", Expect.Any);
+        yield return new("num/double-bitnot", "realm kernel { entry func Main() { let v = ~(~1); } }", Expect.Any);
+        yield return new("num/double-not", "realm kernel { entry func Main() { let v = !(!true); } }", Expect.Any);
         yield return new("num/int-div-zero-const",
-            "kernel { entry func Main() { let v = 1 / 0; } }", Expect.Any);
+            "realm kernel { entry func Main() { let v = 1 / 0; } }", Expect.Any);
 
         #endregion
 
         #region import edges
-        yield return new("import/unknown", "import NoSuchModule; kernel { entry func Main() { } }", Expect.Any);
-        yield return new("import/empty-path", "import \"\"; kernel { entry func Main() { } }", Expect.Any);
-        yield return new("import/after-decls", "kernel { entry func Main() { } } import gata;", Expect.Any);
-        yield return new("import/duplicate", "import gata; import gata; kernel { entry func Main() { } }", Expect.Any);
-        yield return new("import/inside-kernel", "kernel { import gata; entry func Main() { } }", Expect.Rejected);
+        yield return new("import/unknown", "import NoSuchModule; realm kernel { entry func Main() { } }", Expect.Any);
+        yield return new("import/empty-path", "import \"\"; realm kernel { entry func Main() { } }", Expect.Any);
+        yield return new("import/after-decls", "realm kernel { entry func Main() { } } import gata;", Expect.Any);
+        yield return new("import/duplicate", "import gata; import gata; realm kernel { entry func Main() { } }", Expect.Any);
+        yield return new("import/inside-kernel", "realm kernel { import gata; entry func Main() { } }", Expect.Rejected);
 
         #endregion
     }

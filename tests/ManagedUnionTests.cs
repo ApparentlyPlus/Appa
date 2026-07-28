@@ -43,7 +43,7 @@ public class ManagedUnionTests
     /// </summary>
     private const string OwnershipProgram = Prelude + """
 
-        user {
+        realm userspace {
             entry func Main() {
                 Console.PrintLine("scope");
                 { let Node a = Make("a"); Console.PrintLine($"held={IsHeld(a)}"); }
@@ -146,7 +146,7 @@ public class ManagedUnionTests
             Console.PrintLine("unreachable");
         }
 
-        user {
+        realm userspace {
             entry func Main() {
                 Console.PrintLine("throws-ok");
                 {
@@ -251,7 +251,7 @@ public class ManagedUnionTests
         Node func Make(Census c) { return Node.Held(new Res(c)); }
         int func IsHeld(Node n) { match (n) { case Held(r) { return 1; } default { return 0; } } }
 
-        user {
+        realm userspace {
             entry func Main() {
                 let Census c = new Census();
                 let int seen = 0;
@@ -297,7 +297,7 @@ public class ManagedUnionTests
 
             class Crate[T] { public T item; }
 
-            user {
+            realm userspace {
                 entry func Main() {
                     {
                         let Crate[Node] c = new Crate[Node]();
@@ -349,7 +349,7 @@ public class ManagedUnionTests
                 import Console;
                 import "src/shapes.g";
 
-                user {
+                realm userspace {
                     entry func Main() {
                         { let Node a = Make("a"); Console.PrintLine($"held={IsHeld(a)}"); }
                         Console.PrintLine("done");
@@ -403,7 +403,7 @@ public class ManagedUnionTests
                 return Maybe.Missing();
             }
 
-            user {
+            realm userspace {
                 entry func Main() {
                     // Inferred from the argument, and from the binding for the payload-free variant.
                     let Maybe[int] a = Maybe.Found(7);
@@ -484,7 +484,7 @@ public class ManagedUnionTests
                 match (m) { case Found(v) { return v; } case Missing { return -1; } }
             }
 
-            user {
+            realm userspace {
                 entry func Main() {
                     // The type reading.
                     let Maybe[int] a = Maybe[int].Found(7);
@@ -561,7 +561,7 @@ public class ManagedUnionTests
                 }
             }
 
-            user {
+            realm userspace {
                 entry func Main() {
                     let List[Node[int]] inner = new List[Node[int]]();
                     inner.Add(Node.Leaf(1));
@@ -613,7 +613,7 @@ public class ManagedUnionTests
 
             union Node { Leaf(int v), Held(Res r) }
 
-            user {
+            realm userspace {
                 entry func Main() {
                     let Census c = new Census();
                     {
@@ -697,7 +697,7 @@ public class ManagedUnionTests
                                   $"during={c.live}");
             }
 
-            user {
+            realm userspace {
                 entry func Main() {
                     let Census c = new Census();
                     Body(c);

@@ -314,7 +314,7 @@ public class MultiFileTests
             files.Add(("src/shared.g", "class Shared[T] { public T v; }\n"));
             var mainImports = string.Join("\n", Enumerable.Range(0, n).Select(i => $"import \"src/f{i}.g\";"));
             var mainBody = "let int v = " + string.Join(" + ", Enumerable.Range(0, n).Select(i => $"F{i}()")) + ";";
-            files.Add(("src/main.g", $"{mainImports}\nuser {{ entry func Main() {{ {mainBody} }} }}\n"));
+            files.Add(("src/main.g", $"{mainImports}\nrealm userspace {{ entry func Main() {{ {mainBody} }} }}\n"));
 
             var shape = acyclic ? "acyclic" : "cyclic";
             var c = new MultiFileCase($"graph/{shape}/seed{seed}", [.. files],

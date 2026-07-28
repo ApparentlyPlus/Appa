@@ -19,7 +19,7 @@ public class UnionEqualityTests
 
         union U { Nil, K(int n), Pt(int x, int y), S(String s), Arr([2]int a) }
 
-        user {
+        realm userspace {
             entry func Main() {
                 let List[U] vs = new List[U]();
                 vs.Add(U.Nil());            // 0
@@ -102,7 +102,7 @@ public class UnionEqualityTests
 
             union U { V(Valued v), P(Plain p) }
 
-            user {
+            realm userspace {
                 entry func Main() {
                     // Distinct objects, equal contents. Valued declares '==', so these are equal.
                     let bool byValue = U.V(new Valued(5)) == U.V(new Valued(5));
@@ -140,7 +140,7 @@ public class UnionEqualityTests
             union Inner { A(String s), B(int n), C }
             union Outer { W(Inner i), K(int n) }
 
-            user {
+            realm userspace {
                 entry func Main() {
                     let bool same = Outer.W(Inner.A("x")) == Outer.W(Inner.A("x"));
                     let bool innerDiff = Outer.W(Inner.A("x")) == Outer.W(Inner.A("y"));
@@ -174,7 +174,7 @@ public class UnionEqualityTests
 
             union Tok { Word(String s), Num(int n), End }
 
-            user {
+            realm userspace {
                 entry func Main() {
                     let List[Tok] ts = new List[Tok]();
                     ts.Add(Tok.Word("let"));
@@ -221,7 +221,7 @@ public class UnionEqualityTests
 
             union U { T(Tracked t), K(int n) }
 
-            user {
+            realm userspace {
                 entry func Main() {
                     let Census c = new Census();
                     let int equal = 0;
@@ -246,7 +246,7 @@ public class UnionEqualityTests
 
     /// <summary>
     /// A generated equality goes only into realms declaring the operators it calls. A class inside
-    /// 'user { }' is emitted into uproc.c alone, so a kmain.c copy calls an undeclared function - a
+    /// 'realm userspace { }' is emitted into uproc.c alone, so a kmain.c copy calls an undeclared function - a
     /// warning on the pinned gcc 7, fatal on anything newer.
     /// </summary>
     [Fact]
@@ -257,9 +257,9 @@ public class UnionEqualityTests
         var (diag, module) = SingleFileCompile.Check("""
             union Tagged { Ident(Key k), Nothing }
 
-            kernel { entry func Main() { } }
+            realm kernel { entry func Main() { } }
 
-            user {
+            realm userspace {
                 class Key {
                     public int id;
                     func _init() { self.id = 0; }

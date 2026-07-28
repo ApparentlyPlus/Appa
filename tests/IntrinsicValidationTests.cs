@@ -40,7 +40,7 @@ public class IntrinsicValidationTests
                 int v;
                 func _init(int x) { self.v = x; }
             }
-            kernel { entry func Main() { let Box b = new Box(5); } }
+            realm kernel { entry func Main() { let Box b = new Box(5); } }
             """);
 
         var d = Assert.Single(found);
@@ -59,7 +59,7 @@ public class IntrinsicValidationTests
     {
         var d = Assert.Single(ValidateOf("""
             class Box { int v; }
-            kernel { entry func Main() { let Box b = new Box(); } }
+            realm kernel { entry func Main() { let Box b = new Box(); } }
             """));
 
         Assert.NotEmpty(d.Hints);
@@ -76,7 +76,7 @@ public class IntrinsicValidationTests
     public void ProgramWithNoManagedClassIsClean()
     {
         Assert.Empty(ValidateOf("""
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let int x = 0;
                 for (let int i = 0; i < 3; i = i + 1) { x = x + i; }
             } }
@@ -88,7 +88,7 @@ public class IntrinsicValidationTests
     {
         Assert.Empty(ValidateOf("""
             module M { public static int func Twice(int x) { return x * 2; } }
-            kernel { entry func Main() { let int y = M.Twice(21); } }
+            realm kernel { entry func Main() { let int y = M.Twice(21); } }
             """));
     }
 
@@ -97,7 +97,7 @@ public class IntrinsicValidationTests
     {
         Assert.Empty(ValidateOf("""
             enum Status { Pending, Active, Done }
-            kernel { entry func Main() { let Status s = Status.Active; } }
+            realm kernel { entry func Main() { let Status s = Status.Active; } }
             """));
     }
 
@@ -120,7 +120,7 @@ public class IntrinsicValidationTests
             void func obj_init(void* o, func(void*) -> void dtor) native { }
 
             class Box { int v; }
-            kernel { entry func Main() { let Box b = new Box(); } }
+            realm kernel { entry func Main() { let Box b = new Box(); } }
             """));
 
         Assert.Equal(Codes.MissingIntrinsic, d.Code);
@@ -151,7 +151,7 @@ public class IntrinsicValidationTests
             void func release(void* p) native { }
 
             class Box { int v; }
-            kernel { entry func Main() { let Box b = new Box(); } }
+            realm kernel { entry func Main() { let Box b = new Box(); } }
             """));
     }
 }

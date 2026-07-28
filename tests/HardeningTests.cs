@@ -30,29 +30,29 @@ public class HardeningTests
     public void EntryFuncWithParamsIsRejected()
     {
         AssertError(Codes.BadEntrySignature,
-            "kernel { entry func Main(int x) { } }");
+            "realm kernel { entry func Main(int x) { } }");
     }
 
     [Fact]
     public void EntryFuncWithReturnTypeIsRejected()
     {
         AssertError(Codes.BadEntrySignature,
-            "kernel { entry int func Main() { return 1; } }");
+            "realm kernel { entry int func Main() { return 1; } }");
     }
 
     [Fact]
     public void EntryFuncWithThrowsIsRejected()
     {
         AssertError(Codes.BadEntrySignature,
-            "kernel { entry throws func Main() { } }");
+            "realm kernel { entry throws func Main() { } }");
     }
 
     [Fact]
     public void ThreadEntryWithParamsIsRejected()
     {
         AssertError(Codes.BadEntrySignature, """
-            kernel { entry func Main() { } }
-            user { foreground process P { thread T { entry func Run(int x) { } } } }
+            realm kernel { entry func Main() { } }
+            realm userspace { foreground process P { thread T { entry func Run(int x) { } } } }
             """);
     }
 
@@ -60,8 +60,8 @@ public class HardeningTests
     public void PlainEntrySignaturesAreClean()
     {
         AssertClean("""
-            kernel { entry func Main() { } }
-            user { foreground process P { thread T { entry func Run() { } } } }
+            realm kernel { entry func Main() { } }
+            realm userspace { foreground process P { thread T { entry func Run() { } } } }
             """);
     }
 
@@ -73,8 +73,8 @@ public class HardeningTests
     public void UserEntryInGatOSIsRejected()
     {
         var prog = SingleFileCompile.Parse("""
-            kernel { entry func Main() { } }
-            user { entry func UMain() { } }
+            realm kernel { entry func Main() { } }
+            realm userspace { entry func UMain() { } }
             """);
         var diag = new DiagnosticBag(new SourceSet());
         Pipeline.ValidateStructure([("t.g", prog)], Target.GatOS, diag);
@@ -84,7 +84,7 @@ public class HardeningTests
     [Fact]
     public void UserEntryInHostedIsAccepted()
     {
-        var prog = SingleFileCompile.Parse("user { entry func UMain() { } }");
+        var prog = SingleFileCompile.Parse("realm userspace { entry func UMain() { } }");
         var diag = new DiagnosticBag(new SourceSet());
         Pipeline.ValidateStructure([("t.g", prog)], Target.Hosted, diag);
         Assert.False(diag.HasErrors);
@@ -99,8 +99,8 @@ public class HardeningTests
     /// 'typedef ... Result_int*;' - invalid C).
     /// </summary>
     [Theory]
-    [InlineData("throws int* func F() { throw; } kernel { entry func Main() { try { unsafe { let int* p = F(); } } catch { } } }")]
-    [InlineData("throws [4]int func F() { throw; } kernel { entry func Main() { try { let [4]int a = F(); } catch { } } }")]
+    [InlineData("throws int* func F() { throw; } realm kernel { entry func Main() { try { unsafe { let int* p = F(); } } catch { } } }")]
+    [InlineData("throws [4]int func F() { throw; } realm kernel { entry func Main() { try { let [4]int a = F(); } catch { } } }")]
     public void ThrowsPointerReturnIsRejected(string src)
     {
         AssertError(Codes.BadThrowsReturnType, src);
@@ -111,7 +111,7 @@ public class HardeningTests
     {
         AssertError(Codes.BadThrowsReturnType, """
             class Box { public throws int* func Get() { throw; } }
-            kernel { entry func Main() { } }
+            realm kernel { entry func Main() { } }
             """);
     }
 
@@ -121,7 +121,7 @@ public class HardeningTests
         var output = SingleFileCompile.Emit("""
             enum Color { Red, Green }
             throws Color func Pick(bool ok) { if (ok) { return Color.Red; } throw; }
-            kernel { entry func Main() { try { let Color c = Pick(true); } catch { } } }
+            realm kernel { entry func Main() { try { let Color c = Pick(true); } catch { } } }
             """);
         Assert.NotEmpty(output);
         var shared = Assert.Single(output, f => f.Name == "shared.h").Content;
@@ -138,13 +138,13 @@ public class HardeningTests
         AssertError(Codes.TypeMismatch, """
             class Box { int v; }
             throws Box func Make() { throw; }
-            kernel { entry func Main() { try { let int x = Make(); } catch { } } }
+            realm kernel { entry func Main() { try { let int x = Make(); } catch { } } }
             """);
     }
 
     [Theory]
-    [InlineData("throws int func F() { return 1; } kernel { entry func Main() { try { let int x = F(); } catch { } } }")]
-    [InlineData("throws int func F() { return 1; } kernel { entry func Main() { try { let int64 x = F(); } catch { } } }")]
+    [InlineData("throws int func F() { return 1; } realm kernel { entry func Main() { try { let int x = F(); } catch { } } }")]
+    [InlineData("throws int func F() { return 1; } realm kernel { entry func Main() { try { let int64 x = F(); } catch { } } }")]
     public void ThrowsInitMatchingTypeIsClean(string src)
     {
         AssertClean(src);
@@ -169,7 +169,7 @@ public class HardeningTests
                 public A func First() { return self.first; }
             }
             T func GetFirst[T](Pair[T, T] p) { return p.First(); }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Pair[int, int] p = new Pair[int, int]();
                 let int x = GetFirst(p);
             } }
@@ -186,7 +186,7 @@ public class HardeningTests
                 public A func First() { return self.first; }
             }
             T func GetFirst[T](Pair[T, T] p) { return p.First(); }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Pair[int, bool] p = new Pair[int, bool]();
                 let int x = GetFirst(p);
             } }
@@ -198,10 +198,10 @@ public class HardeningTests
     #region Dedicated diagnostic codes
 
     [Theory]
-    [InlineData("kernel { entry func Main() { defer { return; } } }")]
-    [InlineData("kernel { entry func Main() { while (true) { defer { break; } } } }")]
-    [InlineData("kernel { entry func Main() { while (true) { defer { continue; } } } }")]
-    [InlineData("kernel { entry func Main() { defer { defer { let x = 1; } } } }")]
+    [InlineData("realm kernel { entry func Main() { defer { return; } } }")]
+    [InlineData("realm kernel { entry func Main() { while (true) { defer { break; } } } }")]
+    [InlineData("realm kernel { entry func Main() { while (true) { defer { continue; } } } }")]
+    [InlineData("realm kernel { entry func Main() { defer { defer { let x = 1; } } } }")]
     public void DeferControlTransferHasItsOwnCode(string src)
     {
         AssertError(Codes.DeferTransfer, src);
@@ -211,21 +211,21 @@ public class HardeningTests
     public void ModuleFieldUsesModuleFieldCode()
     {
         AssertError(Codes.ModuleField,
-            "module M { int x; } kernel { entry func Main() { } }");
+            "module M { int x; } realm kernel { entry func Main() { } }");
     }
 
     [Theory]
-    [InlineData("class C { public private func F() { } } kernel { entry func Main() { } }")]
-    [InlineData("class C { public public func F() { } } kernel { entry func Main() { } }")]
-    [InlineData("class C { static static func F() { } } kernel { entry func Main() { } }")]
+    [InlineData("class C { public private func F() { } } realm kernel { entry func Main() { } }")]
+    [InlineData("class C { public public func F() { } } realm kernel { entry func Main() { } }")]
+    [InlineData("class C { static static func F() { } } realm kernel { entry func Main() { } }")]
     public void ConflictingModifiersAreRejected(string src)
     {
         AssertError(Codes.ConflictingModifiers, src);
     }
 
     [Theory]
-    [InlineData("class C { throws func _init() { } } kernel { entry func Main() { } }")]
-    [InlineData("class C { throws func _deinit() { } } kernel { entry func Main() { } }")]
+    [InlineData("class C { throws func _init() { } } realm kernel { entry func Main() { } }")]
+    [InlineData("class C { throws func _deinit() { } } realm kernel { entry func Main() { } }")]
     public void ThrowsOnLifecycleMethodIsRejected(string src)
     {
         AssertError(Codes.LifecycleThrows, src);
@@ -269,7 +269,7 @@ public class HardeningTests
     public void StringConcatNeedsAnOperator()
     {
         AssertError(Codes.MissingIntrinsic,
-            """kernel { entry func Main() { let s = "a" + "b"; } }""");
+            """realm kernel { entry func Main() { let s = "a" + "b"; } }""");
     }
 
     #endregion
@@ -289,7 +289,7 @@ public class HardeningTests
 
         AssertClean($$"""
             class P { public int x; public int y; func _init() { } }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let [2]P a = default([2]P);
                 let [2]P b = default([2]P);
                 let int i = 0;

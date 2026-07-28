@@ -33,10 +33,8 @@ internal sealed class Lexer(string src)
     private static readonly FrozenDictionary<string, TK> kw = new Dictionary<string, TK>
     {
         ["import"]      = TK.Import,
+        ["realm"]       = TK.Realm,
         ["kernel"]      = TK.Kernel,
-        ["user"]        = TK.User,
-        ["process"]     = TK.Process,
-        ["thread"]      = TK.Thread,
         ["foreground"]  = TK.Foreground,
         ["background"]  = TK.Background,
         ["class"]       = TK.Class,

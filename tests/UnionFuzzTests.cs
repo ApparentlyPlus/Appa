@@ -290,7 +290,7 @@ public class UnionFuzzTests
                         $"if (acc > 100000) {{ acc = 0; }} }}\n");
         }
 
-        src.Append("kernel { entry func Main() {\n    let int acc = 0;\n");
+        src.Append("realm kernel { entry func Main() {\n    let int acc = 0;\n");
         src.Append(body);
         src.Append("} }\n");
         return src.ToString();
@@ -390,7 +390,7 @@ public class UnionFuzzTests
                 }
             }
 
-        src.Append("kernel { entry func Main() {\n    let int acc = 0;\n");
+        src.Append("realm kernel { entry func Main() {\n    let int acc = 0;\n");
         src.Append(body);
         src.Append("} }\n");
         return src.ToString();
@@ -749,7 +749,7 @@ public class UnionFuzzTests
             }
         }
 
-        src.Append("\nuser {\n    entry func Main() {\n");
+        src.Append("\nrealm userspace {\n    entry func Main() {\n");
         src.Append("        let bool eq = false;\n        let bool ne = false;\n");
         src.Append("        let int bad = 0;\n        let int checked = 0;\n");
         src.Append(body);

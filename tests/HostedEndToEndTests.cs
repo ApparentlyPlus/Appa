@@ -79,7 +79,7 @@ public class HostedEndToEndTests
             public int func Value() { return self.n; }
         }
 
-        user {
+        realm userspace {
             entry func Main() {
                 let List[int] xs = new List[int]();
                 xs.Add(3);

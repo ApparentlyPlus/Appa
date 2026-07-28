@@ -29,7 +29,7 @@ internal sealed record Diagnostic(Severity Severity, string Code, string Message
 internal static class Codes
 {
     public const string File                  = "G000";
-    public const string DuplicateContext      = "G001";
+    public const string RetiredG001           = "G001";
     public const string MissingEntryPoint     = "G002";
     public const string DuplicateName         = "G003";
     public const string TypeMismatch          = "G004";
@@ -84,10 +84,10 @@ internal static class Codes
     public const string BadDeclHeader         = "G053";
     public const string CannotInfer           = "G054";
     public const string KernelBlockInHosted    = "G055";
-    public const string MissingUserRealm       = "G056";
-    public const string DuplicateUserRealm     = "G057";
-    public const string MissingUserEntry       = "G058";
-    public const string DuplicateUserEntry     = "G059";
+    public const string MissingRealm           = "G056";
+    public const string DuplicateRealm         = "G057";
+    public const string MissingEntry           = "G058";
+    public const string DuplicateEntry         = "G059";
     public const string MissingProcessMode     = "G060";
     public const string BadEntrySignature      = "G061";
     public const string DeferTransfer          = "G062";
@@ -113,6 +113,8 @@ internal static class Codes
     public const string CatchHandlerNoAssign   = "G082";
     public const string IdentityPayloadComparison  = "G083";
     public const string ImprecisePayloadComparison = "G084";
+    public const string MissingRealmKeyword        = "G085";
+    public const string UnknownRealm               = "G086";
 }
 
 /// <summary>

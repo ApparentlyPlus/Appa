@@ -65,7 +65,7 @@ public class ParserDiagnosticsTests
     [Fact]
     public void ProcessColonWithoutModeIsRejected()
     {
-        var ex = Parse("user { process App : sideways { } }");
+        var ex = Parse("realm userspace { process App : sideways { } }");
         Assert.Equal(Codes.BadDeclHeader, ex.Code);
         Assert.Contains("'foreground' or 'background'", ex.Message);
     }
@@ -73,7 +73,7 @@ public class ParserDiagnosticsTests
     [Fact]
     public void DuplicateProcessModeIsRejected()
     {
-        var ex = Parse("user { foreground process App : background { } }");
+        var ex = Parse("realm userspace { foreground process App : background { } }");
         Assert.Equal(Codes.BadDeclHeader, ex.Code);
         Assert.Contains("mode specified twice", ex.Message);
     }
@@ -86,7 +86,7 @@ public class ParserDiagnosticsTests
     [Fact]
     public void ProcessWithoutModeIsRejected()
     {
-        var ex = Parse("user { process App { thread T { entry func Run() { } } } }");
+        var ex = Parse("realm userspace { process App { thread T { entry func Run() { } } } }");
         Assert.Equal(Codes.MissingProcessMode, ex.Code);
         Assert.Contains("missing a foreground/background mode", ex.Message);
         // The suggested spellings are hints, rendered on their own "= help:" lines, not
@@ -100,7 +100,7 @@ public class ParserDiagnosticsTests
     [Fact]
     public void MissingProcessKeywordHints()
     {
-        var ex = Parse("user { TicTacToe { thread T { entry func Run() { } } } }");
+        var ex = Parse("realm userspace { TicTacToe { thread T { entry func Run() { } } } }");
         Assert.Equal(Codes.BadDeclHeader, ex.Code);
         Assert.Contains("expected 'func'", ex.Message);
         Assert.DoesNotContain("forget 'process'", ex.Message);
@@ -129,13 +129,60 @@ public class ParserDiagnosticsTests
     }
 
     [Theory]
-    [InlineData("kernel { user { } }")]
+    [InlineData("realm kernel { realm userspace { } }")]
     [InlineData("class A { class B { } }")]
-    [InlineData("class A { kernel { } }")]
-    [InlineData("user { foreground process P { thread T { thread U { entry func R() { } } } } }")]
+    [InlineData("class A { realm kernel { } }")]
+    [InlineData("realm userspace { foreground process P { thread T { thread U { entry func R() { } } } } }")]
     public void NestingViolationsCarryTheirCode(string src)
     {
         Assert.Equal(Codes.InvalidNesting, Parse(src).Code);
+    }
+
+    [Theory]
+    [InlineData("kernel { entry func Main() { } }")]
+    [InlineData("realm kernel { entry func Main() { } } kernel { }")]
+    public void BareKernelAsksForTheRealmKeyword(string src)
+    {
+        var ex = Parse(src);
+        Assert.Equal(Codes.MissingRealmKeyword, ex.Code);
+        Assert.Contains(ex.Hints, h => h.Contains("realm kernel"));
+    }
+
+    [Theory]
+    [InlineData("realm potato { }")]
+    [InlineData("realm { }")]
+    [InlineData("realm user { }")]
+    public void UnknownRealmNamesAreRejected(string src)
+    {
+        Assert.Equal(Codes.UnknownRealm, Parse(src).Code);
+    }
+
+    /// <summary>
+    /// 'userspace' is close enough to 'user' that the old spelling should be suggested, not just
+    /// rejected - this is the first place Suggest is wired into a realm diagnostic.
+    /// </summary>
+    [Fact]
+    public void ANearMissRealmNameSuggestsTheRealOne()
+    {
+        var ex = Parse("realm userspac { }");
+        Assert.Equal(Codes.UnknownRealm, ex.Code);
+        Assert.Contains(ex.Hints, h => h.Contains("userspace"));
+    }
+
+    /// <summary>
+    /// The point of introducing 'realm': three of the most ordinary identifiers in systems code
+    /// stopped being reserved words, in every position a name can appear.
+    /// </summary>
+    [Theory]
+    [InlineData("realm kernel { entry func Main() { let int user = 1; } }")]
+    [InlineData("realm kernel { entry func Main() { let int process = 1; } }")]
+    [InlineData("realm kernel { entry func Main() { let int thread = 1; } }")]
+    [InlineData("class C { int user; int process; int thread; }")]
+    [InlineData("void func F(int user, int process, int thread) { }")]
+    [InlineData("class C { public void func user() { } }")]
+    public void ContextualKeywordsParseAsIdentifiers(string src)
+    {
+        SingleFileCompile.Parse(src); // must not throw
     }
 
     [Fact]

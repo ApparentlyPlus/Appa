@@ -121,6 +121,29 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
+    /// Returns true if the current token is an identifier spelled exactly as given. The test for a
+    /// contextual keyword - a word that only means something in one grammatical position, and is
+    /// an ordinary identifier everywhere else.
+    /// </summary>
+    private bool AtValue(string word)
+    {
+        return Cur.Kind == TK.Ident && Cur.Value == word;
+    }
+
+    /// <summary>
+    /// Returns true if a process declaration starts here. 'process' is contextual, so the bare form
+    /// needs two tokens of lookahead: only a process is spelled 'process' Ident '{' or
+    /// 'process' Ident ':'. A free function is 'Ident func Ident', a field is 'Ident Ident ;', and a
+    /// method is 'Ident func Ident (' - none of which can be confused with this.
+    /// </summary>
+    private bool AtProcessStart()
+    {
+        if (At(TK.Foreground) || At(TK.Background)) return true;
+        return AtValue("process") && Peek().Kind == TK.Ident
+            && (Peek(2).Kind == TK.LBrace || Peek(2).Kind == TK.Colon);
+    }
+
+    /// <summary>
     /// Consumes the current token and returns true if it matches the given kind; otherwise returns
     /// false without consuming.
     /// </summary>
@@ -294,9 +317,9 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         if (At(TK.Union)) { RejectAnns(anns, "a union"); return ParseUnionDecl(anns, s); }
         if (At(TK.Class)) { RejectAnns(anns, "a class", allowKeep: true, allowBuiltin: true); return ParseClassDecl(anns, s); }
         if (At(TK.Module)) { RejectAnns(anns, "a module", allowKeep: true); return ParseModuleDecl(anns, s); }
-        if (At(TK.Kernel)) { RejectAnns(anns, "kernel"); return ParseContextDecl("kernel"); }
-        if (At(TK.User)) { RejectAnns(anns, "user"); return ParseContextDecl("user"); }
-        if (At(TK.Process) || At(TK.Foreground) || At(TK.Background))
+        if (At(TK.Realm)) { RejectAnns(anns, "a realm"); return ParseRealmDecl(); }
+        if (At(TK.Kernel)) RequireRealmKeyword();
+        if (AtProcessStart())
             { RejectAnns(anns, "a process"); return ParseProcessDeclTop(); }
         if (At(TK.AtExtern)) return ParseExternDecl(anns, s);
         return ParseFreeFuncDecl(anns, s);
@@ -357,11 +380,22 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Parses a kernel or user block. The kind string is the keyword that opened it.
+    /// Parses a 'realm kernel { … }' or 'realm userspace { … }' block. There are exactly two
+    /// realms; 'kernel' is a keyword, 'userspace' is matched by value since nothing else may
+    /// follow 'realm'.
     /// </summary>
-    private ContextDecl ParseContextDecl(string kind)
+    private ContextDecl ParseRealmDecl()
     {
-        int s = Cur.Span.Start; Advance(); Expect(TK.LBrace);
+        int s = Cur.Span.Start;
+        Advance(); // 'realm'
+        Realm kind = Realm.None;
+        if (At(TK.Kernel)) { kind = Realm.Kernel; Advance(); }
+        else if (AtValue("userspace")) { kind = Realm.User; Advance(); }
+        else
+            Fail($"unknown realm {Found()}; the only realms are 'kernel' and 'userspace'",
+                 Codes.UnknownRealm,
+                 Cur.Kind == TK.Ident ? Suggest.Hints(Cur.Value, ["kernel", "userspace"]) : []);
+        Expect(TK.LBrace);
         List<TopLevel> items = [];
         while (!At(TK.RBrace) && !At(TK.EOF)) items.Add(ParseContextItem());
         Expect(TK.RBrace);
@@ -369,12 +403,23 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Dispatches to the correct parser for a single item inside a kernel or user block. Context
-    /// blocks cannot be nested, so kernel and user keywords are hard errors here.
+    /// Reports a bare 'kernel' that is missing its 'realm' prefix. Kept as a dedicated diagnostic
+    /// so the pre-'realm' spelling produces advice rather than a generic syntax error.
+    /// </summary>
+    private void RequireRealmKeyword()
+    {
+        Fail("expected 'realm' before 'kernel'", Codes.MissingRealmKeyword,
+             ["write 'realm kernel { ... }'"]);
+    }
+
+    /// <summary>
+    /// Dispatches to the correct parser for a single item inside a realm block. Realm blocks
+    /// cannot be nested, so a nested 'realm' is a hard error here.
     /// </summary>
     private TopLevel ParseContextItem()
     {
-        if (At(TK.Kernel) || At(TK.User)) Fail("contexts cannot be nested", Codes.InvalidNesting);
+        if (At(TK.Realm)) Fail("a 'realm' block cannot be nested inside another", Codes.InvalidNesting);
+        if (At(TK.Kernel)) RequireRealmKeyword();
         int s = Cur.Span.Start;
         var anns = ParseAnnotations();
         if (At(TK.NativeContent)) return new NativeBlock(ParseNativeBody(Advance()), To(s), anns);
@@ -384,7 +429,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         if (At(TK.Union)) { RejectAnns(anns, "a union"); return ParseUnionDecl(anns, s); }
         if (At(TK.Class)) { RejectAnns(anns, "a class", allowKeep: true, allowBuiltin: true); return ParseClassDecl(anns, s); }
         if (At(TK.Module)) { RejectAnns(anns, "a module", allowKeep: true); return ParseModuleDecl(anns, s); }
-        if (At(TK.Process) || At(TK.Foreground) || At(TK.Background))
+        if (AtProcessStart())
             { RejectAnns(anns, "a process"); return ParseProcessDeclTop(); }
         return ParseFreeFuncDecl(anns, s);
     }
@@ -683,7 +728,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     {
         int s = Cur.Span.Start;
         if (At(TK.Class) || At(TK.Module)) Fail("classes and modules cannot be nested", Codes.InvalidNesting);
-        if (At(TK.Kernel) || At(TK.User)) Fail("context blocks cannot appear inside a class", Codes.InvalidNesting);
+        if (At(TK.Realm)) Fail("a 'realm' block cannot appear inside a class", Codes.InvalidNesting);
 
         // fields { } block is a raw C struct fields injected verbatim into the emitted typedef.
         if (At(TK.Fields)) return new FieldsBlock(ParseNativeBody(Advance()), To(s));
@@ -841,7 +886,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         bool modeExplicit = false;
         if (At(TK.Foreground)) { mode = "foreground"; modeExplicit = true; Advance(); }
         else if (At(TK.Background)) { mode = "background"; modeExplicit = true; Advance(); }
-        Expect(TK.Process);
+        if (!AtValue("process")) Fail($"expected 'process', found {Found()}", Codes.BadDeclHeader);
+        Advance();
         var name = Expect(TK.Ident).Value;
         if (Try(TK.Colon))
         {
@@ -872,7 +918,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         string? mode = null;
         if (At(TK.Foreground)) { mode = "foreground"; Advance(); }
         else if (At(TK.Background)) { mode = "background"; Advance(); }
-        if (!At(TK.Thread)) Fail("a process body may only contain 'thread' declarations", Codes.BadDeclHeader);
+        if (!AtValue("thread")) Fail("a process body may only contain 'thread' declarations", Codes.BadDeclHeader);
         Advance();
         var name = Expect(TK.Ident).Value;
         Expect(TK.LBrace);
@@ -890,7 +936,10 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     private EntryFuncDecl ParseThreadEntry()
     {
         int s = Cur.Span.Start;
-        if (At(TK.Thread)) Fail("threads cannot be nested", Codes.InvalidNesting);
+        // 'thread' is contextual, so this must test the spelling. Without it a nested thread falls
+        // through to the entry-func parse and reports "expected 'entry'", which is strictly worse
+        // advice for a construct people do try to write.
+        if (AtValue("thread")) Fail("threads cannot be nested", Codes.InvalidNesting);
         var mods = ParseMods();
         if (!Try(TK.Entry)) Fail("a thread body must contain a single 'entry func'", Codes.BadDeclHeader);
         TypeSpec? ret = At(TK.Func) && Peek().Kind == TK.Ident ? null : ParseTypeSpec();

@@ -39,7 +39,7 @@ public class CatchCallTests
     public void HandlerSatisfiesTheThrowsRule()
     {
         AssertClean(Throwing +
-            "kernel { entry func Main() { let int a = P(1) catch { assign 0; }; } }");
+            "realm kernel { entry func Main() { let int a = P(1) catch { assign 0; }; } }");
     }
 
     /// <summary>
@@ -51,7 +51,7 @@ public class CatchCallTests
     {
         AssertClean(Throwing +
             """
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let int a = P(1) catch { assign 0; };
                 let int b = a + 1;
                 let int c = a + b;
@@ -72,7 +72,7 @@ public class CatchCallTests
                 let int v = P(x) catch { throw; };
                 return v + 1;
             }
-            kernel { entry func Main() { try { let int q = Chain(1); } catch { } } }
+            realm kernel { entry func Main() { try { let int q = Chain(1); } catch { } } }
             """);
     }
 
@@ -85,7 +85,7 @@ public class CatchCallTests
                 let int v = P(x) catch { return -1; };
                 return v;
             }
-            kernel { entry func Main() { let int z = Safe(3); } }
+            realm kernel { entry func Main() { let int z = Safe(3); } }
             """);
     }
 
@@ -94,7 +94,7 @@ public class CatchCallTests
     {
         AssertClean(Throwing +
             """
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let int a = P(1) catch {
                     if (true) { assign 1; } else { assign 2; }
                 };
@@ -107,7 +107,7 @@ public class CatchCallTests
     {
         AssertClean(Throwing +
             """
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let int a = P(-1) catch {
                     let int inner = P(-1) catch { assign 7; };
                     assign inner * 2;
@@ -120,14 +120,14 @@ public class CatchCallTests
     public void StatementPositionNeedsNoAssign()
     {
         AssertClean(Throwing +
-            "kernel { entry func Main() { P(-1) catch { let int logged = 1; }; } }");
+            "realm kernel { entry func Main() { P(-1) catch { let int logged = 1; }; } }");
     }
 
     [Fact]
     public void AssignWidensToTheDeclaredType()
     {
         AssertClean(Throwing +
-            "kernel { entry func Main() { let int64 a = P(1) catch { assign 0; }; } }");
+            "realm kernel { entry func Main() { let int64 a = P(1) catch { assign 0; }; } }");
     }
 
     #endregion
@@ -138,7 +138,7 @@ public class CatchCallTests
     public void HandlerFallingThroughIsRejected()
     {
         AssertError(Codes.CatchHandlerNoAssign, Throwing +
-            "kernel { entry func Main() { let int a = P(1) catch { let int z = 0; }; } }");
+            "realm kernel { entry func Main() { let int a = P(1) catch { let int z = 0; }; } }");
     }
 
     [Fact]
@@ -146,7 +146,7 @@ public class CatchCallTests
     {
         AssertError(Codes.CatchHandlerNoAssign, Throwing +
             """
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let int a = P(1) catch { if (true) { assign 1; } };
             } }
             """);
@@ -156,14 +156,14 @@ public class CatchCallTests
     public void AssignOutsideAnyHandlerIsRejected()
     {
         AssertError(Codes.AssignOutsideCatch,
-            "kernel { entry func Main() { assign 5; } }");
+            "realm kernel { entry func Main() { assign 5; } }");
     }
 
     [Fact]
     public void AssignAsAStatementIsRejected()
     {
         AssertError(Codes.AssignOutsideCatch, Throwing +
-            "kernel { entry func Main() { P(1) catch { assign 3; }; } }");
+            "realm kernel { entry func Main() { P(1) catch { assign 3; }; } }");
     }
 
     [Fact]
@@ -172,7 +172,7 @@ public class CatchCallTests
         AssertError(Codes.ThrowsOutsideTry,
             """
             int func Plain(int x) { return x; }
-            kernel { entry func Main() { let int a = Plain(1) catch { assign 0; }; } }
+            realm kernel { entry func Main() { let int a = Plain(1) catch { assign 0; }; } }
             """);
     }
 
@@ -180,14 +180,14 @@ public class CatchCallTests
     public void CatchOnNonCallIsRejected()
     {
         AssertError(Codes.Syntax,
-            "kernel { entry func Main() { let int a = 5 catch { assign 0; }; } }");
+            "realm kernel { entry func Main() { let int a = 5 catch { assign 0; }; } }");
     }
 
     [Fact]
     public void AssignOfWrongTypeIsRejected()
     {
         AssertError(Codes.TypeMismatch, Throwing +
-            "kernel { entry func Main() { let int a = P(1) catch { assign \"nope\"; }; } }");
+            "realm kernel { entry func Main() { let int a = P(1) catch { assign \"nope\"; }; } }");
     }
 
     [Fact]
@@ -196,7 +196,7 @@ public class CatchCallTests
         AssertError(Codes.ThrowsOutsideTry, Throwing +
             """
             throws int func Q(int x) { if (x < 0) { throw; } return x; }
-            kernel { entry func Main() { let int a = Q(P(1)) catch { assign 0; }; } }
+            realm kernel { entry func Main() { let int a = Q(P(1)) catch { assign 0; }; } }
             """);
     }
 
@@ -210,12 +210,12 @@ public class CatchCallTests
     {
         AssertError(Codes.ThrowsOutsideTry, Throwing +
             "class B { public int v = P(1) catch { assign 0; }; }\n" +
-            "kernel { entry func Main() { let B b = new B(); } }");
+            "realm kernel { entry func Main() { let B b = new B(); } }");
     }
 
     [Theory]
-    [InlineData("class B { int v; func _init(int x) { self.v = x; } }\nkernel { entry func Main() { let B b = new B(P(1) catch { assign 0; }); } }")]
-    [InlineData("class L { public void func Add(int x) { } }\nkernel { entry func Main() { let L l = new L { P(1) catch { assign 0; } }; } }")]
+    [InlineData("class B { int v; func _init(int x) { self.v = x; } }\nrealm kernel { entry func Main() { let B b = new B(P(1) catch { assign 0; }); } }")]
+    [InlineData("class L { public void func Add(int x) { } }\nrealm kernel { entry func Main() { let L l = new L { P(1) catch { assign 0; } }; } }")]
     public void NestedCatchIsRejected(string body)
     {
         AssertError(Codes.ThrowsOutsideTry, Throwing + body);
@@ -229,7 +229,7 @@ public class CatchCallTests
     public void BreakInHandlerLoopIsNotLeaving()
     {
         AssertError(Codes.CatchHandlerNoAssign, Throwing +
-            "kernel { entry func Main() { let int v = P(1) catch { while (true) { break; } }; } }");
+            "realm kernel { entry func Main() { let int v = P(1) catch { while (true) { break; } }; } }");
     }
 
     /// <summary>
@@ -244,7 +244,7 @@ public class CatchCallTests
     [InlineData("try { let int v = P(1) catch { assign 9; }; } catch { }")]
     public void CatchWorksInEveryPosition(string body)
     {
-        AssertClean(Throwing + "kernel { entry func Main() { " + body + " } }");
+        AssertClean(Throwing + "realm kernel { entry func Main() { " + body + " } }");
     }
 
     /// <summary>
@@ -261,7 +261,7 @@ public class CatchCallTests
                 let int a = P(-1) catch { let T shadow = fb; assign 0; };
                 return fb;
             }
-            kernel { entry func Main() { let int w = Wrap(7); } }
+            realm kernel { entry func Main() { let int w = Wrap(7); } }
             """);
     }
 
@@ -278,7 +278,7 @@ public class CatchCallTests
                     return self.v;
                 }
             }
-            kernel { entry func Main() { let Holder[int] h = new Holder[int](3); let int p = h.Pick(); } }
+            realm kernel { entry func Main() { let Holder[int] h = new Holder[int](3); let int p = h.Pick(); } }
             """);
     }
 
@@ -291,7 +291,7 @@ public class CatchCallTests
                 public int func M() { let int v = P(-1) catch { assign -5; }; return v; }
                 public operator int func +(Ops o) { let int v = P(-1) catch { assign 42; }; return v; }
             }
-            kernel { entry func Main() { let Ops o = new Ops(); let int m = o.M(); let int s = o + o; } }
+            realm kernel { entry func Main() { let Ops o = new Ops(); let int m = o.M(); let int s = o + o; } }
             """);
     }
 
@@ -325,7 +325,7 @@ public class CatchCallTests
     public void LowersToDeclarationThenBranch()
     {
         var body = LoweredMain(Throwing +
-            "kernel { entry func Main() { let int a = P(1) catch { assign 0; }; let int b = a; } }");
+            "realm kernel { entry func Main() { let int a = P(1) catch { assign 0; }; let int b = a; } }");
 
         var decl = Assert.IsType<IrDeclVar>(body[0]);
         Assert.Equal("a", decl.Name);
@@ -351,7 +351,7 @@ public class CatchCallTests
     public void AssignStoresIntoTheDeclaration()
     {
         var body = LoweredMain(Throwing +
-            "kernel { entry func Main() { let int a = P(1) catch { assign 9; }; } }");
+            "realm kernel { entry func Main() { let int a = P(1) catch { assign 9; }; } }");
 
         var branch = Assert.IsType<IrIf>(body[2]);
         var store = Assert.IsType<IrAssign>(branch.Then.Stmts.Single());
@@ -371,7 +371,7 @@ public class CatchCallTests
             """
             class Box { int v; }
             throws Box func Make(int x) { if (x < 0) { throw; } return new Box(); }
-            kernel { entry func Main() { let Box b = Make(1) catch { assign new Box(); }; } }
+            realm kernel { entry func Main() { let Box b = Make(1) catch { assign new Box(); }; } }
             """);
 
         var decl = Assert.IsType<IrDeclVar>(body[0]);
@@ -391,7 +391,7 @@ public class CatchCallTests
             """
             class Box { int v; }
             throws Box func Make(int x) { if (x < 0) { throw; } return new Box(); }
-            kernel { entry func Main() { Make(1) catch { let int logged = 1; }; } }
+            realm kernel { entry func Main() { Make(1) catch { let int logged = 1; }; } }
             """);
 
         var branch = Assert.IsType<IrIf>(body[1]);

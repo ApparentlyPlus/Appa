@@ -45,7 +45,7 @@ throws Counter func MaybeCounter(int k) {
     return c;
 }
 
-kernel {
+realm kernel {
     entry func Main() {
         debug "M:start";
 
@@ -250,7 +250,7 @@ kernel {
     }
 }
 
-user {
+realm userspace {
     foreground process App {
         thread T {
             entry func Run() {

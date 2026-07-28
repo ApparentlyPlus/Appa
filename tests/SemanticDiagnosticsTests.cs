@@ -33,9 +33,9 @@ public class SemanticDiagnosticsTests
     #region Postfix operand validation
 
     [Theory]
-    [InlineData("kernel { entry func Main() { 5++; } }")]
-    [InlineData("int func F() { return 1; } kernel { entry func Main() { F()++; } }")]
-    [InlineData("kernel { entry func Main() { (1 + 2)--; } }")]
+    [InlineData("realm kernel { entry func Main() { 5++; } }")]
+    [InlineData("int func F() { return 1; } realm kernel { entry func Main() { F()++; } }")]
+    [InlineData("realm kernel { entry func Main() { (1 + 2)--; } }")]
     public void PostfixOnNonLvalueIsRejected(string src)
     {
         AssertError(Codes.NotAnLvalue, src);
@@ -45,16 +45,16 @@ public class SemanticDiagnosticsTests
     public void PostfixOnNonNumericIsRejected()
     {
         AssertError(Codes.TypeMismatch,
-            "kernel { entry func Main() { let bool b = true; b++; } }");
+            "realm kernel { entry func Main() { let bool b = true; b++; } }");
     }
 
     [Fact]
     public void PointerPostfixRequiresUnsafe()
     {
         AssertError(Codes.UnsafeRequired,
-            "kernel { entry func Main() { let int* p = null; p++; } }");
+            "realm kernel { entry func Main() { let int* p = null; p++; } }");
         AssertClean(
-            "kernel { entry func Main() { unsafe { let int x = 1; let int* p = &x; p++; } } }");
+            "realm kernel { entry func Main() { unsafe { let int x = 1; let int* p = &x; p++; } } }");
     }
 
     [Fact]
@@ -62,7 +62,7 @@ public class SemanticDiagnosticsTests
     {
         AssertClean("""
         class C { int n; public void func Bump() { self.n++; } }
-        kernel { entry func Main() {
+        realm kernel { entry func Main() {
           let int i = 0; i++; i--;
           let a = [1, 2, 3]; a[0]++;
           let C c = new C(); c.Bump();
@@ -77,32 +77,32 @@ public class SemanticDiagnosticsTests
     [Fact]
     public void LetWithoutTypeOrInitIsRejected()
     {
-        AssertError(Codes.CannotInfer, "kernel { entry func Main() { let x; } }");
+        AssertError(Codes.CannotInfer, "realm kernel { entry func Main() { let x; } }");
     }
 
     [Fact]
     public void LetFromNullIsRejected()
     {
-        AssertError(Codes.CannotInfer, "kernel { entry func Main() { let x = null; } }");
+        AssertError(Codes.CannotInfer, "realm kernel { entry func Main() { let x = null; } }");
     }
 
     [Fact]
     public void LetFromVoidCallIsRejected()
     {
         AssertError(Codes.CannotInfer,
-            "void func V() { } kernel { entry func Main() { let x = V(); } }");
+            "void func V() { } realm kernel { entry func Main() { let x = V(); } }");
     }
 
     [Fact]
     public void TypedLetWithoutInitStillChecks()
     {
-        AssertClean("kernel { entry func Main() { let int x; x = 5; if (x == 5) { } } }");
+        AssertClean("realm kernel { entry func Main() { let int x; x = 5; if (x == 5) { } } }");
     }
 
     [Fact]
     public void TypedLetFromNullStillChecks()
     {
-        AssertClean("class Box { int v; } kernel { entry func Main() { let Box b = null; if (b == null) { } } }");
+        AssertClean("class Box { int v; } realm kernel { entry func Main() { let Box b = null; if (b == null) { } } }");
     }
 
     #endregion
@@ -124,7 +124,7 @@ public class SemanticDiagnosticsTests
     {
         AssertClean($$"""
             class C { public {{field}} }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let C c = new C();
                 {{use}}
             } }
@@ -146,7 +146,7 @@ public class SemanticDiagnosticsTests
                 public void func Bump() { self.count = self.count + 1; }
                 public int func Value() { return self.count; }
             }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Counter c = new Counter();
                 c.Bump();
                 let int v = c.Value();
@@ -159,10 +159,10 @@ public class SemanticDiagnosticsTests
     #region Switch label hygiene
 
     [Theory]
-    [InlineData("kernel { entry func Main() { let int x = 1; switch (x) { case 1 { } case 1 { } } } }")]
-    [InlineData("kernel { entry func Main() { let int x = 1; switch (x) { case 1, 2, 1 { } } } }")]
-    [InlineData("kernel { entry func Main() { let int x = 1; switch (x) { case 'a' { } case 97 { } } } }")]
-    [InlineData("enum E { A, B } kernel { entry func Main() { let E e = E.A; switch (e) { case E.A { } case E.A { } default { } } } }")]
+    [InlineData("realm kernel { entry func Main() { let int x = 1; switch (x) { case 1 { } case 1 { } } } }")]
+    [InlineData("realm kernel { entry func Main() { let int x = 1; switch (x) { case 1, 2, 1 { } } } }")]
+    [InlineData("realm kernel { entry func Main() { let int x = 1; switch (x) { case 'a' { } case 97 { } } } }")]
+    [InlineData("enum E { A, B } realm kernel { entry func Main() { let E e = E.A; switch (e) { case E.A { } case E.A { } default { } } } }")]
     public void DuplicateSwitchLabelIsRejected(string src)
     {
         AssertError(Codes.DuplicateName, src);
@@ -171,7 +171,7 @@ public class SemanticDiagnosticsTests
     [Fact]
     public void DistinctSwitchLabelsStillCheck()
     {
-        AssertClean("kernel { entry func Main() { let int x = 1; switch (x) { case 1, 2 { } case 3 { } default { } } } }");
+        AssertClean("realm kernel { entry func Main() { let int x = 1; switch (x) { case 1, 2 { } case 3 { } default { } } } }");
     }
 
     #endregion
@@ -183,7 +183,7 @@ public class SemanticDiagnosticsTests
     {
         AssertClean("""
         enum E { Invalid = -1, Zero = 0, One }
-        kernel { entry func Main() { let E e = E.Invalid; if (e == E.Invalid) { } } }
+        realm kernel { entry func Main() { let E e = E.Invalid; if (e == E.Invalid) { } } }
         """);
     }
 
@@ -191,21 +191,21 @@ public class SemanticDiagnosticsTests
     public void NonConstEnumValueIsStillRejected()
     {
         AssertError(Codes.TypeMismatch,
-            "enum E { A = \"str\" } kernel { entry func Main() { } }");
+            "enum E { A = \"str\" } realm kernel { entry func Main() { } }");
     }
 
     [Fact]
     public void DuplicateEnumMemberIsRejected()
     {
         AssertError(Codes.DuplicateName,
-            "enum E { A, B, A } kernel { entry func Main() { } }");
+            "enum E { A, B, A } realm kernel { entry func Main() { } }");
     }
 
     [Fact]
     public void DuplicateUnionVariantIsRejected()
     {
         AssertError(Codes.DuplicateName,
-            "union U { A(int x), B, A } kernel { entry func Main() { } }");
+            "union U { A(int x), B, A } realm kernel { entry func Main() { } }");
     }
 
     /// <summary>
@@ -217,7 +217,7 @@ public class SemanticDiagnosticsTests
     public void VariantWithoutCallGivesOneError()
     {
         var (diag, _) = SingleFileCompile.Check(
-            "union U { A(int x), Nil } kernel { entry func Main() { let U q = U.Nil; } }");
+            "union U { A(int x), Nil } realm kernel { entry func Main() { let U q = U.Nil; } }");
 
         var errors = diag.All.Where(d => d.Severity == Severity.Error).ToList();
         Assert.Single(errors);
@@ -240,7 +240,7 @@ public class SemanticDiagnosticsTests
             "  public usize func A(T x) { unsafe { return x as usize; } } " +
             "  public usize func B(T x) { unsafe { return x as usize; } } " +
             "  public usize func C2(T x) { unsafe { return x as usize; } } } " +
-            "kernel { entry func Main() { let G[C] g = new G[C](); } }");
+            "realm kernel { entry func Main() { let G[C] g = new G[C](); } }");
 
         var errors = diag.All.Where(d => d.Severity == Severity.Error).ToList();
         Assert.Single(errors);
@@ -252,7 +252,7 @@ public class SemanticDiagnosticsTests
     public void UnknownVariantNamesTheUnion()
     {
         var (diag, _) = SingleFileCompile.Check(
-            "union U { A(int x), Nil } kernel { entry func Main() { let U q = U.Zzz; } }");
+            "union U { A(int x), Nil } realm kernel { entry func Main() { let U q = U.Zzz; } }");
 
         var errors = diag.All.Where(d => d.Severity == Severity.Error).ToList();
         Assert.Single(errors);
@@ -264,8 +264,8 @@ public class SemanticDiagnosticsTests
     #region Control-flow divergence
 
     [Theory]
-    [InlineData("int func F() { for (;;) { } } kernel { entry func Main() { let int x = F(); } }")]
-    [InlineData("int func F() { while (true) { } } kernel { entry func Main() { let int x = F(); } }")]
+    [InlineData("int func F() { for (;;) { } } realm kernel { entry func Main() { let int x = F(); } }")]
+    [InlineData("int func F() { while (true) { } } realm kernel { entry func Main() { let int x = F(); } }")]
     public void InfiniteLoopSatisfiesReturn(string src)
     {
         AssertClean(src);
@@ -275,7 +275,7 @@ public class SemanticDiagnosticsTests
     public void BreakableLoopStillNeedsReturn()
     {
         AssertError(Codes.MissingReturn,
-            "int func F() { while (true) { break; } } kernel { entry func Main() { let int x = F(); } }");
+            "int func F() { while (true) { break; } } realm kernel { entry func Main() { let int x = F(); } }");
     }
 
     [Fact]
@@ -283,7 +283,7 @@ public class SemanticDiagnosticsTests
     {
         AssertClean("""
         int func F() { while (true) { while (true) { break; } } }
-        kernel { entry func Main() { let int x = F(); } }
+        realm kernel { entry func Main() { let int x = F(); } }
         """);
     }
 
@@ -296,7 +296,7 @@ public class SemanticDiagnosticsTests
     {
         var src = """
         union U { A, B }
-        kernel { entry func Main() {
+        realm kernel { entry func Main() {
           let U u = U.A();
           match (u) { case A { } case B { } case Bogus { } }
         } }
@@ -316,7 +316,7 @@ public class SemanticDiagnosticsTests
         var files = SingleFileCompile.Emit("""
         @preamble(kernel)
         native { }
-        kernel { entry func Main() {
+        realm kernel { entry func Main() {
           let int sum = 0;
           for (let int i = 0; i < 100; i = i + 1) { sum = sum + i; }
           if (sum > 0) { } else { }
@@ -327,8 +327,8 @@ public class SemanticDiagnosticsTests
     }
 
     [Theory]
-    [InlineData("kernel { entry func Main() { for (let int i = 0; i < 5; i = \"x\") { } } }")]
-    [InlineData("kernel { entry func Main() { for (let int i = 0; i < 5; i &= 1.5) { } } }")]
+    [InlineData("realm kernel { entry func Main() { for (let int i = 0; i < 5; i = \"x\") { } } }")]
+    [InlineData("realm kernel { entry func Main() { for (let int i = 0; i < 5; i &= 1.5) { } } }")]
     public void ForStepAssignmentIsTypeChecked(string src)
     {
         AssertError(Codes.TypeMismatch, src);
@@ -353,7 +353,7 @@ public class SemanticDiagnosticsTests
           Ch = 'x',
           Masked = ~0 & 15
         }
-        kernel { entry func Main() { let Flags f = Flags.All; if (f == Flags.All) { } } }
+        realm kernel { entry func Main() { let Flags f = Flags.All; if (f == Flags.All) { } } }
         """);
         Assert.False(diag.HasErrors, string.Join("; ", diag.All.Select(d => d.Message)));
         var e = module!.Enums.Single();
@@ -370,16 +370,16 @@ public class SemanticDiagnosticsTests
     {
         var (diag, module) = SingleFileCompile.Check("""
         enum E { A = 10, B, C = B + 5 }
-        kernel { entry func Main() { let E e = E.C; if (e == E.C) { } } }
+        realm kernel { entry func Main() { let E e = E.C; if (e == E.C) { } } }
         """);
         Assert.False(diag.HasErrors);
         Assert.Equal("16", module!.Enums.Single().Members.Single(m => m.Name == "C").CValue);
     }
 
     [Theory]
-    [InlineData("enum E { A = x + 1 } kernel { entry func Main() { } }")]
-    [InlineData("enum E { A = B + 1, B } kernel { entry func Main() { } }")]
-    [InlineData("enum E { A = 1 / 0 } kernel { entry func Main() { } }")]
+    [InlineData("enum E { A = x + 1 } realm kernel { entry func Main() { } }")]
+    [InlineData("enum E { A = B + 1, B } realm kernel { entry func Main() { } }")]
+    [InlineData("enum E { A = 1 / 0 } realm kernel { entry func Main() { } }")]
     public void NonConstEnumValueIsRejected(string src)
     {
         AssertError(Codes.TypeMismatch, src);
@@ -403,7 +403,7 @@ public class SemanticDiagnosticsTests
     public void OperatorOperandTypeIsChecked(string stmt)
     {
         AssertError(Codes.ArgTypeMismatch, VecDecl + $$"""
-        kernel { entry func Main() {
+        realm kernel { entry func Main() {
           let Vec a = new Vec(1);
           {{stmt}}
         } }
@@ -414,7 +414,7 @@ public class SemanticDiagnosticsTests
     public void CompoundOperandTypeIsChecked()
     {
         AssertError(Codes.ArgTypeMismatch, VecDecl + """
-        kernel { entry func Main() {
+        realm kernel { entry func Main() {
           let Vec a = new Vec(1);
           a += 5;
         } }
@@ -425,7 +425,7 @@ public class SemanticDiagnosticsTests
     public void MatchingOperandStillChecks()
     {
         AssertClean(VecDecl + """
-        kernel { entry func Main() {
+        realm kernel { entry func Main() {
           let Vec a = new Vec(1);
           let Vec b = new Vec(2);
           let Vec c = a + b;
@@ -440,9 +440,9 @@ public class SemanticDiagnosticsTests
     /// A wrong-arity indexer no longer crashes the resolver at use sites.
     /// </summary>
     [Theory]
-    [InlineData("class C { int v; operator C func +(C a, C b) { return a; } } kernel { entry func Main() { } }")]
-    [InlineData("class C { int v; operator int func [](int i, int j) { return 0; } } kernel { entry func Main() { let C c = new C(); let int x = c[0]; } }")]
-    [InlineData("class C { int v; operator func []=(int i) { } } kernel { entry func Main() { let C c = new C(); c[0] = 1; } }")]
+    [InlineData("class C { int v; operator C func +(C a, C b) { return a; } } realm kernel { entry func Main() { } }")]
+    [InlineData("class C { int v; operator int func [](int i, int j) { return 0; } } realm kernel { entry func Main() { let C c = new C(); let int x = c[0]; } }")]
+    [InlineData("class C { int v; operator func []=(int i) { } } realm kernel { entry func Main() { let C c = new C(); c[0] = 1; } }")]
     public void OperatorArityIsEnforced(string src)
     {
         AssertError(Codes.WrongArgCount, src);
@@ -462,7 +462,7 @@ public class SemanticDiagnosticsTests
     {
         var (diag, _) = SingleFileCompile.Check("""
             class Console { public static void func Home() { } }
-            kernel { entry func Main() { Console.Hme(); } }
+            realm kernel { entry func Main() { Console.Hme(); } }
             """);
         var d = Assert.Single(diag.All, x => x.Code == Codes.UndefinedMethod);
         Assert.DoesNotContain("did you mean", d.Message);
@@ -474,7 +474,7 @@ public class SemanticDiagnosticsTests
     {
         var (diag, _) = SingleFileCompile.Check("""
             class Console { public static void func Home() { } }
-            kernel { entry func Main() { Console.ZzzCompletelyUnrelated(); } }
+            realm kernel { entry func Main() { Console.ZzzCompletelyUnrelated(); } }
             """);
         var d = Assert.Single(diag.All, x => x.Code == Codes.UndefinedMethod);
         Assert.Empty(d.Hints);
@@ -505,7 +505,7 @@ public class SemanticDiagnosticsTests
                 func _init() { }
                 public int func Bad() { let int i = 0; return items[i].x; }
             }
-            kernel { entry func Main() { } }
+            realm kernel { entry func Main() { } }
             """);
         Assert.Contains(diag.All, d => d.Code == Codes.UndefinedVariable && d.Message.Contains("self.items"));
         Assert.DoesNotContain(diag.All, d => d.Message.Contains("items_i") || d.Message.Contains("is a type"));
@@ -520,7 +520,7 @@ public class SemanticDiagnosticsTests
     {
         var (diag, _) = SingleFileCompile.Check("""
             class Pt { public int x; func _init() { } }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let [2]Pt items = default([2]Pt);
                 let int i = 0;
                 let int n = itemz[i].x;
@@ -540,7 +540,7 @@ public class SemanticDiagnosticsTests
     {
         AssertClean("""
             union Opt[V] { Some(V v), None }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let [2]int Opt = default([2]int);
                 let int i = 0;
                 let int shadowed = Opt[i];
@@ -555,12 +555,12 @@ public class SemanticDiagnosticsTests
     /// naming a type nobody wrote and, for two of them, the wrong problem.
     /// </summary>
     [Theory]
-    [InlineData("kernel { entry func Main() { let int n = Nope[int].A(); } }",
+    [InlineData("realm kernel { entry func Main() { let int n = Nope[int].A(); } }",
                 "unknown generic type 'Nope'")]
-    [InlineData("union U { A(int v), B } kernel { entry func Main() { let U x = U[int].A(1); } }",
+    [InlineData("union U { A(int v), B } realm kernel { entry func Main() { let U x = U[int].A(1); } }",
                 "'U' is not generic")]
     [InlineData("class Box[T] { public T v; func _init() { } } " +
-                "kernel { entry func Main() { let Box[int] b = new Box[int](); let int n = Box[int].Nope(); } }",
+                "realm kernel { entry func Main() { let Box[int] b = new Box[int](); let int n = Box[int].Nope(); } }",
                 "'Box[int]' is not a union")]
     public void TypeRefErrorsNameWhatWasWritten(string src, string expected)
     {
@@ -592,7 +592,7 @@ public class SemanticDiagnosticsTests
     public void ExpectationDoesNotDecideAnArgument()
     {
         var (diag, _) = SingleFileCompile.Check(OptDecl + """
-            kernel { entry func Main() { let Opt[bool] s = Wrap(Take(Opt.None())); } }
+            realm kernel { entry func Main() { let Opt[bool] s = Wrap(Take(Opt.None())); } }
             """);
         var first = diag.All.First(d => d.Severity == Severity.Error);
         Assert.Equal(Codes.CannotInfer, first.Code);
@@ -606,7 +606,7 @@ public class SemanticDiagnosticsTests
     public void ExplicitInstantiationSettlesAnArg()
     {
         AssertClean(OptDecl + """
-            kernel { entry func Main() { let Opt[bool] s = Wrap(Take(Opt[int].None())); } }
+            realm kernel { entry func Main() { let Opt[bool] s = Wrap(Take(Opt[int].None())); } }
             """);
     }
 
@@ -617,7 +617,7 @@ public class SemanticDiagnosticsTests
     public void ExpectationDecidesItsOwnPosition()
     {
         AssertClean(OptDecl + """
-            kernel { entry func Main() { let Opt[int] a = Opt.None(); let int n = Take(a); } }
+            realm kernel { entry func Main() { let Opt[int] a = Opt.None(); let int n = Take(a); } }
             """);
     }
 

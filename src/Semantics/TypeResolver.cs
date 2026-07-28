@@ -44,14 +44,14 @@ internal sealed class TypeResolver(
     /// Picks the generic free-function template a bare call resolves to: an own-file private
     /// template always wins, otherwise the first in-scope public one.
     /// </summary>
-    private (FuncDecl Decl, string File, string Context)? ResolveFuncTemplate(
+    private (FuncDecl Decl, string File, Realm Realm)? ResolveFuncTemplate(
         string name, string ctxFile, out List<string> collidingFiles)
     {
         collidingFiles = [];
         if (!_funcTemplates.TryGetValue(name, out var bucket) || bucket.Count == 0) return null;
 
         var ownPrivate = bucket.Find(e => e.IsPrivate && e.File == ctxFile);
-        if (ownPrivate.Decl != null) return (ownPrivate.Decl, ownPrivate.File, ownPrivate.Context);
+        if (ownPrivate.Decl != null) return (ownPrivate.Decl, ownPrivate.File, ownPrivate.Realm);
 
         var publicInScope = bucket.FindAll(e => !e.IsPrivate && _scope.Contains(e.File));
         if (publicInScope.Count == 0) return null;
@@ -59,7 +59,7 @@ internal sealed class TypeResolver(
             collidingFiles = [.. publicInScope.Select(e => e.File).Distinct()];
 
         var chosen = publicInScope[0];
-        return (chosen.Decl, chosen.File, chosen.Context);
+        return (chosen.Decl, chosen.File, chosen.Realm);
     }
 
     /// <summary>
@@ -74,7 +74,7 @@ internal sealed class TypeResolver(
             var match = bucket.Find(e => Path.GetFileNameWithoutExtension(e.File) == ns
                 && (e.File == ctx.File || (!e.IsPrivate && _scope.Contains(e.File))));
             if (match.Decl != null)
-                return ResolveGenericCall((match.Decl, match.File, match.Context), args, ctx, ce.Span, ce.Args);
+                return ResolveGenericCall((match.Decl, match.File, match.Realm), args, ctx, ce.Span, ce.Args);
         }
 
         var priv = sym.LookupPrivateFunc(ctx.File, name);
@@ -144,11 +144,11 @@ internal sealed class TypeResolver(
     // Generic free function templates, bucketed by name (several files may each declare their
     // own private generic under the same name without clobbering one another); each distinct
     // instantiation is stamped once.
-    private readonly Dictionary<string, List<(FuncDecl Decl, string File, string Context, bool IsPrivate)>> _funcTemplates = [];
+    private readonly Dictionary<string, List<(FuncDecl Decl, string File, Realm Realm, bool IsPrivate)>> _funcTemplates = [];
     // Generic method templates on classes/modules, keyed by owner+name; mirrors _funcTemplates.
-    private readonly Dictionary<MemberKey, (MethodDecl Decl, string File, string Context)> _methodTemplates = [];
-    private readonly Queue<(FuncDecl Decl, string File, string Context, Dictionary<string, TypeSpec> Binds, string Mangled)> _genericQueue = new();
-    private readonly Queue<(MethodDecl Decl, string Owner, string File, string Context, Dictionary<string, TypeSpec> Binds, string Mangled)> _genericMethodQueue = new();
+    private readonly Dictionary<MemberKey, (MethodDecl Decl, string File, Realm Realm)> _methodTemplates = [];
+    private readonly Queue<(FuncDecl Decl, string File, Realm Realm, Dictionary<string, TypeSpec> Binds, string Mangled)> _genericQueue = new();
+    private readonly Queue<(MethodDecl Decl, string Owner, string File, Realm Realm, Dictionary<string, TypeSpec> Binds, string Mangled)> _genericMethodQueue = new();
     private readonly HashSet<string> _genericSeen = [];
     private int _labelSeq;
 
@@ -688,7 +688,7 @@ internal sealed class TypeResolver(
                 ident = char.IsLetterOrDigit(inner[j]) || inner[j] == '_';
             if (!ident) continue;
             string name = inner.ToString();
-            if (ctx.Scope.Lookup(name) == null) continue;
+            if (ctx.Locals.Lookup(name) == null) continue;
             diag.Warn(Codes.MissingInterpolation, ctx.File, sl.Span,
                 $"this string contains '{{{name}}}' and '{name}' is a variable in scope, but the string is not interpolated",
                 [$"write $\"...\" to substitute the value, or escape the brace if the text is literal"]);
@@ -1479,7 +1479,7 @@ internal sealed class TypeResolver(
     /// </summary>
     private readonly record struct ResolveCtx(
         string File,
-        string Context,
+        Realm Realm,
         string CurClass,
         string? CurFunc,
         bool InStatic,
@@ -1488,7 +1488,7 @@ internal sealed class TypeResolver(
         bool InThrowsFunc,
         string CatchLabel,
         int LoopDepth,
-        ScopeStack Scope,
+        ScopeStack Locals,
         bool InDefer = false,
         IrType? AssignType = null,
         // The type the enclosing construct wants this expression to have, when there is one:
@@ -1547,11 +1547,11 @@ internal sealed class TypeResolver(
         }
 
         /// <summary>
-        /// Returns a context with the realm context string updated.
+        /// Returns a context with the realm updated.
         /// </summary>
-        public ResolveCtx WithContext(string ctx)
+        public ResolveCtx WithRealm(Realm r)
         {
-            return this with { Context = ctx };
+            return this with { Realm = r };
         }
 
         /// <summary>
@@ -1585,7 +1585,7 @@ internal sealed class TypeResolver(
         /// </summary>
         public ResolveCtx PushScope(bool isParams = false)
         {
-            return this with { Scope = Scope.Push(isParams) };
+            return this with { Locals = Locals.Push(isParams) };
         }
     }
 
@@ -1628,11 +1628,11 @@ internal sealed class TypeResolver(
     {
         var module = new IrModule([], [], [], [], [], _arrays, [], sym, _funcPtrTypes, []);
         foreach (var (prog, file) in programs)
-            CollectFuncTemplates(prog.Items, "none", file);
+            CollectFuncTemplates(prog.Items, Realm.None, file);
         foreach (var (prog, file) in programs)
         {
             _fileScope = visible.GetValueOrDefault(file, [file]);
-            var ctx = new ResolveCtx(file, "none", "", null, false, false, false, false, "", 0, new ScopeStack());
+            var ctx = new ResolveCtx(file, Realm.None, "", null, false, false, false, false, "", 0, new ScopeStack());
             foreach (var item in prog.Items)
             {
                 _scope = ScopeFor(item, file);
@@ -1674,7 +1674,7 @@ internal sealed class TypeResolver(
     /// Scans top-level items for generic function/method templates and registers them for on-demand
     /// instantiation.
     /// </summary>
-    private void CollectFuncTemplates(TopLevel[] items, string context, string file)
+    private void CollectFuncTemplates(TopLevel[] items, Realm realm, string file)
     {
         foreach (var item in items)
             switch (item)
@@ -1682,7 +1682,7 @@ internal sealed class TypeResolver(
                 case FuncDecl fd when fd.GenericParams.Length > 0:
                     if (!_funcTemplates.TryGetValue(fd.Name, out var bucket))
                         _funcTemplates[fd.Name] = bucket = [];
-                    bucket.Add((fd, file, context, (fd.Modifiers & Modifiers.Private) != 0));
+                    bucket.Add((fd, file, realm, (fd.Modifiers & Modifiers.Private) != 0));
                     break;
                 case ContextDecl cd:
                     CollectFuncTemplates(cd.Items, cd.Kind, file);
@@ -1690,7 +1690,7 @@ internal sealed class TypeResolver(
                 case ClassDecl cls:
                     foreach (var m in cls.Members)
                         if (m is MethodDecl md && md.GenericParams.Length > 0)
-                            _methodTemplates[new MemberKey(cls.Name, md.Name)] = (md, file, context);
+                            _methodTemplates[new MemberKey(cls.Name, md.Name)] = (md, file, realm);
                     break;
             }
     }
@@ -1716,7 +1716,7 @@ internal sealed class TypeResolver(
             case ExternFuncDecl:
                 break;
             case EnvironmentDecl ed:
-                if (ctx.Context != "none")
+                if (ctx.Realm != Realm.None)
                     diag.Error(Codes.MisplacedEnvironment, ctx.File, ed.Span,
                         "an '@environment' declaration is only valid at the top level of a file, not inside a context block");
                 break;
@@ -1731,7 +1731,7 @@ internal sealed class TypeResolver(
                         "a native block can carry only one '@preamble'; remove the extra one(s)");
                 var pre = preambles.FirstOrDefault();
                 var (section, vis) = pre is null
-                    ? (NativeSection.Types, VisOf(ctx.Context))
+                    ? (NativeSection.Types, VisOf(ctx.Realm))
                     : pre.Target switch
                     {
                         "boot" => (NativeSection.Boot, Visibility.Kernel),
@@ -1746,7 +1746,7 @@ internal sealed class TypeResolver(
                 module.Classes.Add(ResolveClass(cd, ctx));
                 break;
             case ContextDecl cdecl:
-                var inner = ctx.WithContext(cdecl.Kind);
+                var inner = ctx.WithRealm(cdecl.Kind);
                 foreach (var i in cdecl.Items) ResolveTop(i, inner, module);
                 break;
             case FuncDecl fd:
@@ -1754,7 +1754,7 @@ internal sealed class TypeResolver(
                 module.FreeFunctions.Add(ResolveFreeFunc(fd, ctx));
                 break;
             case NativeTypeDecl nd:
-                module.NativeTypes.Add(new IrNativeType(nd.Name, Mangler.Class(nd.Name), nd.CBody, VisOf(ctx.Context)));
+                module.NativeTypes.Add(new IrNativeType(nd.Name, Mangler.Class(nd.Name), nd.CBody, VisOf(ctx.Realm)));
                 break;
             case EnumDecl ed:
                 module.Enums.Add(ResolveEnum(ed, ctx));
@@ -1769,14 +1769,14 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Maps a realm context string to its IR visibility.
+    /// Maps a realm to its IR visibility.
     /// </summary>
-    private static Visibility VisOf(string ctx)
+    private static Visibility VisOf(Realm r)
     {
-        return ctx switch
+        return r switch
         {
-            "kernel" => Visibility.Kernel,
-            "user" => Visibility.User,
+            Realm.Kernel => Visibility.Kernel,
+            Realm.User => Visibility.User,
             _ => Visibility.Shared
         };
     }
@@ -1832,8 +1832,8 @@ internal sealed class TypeResolver(
     /// </summary>
     private IrClass ResolveClass(ClassDecl cd, ResolveCtx ctx)
     {
-        bool lib = ctx.Context == "none";
-        var vis = VisOf(ctx.Context);
+        bool lib = ctx.Realm == Realm.None;
+        var vis = VisOf(ctx.Realm);
         var classCtx = ctx.WithClass(cd.Name);
 
         // A stamped generic instance is a machine-generated copy, so one bad type argument is
@@ -1916,8 +1916,8 @@ internal sealed class TypeResolver(
         string cname = Mangler.Method(cls, md.Name, md.Params, sym.IsOverloadedMethod(cls, md.Name));
         var mctx = ctx.WithClass(cls).WithFunc(md.Name).WithStatic(isStatic)
             .WithThrowsFunc(md.Throws).PushScope(isParams: true);
-        if (!isStatic) mctx.Scope.Declare("self", new IrClassRef(cls));
-        foreach (var p in md.Params) mctx.Scope.Declare(p.Name, ResolveType(p.Type), p.IsRef);
+        if (!isStatic) mctx.Locals.Declare("self", new IrClassRef(cls));
+        foreach (var p in md.Params) mctx.Locals.Declare(p.Name, ResolveType(p.Type), p.IsRef);
         var (body, native) = ResolveBodyOrNative(md.Body, mctx, ret);
         CheckMissingReturn(body, ret, md.Throws, md.Span, $"{Mangler.DisplayName(cls)}.{md.Name}", ctx);
         if (body != null) { CheckBodyQuality(body, ret, md.Span, ctx, md.Params, md.Span); CheckThrowsPlacement(body, mctx); }
@@ -1974,8 +1974,8 @@ internal sealed class TypeResolver(
 
         string cname = Mangler.Operator(cls, od.Op, od.Params, sym.IsOverloadedOperator(cls, od.Op));
         var octx = ctx.WithClass(cls).WithFunc($"op_{Mangler.OpSuffix(od.Op)}").WithStatic(isAs).PushScope(isParams: true);
-        if (!isAs) octx.Scope.Declare("self", new IrClassRef(cls));
-        foreach (var p in od.Params) octx.Scope.Declare(p.Name, ResolveType(p.Type), p.IsRef);
+        if (!isAs) octx.Locals.Declare("self", new IrClassRef(cls));
+        foreach (var p in od.Params) octx.Locals.Declare(p.Name, ResolveType(p.Type), p.IsRef);
         var (body, native) = ResolveBodyOrNative(od.Body, octx, ret);
         CheckMissingReturn(body, ret, false, od.Span, $"operator {od.Op} on {Mangler.DisplayName(cls)}", ctx);
         if (body != null) { CheckBodyQuality(body, ret, od.Span, ctx, od.Params, od.Span); CheckThrowsPlacement(body, octx); }
@@ -1989,8 +1989,8 @@ internal sealed class TypeResolver(
     /// </summary>
     private IrFunction ResolveFreeFunc(FuncDecl fd, ResolveCtx ctx)
     {
-        bool lib = ctx.Context == "none";
-        var vis = VisOf(ctx.Context);
+        bool lib = ctx.Realm == Realm.None;
+        var vis = VisOf(ctx.Realm);
         if (fd.IsEntry)
         {
             if (fd.Params.Length > 0)
@@ -2021,7 +2021,7 @@ internal sealed class TypeResolver(
                 sym.PrivateFuncOverloads(ctx.File, fd.Name).Count > 1)
             : Mangler.FreeFunc(fd.Name, fd.Params, sym.IsOverloadedFunc(fd.Name), fd.IsEntry, isExtern: false);
         var fctx = ctx.WithFunc(fd.Name).WithStatic(true).WithThrowsFunc(fd.Throws).PushScope(isParams: true);
-        foreach (var p in fd.Params) fctx.Scope.Declare(p.Name, ResolveType(p.Type), p.IsRef);
+        foreach (var p in fd.Params) fctx.Locals.Declare(p.Name, ResolveType(p.Type), p.IsRef);
         var (body, native) = ResolveBodyOrNative(fd.Body, fctx, ret);
         CheckMissingReturn(body, ret, fd.Throws, fd.Span, fd.Name, ctx);
         if (body != null) { CheckBodyQuality(body, ret, fd.Span, ctx, fd.Params, fd.Span); CheckThrowsPlacement(body, fctx); }
@@ -2048,7 +2048,7 @@ internal sealed class TypeResolver(
     /// </summary>
     private IrProcess ResolveProcess(ProcessDecl pd, ResolveCtx ctx)
     {
-        var vis = VisOf(ctx.Context);
+        var vis = VisOf(ctx.Realm);
 
         // Process and thread names are not symbols, so nothing upstream deduplicates
         // them, but both are mangled into C function names (gata_<process>_<thread>_main).
@@ -2091,7 +2091,7 @@ internal sealed class TypeResolver(
         }
 
         var fctx = ctx.WithStatic(true).PushScope(isParams: true);
-        foreach (var p in ef.Params) fctx.Scope.Declare(p.Name, ResolveType(p.Type));
+        foreach (var p in ef.Params) fctx.Locals.Declare(p.Name, ResolveType(p.Type));
         var body = ResolveBlock(ef.Body, fctx, IrType.Void);
         CheckBodyQuality(body, IrType.Void, ef.Span, ctx, ef.Params, ef.Span);
         CheckThrowsPlacement(body, fctx);
@@ -2105,7 +2105,7 @@ internal sealed class TypeResolver(
     /// main pass completes.
     /// </summary>
     private IrExpr ResolveGenericCall(
-        (FuncDecl Decl, string File, string Context) t,
+        (FuncDecl Decl, string File, Realm Realm) t,
         List<IrExpr> args, ResolveCtx ctx, TextSpan span, Expr[]? astArgs = null)
     {
         var fd = t.Decl;
@@ -2134,7 +2134,7 @@ internal sealed class TypeResolver(
         string mangled = fd.Name + "_" + string.Join("_", fd.GenericParams.Select(p => Monomorphizer.SanitizeTypeName(binds[p].ToSpecString())));
         _usedFuncTemplates.Add((t.File, fd.Name));
         if (_genericSeen.Add(mangled))
-            _genericQueue.Enqueue((fd, t.File, t.Context, binds, mangled));
+            _genericQueue.Enqueue((fd, t.File, t.Realm, binds, mangled));
 
         var concreteParams = Monomorphizer.SubParams(fd.Params, binds);
 
@@ -2157,7 +2157,7 @@ internal sealed class TypeResolver(
     /// the instantiation for resolution after the main pass completes.
     /// </summary>
     private IrExpr ResolveGenericMethodCall(
-        (MethodDecl Decl, string File, string Context) t, string owner, bool isStatic,
+        (MethodDecl Decl, string File, Realm Realm) t, string owner, bool isStatic,
         List<IrExpr> args, ResolveCtx ctx, TextSpan span, IrExpr? recv = null, Expr[]? astArgs = null)
     {
         var md = t.Decl;
@@ -2191,7 +2191,7 @@ internal sealed class TypeResolver(
         string seenKey = owner + "::" + mangled;
         _usedMethodTemplates.Add(new MemberKey(owner, md.Name));
         if (_genericSeen.Add(seenKey))
-            _genericMethodQueue.Enqueue((md, owner, t.File, t.Context, binds, mangled));
+            _genericMethodQueue.Enqueue((md, owner, t.File, t.Realm, binds, mangled));
 
         var concreteParams = Monomorphizer.SubParams(md.Params, binds);
         string cname = Mangler.Method(owner, mangled, concreteParams, overloaded: false);
@@ -2224,7 +2224,7 @@ internal sealed class TypeResolver(
     {
         while (_genericQueue.Count > 0)
         {
-            var (fd, file, context, binds, mangled) = _genericQueue.Dequeue();
+            var (fd, file, realm, binds, mangled) = _genericQueue.Dequeue();
             var cMap = binds.ToDictionary(kv => kv.Key, kv => Monomorphizer.CTypeOf(kv.Value));
             var instRet = Monomorphizer.SubType(fd.ReturnType, binds);
             if (fd.Throws) sym.RegisterThrows(instRet);
@@ -2233,13 +2233,13 @@ internal sealed class TypeResolver(
                 [..Monomorphizer.SubParams(fd.Params, binds)], fd.IsEntry, fd.Throws,
                 Monomorphizer.SubBody(fd.Body, binds, cMap), fd.Span);
             _scope = visible.GetValueOrDefault(file, [file]);
-            var ctx = new ResolveCtx(file, context, "", null, false, false, false, false, "", 0, new ScopeStack());
+            var ctx = new ResolveCtx(file, realm, "", null, false, false, false, false, "", 0, new ScopeStack());
             module.FreeFunctions.Add(ResolveFreeFunc(inst, ctx));
         }
 
         while (_genericMethodQueue.Count > 0)
         {
-            var (md, owner, file, context, binds, mangled) = _genericMethodQueue.Dequeue();
+            var (md, owner, file, realm, binds, mangled) = _genericMethodQueue.Dequeue();
             var cMap = binds.ToDictionary(kv => kv.Key, kv => Monomorphizer.CTypeOf(kv.Value));
             var instMethodRet = Monomorphizer.SubType(md.ReturnType, binds);
             if (md.Throws) sym.RegisterThrows(instMethodRet);
@@ -2249,9 +2249,9 @@ internal sealed class TypeResolver(
                 Monomorphizer.SubBody(md.Body, binds, cMap), md.Span);
             _scope = visible.GetValueOrDefault(file, [file]);
             bool isModule = sym.Modules.Contains(owner);
-            var ctx = new ResolveCtx(file, context, "", null, false, false, false, false, "", 0, new ScopeStack());
-            var lib = context == "none";
-            var fn = ResolveMethod(owner, inst, ctx.WithClass(owner), lib, VisOf(context), isModule);
+            var ctx = new ResolveCtx(file, realm, "", null, false, false, false, false, "", 0, new ScopeStack());
+            var lib = realm == Realm.None;
+            var fn = ResolveMethod(owner, inst, ctx.WithClass(owner), lib, VisOf(realm), isModule);
             var cls = module.Classes.Find(c => c.Name == owner);
             cls?.Methods.Add(fn);
         }
@@ -2817,7 +2817,7 @@ internal sealed class TypeResolver(
                 if (releaseMode)
                     diag.Error(Codes.DiagInRelease, ctx.File, s.Span,
                         "'panic' is not allowed in a release build", ["remove it before shipping"]);
-                if (ctx.Context != "kernel")
+                if (ctx.Realm != Realm.Kernel)
                     diag.Error(Codes.PanicOutsideKernel, ctx.File, s.Span,
                         "'panic' is only valid in the kernel realm");
                 return new IrPanic(p.Raw) { Span = s.Span };
@@ -2867,7 +2867,7 @@ internal sealed class TypeResolver(
         if (collection.Type is IrArrayType at)
         {
             var ainner = ctx.PushScope() with { LoopDepth = ctx.LoopDepth + 1 };
-            ainner.Scope.Declare(fi.Var, at.Elem);
+            ainner.Locals.Declare(fi.Var, at.Elem);
             var abody = ResolveBlock(fi.Body, ainner, retType);
             WarnIfEmpty(abody, "for..in", ctx, fi.Span);
             return new IrForIn(fi.Var, at.Elem, "", "", collection, abody, at.Size);
@@ -2899,7 +2899,7 @@ internal sealed class TypeResolver(
         }
 
         var inner = ctx.PushScope() with { LoopDepth = ctx.LoopDepth + 1 };
-        inner.Scope.Declare(fi.Var, elemType);
+        inner.Locals.Declare(fi.Var, elemType);
         var body = ResolveBlock(fi.Body, inner, retType);
         WarnIfEmpty(body, "for..in", ctx, fi.Span);
         return new IrForIn(fi.Var, elemType, lenCName, getCName, collection, body);
@@ -3000,7 +3000,7 @@ internal sealed class TypeResolver(
             for (int i = 0; i < c.Bindings.Length && i < fields.Length; i++)
             {
                 var ft = ResolveType(fields[i].Type);
-                caseCtx.Scope.Declare(c.Bindings[i], ft);
+                caseCtx.Locals.Declare(c.Bindings[i], ft);
                 binds.Add(new IrMatchBind(fields[i].Name, c.Bindings[i], ft));
             }
             cases.Add(new IrMatchCase(idx, binds, ResolveBlock(c.Body, caseCtx, retType)));
@@ -3125,18 +3125,18 @@ internal sealed class TypeResolver(
                  "or leave the handler through 'return', 'throw', 'break', or 'continue'"]);
 
         CheckNotReservedLocal(ls.Name, ls.Span, "variable", ctx);
-        if (ctx.Scope.DeclaredHere(ls.Name))
+        if (ctx.Locals.DeclaredHere(ls.Name))
             diag.Error(Codes.DuplicateName, ctx.File, ls.Span, $"'{ls.Name}' is already declared in this scope");
-        else if (ctx.Scope.CollidesWithParam(ls.Name))
+        else if (ctx.Locals.CollidesWithParam(ls.Name))
             diag.Error(Codes.DuplicateName, ctx.File, ls.Span,
                 $"'{ls.Name}' is already a parameter of this function",
                 ["a parameter and a top-level local share one scope; rename one of them",
                  "shadowing is fine inside a nested block"]);
-        else if (ctx.Scope.ShadowsOuter(ls.Name))
+        else if (ctx.Locals.ShadowsOuter(ls.Name))
             diag.Warn(Codes.ShadowedVariable, ctx.File, ls.Span,
                 $"'{ls.Name}' shadows a variable of the same name from an enclosing scope",
                 ["rename this one if the outer variable was meant to stay reachable"]);
-        ctx.Scope.Declare(ls.Name, type);
+        ctx.Locals.Declare(ls.Name, type);
         return new IrDeclVar(ls.Name, type, init);
     }
 
@@ -3555,8 +3555,8 @@ internal sealed class TypeResolver(
             return new IrSelfExpr(ctx.CurClass);
         }
 
-        var local = ctx.Scope.Lookup(name);
-        if (local != null) return new IrVar(name, local, ctx.Scope.IsRef(name));
+        var local = ctx.Locals.Lookup(name);
+        if (local != null) return new IrVar(name, local, ctx.Locals.IsRef(name));
 
         if (ClassInScope(name)) return new IrVar(name, new IrClassRef(name));
 
@@ -3614,7 +3614,7 @@ internal sealed class TypeResolver(
     private IrExpr ResolveMemberAccess(MemberAccessExpr ma, ResolveCtx ctx)
     {
         // Enum member access: Color.Red.
-        if (ma.Object is IdentExpr eid && sym.IsEnum(eid.Name) && ctx.Scope.Lookup(eid.Name) == null)
+        if (ma.Object is IdentExpr eid && sym.IsEnum(eid.Name) && ctx.Locals.Lookup(eid.Name) == null)
         {
             if (!sym.IsEnumMember(eid.Name, ma.Member))
                 diag.Error(Codes.UndefinedVariable, ctx.File, ma.Span,
@@ -3622,7 +3622,7 @@ internal sealed class TypeResolver(
             return new IrEnumConst(eid.Name, ma.Member) { Span = ma.Span };
         }
 
-        if (ma.Object is IdentExpr uid && sym.IsUnion(uid.Name) && ctx.Scope.Lookup(uid.Name) == null)
+        if (ma.Object is IdentExpr uid && sym.IsUnion(uid.Name) && ctx.Locals.Lookup(uid.Name) == null)
         {
             var variants = sym.UnionDef(uid.Name)!;
             bool known = variants.Exists(v => v.Name == ma.Member);
@@ -3719,7 +3719,7 @@ internal sealed class TypeResolver(
 
         if (ce.Callee is MemberAccessExpr { Object: GenericTypeRefExpr gt } gma
             && Mangler.IsGenericTemplate(gt.Name)
-            && (gt.IndexForm == null || ctx.Scope.Lookup(gt.Name) == null))
+            && (gt.IndexForm == null || ctx.Locals.Lookup(gt.Name) == null))
         {
             if (sym.IsUnion(gt.Mangled))
                 return ResolveUnionConstruct(gt.Mangled, gma.Member, args, ctx, ce.Span);
@@ -3734,14 +3734,14 @@ internal sealed class TypeResolver(
         {
             string objName = ma.Object is IdentExpr oid ? oid.Name : "";
 
-            if (!string.IsNullOrEmpty(objName) && sym.IsUnion(objName) && ctx.Scope.Lookup(objName) == null)
+            if (!string.IsNullOrEmpty(objName) && sym.IsUnion(objName) && ctx.Locals.Lookup(objName) == null)
                 return ResolveUnionConstruct(objName, ma.Member, args, ctx, ce.Span);
 
-            if (!string.IsNullOrEmpty(objName) && ctx.Scope.Lookup(objName) == null
+            if (!string.IsNullOrEmpty(objName) && ctx.Locals.Lookup(objName) == null
                 && ResolveGenericUnionConstruct(objName, ma.Member, args, ctx, ce.Span) is { } gu)
                 return gu;
 
-            if (!string.IsNullOrEmpty(objName) && ClassInScope(objName.AsSpan()) && ctx.Scope.Lookup(objName) == null)
+            if (!string.IsNullOrEmpty(objName) && ClassInScope(objName.AsSpan()) && ctx.Locals.Lookup(objName) == null)
             {
                 if (_methodTemplates.TryGetValue(new MemberKey(objName, ma.Member), out var mtmpl))
                 {
@@ -3769,7 +3769,7 @@ internal sealed class TypeResolver(
                     Mangler.Method(objName, ma.Member, [], false), null, ctx, ce);
             }
 
-            if (!string.IsNullOrEmpty(objName) && ctx.Scope.Lookup(objName) == null && !ClassInScope(objName.AsSpan())
+            if (!string.IsNullOrEmpty(objName) && ctx.Locals.Lookup(objName) == null && !ClassInScope(objName.AsSpan())
                 && TryResolveFileNamespacedCall(objName, ma.Member, args, ctx, ce) is { } nsCall)
                 return nsCall;
 
@@ -3819,9 +3819,9 @@ internal sealed class TypeResolver(
         if (ce.Callee is IdentExpr id)
         {
             // local variable holding a function pointer shadows any free function of the same name
-            var calleeLocal = ctx.Scope.Lookup(id.Name);
+            var calleeLocal = ctx.Locals.Lookup(id.Name);
             if (calleeLocal is IrFuncPtrType localFp)
-                return ResolveIndirectCallArgs(new IrVar(id.Name, localFp, ctx.Scope.IsRef(id.Name)), localFp, args, ctx, ce.Span, ce.Args);
+                return ResolveIndirectCallArgs(new IrVar(id.Name, localFp, ctx.Locals.IsRef(id.Name)), localFp, args, ctx, ce.Span, ce.Args);
 
             if (TryResolveArcIntrinsic(id.Name, args, ctx, ce.Span) is { } arc) return arc;
 
@@ -4211,7 +4211,7 @@ internal sealed class TypeResolver(
     {
         bool isTemplate = Mangler.IsGenericTemplate(g.Name);
         bool namesType = isTemplate || sym.IsUnion(g.Mangled) || sym.IsClass(g.Mangled);
-        if (g.IndexForm != null && (!namesType || ctx.Scope.Lookup(g.Name) != null))
+        if (g.IndexForm != null && (!namesType || ctx.Locals.Lookup(g.Name) != null))
             return ResolveIndex(new IndexExpr(new IdentExpr(g.Name, g.Span), g.IndexForm, g.Span), ctx);
 
         if (isTemplate)

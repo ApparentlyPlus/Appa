@@ -74,7 +74,7 @@ public static class MultiFileCorpus
     /// <summary>
     /// A minimal user realm with an entry point, for cases whose focus is elsewhere.
     /// </summary>
-    private const string MainShell = "user {{ entry func Main() {{ {0} }} }}";
+    private const string MainShell = "realm userspace {{ entry func Main() {{ {0} }} }}";
 
     /// <summary>
     /// Builds src/main.g with the given imports and body.
@@ -255,32 +255,32 @@ public static class MultiFileCorpus
         #region realm blocks split across files
         yield return new("realm/entry-in-imported-file",
         [
-            F("src/lib.g", "user { entry func Main() { } }"),
+            F("src/lib.g", "realm userspace { entry func Main() { } }"),
             F("src/main.g", "import \"src/lib.g\";\n"),
         ], Expect.Any);
 
         yield return new("realm/two-user-blocks-two-files",
         [
-            F("src/lib.g", "user { void func Helper() { } }"),
+            F("src/lib.g", "realm userspace { void func Helper() { } }"),
             F("src/main.g", Main("import \"src/lib.g\";", "")),
         ], Expect.Any);
 
         yield return new("realm/two-entries-two-files",
         [
-            F("src/lib.g", "user { entry func Second() { } }"),
+            F("src/lib.g", "realm userspace { entry func Second() { } }"),
             F("src/main.g", Main("import \"src/lib.g\";", "")),
         ], Expect.Rejected);
 
         yield return new("realm/kernel-and-user-split",
         [
-            F("src/k.g", "kernel { entry func KMain() { } }"),
+            F("src/k.g", "realm kernel { entry func KMain() { } }"),
             F("src/main.g", Main("import \"src/k.g\";", "")),
         ], Expect.Any);
 
         yield return new("realm/no-entry-anywhere",
         [
             F("src/lib.g", "public int func Helper() { return 1; }"),
-            F("src/main.g", "import \"src/lib.g\";\nuser { void func NotEntry() { } }\n"),
+            F("src/main.g", "import \"src/lib.g\";\nrealm userspace { void func NotEntry() { } }\n"),
         ], Expect.Rejected);
 
         #endregion
@@ -654,15 +654,15 @@ public static class MultiFileCorpus
         #region processes and threads declared away from the entry
         yield return new("proc/in-imported-file",
         [
-            F("src/p.g", "kernel { foreground process Worker { thread T { entry func Run() { } } } }"),
-            F("src/main.g", "import \"src/p.g\";\nkernel { entry func Main() { } }\n"),
+            F("src/p.g", "realm kernel { foreground process Worker { thread T { entry func Run() { } } } }"),
+            F("src/main.g", "import \"src/p.g\";\nrealm kernel { entry func Main() { } }\n"),
         ], Expect.Any);
 
         yield return new("proc/same-name-two-files",
         [
-            F("src/a.g", "kernel { foreground process Worker { thread T { entry func Run() { } } } }"),
-            F("src/b.g", "kernel { foreground process Worker { thread U { entry func Run() { } } } }"),
-            F("src/main.g", "import \"src/a.g\";\nimport \"src/b.g\";\nkernel { entry func Main() { } }\n"),
+            F("src/a.g", "realm kernel { foreground process Worker { thread T { entry func Run() { } } } }"),
+            F("src/b.g", "realm kernel { foreground process Worker { thread U { entry func Run() { } } } }"),
+            F("src/main.g", "import \"src/a.g\";\nimport \"src/b.g\";\nrealm kernel { entry func Main() { } }\n"),
         ], Expect.Rejected, Codes.DuplicateName);
 
         #endregion

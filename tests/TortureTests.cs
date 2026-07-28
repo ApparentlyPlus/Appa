@@ -152,6 +152,49 @@ public class TortureTests
     }
 
     /// <summary>
+    /// A process body means the same thing in either realm, so every declaration probe must get the
+    /// same verdict inside 'realm kernel' as inside 'realm userspace'. The realm decides which
+    /// translation unit a declaration is emitted into and nothing else; it must never decide
+    /// whether the declaration is legal. Asymmetry here is a bug in the rule, not in the input.
+    /// </summary>
+    [Fact]
+    public void ProcessBodyRulesAreRealmSymmetric()
+    {
+        var byName = TortureCorpus.All.ToDictionary(c => c.Name);
+        var fails = new Failures();
+        int compared = 0;
+
+        foreach (var c in TortureCorpus.All)
+        {
+            const string kPrefix = "decl/process-kernel/";
+            if (!c.Name.StartsWith(kPrefix, StringComparison.Ordinal)) continue;
+
+            string probe = c.Name[kPrefix.Length..];
+            if (!byName.TryGetValue($"decl/process-user/{probe}", out var twin))
+            {
+                fails.Add($"[{probe}] has a kernel-realm case but no userspace-realm twin");
+                continue;
+            }
+
+            var (kDiag, _, kCrash) = TryCheck(c.Source);
+            var (uDiag, _, uCrash) = TryCheck(twin.Source);
+            if (kCrash != null || uCrash != null) continue; // owned by NoCorpusCaseCrashesTheCompiler
+
+            var kCodes = Codes(kDiag!);
+            var uCodes = Codes(uDiag!);
+            compared++;
+            if (kCodes != uCodes)
+                fails.Add($"[{probe}] realm kernel gives [{kCodes}] but realm userspace gives [{uCodes}]");
+        }
+
+        Assert.True(compared > 0, "no process-realm pairs were compared - the matrix positions were renamed");
+        fails.Assert("process body rules differ between realms");
+
+        static string Codes(DiagnosticBag d) =>
+            string.Join(",", d.All.Where(x => x.Severity == Severity.Error).Select(x => x.Code).Order());
+    }
+
+    /// <summary>
     /// Cases the corpus marks <see cref="Expect.Rejected"/> must produce an error, and the named
     /// one where a code is given. A case that silently passes is a missing diagnostic - the
     /// compiler is about to emit C for nonsense.
@@ -259,7 +302,7 @@ public class TortureTests
     {
         string[] atoms =
         [
-            "kernel", "user", "class", "module", "enum", "union", "func", "entry", "throws",
+            "realm", "kernel", "userspace", "class", "module", "enum", "union", "func", "entry", "throws",
             "let", "if", "else", "while", "for", "in", "switch", "case", "default", "match",
             "try", "catch", "assign", "throw", "defer", "unsafe", "return", "break", "continue",
             "new", "null", "true", "sizeof", "as", "ref", "static", "public", "private",
@@ -306,7 +349,7 @@ public class TortureTests
     }
     module Util { public static int func Twice(int n) { return n * 2; } }
     throws int func Risky(int n) { if (n < 0) { throw; } return n; }
-    kernel {
+    realm kernel {
         foreground process P { thread T { entry func Run() { } } }
         entry func Main() {
             let int a = Util.Twice(3);

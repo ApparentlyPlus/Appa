@@ -34,7 +34,7 @@ public class AsOperatorSemanticTests
                 int v;
                 public operator Wrapper func as(char c) { let Wrapper w = new Wrapper(); w.v = c as int; return w; }
             }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Wrapper w = 'x' as Wrapper;
             } }
             """);
@@ -55,7 +55,7 @@ public class AsOperatorSemanticTests
                 func _init(int v) { self.v = v; }
                 public operator Inches func as(Centimeters c) { return new Inches(c.v / 2); }
             }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Centimeters c = new Centimeters(10);
                 let Inches i = c as Inches;
             } }
@@ -75,7 +75,7 @@ public class AsOperatorSemanticTests
                 int v;
                 public operator func as(int i) { let Wrapper w = new Wrapper(); w.v = i; return w; }
             }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Wrapper w = 5 as Wrapper;
             } }
             """);
@@ -92,7 +92,7 @@ public class AsOperatorSemanticTests
                 public operator Wrapper func as(int i) { let Wrapper w = new Wrapper(); w.v = i; return w; }
                 public operator Wrapper func as(Box b) { let Wrapper w = new Wrapper(); w.v = b.v; return w; }
             }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Wrapper a = 'x' as Wrapper;
                 let Wrapper b = 5 as Wrapper;
                 let Wrapper c = new Box() as Wrapper;
@@ -113,7 +113,7 @@ public class AsOperatorSemanticTests
                 int v;
                 public operator Box func as(Box b) { return b; }
             }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Box a = new Box();
                 let Box b = a as Box;
             } }
@@ -133,7 +133,7 @@ public class AsOperatorSemanticTests
                 T v;
                 public operator Box[T] func as(T t) { let Box[T] b = new Box[T](); b.v = t; return b; }
             }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Box[int] bi = 5 as Box[int];
             } }
             """);
@@ -148,7 +148,7 @@ public class AsOperatorSemanticTests
                 int v;
                 public operator Wrapper func as(Box b) { let Wrapper w = new Wrapper(); w.v = b.v; return w; }
             }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Box b = new Box();
                 let Wrapper w = b as Wrapper;
             } }
@@ -163,7 +163,7 @@ public class AsOperatorSemanticTests
                 int v;
                 public operator Wrapper func as(int i) { let Wrapper w = new Wrapper(); return w; }
             }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Wrapper w = 5;
             } }
             """);
@@ -246,7 +246,7 @@ public class AsOperatorSemanticTests
         AssertError(Codes.InvalidCast, """
             class Box { int v; }
             class Other { int v; }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Box b = new Box();
                 let Other o = b as Other;
             } }
@@ -263,7 +263,7 @@ public class AsOperatorSemanticTests
                 int v;
                 public operator Wrapper func as(Other o) { let Wrapper w = new Wrapper(); return w; }
             }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Box b = new Box();
                 let Wrapper w = b as Wrapper;
             } }
@@ -275,7 +275,7 @@ public class AsOperatorSemanticTests
     {
         AssertError(Codes.InvalidCast, """
             class Wrapper { int v; }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Wrapper w = 5 as Wrapper;
             } }
             """);
@@ -291,7 +291,7 @@ public class AsOperatorSemanticTests
     {
         AssertError(Codes.InvalidCast, """
             class Box { int v; func _init(int v) { self.v = v; } }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Box b = new Box(1);
                 let int i = b as int;
             } }
@@ -303,7 +303,7 @@ public class AsOperatorSemanticTests
     {
         var (diag, _) = SingleFileCompile.Check("""
             class Box { int v; func _init(int v) { self.v = v; } }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Box b = new Box(1);
                 let int i = b as int;
             } }
@@ -317,7 +317,7 @@ public class AsOperatorSemanticTests
     #region Codegen
 
     /// <summary>
-    /// Finds the entry function's body statements among the module's free functions - 'kernel {
+    /// Finds the entry function's body statements among the module's free functions - 'realm kernel {
     /// entry func Main() { ... } }' lowers to a free function with IsEntry set, not a class member,
     /// so this is where 'let' statements inside Main live in the IR.
     /// </summary>
@@ -351,7 +351,7 @@ public class AsOperatorSemanticTests
                 int v;
                 public operator Wrapper func as(int i) { let Wrapper w = new Wrapper(); w.v = i; return w; }
             }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Wrapper w = 5 as Wrapper;
             } }
             """);
@@ -377,7 +377,7 @@ public class AsOperatorSemanticTests
                 public operator Wrapper func as(int i) { let Wrapper w = new Wrapper(); w.v = i; return w; }
                 public operator Wrapper func as(bool flag) { let Wrapper w = new Wrapper(); w.v = flag as int; return w; }
             }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Wrapper a = 5 as Wrapper;
                 let Wrapper b = true as Wrapper;
             } }
@@ -410,7 +410,7 @@ public class AsOperatorSemanticTests
                 int v;
                 public operator Wrapper func as(int i) { let Wrapper w = new Wrapper(); w.v = i; return w; }
             }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Wrapper w = 5 as Wrapper;
             } }
             """);

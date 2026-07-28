@@ -83,9 +83,9 @@ public class ParserTests
     [Fact]
     public void KernelBlockGroupsItsItems()
     {
-        var prog = SingleFileCompile.Parse("kernel { entry func Main() { } }");
+        var prog = SingleFileCompile.Parse("realm kernel { entry func Main() { } }");
         var ctx = Assert.IsType<ContextDecl>(prog.Items[0]);
-        Assert.Equal("kernel", ctx.Kind);
+        Assert.Equal(Realm.Kernel, ctx.Kind);
         Assert.Single(ctx.Items);
         Assert.IsType<FuncDecl>(ctx.Items[0]);
     }
@@ -94,7 +94,7 @@ public class ParserTests
     public void UserBlockParsesItsTopology()
     {
         var prog = SingleFileCompile.Parse("""
-            user {
+            realm userspace {
                 foreground process App {
                     thread Main {
                         entry func Run() { }
@@ -103,7 +103,7 @@ public class ParserTests
             }
             """);
         var ctx = Assert.IsType<ContextDecl>(prog.Items[0]);
-        Assert.Equal("user", ctx.Kind);
+        Assert.Equal(Realm.User, ctx.Kind);
         var proc = Assert.IsType<ProcessDecl>(ctx.Items[0]);
         Assert.Equal("App", proc.Name);
         Assert.Equal("foreground", proc.Mode);

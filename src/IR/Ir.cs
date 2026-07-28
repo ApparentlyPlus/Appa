@@ -662,6 +662,14 @@ internal record IrPanic(string Raw) : IrStmt;
 internal enum Visibility { Shared, Kernel, User }
 
 /// <summary>
+/// Which realm a declaration was written in. This is the *visibility* axis: it decides which
+/// translation unit a declaration is emitted into, and nothing else. The orthogonal *name* axis -
+/// which enclosing scope a declaration's name belongs to - is carried separately by ScopeId, so
+/// that a process can contribute to a name's scope while inheriting its realm's visibility.
+/// </summary>
+internal enum Realm { None, Kernel, User }
+
+/// <summary>
 /// A single parameter in an IR function signature.
 /// </summary>
 internal record IrParam(string Name, IrType Type, bool IsRef = false);

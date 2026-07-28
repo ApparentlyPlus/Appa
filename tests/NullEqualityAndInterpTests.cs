@@ -81,7 +81,7 @@ public class NullEqualityAndInterpTests
     public void EqNullBypassesDeclaredOperator()
     {
         var module = CheckClean(BoxWithEq + """
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Box b = new Box(1);
                 if (b == null) { return; }
             } }
@@ -94,7 +94,7 @@ public class NullEqualityAndInterpTests
     public void NeNullBypassesDeclaredOperator()
     {
         var module = CheckClean(BoxWithEq + """
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Box b = new Box(1);
                 if (b != null) { return; }
             } }
@@ -107,7 +107,7 @@ public class NullEqualityAndInterpTests
     public void NullOnLeftIsIdentity()
     {
         var module = CheckClean(BoxWithEq + """
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Box b = new Box(1);
                 if (null == b) { return; }
             } }
@@ -120,7 +120,7 @@ public class NullEqualityAndInterpTests
     public void ValueEqualityStillDispatches()
     {
         var module = CheckClean(BoxWithEq + """
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Box a = new Box(1);
                 let Box b = new Box(1);
                 if (a == b) { return; }
@@ -134,7 +134,7 @@ public class NullEqualityAndInterpTests
     public void IntAgainstNullIsRejected()
     {
         var (diag, _) = SingleFileCompile.Check(
-            "kernel { entry func Main() { let int n = 5; if (n == null) { } } }");
+            "realm kernel { entry func Main() { let int n = 5; if (n == null) { } } }");
         Assert.Contains(diag.All, d => d.Severity == Severity.Error && d.Code == Codes.TypeMismatch);
     }
 
@@ -143,7 +143,7 @@ public class NullEqualityAndInterpTests
     {
         CheckClean("""
             class Plain { int v; }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Plain p = new Plain();
                 if (p == null) { return; }
             } }
@@ -180,7 +180,7 @@ public class NullEqualityAndInterpTests
     public void ThreePartInterpUsesStringBuilder()
     {
         var module = CheckClean(InterpStubs + """
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let int x = 1;
                 let String s = $"a{x}b{x}c";
             } }
@@ -193,7 +193,7 @@ public class NullEqualityAndInterpTests
     public void TwoPartInterpKeepsConcat()
     {
         var module = CheckClean(InterpStubs + """
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let int x = 1;
                 let String s = $"a{x}";
             } }
@@ -215,7 +215,7 @@ public class NullEqualityAndInterpTests
             @intrinsic(stringify_int)
             String func IntToString(int n) { return new String(); }
 
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let int x = 1;
                 let String s = $"a{x}b{x}c";
             } }

@@ -51,7 +51,7 @@ public class OperatorConsistencyTests
                 public int v;
                 public operator bool func ==(Box other) { return self.v == other.v; }
             }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Box a = new Box();
                 let Box b = new Box();
                 let bool ne = a != b;
@@ -73,7 +73,7 @@ public class OperatorConsistencyTests
                 public int v;
                 public operator bool func !=(Box other) { return self.v != other.v; }
             }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Box a = new Box();
                 let Box b = new Box();
                 let bool eq = a == b;
@@ -96,7 +96,7 @@ public class OperatorConsistencyTests
                 public operator bool func ==(Box other) { return self.v == other.v; }
                 public operator bool func !=(Box other) { return self.v != other.v; }
             }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Box a = new Box();
                 let Box b = new Box();
                 let bool eq = a == b;
@@ -115,7 +115,7 @@ public class OperatorConsistencyTests
     {
         var (diag, module) = SingleFileCompile.Check("""
             class Box { public int v; }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Box a = new Box();
                 let Box b = new Box();
                 let bool eq = a == b;
@@ -138,7 +138,7 @@ public class OperatorConsistencyTests
                 public operator bool func ==(Box other) { return self.v == other.v; }
             }
             class Other { public int v; }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Box a = new Box();
                 let Other o = new Other();
                 let bool ne = a != o;
@@ -175,7 +175,7 @@ public class OperatorConsistencyTests
                 public int v;
                 public operator func <(Box other) { return self.v < other.v; }
             }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Box a = new Box();
                 let Box b = new Box();
                 let bool lt = a < b;
@@ -198,7 +198,7 @@ public class OperatorConsistencyTests
                 public int v;
                 {{decl}}
             }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Box a = new Box();
                 {{use}}
             } }
@@ -220,7 +220,7 @@ public class OperatorConsistencyTests
                 public operator Box func -() { return new Box(); }
                 public operator Box func -(Box other) { return new Box(); }
             }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Box a = new Box();
                 let Box b = new Box();
                 let Box neg = -a;
@@ -238,7 +238,7 @@ public class OperatorConsistencyTests
                 public operator func ++() { self.v = self.v + 1; }
                 public operator func --() { self.v = self.v - 1; }
             }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Counter c = new Counter();
                 c++;
                 c--;
@@ -279,7 +279,7 @@ public class OperatorConsistencyTests
     {
         AssertError(Codes.TypeMismatch, """
             class Box { public int v; }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Box a = new Box();
                 let bool r = !a;
             } }
@@ -302,7 +302,7 @@ public class OperatorConsistencyTests
                 operator Box func +(Box other) { return self; }
                 operator bool func ==(Box other) { return self.v == other.v; }
             }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Box a = new Box();
                 let Box b = new Box();
                 {{use}}
@@ -318,7 +318,7 @@ public class OperatorConsistencyTests
                 public int v;
                 operator int func [](int i) { return self.v; }
             }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Box b = new Box();
                 let int x = b[0];
             } }
@@ -333,7 +333,7 @@ public class OperatorConsistencyTests
                 int v;
                 operator Wrapper func as(int i) { return new Wrapper(); }
             }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Wrapper w = 5 as Wrapper;
             } }
             """);
@@ -348,7 +348,7 @@ public class OperatorConsistencyTests
                 operator Box func +(Box other) { return self; }
                 public Box func Twice() { return self + self; }
             }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Box a = new Box();
                 let Box b = a.Twice();
             } }

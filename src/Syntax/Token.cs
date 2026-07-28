@@ -12,8 +12,10 @@ internal enum TK : byte
     NativeContent, NativeTypeDecl,
 
     // Keywords (Structure)
-    Import, Kernel, User,
-    Process, Thread, Foreground, Background,
+    // 'userspace', 'process' and 'thread' are deliberately absent: they are contextual, matched by
+    // value where the grammar already forces them, so they stay usable as ordinary identifiers.
+    Import, Realm, Kernel,
+    Foreground, Background,
     Class, Module, Func, Static, Public, Private,
     Entry, Throws, Operator, As, Fields, Ref,
 

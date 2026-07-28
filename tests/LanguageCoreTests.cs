@@ -22,8 +22,20 @@ public class LanguageCoreTests
     {
         var data = new TheoryData<string, string>
         {
+            // The words 'realm' freed up. Before it existed, every one of these was a hard syntax
+            // error, which made three of the most ordinary names in systems code unusable.
+            { "contextual_keywords_as_names", """
+            class Session { public int user; }
+            realm kernel { entry func Main() {
+              let int user = 1;
+              let int process = 2;
+              let int thread = 3;
+              let Session s = new Session();
+              s.user = user + process + thread;
+            } }
+            """ },
             { "compound_bitwise", """
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
               let int f = 0;
               f |= 8; f &= 12; f ^= 4; f <<= 2; f >>= 1;
               let uint u = 1u;
@@ -31,27 +43,27 @@ public class LanguageCoreTests
             } }
             """ },
             { "cond_bool", """
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
               let int i = 0;
               while (i < 3) { i++; }
               if (i == 3) { } else { }
             } }
             """ },
             { "explicit_narrow", """
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
               let int64 a = 5;
               let int b = a as int;
             } }
             """ },
             { "for_init_no_let", """
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
               let int i = 0;
               let int sum = 0;
               for (i = 0; i < 5; i++) { sum = sum + i; }
             } }
             """ },
             { "for_step_assign", """
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
               let int sum = 0;
               for (let int i = 0; i < 100; i = i + 1) { sum = sum + i; }
               for (let int j = 0; j < 100; j += 7) { sum = sum + j; }
@@ -64,7 +76,7 @@ public class LanguageCoreTests
             T func identity[T](T x) { return x; }
             T func firstOf[T](T a, T b) { return a; }
 
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
               let int    a = max(3, 7);
               let int64  b = max((10 as int64), (4 as int64));
               let int    c = max(5, 9);
@@ -79,16 +91,16 @@ public class LanguageCoreTests
             }
             @keep
             void func helper() { }
-            kernel { entry func Main() { } }
+            realm kernel { entry func Main() { } }
             """ },
             { "kernel_float", """
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
               let double d = 1.0;
               let float  f = 2.5f;
             } }
             """ },
             { "literals", """
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
               let h1   = 0xFF;
               let h2   = 0xFFULL;
               let wide = 0x8000000000000000;
@@ -99,7 +111,7 @@ public class LanguageCoreTests
               let umax = 18446744073709551615;
               let dec  = 42;
             } }
-            user { foreground process App { thread T { entry func Run() {
+            realm userspace { foreground process App { thread T { entry func Run() {
               let huge  = 1.0e+300;
               let small = 5.96046447753906250000e-08;
               let neg   = 1.5e-10;
@@ -111,7 +123,7 @@ public class LanguageCoreTests
             native {
                 char* s = "only a closing brace }";
             }
-            kernel { entry func Main() { } }
+            realm kernel { entry func Main() { } }
             """ },
             { "process_thread_handles", """
             native {
@@ -123,7 +135,7 @@ public class LanguageCoreTests
                 unsafe { *slot = p; }
             }
 
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Process p = make_handle();
                 let Thread t = make_handle() as Thread;
                 if (p != null && t != null) {
@@ -136,7 +148,7 @@ public class LanguageCoreTests
             } }
             """ },
             { "return_ok", """
-            kernel { entry func Main() { let x = add(2,3); } }
+            realm kernel { entry func Main() { let x = add(2,3); } }
             int func add(int a, int b) { return a + b; }
             """ },
             { "switch_enum", """
@@ -150,7 +162,7 @@ public class LanguageCoreTests
               }
             }
 
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
               let int hits = 0;
               for (let int i = 0; i < 8; i++) {
                 switch (i) {
@@ -164,7 +176,7 @@ public class LanguageCoreTests
             } }
             """ },
             { "ternary", """
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
               let int a = 3;
               let int b = 7;
               let int m = a > b ? a : b;
@@ -177,9 +189,9 @@ public class LanguageCoreTests
             { "topology_threads", """
             int func work(int a) { return a + 1; }
 
-            kernel { entry func Main() { } }
+            realm kernel { entry func Main() { } }
 
-            user {
+            realm userspace {
               foreground process App {
                 thread Ui      { entry func Run() { let int a = work(1); } }
                 thread Worker { entry func Run() { let int b = work(2); } }
@@ -190,7 +202,7 @@ public class LanguageCoreTests
             }
             """ },
             { "widening", """
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
               let int a = 5;
               let int64 b = a;
               let short c = 3;
@@ -203,7 +215,7 @@ public class LanguageCoreTests
               return (x as int64);
             }
 
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
               let int    a = 1;
               let int64  b = 2;
               let uint   d = 3u;
@@ -251,81 +263,81 @@ public class LanguageCoreTests
             { "ambiguous_overload", "G015", """
             int func F(int a, float b) { return a; }
             int func F(float a, int b) { return b; }
-            kernel { entry func Main() { let int x = F(1, 1); } }
+            realm kernel { entry func Main() { let int x = F(1, 1); } }
             """ },
             { "annotation_on_block", "G048", """
             @intrinsic(alloc)
-            kernel { entry func Main() { } }
+            realm kernel { entry func Main() { } }
             """ },
             { "bitwise_assign_float", "G004", """
-            user { foreground process App { thread T { entry func Run() {
+            realm userspace { foreground process App { thread T { entry func Run() {
               let int x = 0; let double d = 2.0;
               x <<= d;
             } } } }
             """ },
             { "bool_arith", "G004", """
-            kernel { entry func Main() { let x = true + 5; } }
+            realm kernel { entry func Main() { let x = true + 5; } }
             """ },
             { "break_in_catch", "G022", """
             throws int func risky(int x) { if (x < 0) { throw; } return x; }
             int func sink(int a) { return a; }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
               try { let int x = risky(1); sink(x); } catch { break; }
             } }
             """ },
             { "call_entry", "G030", """
-            kernel { entry func Main() { Main(); } }
+            realm kernel { entry func Main() { Main(); } }
             """ },
             { "call_nonclass", "G006", """
-            kernel { entry func Main() { let int n = 5; n.foo(); } }
+            realm kernel { entry func Main() { let int n = 5; n.foo(); } }
             """ },
             { "cast_to_void", "G028", """
-            kernel { entry func Main() { let int x = 5; let y = x as void; } }
+            realm kernel { entry func Main() { let int x = 5; let y = x as void; } }
             """ },
             { "catch_binding", "G044", """
             throws int func risky(int x) { if (x < 0) { throw; } return x; }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
               try { let int v = risky(1); } catch (e) { }
             } }
             """ },
             { "char_bad_escape", "G047", """
-            kernel { entry func Main() { let c = '\q'; } }
+            realm kernel { entry func Main() { let c = '\q'; } }
             """ },
             { "char_empty", "G046", """
-            kernel { entry func Main() { let c = ''; } }
+            realm kernel { entry func Main() { let c = ''; } }
             """ },
             { "compound_str", "G004", """
-            kernel { entry func Main() { let int a = 0; a -= "x"; } }
+            realm kernel { entry func Main() { let int a = 0; a -= "x"; } }
             """ },
             { "compound_void", "G007", """
-            kernel { entry func Main(void x) { x -= "s"; } }
+            realm kernel { entry func Main(void x) { x -= "s"; } }
             """ },
             { "cond_int", "G029", """
-            kernel { entry func Main() { if (5) { } } }
+            realm kernel { entry func Main() { if (5) { } } }
             """ },
             { "continue_outside", "G022", """
-            kernel { entry func Main() { continue; } }
+            realm kernel { entry func Main() { continue; } }
             """ },
             { "default_private_field", "G035", """
             class Box { int v; func _init(int x) { self.v = x; } }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
               let Box b = new Box(1);
               let int z = b.v;
             } }
             """ },
             { "default_private_method", "G035", """
             module M { int func helper() { return 1; } }
-            kernel { entry func Main() { let int z = M.helper(); } }
+            realm kernel { entry func Main() { let int z = M.helper(); } }
             """ },
             { "defer_defer", "G062", """
-            kernel { entry func Main() { defer defer { } } }
+            realm kernel { entry func Main() { defer defer { } } }
             """ },
             { "dual_return_type", "G053", """
             int func Foo() -> String { return "hi"; }
-            kernel { entry func Main() { } }
+            realm kernel { entry func Main() { } }
             """ },
             { "dup_param", "G003", """
-            kernel { entry func Main() { } }
+            realm kernel { entry func Main() { } }
             int func f(int x, int x) { return x; }
             """ },
             { "duplicate_intrinsic", "G018", """
@@ -333,43 +345,43 @@ public class LanguageCoreTests
             void* func A(usize n) { return null; }
             @intrinsic(alloc)
             void* func B(usize n) { return null; }
-            kernel { entry func Main() { } }
+            realm kernel { entry func Main() { } }
             """ },
             { "enum_trailing_comma", "G052", """
             enum Color { Red, Green, Blue, }
-            kernel { entry func Main() { } }
+            realm kernel { entry func Main() { } }
             """ },
             { "field_as_method", "G006", """
             class C { int x; func f() { let y = self.x(); } }
-            kernel { entry func Main() { } }
+            realm kernel { entry func Main() { } }
             """ },
             { "field_static", "G053", """
             class C { static int x; }
-            kernel { entry func Main() { } }
+            realm kernel { entry func Main() { } }
             """ },
             { "field_with_entry", "G053", """
             class C { entry int x; }
-            kernel { entry func Main() { } }
+            realm kernel { entry func Main() { } }
             """ },
             { "field_with_throws", "G053", """
             class C { throws int x; }
-            kernel { entry func Main() { } }
+            realm kernel { entry func Main() { } }
             """ },
             { "forin_int", "G032", """
-            kernel { entry func Main() { for i in 5 { } } }
+            realm kernel { entry func Main() { for i in 5 { } } }
             """ },
             { "forin_partial_protocol", "G032", """
             class Bag {
                 int func Get(int i) { return i; }
             }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Bag b = new Bag();
                 for x in b { }
             } }
             """ },
             { "funcptr_ref_callsite", "G037", """
             int func AddOne(int x) { return x + 1; }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
               let f = AddOne;
               let int y = 5;
               let int r = f(ref y);
@@ -377,55 +389,58 @@ public class LanguageCoreTests
             """ },
             { "funcptr_ref_decay", "G004", """
             func Inc(ref int x) { x = x + 1; }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
               let f = Inc;
             } }
             """ },
             { "generic_conflict", "G009", """
             T func same[T](T a, T b) { return a; }
-            kernel { entry func Main() { let int64 z = same(3, (4 as int64)); } }
+            realm kernel { entry func Main() { let int64 z = same(3, (4 as int64)); } }
             """ },
             { "generic_expr", "G044", """
-            kernel { entry func Main() { let List[Main(x)] a; } }
+            realm kernel { entry func Main() { let List[Main(x)] a; } }
             """ },
             { "generic_no_infer", "G007", """
             T func make[T]() { return default(T); }
-            kernel { entry func Main() { let int z = make(); } }
+            realm kernel { entry func Main() { let int z = make(); } }
             """ },
             { "hex_overflow", "G004", """
-            kernel { entry func Main() { let x = 0x1FFFFFFFFFFFFFFFFF; } }
+            realm kernel { entry func Main() { let x = 0x1FFFFFFFFFFFFFFFFF; } }
             """ },
             { "huge_int", "G004", """
-            kernel { entry func Main() { let x = 999999999999999999999999; } }
+            realm kernel { entry func Main() { let x = 999999999999999999999999; } }
             """ },
             { "index_int", "G012", """
-            kernel { entry func Main() { let int n = 5; let x = n[0]; } }
+            realm kernel { entry func Main() { let int n = 5; let x = n[0]; } }
             """ },
             { "instance_on_static", "G014", """
             class C { public static int func F() { return 1; } }
-            kernel { entry func Main() { let C c = new C(); let int x = c.F(); } }
+            realm kernel { entry func Main() { let C c = new C(); let int x = c.F(); } }
             """ },
             { "intrinsic_on_native_block", "G041", """
             @intrinsic(alloc)
             native { int x; }
-            kernel { entry func Main() { } }
+            realm kernel { entry func Main() { } }
             """ },
             { "keep_on_enum", "G048", """
             @keep
             enum Color { Red, Green }
-            kernel { entry func Main() { } }
+            realm kernel { entry func Main() { } }
             """ },
             { "keep_on_method", "G041", """
             class C { @keep int func F() { return 1; } }
-            kernel { entry func Main() { } }
+            realm kernel { entry func Main() { } }
             """ },
-            { "keyword_as_ident_unreachable", "G044", """
-            kernel { entry func Main() {
+            // 'thread' and 'process' are contextual keywords, so this is no longer a syntax error -
+            // they parse as perfectly ordinary identifiers, and the only thing wrong is that
+            // nobody declared them.
+            { "contextual_keywords_are_idents", "G005", """
+            realm kernel { entry func Main() {
               let int x = thread + process;
             } }
             """ },
             { "logical_int", "G004", """
-            kernel { entry func Main() { let x = 3 && 4; } }
+            realm kernel { entry func Main() { let x = 3 && 4; } }
             """ },
             { "match_duplicate_default", "G003", """
             union Shape { Circle(float radius), Square(float side), Point }
@@ -438,53 +453,53 @@ public class LanguageCoreTests
                 }
             }
 
-            kernel { entry func Main() { } }
+            realm kernel { entry func Main() { } }
             """ },
             { "method_with_entry", "G053", """
             class C {
                 entry void func Run() {}
             }
-            kernel { entry func Main() {} }
+            realm kernel { entry func Main() {} }
             """ },
             { "missing_return", "G027", """
-            kernel { entry func Main() { } int func f() { } }
+            realm kernel { entry func Main() { } int func f() { } }
             """ },
             { "narrow_long_int", "G007", """
-            kernel { entry func Main() { let long a = 5; } }
+            realm kernel { entry func Main() { let long a = 5; } }
             """ },
             { "native_in_class", "G044", """
             class Box {
               int v;
               native { int extra; }
             }
-            kernel { entry func Main() { } }
+            realm kernel { entry func Main() { } }
             """ },
             { "nested_kernel", "G051", """
-            kernel { kernel { entry func Main() { } } }
+            realm kernel { realm kernel { entry func Main() { } } }
             """ },
             { "new_module", "G011", """
             module M { }
-            kernel { entry func Main() { let M m = new M(); } }
+            realm kernel { entry func Main() { let M m = new M(); } }
             """ },
             { "no_matching_overload", "G016", """
             class Widget { }
             int func F(int a) { return a; }
             int func F(String a) { return 0; }
-            kernel { entry func Main() { let Widget w = new Widget(); let int x = F(w); } }
+            realm kernel { entry func Main() { let Widget w = new Widget(); let int x = F(w); } }
             """ },
             { "nonsense_generic_class_header", "G053", """
             class Foo[Bar[Baz]] { int v; }
-            kernel { entry func Main() { } }
+            realm kernel { entry func Main() { } }
             """ },
             { "not_lvalue", "G034", """
-            kernel { entry func Main() { 5 = 3; } }
+            realm kernel { entry func Main() { 5 = 3; } }
             """ },
             { "operator_index_no_setter", "G038", """
             class RO {
                 int v;
                 operator int func [](int i) { return self.v; }
             }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let RO r = new RO();
                 r[0] = 5;
             } }
@@ -495,40 +510,40 @@ public class LanguageCoreTests
                 int func Length() { return 1; }
                 int func Get(int i) { return self.v; }
             }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let Plain p = new Plain();
                 let int x = p[0];
             } }
             """ },
             { "panic_user", "G031", """
-            kernel { entry func Main() {} }
-            user { foreground process A { thread T { entry func Run() { panic "nope"; } } } }
+            realm kernel { entry func Main() {} }
+            realm userspace { foreground process A { thread T { entry func Run() { panic "nope"; } } } }
             """ },
             { "preamble_on_func", "G041", """
             @preamble(user)
             int func Foo() { return 1; }
-            kernel { entry func Main() { } }
+            realm kernel { entry func Main() { } }
             """ },
             { "private_field", "G035", """
             class Box { private int v; func _init(int x) { self.v = x; } }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
               let Box b = new Box(1);
               let int z = b.v;
             } }
             """ },
             { "private_method", "G035", """
             module M { private int func helper() { return 1; } }
-            kernel { entry func Main() { let int z = M.helper(); } }
+            realm kernel { entry func Main() { let int z = M.helper(); } }
             """ },
             { "process_non_thread", "G053", """
-            user { foreground process App { int func oops() { return 1; } } }
+            realm userspace { foreground process App { int func oops() { return 1; } } }
             """ },
             { "redeclare", "G003", """
-            kernel { entry func Main() { let int s = 10; let String s = "hi"; } }
+            realm kernel { entry func Main() { let int s = 10; let String s = "hi"; } }
             """ },
             { "ref_missing_at_callsite", "G037", """
             func Swap[T](ref T a, ref T b) { let tmp = a; a = b; b = tmp; }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let int x = 1;
                 let int y = 2;
                 Swap(x, y);
@@ -536,41 +551,41 @@ public class LanguageCoreTests
             """ },
             { "ref_not_lvalue", "G034", """
             func Swap[T](ref T a, ref T b) { let tmp = a; a = b; b = tmp; }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let int y = 2;
                 Swap(ref 5, ref y);
             } }
             """ },
             { "ref_on_non_ref_param", "G037", """
             void func TakesInt(int n) { }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
                 let int x = 1;
                 TakesInt(ref x);
             } }
             """ },
             { "return_empty", "G010", """
-            kernel { entry func Main() { } int func f() { return; } }
+            realm kernel { entry func Main() { } int func f() { return; } }
             """ },
             { "return_void_val", "G010", """
-            kernel { entry func Main() { } void func f() { return 5; } }
+            realm kernel { entry func Main() { } void func f() { return 5; } }
             """ },
             { "static_free_func", "G040", """
             static int func helper() { return 1; }
-            kernel { entry func Main() { let int x = helper(); } }
+            realm kernel { entry func Main() { let int x = helper(); } }
             """ },
             { "static_on_instance", "G013", """
             class C { public int func F() { return 1; } }
-            kernel { entry func Main() { let int x = C.F(); } }
+            realm kernel { entry func Main() { let int x = C.F(); } }
             """ },
             { "string_bad_escape", "G047", """
-            kernel { entry func Main() { let s = "hi \q there"; } }
+            realm kernel { entry func Main() { let s = "hi \q there"; } }
             """ },
             { "string_raw_newline", "G046", """
-            kernel { entry func Main() { let s = "line1
+            realm kernel { entry func Main() { let s = "line1
             line2"; } }
             """ },
             { "switch_duplicate_default", "G003", """
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
               let int x = 5;
               switch (x) {
                 default { x = 1; }
@@ -580,119 +595,119 @@ public class LanguageCoreTests
             } }
             """ },
             { "switch_not_int", "G004", """
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
               let String s = "x";
               switch (s) { default { } }
             } }
             """ },
             { "ternary_branch", "G004", """
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
               let int a = 1;
               let int x = a > 0 ? 5 : "no";
             } }
             """ },
             { "ternary_class_mismatch", "G004", """
             class Box { int v; func _init(int x) { self.v = x; } }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
               let int x = true ? 1 : new Box(2);
             } }
             """ },
             { "ternary_cond", "G029", """
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
               let int a = 1;
               let int b = a ? 2 : 3;
             } }
             """ },
             { "thread_mode_not_allowed", "G043", """
-            kernel { entry func Main() {} }
-            user {
+            realm kernel { entry func Main() {} }
+            realm userspace {
               foreground process App {
                 background thread Worker { entry func Run() {} }
               }
             }
             """ },
             { "thread_nested", "G051", """
-            user { foreground process App { thread T { thread U { entry func R() { } } } } }
+            realm userspace { foreground process App { thread T { thread U { entry func R() { } } } } }
             """ },
             { "thread_no_entry", "G053", """
-            user { foreground process App { thread T { } } }
+            realm userspace { foreground process App { thread T { } } }
             """ },
             { "thread_stray_func", "G053", """
-            user { foreground process App { thread T {
+            realm userspace { foreground process App { thread T {
               entry func R() { }
               int func helper() { return 1; }
             } } }
             """ },
             { "throw_outside_throws", "G021", """
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
               throw;
             } }
             """ },
             { "throws_as_arg", "G021", """
             throws int func risky(int x) { if (x < 0) { throw; } return x; }
             int func sink(int a) { return a; }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
               let int x = sink(risky(1));
             } }
             """ },
             { "throws_in_concat", "G021", """
             throws int func risky(int x) { if (x < 0) { throw; } return x; }
             int func sink(int a) { return a; }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
               let String s = "n=" + risky(1);
             } }
             """ },
             { "throws_ternary_arm", "G021", """
             throws int func risky(int x) { if (x < 0) { throw; } return x; }
             int func sink(int a) { return a; }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
               let int x = true ? risky(1) : 0;
             } }
             """ },
             { "throws_unhandled", "G021", """
             throws int func risky(int x) { if (x < 0) { throw; } return x; }
             int func sink(int a) { return a; }
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
               let int x = risky(1);
             } }
             """ },
             { "trailing_return_type_only", "G053", """
             func Foo() -> int { return 1; }
-            kernel { entry func Main() { } }
+            realm kernel { entry func Main() { } }
             """ },
             { "undef_var", "G005", """
-            kernel { entry func Main() { let int x = y + 1; } }
+            realm kernel { entry func Main() { let int x = y + 1; } }
             """ },
             { "union_trailing_comma", "G052", """
             union U { A, B, }
-            kernel { entry func Main() { } }
+            realm kernel { entry func Main() { } }
             """ },
             { "unknown_annotation", "G048", """
-            kernel { entry func Main() { let int @foo = 5; } }
+            realm kernel { entry func Main() { let int @foo = 5; } }
             """ },
             { "unknown_intrinsic_role", "G017", """
             @intrinsic(totally_bogus_role)
             int func Foo() { return 0; }
-            kernel { entry func Main() { } }
+            realm kernel { entry func Main() { } }
             """ },
             { "unsafe_required_addrof", "G033", """
-            kernel { entry func Main() { let int x = 5; let int* p = &x; } }
+            realm kernel { entry func Main() { let int x = 5; let int* p = &x; } }
             """ },
             { "void_local", "G007", """
-            kernel { entry func Main() { let void v; } }
+            realm kernel { entry func Main() { let void v; } }
             """ },
             { "void_param", "G007", """
-            kernel { entry func Main() { } func f(void x) { } }
+            realm kernel { entry func Main() { } func f(void x) { } }
             """ },
             { "width_narrow", "G004", """
-            kernel { entry func Main() {
+            realm kernel { entry func Main() {
               let int64 a = 5;
               let int   b = a;
             } }
             """ },
             { "wrong_arg_count", "G008", """
             int func add(int a, int b) { return a + b; }
-            kernel { entry func Main() { let int x = add(1); } }
+            realm kernel { entry func Main() { let int x = add(1); } }
             """ }
         };
         return data;
@@ -712,18 +727,18 @@ public class LanguageCoreTests
         var data = new TheoryData<string, string, string>
         {
             { "empty_block", "G025", """
-            kernel { entry func Main() { if (true) { } } }
+            realm kernel { entry func Main() { if (true) { } } }
             """ },
             { "redundant_return", "G026", """
             void func F() { return; }
-            kernel { entry func Main() { F(); } }
+            realm kernel { entry func Main() { F(); } }
             """ },
             { "unreachable_code", "G024", """
             int func F() { return 1; let int x = 2; }
-            kernel { entry func Main() { let int y = F(); } }
+            realm kernel { entry func Main() { let int y = F(); } }
             """ },
             { "unused_variable", "G023", """
-            kernel { entry func Main() { let int x = 5; } }
+            realm kernel { entry func Main() { let int x = 5; } }
             """ }
         };
         return data;

@@ -54,10 +54,10 @@ internal record ClassDecl(string Name, string[] GenericParams, Annotation[] Anno
                  ClassMember[] Members, TextSpan Span, bool IsModule = false) : TopLevel(Span);
 
 /// <summary>
-/// kernel { … } or user { … } block. Groups top-level declarations that belong to one execution
-/// environment. Kind is the keyword ("kernel" or "user").
+/// realm kernel { … } or realm userspace { … } block. Groups top-level declarations that belong to
+/// one execution environment, which decides the translation unit they are emitted into.
 /// </summary>
-internal record ContextDecl(string Kind, TopLevel[] Items, TextSpan Span) : TopLevel(Span);
+internal record ContextDecl(Realm Kind, TopLevel[] Items, TextSpan Span) : TopLevel(Span);
 
 /// <summary>
 /// A free function declaration. GenericParams empty = ordinary function; non-empty = generic
