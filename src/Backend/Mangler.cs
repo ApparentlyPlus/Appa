@@ -152,15 +152,39 @@ internal static class Mangler
         return found;
     }
 
+    // Readable form of every scope-qualified name this build produced: 'Config@kernel$P1' maps to
+    // 'kernel.P1.Config'. Without this every diagnostic naming a scoped type would print the raw
+    // internal spelling, which is both unreadable and a lie about what the user wrote.
+    [ThreadStatic] private static Dictionary<string, string>? _scopeDisplayTls;
+    private static Dictionary<string, string> _scopeDisplay => _scopeDisplayTls ??= [];
+
+    /// <summary>
+    /// Records the readable, fully-qualified form of a scope-qualified name.
+    /// </summary>
+    public static void RegisterScopedName(string qualified, string display)
+    {
+        _scopeDisplay[qualified] = display;
+    }
+
+    /// <summary>
+    /// Clears the scoped-name display registry for the next build. Called beside the other resets;
+    /// leaving it populated leaks names between builds, which in the in-process test harness means
+    /// leaking them between tests.
+    /// </summary>
+    public static void ResetScopeDisplay()
+    {
+        _scopeDisplayTls = [];
+    }
+
     /// <summary>
     /// Returns the user-readable display name for a type, expanding generic instantiations
-    /// recursively, e.g. List_int becomes List[int].
+    /// recursively, e.g. List_int becomes List[int], and unqualifying scoped names.
     /// </summary>
     public static string DisplayName(string name)
     {
-        if (!_genericInfo.TryGetValue(name, out _))
+        if (!_genericInfo.ContainsKey(name))
         {
-            return name;
+            return _scopeDisplay.GetValueOrDefault(name, name);
         }
         var sb = new System.Text.StringBuilder();
         AppendDisplayName(sb, name);
@@ -184,8 +208,23 @@ internal static class Mangler
         }
         else
         {
-            sb.Append(name);
+            // A scoped type reached as a generic argument lands here, so the unqualification has to
+            // happen on this branch too: List_Config@kernel$P1 must read List[kernel.P1.Config].
+            sb.Append(_scopeDisplay.GetValueOrDefault(name, name));
         }
+    }
+
+    /// <summary>
+    /// Turns a scope-qualified Gata name into a C-safe fragment: 'Config@kernel$P' becomes
+    /// 'Config_s3f2a71c9'. Unqualified names pass through untouched, so a program that declares
+    /// nothing inside a realm or process emits byte-identical C to one compiled before scopes
+    /// existed. The token is a hash of the scope suffix rather than the suffix itself, to keep C
+    /// names short and stable regardless of how deeply nested the scope is.
+    /// </summary>
+    public static string Sanitize(string name)
+    {
+        int at = name.IndexOf('@');
+        return at < 0 ? name : string.Concat(name.AsSpan(0, at), "_s", Hash(name.AsSpan(at)));
     }
 
     /// <summary>
@@ -193,7 +232,7 @@ internal static class Mangler
     /// </summary>
     public static string Class(string name)
     {
-        return _dense.GetValueOrDefault(name, $"gata_{name}");
+        return _dense.GetValueOrDefault(name, $"gata_{Sanitize(name)}");
     }
 
     /// <summary>
@@ -201,7 +240,7 @@ internal static class Mangler
     /// </summary>
     public static string Allocator(string cls)
     {
-        return _dense.TryGetValue(cls, out var d) ? d + "_n" : $"new_{cls}";
+        return _dense.TryGetValue(cls, out var d) ? d + "_n" : $"new_{Sanitize(cls)}";
     }
 
     /// <summary>
@@ -209,7 +248,7 @@ internal static class Mangler
     /// </summary>
     public static string Dtor(string cls)
     {
-        return _dense.TryGetValue(cls, out var d) ? d + "_d" : $"gata_{cls}__dtor";
+        return _dense.TryGetValue(cls, out var d) ? d + "_d" : $"gata_{Sanitize(cls)}__dtor";
     }
 
     /// <summary>
@@ -225,7 +264,7 @@ internal static class Mangler
     /// </summary>
     public static string Enum(string name)
     {
-        return $"gata_{name}";
+        return $"gata_{Sanitize(name)}";
     }
 
     /// <summary>
@@ -233,7 +272,7 @@ internal static class Mangler
     /// </summary>
     public static string EnumMember(string enumName, string member)
     {
-        return $"gata_{enumName}_{member}";
+        return $"gata_{Sanitize(enumName)}_{member}";
     }
 
     /// <summary>
@@ -241,7 +280,7 @@ internal static class Mangler
     /// </summary>
     public static string Union(string name)
     {
-        return $"gata_{name}";
+        return $"gata_{Sanitize(name)}";
     }
 
     /// <summary>
@@ -249,7 +288,7 @@ internal static class Mangler
     /// </summary>
     public static string UnionTag(string unionName, string variant)
     {
-        return $"gata_{unionName}_{variant}";
+        return $"gata_{Sanitize(unionName)}_{variant}";
     }
 
     /// <summary>
@@ -259,7 +298,7 @@ internal static class Mangler
     /// </summary>
     public static string UnionRetain(string name)
     {
-        return $"gata_{name}__retain";
+        return $"gata_{Sanitize(name)}__retain";
     }
 
     /// <summary>
@@ -268,7 +307,7 @@ internal static class Mangler
     /// </summary>
     public static string UnionRelease(string name)
     {
-        return $"gata_{name}__release";
+        return $"gata_{Sanitize(name)}__release";
     }
 
     /// <summary>
@@ -277,7 +316,7 @@ internal static class Mangler
     /// </summary>
     public static string UnionEq(string name)
     {
-        return $"gata_{name}__eq";
+        return $"gata_{Sanitize(name)}__eq";
     }
 
     /// <summary>
@@ -285,7 +324,7 @@ internal static class Mangler
     /// </summary>
     public static string Method(string owner, string name, IReadOnlyList<Param> ps, bool overloaded)
     {
-        return $"gata_{owner}_{name}" + (overloaded ? "_" + OverloadSuffix(ps) : "");
+        return $"gata_{Sanitize(owner)}_{name}" + (overloaded ? "_" + OverloadSuffix(ps) : "");
     }
 
     /// <summary>
@@ -296,7 +335,7 @@ internal static class Mangler
     {
         if (isEntry)  return KernelEntry;
         if (isExtern) return name;
-        string b = name.StartsWith("gata_") ? name : $"gata_{name}";
+        string b = name.StartsWith("gata_") ? name : $"gata_{Sanitize(name)}";
         return b + (overloaded ? "_" + OverloadSuffix(ps) : "");
     }
 
@@ -306,7 +345,7 @@ internal static class Mangler
     /// </summary>
     public static string PrivateFreeFunc(string fileToken, string name, IReadOnlyList<Param> ps, bool overloaded)
     {
-        return $"gata_f{fileToken}_{name}" + (overloaded ? "_" + OverloadSuffix(ps) : "");
+        return $"gata_f{fileToken}_{Sanitize(name)}" + (overloaded ? "_" + OverloadSuffix(ps) : "");
     }
 
     /// <summary>
@@ -315,8 +354,17 @@ internal static class Mangler
     /// </summary>
     public static string FileToken(string file)
     {
+        return Hash(file);
+    }
+
+    /// <summary>
+    /// A stable 8-hex C-identifier fragment derived from a string via 32-bit FNV-1a. Stable across
+    /// builds and machines, which matters because it ends up in emitted C.
+    /// </summary>
+    private static string Hash(ReadOnlySpan<char> s)
+    {
         uint h = 2166136261;
-        foreach (char c in file) { h ^= c; h *= 16777619; }
+        foreach (char c in s) { h ^= c; h *= 16777619; }
         return h.ToString("x8");
     }
 
@@ -327,7 +375,7 @@ internal static class Mangler
     /// </summary>
     public static string Operator(string owner, string op, IReadOnlyList<Param> ps, bool overloaded)
     {
-        string bare = $"gata_{owner}_{OpSuffix(op)}";
+        string bare = $"gata_{Sanitize(owner)}_{OpSuffix(op)}";
         if (!overloaded) return bare;
         
         // Note here: A zero param overload is the unary form of a symbol that also has a binary form. 

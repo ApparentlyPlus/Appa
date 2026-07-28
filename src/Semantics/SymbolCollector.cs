@@ -263,7 +263,7 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
         // error on a free function, not a redundant-but-harmless spelling.
         if ((fd.Modifiers & Modifiers.Static) != 0)
             diag.Error(Codes.StaticOnFreeFunc, file, fd.Span,
-                $"'static' has no meaning on the free function '{fd.Name}' — it is never an instance member");
+                $"'static' has no meaning on the free function '{Mangler.DisplayName(fd.Name)}' — it is never an instance member");
 
         if (fd.GenericParams.Length > 0) return;
 

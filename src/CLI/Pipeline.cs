@@ -70,6 +70,7 @@ internal static class Pipeline
     {
         Mangler.ResetDense();
         Mangler.ResetGenericDisplay();
+        Mangler.ResetScopeDisplay();
         var scopes = new ScopeBinder(diag).Bind(programs);
         var genericRequestFile = new Monomorphizer(diag).Process(programs);
         var collected = new SymbolCollector(diag).Collect([.. programs.Select(t => (t.path, t.prog))]);

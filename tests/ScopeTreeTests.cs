@@ -164,15 +164,18 @@ public class ScopeTreeTests
     }
 
     /// <summary>
-    /// A program with no realm-scoped declarations must produce no scoped names at all - that is
-    /// what makes qualification inert for every program written before scopes existed.
+    /// A program whose realms declare nothing but an entry func produces no scoped names at all,
+    /// which is what makes qualification inert for every program written before scopes existed.
+    /// An 'entry func' is deliberately excluded: it is named by the runtime, not by Gata code.
     /// </summary>
     [Fact]
     public void BinderIsInertWithoutScopedDeclarations()
     {
         var r = Bind("class Global { int n; } realm kernel { entry func Main() { } }");
-        Assert.Equal("Main@kernel", r.Index.Resolve(r.Tree.Intern(ScopeId.Root, "kernel", Realm.Kernel), "Main"));
+        var kernel = r.Tree.Intern(ScopeId.Root, "kernel", Realm.Kernel);
+        Assert.Null(r.Index.Resolve(kernel, "Main"));
         Assert.Null(r.Index.Resolve(ScopeId.Root, "Global"));
+        Assert.False(r.Index.HasScopedDeclarations);
     }
 
     [Fact]

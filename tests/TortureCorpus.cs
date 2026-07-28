@@ -901,6 +901,83 @@ public static class TortureCorpus
 
         #endregion
 
+        #region realm scopes
+        // The declaration two realms may each make. Accepted, so EmittedCCompilesTests puts the
+        // generated C through the host compiler - which is where a name collision would surface as
+        // a duplicate struct rather than as anything the front end could have caught.
+        yield return new("scope/same-class-in-both-realms", """
+            realm kernel {
+                class Config { public int n; }
+                void func Use(Config c) { }
+                entry func Main() { }
+            }
+            realm userspace {
+                class Config { public int n; }
+                void func Use(Config c) { }
+                foreground process App {
+                    thread T { entry func Run() { } }
+                }
+            }
+            """, Expect.Accepted);
+
+        yield return new("scope/same-enum-and-union-in-both-realms", """
+            realm kernel {
+                enum Mode { Idle }
+                union Msg { Ping, Pong(int n) }
+                entry func Main() { let Mode m = Mode.Idle; let Msg s = Msg.Ping(); }
+            }
+            realm userspace {
+                enum Mode { Idle }
+                union Msg { Ping, Pong(int n) }
+                foreground process App {
+                    thread T { entry func Run() { let Mode m = Mode.Idle; let Msg s = Msg.Pong(1); } }
+                }
+            }
+            """, Expect.Accepted);
+
+        // A realm-scoped declaration is not visible from the enclosing scope. This is the whole
+        // point of the feature, so it gets a case rather than only a unit test.
+        yield return new("scope/realm-type-not-visible-outside",
+            "void func Take(Config c) { } realm kernel { class Config { int n; } entry func Main() { } }",
+            Expect.Rejected);
+
+        yield return new("scope/realm-type-not-visible-from-sibling",
+            "realm kernel { class Config { int n; } entry func Main() { } } " +
+            "realm userspace { void func Take(Config c) { } }",
+            Expect.Rejected);
+
+        // A realm may shadow a top-level name; the inner one wins, silently.
+        yield return new("scope/realm-shadows-top-level", """
+            class Config { public int narrow; }
+            realm kernel {
+                // Shadows the top-level Config. The inner one wins here, silently, and the outer
+                // one stays reachable everywhere else.
+                class Config { public int wide; }
+                void func Use(Config c) { let int v = c.wide; }
+                entry func Main() { }
+            }
+            """, Expect.Accepted);
+
+        yield return new("scope/generic-class-in-realm",
+            "realm kernel { class Box[T] { T v; } entry func Main() { } }",
+            Expect.Rejected, Codes.GenericInScope);
+
+        yield return new("scope/generic-func-in-realm",
+            "realm kernel { T func Id[T](T v) { return v; } entry func Main() { } }",
+            Expect.Rejected, Codes.GenericInScope);
+
+        // A top-level generic instantiated over a realm-scoped type: the template stays global, the
+        // argument is scoped, and the stamp is per-realm. This is the case that must keep working.
+        yield return new("scope/top-level-generic-over-realm-type", """
+            class Box[T] { public T v; }
+            realm kernel {
+                class Config { public int n; }
+                void func Use(Box[Config] b) { }
+                entry func Main() { }
+            }
+            """, Expect.Accepted);
+        #endregion
+
         #region realms / structure
         yield return new("struct/no-entry", "void func H() { }", Expect.Rejected);
         yield return new("struct/two-entries",

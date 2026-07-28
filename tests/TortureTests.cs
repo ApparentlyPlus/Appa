@@ -1,14 +1,22 @@
 namespace Appa.Tests;
 
 using System.Text;
+using System.Text.RegularExpressions;
 
 /// <summary>
 /// Whole-compiler invariants over a corpus of plausible but garbage programs: nothing crashes,
 /// every diagnostic is well-formed, and anything clean emits valid C. One [Fact] sweeps the corpus
 /// and reports every violation at once, since a regression is usually a class.
 /// </summary>
-public class TortureTests
+public partial class TortureTests
 {
+    /// <summary>
+    /// The internal spelling of a scoped declaration: an identifier, then '@', then a realm name,
+    /// optionally then '$' and a process name.
+    /// </summary>
+    [GeneratedRegex(@"\w@(kernel|userspace)(\$\w+)?")]
+    private static partial Regex ScopeQualifiedName();
+
     #region Sweep plumbing
 
     /// <summary>
@@ -137,6 +145,14 @@ public class TortureTests
                 if (!known.Contains(d.Code)) fails.Add($"{where}: undeclared diagnostic code");
                 if (string.IsNullOrWhiteSpace(d.Message)) fails.Add($"{where}: empty message");
                 else if (d.Message.Contains('\n')) fails.Add($"{where}: multi-line message -- '{d.Message}'");
+
+                // A scope-qualified name is an internal spelling - 'Config@kernel', 'Config@kernel$P'
+                // - and must never reach a user; the readable form is 'kernel.P.Config'. Matching
+                // the shape rather than a bare '@' keeps annotation names like '@intrinsic(alloc)',
+                // which legitimately appear in messages, from tripping this.
+                foreach (string text in new[] { d.Message }.Concat(d.Hints))
+                    if (ScopeQualifiedName().IsMatch(text))
+                        fails.Add($"{where}: raw scope-qualified name leaked into user-facing text -- '{text}'");
 
                 // TextSpan.None is the deliberate "this diagnostic is about the build,
                 // not a place in a file" marker, and an empty file has nothing to point at.

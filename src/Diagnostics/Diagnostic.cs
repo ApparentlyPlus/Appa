@@ -29,7 +29,8 @@ internal sealed record Diagnostic(Severity Severity, string Code, string Message
 internal static class Codes
 {
     public const string File                  = "G000";
-    public const string RetiredG001           = "G001";
+    // Was DuplicateContext, which duplicated G057; repurposed rather than left reserved.
+    public const string GenericInScope        = "G001";
     public const string MissingEntryPoint     = "G002";
     public const string DuplicateName         = "G003";
     public const string TypeMismatch          = "G004";
@@ -115,6 +116,7 @@ internal static class Codes
     public const string ImprecisePayloadComparison = "G084";
     public const string MissingRealmKeyword        = "G085";
     public const string UnknownRealm               = "G086";
+    public const string ScopedNameNotVisible       = "G087";
 }
 
 /// <summary>

@@ -255,16 +255,19 @@ public class UnionEqualityTests
         // Emitted sections rather than composed files: which translation units a build produces
         // depends on the environment's preamble blocks, and this has nothing to do with those.
         var (diag, module) = SingleFileCompile.Check("""
-            union Tagged { Ident(Key k), Nothing }
-
             realm kernel { entry func Main() { } }
 
             realm userspace {
+                // Both the payload class and the union naming it live in the realm. A realm-scoped
+                // declaration is not visible from an enclosing scope, so a top-level union could
+                // not name Key at all - which is the encapsulation working, not a limitation.
                 class Key {
                     public int id;
                     func _init() { self.id = 0; }
                     public operator bool func ==(Key other) { return self.id == other.id; }
                 }
+
+                union Tagged { Ident(Key k), Nothing }
 
                 foreground process App {
                     thread T {
@@ -280,13 +283,18 @@ public class UnionEqualityTests
         Assert.False(diag.HasErrors, string.Join("; ", diag.All.Select(d => d.Message)));
         var o = new Emitter(module!, diag).Build();
 
-        const string Body = "gata_Tagged__eq(gata_Tagged _a, gata_Tagged _b) {";
-        Assert.Contains(Body, o.UserFuncs);
-        Assert.DoesNotContain(Body, o.KernelFuncs);
+        // Derived rather than spelled out: a realm-scoped type's C name carries a scope token, and
+        // hardcoding the hash here would make this test a puzzle rather than a check.
+        string ty = Mangler.Union("Tagged@userspace");
+        string eq = Mangler.UnionEq("Tagged@userspace");
+        string body = $"{eq}({ty} _a, {ty} _b) {{";
+
+        Assert.Contains(body, o.UserFuncs);
+        Assert.DoesNotContain(body, o.KernelFuncs);
 
         // The prototype stays shared: declaring a function no unit defines is legal C, and
         // dropping it per-realm would mean threading realm knowledge into the header too.
-        Assert.Contains("gata_Tagged__eq", o.SharedHeader);
+        Assert.Contains(eq, o.SharedHeader);
     }
 
     /// <summary>

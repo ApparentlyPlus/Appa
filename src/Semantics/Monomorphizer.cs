@@ -13,6 +13,14 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
         public readonly Dictionary<string, string> CMap = c ?? [];
 
         /// <summary>
+        /// Also rewrite bare identifiers that name a substituted type, not just type positions.
+        /// Off for monomorphization, where the keys are type parameters and an identifier spelled
+        /// like one is a variable that must be left alone. On for scope binding, where the keys are
+        /// type names and 'Tagged.Ident(...)' has to follow 'let Tagged x'.
+        /// </summary>
+        public bool RewriteTypeNames { get; init; }
+
+        /// <summary>
         /// Substitutes type parameters in raw native C text, replacing whole words that match a
         /// type parameter with its concrete C type. Native bodies are the one place where
         /// substitution is genuinely textual. Everything else is rewritten structurally.
@@ -390,6 +398,41 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     }
 
     /// <summary>
+    /// Substitutes every type mentioned in a class's members, returning the same array when nothing
+    /// changed. Shared with the ScopeBinder, which rewrites scoped type names through exactly the
+    /// same walker rather than duplicating knowledge of where type positions live.
+    /// </summary>
+    internal static ClassMember[] SubMembers(ClassMember[] members, SubstitutionContext ctx)
+    {
+        ClassMember[]? result = null;
+        for (int i = 0; i < members.Length; i++)
+        {
+            var sm = SubMember(members[i], ctx);
+            if (!ReferenceEquals(sm, members[i]) && result == null)
+            {
+                result = new ClassMember[members.Length];
+                Array.Copy(members, result, i);
+            }
+            result?[i] = sm;
+        }
+        return result ?? members;
+    }
+
+    /// <summary>
+    /// Substitutes every type mentioned in a union's variant payloads.
+    /// </summary>
+    internal static UnionVariant[] SubVariants(UnionVariant[] variants, SubstitutionContext ctx)
+    {
+        var result = new UnionVariant[variants.Length];
+        for (int i = 0; i < variants.Length; i++)
+        {
+            var v = variants[i];
+            result[i] = v with { Fields = SubParams(v.Fields, ctx) };
+        }
+        return result;
+    }
+
+    /// <summary>
     /// Substitutes type parameters in a single class member (field, method, or operator).
     /// </summary>
     private static ClassMember SubMember(ClassMember m, SubstitutionContext ctx)
@@ -545,7 +588,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     /// Substitutes type parameters in a block of statements, returning a new block if any
     /// substitutions occurred.
     /// </summary>
-    private static Block SubBlock(Block b, SubstitutionContext ctx)
+    internal static Block SubBlock(Block b, SubstitutionContext ctx)
     {
         Stmt[]? newStmts = null;
         for (int i = 0; i < b.Stmts.Length; i++)
@@ -754,6 +797,15 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     {
         switch (e)
         {
+            // A type name can appear in expression position too - as the receiver of a union
+            // construction or a static call. Only rewritten when the caller opts in; see
+            // SubstitutionContext.RewriteTypeNames.
+            case IdentExpr id when ctx.RewriteTypeNames:
+                return ctx.SpecMap.TryGetValue(id.Name, out var bound)
+                    && bound is NamedSpec { Args.Length: 0 } ns
+                    ? new IdentExpr(ns.Name, id.Span) { Span = e.Span }
+                    : e;
+
             case CastExpr ce:
                 var newType = ctx.SubType(ce.TargetType);
                 var newVal = SubExpr(ce.Value, ctx);
