@@ -148,10 +148,14 @@ internal sealed class ScopeBinder(DiagnosticBag diag)
     /// </summary>
     private void DeclareItem(ScopeTree tree, ScopeIndex index, ScopeId scope, TopLevel item, string file)
     {
-        // A generic template's name carries its parameter list ("List[T]" parses as "List_T"), and
-        // the Monomorphizer recovers the base by stripping that suffix from the tail. A scope
-        // suffix appended after it would break that recovery silently - the template would simply
-        // never be found. Rejecting it outright is the honest version of not supporting it yet.
+        // A generic template inside a realm is rejected because the Monomorphizer collects and
+        // splices templates over a program's top-level items only - it has never descended into a
+        // realm block - so one declared here would be found by nothing and silently left as a
+        // half-formed class. Rejecting it is the honest version of not supporting it yet.
+        //
+        // The name is no longer the obstacle: a declaration carries its BaseName, so qualifying a
+        // template is composing 'List@kernel' with its parameters rather than hoping a suffix strip
+        // lands in the right place.
         switch (item)
         {
             case ClassDecl { GenericParams.Length: > 0 } g:
@@ -231,9 +235,9 @@ internal sealed class ScopeBinder(DiagnosticBag diag)
         return item switch
         {
             ClassDecl { GenericParams.Length: 0 } cd =>
-                cd with { Name = Q(cd.Name), Members = Monomorphizer.SubMembers(cd.Members, sub) },
+                cd with { Name = Q(cd.Name), BaseName = Q(cd.BaseName), Members = Monomorphizer.SubMembers(cd.Members, sub) },
             UnionDecl { GenericParams.Length: 0 } ud =>
-                ud with { Name = Q(ud.Name), Variants = Monomorphizer.SubVariants(ud.Variants, sub) },
+                ud with { Name = Q(ud.Name), BaseName = Q(ud.BaseName), Variants = Monomorphizer.SubVariants(ud.Variants, sub) },
             EnumDecl ed => ed with { Name = Q(ed.Name) },
             NativeTypeDecl nd => nd with { Name = Q(nd.Name) },
             // A process is not itself a scope yet, but its threads run inside the realm and must

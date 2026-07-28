@@ -2131,7 +2131,7 @@ internal sealed class TypeResolver(
             return new IrStaticCall(fallback, IrType.Void, args);
         }
 
-        string mangled = fd.Name + "_" + string.Join("_", fd.GenericParams.Select(p => Monomorphizer.SanitizeTypeName(binds[p].ToSpecString())));
+        string mangled = Mangler.GenericInstance(fd.Name, fd.GenericParams.Select(p => Monomorphizer.SanitizeTypeName(binds[p].ToSpecString())));
         _usedFuncTemplates.Add((t.File, fd.Name));
         if (_genericSeen.Add(mangled))
             _genericQueue.Enqueue((fd, t.File, t.Realm, binds, mangled));
@@ -2187,7 +2187,7 @@ internal sealed class TypeResolver(
             return FallbackCall();
         }
 
-        string mangled = md.Name + "_" + string.Join("_", md.GenericParams.Select(p => Monomorphizer.SanitizeTypeName(binds[p].ToSpecString())));
+        string mangled = Mangler.GenericInstance(md.Name, md.GenericParams.Select(p => Monomorphizer.SanitizeTypeName(binds[p].ToSpecString())));
         string seenKey = owner + "::" + mangled;
         _usedMethodTemplates.Add(new MemberKey(owner, md.Name));
         if (_genericSeen.Add(seenKey))

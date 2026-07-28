@@ -204,4 +204,72 @@ public class ParserTests
     {
         Assert.Throws<ParseException>(() => SingleFileCompile.Parse("func F() { let int x = 5 }"));
     }
+
+    #region Generic names
+
+    /// <summary>
+    /// A generic declaration folds its parameter list into Name so a self-reference in the body
+    /// resolves, and carries the name the user wrote in BaseName. Recovering the base by stripping
+    /// "_T" off the tail instead is a guess that fails open - it returns the whole string - and a
+    /// template that cannot identify its own base is never matched to its instantiations again.
+    /// </summary>
+    [Theory]
+    [InlineData("class List[T] { T v; }", "List_T", "List")]
+    [InlineData("class Map[K, V] { K k; V v; }", "Map_K_V", "Map")]
+    [InlineData("class Plain { int n; }", "Plain", "Plain")]
+    public void GenericClassCarriesItsBaseName(string src, string name, string baseName)
+    {
+        var cd = Assert.IsType<ClassDecl>(SingleFileCompile.Parse(src).Items[0]);
+        Assert.Equal(name, cd.Name);
+        Assert.Equal(baseName, cd.BaseName);
+    }
+
+    [Theory]
+    [InlineData("union Maybe[V] { Found(V v), Missing }", "Maybe_V", "Maybe")]
+    [InlineData("union Flat { A, B }", "Flat", "Flat")]
+    public void GenericUnionCarriesItsBaseName(string src, string name, string baseName)
+    {
+        var ud = Assert.IsType<UnionDecl>(SingleFileCompile.Parse(src).Items[0]);
+        Assert.Equal(name, ud.Name);
+        Assert.Equal(baseName, ud.BaseName);
+    }
+
+    /// <summary>
+    /// The parser and every later pass must spell an instantiation identically. They agree because
+    /// they call the same composer, not because two independent concatenations happen to match.
+    /// </summary>
+    [Fact]
+    public void ParserComposesGenericNamesThroughTheManglerParserAndPassesAgree()
+    {
+        var cd = Assert.IsType<ClassDecl>(SingleFileCompile.Parse("class Map[K, V] { K k; V v; }").Items[0]);
+        Assert.Equal(Mangler.GenericInstance(cd.BaseName, cd.GenericParams), cd.Name);
+    }
+
+    /// <summary>
+    /// A type reference is structured - base plus arguments - and its mangled spelling is derived,
+    /// never parsed back. Nesting must compose the same way at every depth.
+    /// </summary>
+    [Fact]
+    public void NestedGenericTypeReferencesMangleStructurally()
+    {
+        var inner = new NamedSpec("List", [new NamedSpec("int")], TextSpan.None);
+        var outer = new NamedSpec("Box", [inner], TextSpan.None);
+        Assert.Equal("List_int", inner.Mangled);
+        Assert.Equal("Box_List_int", outer.Mangled);
+        Assert.Equal(outer.Mangled, Mangler.GenericInstance("Box", [inner.Mangled]));
+    }
+
+    /// <summary>
+    /// The instantiation site a generic declaration registers names the base, so the Monomorphizer
+    /// never has to recover it from the mangled form.
+    /// </summary>
+    [Fact]
+    public void GenericDeclarationRegistersItsUseUnderTheBaseName()
+    {
+        var prog = SingleFileCompile.Parse("class List[T] { T v; }");
+        var use = Assert.Single(prog.GenericUses.Where(u => u.Base == "List"));
+        Assert.Equal(["T"], use.Args);
+    }
+
+    #endregion
 }

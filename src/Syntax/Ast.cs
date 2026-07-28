@@ -51,7 +51,17 @@ internal record NativeBlock(NativeBody Body, TextSpan Span, Annotation[]? Annota
 /// concrete type argument set.
 /// </summary>
 internal record ClassDecl(string Name, string[] GenericParams, Annotation[] Annotations,
-                 ClassMember[] Members, TextSpan Span, bool IsModule = false) : TopLevel(Span);
+                 ClassMember[] Members, TextSpan Span, bool IsModule = false) : TopLevel(Span)
+{
+    /// <summary>
+    /// The name as the user wrote it, before the generic parameter list was folded into Name.
+    /// "class List[T]" has Name "List_T" and BaseName "List"; for a non-generic declaration the two
+    /// are the same. Carried rather than recovered: stripping "_T" off the tail of Name is a guess
+    /// that silently returns the whole string when it is wrong, and a template that fails to
+    /// identify its own base is simply never found again.
+    /// </summary>
+    public string BaseName { get; init; } = Name;
+}
 
 /// <summary>
 /// realm kernel { … } or realm userspace { … } block. Groups top-level declarations that belong to
@@ -104,7 +114,14 @@ internal record EnumMember(string Name, Expr? Value, TextSpan Span);
 /// stamped UnionDecl per instantiation.
 /// </summary>
 internal record UnionDecl(string Name, string[] GenericParams, UnionVariant[] Variants,
-                          TextSpan Span, Annotation[]? Annotations = null) : TopLevel(Span);
+                          TextSpan Span, Annotation[]? Annotations = null) : TopLevel(Span)
+{
+    /// <summary>
+    /// The name as the user wrote it, before the generic parameter list was folded into Name. See
+    /// <see cref="ClassDecl.BaseName"/>.
+    /// </summary>
+    public string BaseName { get; init; } = Name;
+}
 
 /// <summary>
 /// One variant of a union. Fields is empty for a payload-free variant like Point.

@@ -146,13 +146,13 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
             {
                 var (declName, genericParams) = item switch
                 {
-                    ClassDecl cd when cd.GenericParams.Length > 0 => (cd.Name, cd.GenericParams),
-                    UnionDecl ud when ud.GenericParams.Length > 0 => (ud.Name, ud.GenericParams),
+                    ClassDecl cd when cd.GenericParams.Length > 0 => (cd.BaseName, cd.GenericParams),
+                    UnionDecl ud when ud.GenericParams.Length > 0 => (ud.BaseName, ud.GenericParams),
                     _ => ((string?)null, (string[]?)null),
                 };
                 if (declName == null) continue;
 
-                string baseName = BaseNameOf(declName, genericParams!);
+                string baseName = declName;
 
                 // 'C[T, T]' names one parameter twice, so the second argument is unreachable and
                 // the mangled name collides with the single-parameter form. Silently accepted
@@ -168,7 +168,10 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
                         $"generic type '{baseName}' is already declared");
                 templates[baseName] = new Template(item, genericParams!, baseName);
                 Mangler.RegisterGenericTemplate(baseName);
-                tmplNames.Add(declName);
+                // The template's own mangled name, derived through the same composer every request
+                // uses. A self-reference inside the body parses as an instantiation over the type
+                // parameter itself, and this is what stops it asking to stamp a copy.
+                tmplNames.Add(Mangler.GenericInstance(baseName, genericParams!));
             }
 
         if (templates.Count == 0) return [];
@@ -214,7 +217,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
         bool AddRequest(string b, string[] a, TextSpan sp, string file, string requester)
         {
             if (!templates.ContainsKey(b)) return false;
-            string mangled = b + "_" + string.Join("_", a);
+            string mangled = Mangler.GenericInstance(b, a);
             if (tmplNames.Contains(mangled)) return false;
             if (!requests.TryAdd(mangled, (b, a, sp, file))) return false;
             scopeRequester[mangled] = requester;
@@ -260,7 +263,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
                 {
                     var concreteArgs = SubstituteArgs(du, binds);
                     if (AddRequest(du.Base, concreteArgs, du.Span, dfile, requester))
-                        pending.Enqueue(du.Base + "_" + string.Join("_", concreteArgs));
+                        pending.Enqueue(Mangler.GenericInstance(du.Base, concreteArgs));
                 }
         }
 
@@ -273,8 +276,8 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
             {
                 string? tmplBase = item switch
                 {
-                    ClassDecl cd when cd.GenericParams.Length > 0 => BaseNameOf(cd.Name, cd.GenericParams),
-                    UnionDecl ud when ud.GenericParams.Length > 0 => BaseNameOf(ud.Name, ud.GenericParams),
+                    ClassDecl cd when cd.GenericParams.Length > 0 => cd.BaseName,
+                    UnionDecl ud when ud.GenericParams.Length > 0 => ud.BaseName,
                     _ => null,
                 };
                 if (tmplBase != null)
@@ -333,12 +336,6 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
         for (int i = 0; i < specs.Length; i++)
             result[i] = ctx.SubType(specs[i]) is NamedSpec ns ? ns.Mangled : du.Args[i];
         return result;
-    }
-
-    private static string BaseNameOf(string name, string[] genericParams)
-    {
-        string suffix = "_" + string.Join("_", genericParams);
-        return name.EndsWith(suffix) ? name[..^suffix.Length] : name;
     }
 
     /// <summary>

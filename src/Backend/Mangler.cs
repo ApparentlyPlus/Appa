@@ -94,6 +94,19 @@ internal static class Mangler
     }
 
     /// <summary>
+    /// Composes the internal name of a generic instantiation from its base and type arguments:
+    /// ("List", ["int"]) becomes "List_int". The single place this rule is spelled - every caller
+    /// that needs the name asks for it rather than concatenating its own, so the composition and
+    /// the decomposition can never drift apart.
+    /// </summary>
+    public static string GenericInstance(string baseName, IEnumerable<string> args)
+    {
+        var sb = new System.Text.StringBuilder(baseName);
+        foreach (var a in args) sb.Append('_').Append(a);
+        return sb.ToString();
+    }
+
+    /// <summary>
     /// Records the base name and type arguments for a generic instantiation so diagnostics can
     /// display it in user-readable form.
     /// </summary>

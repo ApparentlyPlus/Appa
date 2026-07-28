@@ -440,13 +440,15 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
 
     /// <summary>
     /// Parses a class declaration. The name is mangled with the generic parameter list so the
-    /// Monomorphizer can match self-references. "class List[T]" becomes "List_T" in the AST.
+    /// Monomorphizer can match self-references: "class List[T]" becomes "List_T" in the AST, with
+    /// BaseName holding the "List" the user wrote.
     /// </summary>
     private ClassDecl ParseClassDecl(Annotation[] anns, int s)
     {
         Expect(TK.Class);
         int ns = Cur.Span.Start;
         var name = ParseSimpleTypeName();
+        string baseName = name;
         List<string> generics = [];
         if (At(TK.LBrack))
         {
@@ -455,16 +457,18 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
             while (Try(TK.Comma)) generics.Add(ExpectBareGenericParam());
             Expect(TK.RBrack);
 
-            // Register the instantiation site and mangle the name before parsing the body.
+            // Register the instantiation site and mangle the name before parsing the body, so a
+            // self-reference in the body resolves. Composed through Mangler so the one function
+            // that builds this name is the one every other pass asks for it from.
             var genericsArray = generics.ToArray();
             _gu.Add(new GenericUse(name, genericsArray, To(ns)));
-            name = name + "_" + string.Join("_", genericsArray);
+            name = Mangler.GenericInstance(name, genericsArray);
         }
         Expect(TK.LBrace);
         List<ClassMember> members = [];
         while (!At(TK.RBrace) && !At(TK.EOF)) members.Add(ParseClassMember());
         Expect(TK.RBrace);
-        return new ClassDecl(name, [.. generics], anns, [.. members], To(s));
+        return new ClassDecl(name, [.. generics], anns, [.. members], To(s)) { BaseName = baseName };
     }
 
     /// <summary>
@@ -535,6 +539,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         Expect(TK.Union);
         int ns = Cur.Span.Start;
         var name = Expect(TK.Ident).Value;
+        string baseName = name;
 
         // Type parameters, registered and mangled exactly as ParseClassDecl does, so the
         // Monomorphizer discovers the template through the same GenericUse channel.
@@ -548,7 +553,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
 
             var genericsArray = generics.ToArray();
             _gu.Add(new GenericUse(name, genericsArray, To(ns)));
-            name = name + "_" + string.Join("_", genericsArray);
+            name = Mangler.GenericInstance(name, genericsArray);
         }
 
         Expect(TK.LBrace);
@@ -570,7 +575,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
             }
         }
         Expect(TK.RBrace);
-        return new UnionDecl(name, [.. generics], variants?.ToArray() ?? [], To(s), anns);
+        return new UnionDecl(name, [.. generics], variants?.ToArray() ?? [], To(s), anns) { BaseName = baseName };
     }
 
     /// <summary>
