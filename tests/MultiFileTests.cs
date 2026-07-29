@@ -334,4 +334,86 @@ public class MultiFileTests
 
         fails.Assert("random import graphs that did not build");
     }
+
+    /// <summary>
+    /// Shadowing across files is exactly as explicit as within one: unmarked is a hard error,
+    /// '@shadows' accepts it, and a name from a file this build never imports is not shadowed at
+    /// all - so marking it is the error instead.
+    /// </summary>
+    [Theory]
+    [InlineData("imported-unmarked", true)]
+    [InlineData("imported-marked", false)]
+    [InlineData("own-file-unmarked", true)]
+    [InlineData("own-file-marked", false)]
+    [InlineData("not-imported-unmarked", false)]
+    [InlineData("not-imported-marked", true)]
+    public void ShadowingAcrossFilesIsExplicit(string shape, bool rejected)
+    {
+        string mark = shape.EndsWith("-marked", StringComparison.Ordinal) ? "@shadows " : "";
+        string realm = $"realm userspace {{ {mark}class Widget {{ public int m; }} entry func Main() {{ }} }}";
+        const string widget = "class Widget { public int n; }";
+
+        var files = shape.Split('-')[0] switch
+        {
+            "imported" => (("src/lib.g", widget), ("src/main.g", $"import \"src/lib.g\";\n{realm}\n")),
+            "own" => (("src/lib.g", "public int func Unused() { return 1; }"),
+                      ("src/main.g", $"{widget}\n{realm}\n")),
+            _ => (("src/lib.g", widget), ("src/main.g", $"{realm}\n")),
+        };
+
+        var c = new MultiFileCase($"shadow/{shape}", [files.Item1, files.Item2], Expect.Any);
+        using var work = TempDir.Create("appa-multifile-");
+        var r = Build(c, work);
+
+        Assert.Null(r.Crash);
+        Assert.Equal(rejected, r.Diag!.All.Any(d => d.Code == Codes.UnmarkedShadow));
+    }
+
+    /// <summary>
+    /// What a scoped name displaces is whichever declaration the shadowing file can see, not the
+    /// first parsed. Only one file per name was kept, so a file-local homonym claimed the slot and
+    /// hid the imported declaration genuinely being displaced.
+    /// </summary>
+    [Theory]
+    [InlineData("unmarked", true)]
+    [InlineData("marked", false)]
+    public void ShadowingSeesEveryDeclaringFile(string shape, bool rejected)
+    {
+        string mark = shape == "marked" ? "@shadows " : "";
+        var c = new MultiFileCase($"shadow/masked-{shape}",
+        [
+            // Resolved first and file-local, so it must not answer for the name that lib.g exports.
+            ("src/aaa.g", "private int func Helper() { return 0; }"),
+            ("src/lib.g", "public int func Helper() { return 1; }"),
+            ("src/main.g", "import \"src/aaa.g\";\nimport \"src/lib.g\";\n" +
+                           $"realm userspace {{ {mark}int func Helper() {{ return 2; }} entry func Main() {{ }} }}\n"),
+        ], Expect.Any);
+
+        using var work = TempDir.Create("appa-multifile-");
+        var r = Build(c, work);
+
+        Assert.Null(r.Crash);
+        Assert.Equal(rejected, r.Diag!.All.Any(d => d.Code == Codes.UnmarkedShadow));
+    }
+
+    /// <summary>
+    /// A 'private' declaration in another file is not a name this one could read, so it is walked
+    /// past rather than reported as the thing being displaced.
+    /// </summary>
+    [Fact]
+    public void PrivateInAnotherFileIsNotShadowed()
+    {
+        var c = new MultiFileCase("shadow/private-elsewhere",
+        [
+            ("src/lib.g", "private int func Solo() { return 0; }"),
+            ("src/main.g", "import \"src/lib.g\";\n" +
+                           "realm userspace { int func Solo() { return 2; } entry func Main() { } }\n"),
+        ], Expect.Any);
+
+        using var work = TempDir.Create("appa-multifile-");
+        var r = Build(c, work);
+
+        Assert.Null(r.Crash);
+        Assert.DoesNotContain(r.Diag!.All, d => d.Code == Codes.UnmarkedShadow);
+    }
 }

@@ -22,8 +22,35 @@ public class LanguageCoreTests
     {
         var data = new TheoryData<string, string>
         {
-            // The words 'realm' freed up. Before it existed, every one of these was a hard syntax
-            // error, which made three of the most ordinary names in systems code unusable.
+            // A process body holds declarations its threads share and nothing outside can see.
+            // This is what gives a lock a home: the process is the address space, so the scope and
+            // the sharing boundary are the same thing.
+            { "process_scoped_declarations", """
+            realm kernel { entry func Main() { } }
+            realm userspace {
+              foreground process App {
+                class Shared { public int ticks; }
+                enum Phase { Boot, Ready }
+                int func Step(int n) { return n + 1; }
+                thread A { entry func Run() { let Phase p = Phase.Boot; let int n = Step(1); } }
+                thread B { entry func Run() { let int n = Step(2); } }
+              }
+            }
+            """ },
+            // The same names again in a second process. Different address space, different types.
+            { "process_scopes_do_not_collide", """
+            realm kernel { entry func Main() { } }
+            realm userspace {
+              foreground process One {
+                class Shared { public int ticks; }
+                thread T { entry func Run() { } }
+              }
+              background process Two {
+                class Shared { public int frames; }
+                thread T { entry func Run() { } }
+              }
+            }
+            """ },
             { "contextual_keywords_as_names", """
             class Session { public int user; }
             realm kernel { entry func Main() {
@@ -535,8 +562,13 @@ public class LanguageCoreTests
             module M { private int func helper() { return 1; } }
             realm kernel { entry func Main() { let int z = M.helper(); } }
             """ },
-            { "process_non_thread", "G053", """
-            realm userspace { foreground process App { int func oops() { return 1; } } }
+            // A process's entry points are its threads, and every 'entry func' mangles to one
+            // fixed C symbol, so a second one here would be a duplicate definition.
+            { "process_entry_func", "G068", """
+            realm userspace { foreground process App { entry func Oops() { } } }
+            """ },
+            { "process_nested_process", "G051", """
+            realm userspace { foreground process App { foreground process Inner { } } }
             """ },
             { "redeclare", "G003", """
             realm kernel { entry func Main() { let int s = 10; let String s = "hi"; } }

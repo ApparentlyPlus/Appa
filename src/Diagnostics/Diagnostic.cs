@@ -29,8 +29,7 @@ internal sealed record Diagnostic(Severity Severity, string Code, string Message
 internal static class Codes
 {
     public const string File                  = "G000";
-    // Was DuplicateContext, which duplicated G057; repurposed rather than left reserved.
-    public const string GenericInScope        = "G001";
+    public const string TopologyOutsideRealm  = "G001";
     public const string MissingEntryPoint     = "G002";
     public const string DuplicateName         = "G003";
     public const string TypeMismatch          = "G004";
@@ -117,11 +116,11 @@ internal static class Codes
     public const string MissingRealmKeyword        = "G085";
     public const string UnknownRealm               = "G086";
     public const string ScopedNameNotVisible       = "G087";
+    public const string UnmarkedShadow             = "G088";
+    public const string ScopeNotEnclosing          = "G089";
+    public const string UnknownInScope             = "G090";
 }
 
-/// <summary>
-/// "Did you mean ...?" suggestions for misspelled identifiers, by edit distance.
-/// </summary>
 internal static class Suggest
 {
     /// <summary>
@@ -178,10 +177,6 @@ internal static class Suggest
     }
 }
 
-/// <summary>
-/// Collects diagnostics during compilation. It can render them in a human readable format, with
-/// source code context and ANSI colors.
-/// </summary>
 internal sealed class DiagnosticBag(SourceSet sources)
 {
     private readonly List<Diagnostic> _d = [];
@@ -227,8 +222,9 @@ internal sealed class DiagnosticBag(SourceSet sources)
     /// </summary>
     public void Error(string code, string file, TextSpan span, string message, string[]? hints = null)
     {
+        message = Readable(message);
         if (_instanceScope is { } scope && !_instanceSeen.Add((scope, code, message))) return;
-        _d.Add(new Diagnostic(Severity.Error, code, message, new Loc(file, span), hints ?? []));
+        _d.Add(new Diagnostic(Severity.Error, code, message, new Loc(file, span), Readable(hints)));
         _errCount++;
     }
 
@@ -238,9 +234,60 @@ internal sealed class DiagnosticBag(SourceSet sources)
     /// </summary>
     public void Warn(string code, string file, TextSpan span, string message, string[]? hints = null)
     {
-        _d.Add(new Diagnostic(Severity.Warning, code, message, new Loc(file, span), hints ?? []));
+        _d.Add(new Diagnostic(Severity.Warning, code, Readable(message), new Loc(file, span), Readable(hints)));
         _warnCount++;
     }
+
+    /// <summary>
+    /// Rewrites every scope-qualified name in user facing text to its readable form, so a call site
+    /// that forgot Mangler.DisplayName cannot leak 'Config@kernel$P' where 'Kernel.P.Config' belongs.
+    /// </summary>
+    private static string Readable(string text)
+    {
+        // A qualified name always has an identifier character immediately before the '@', which is
+        // what separates it from '@intrinsic(alloc)' or '@shadows' named in prose.
+        int at = -1;
+        for (int i = 1; i < text.Length; i++)
+            if (text[i] == '@' && IsNameChar(text[i - 1])) { at = i; break; }
+        if (at < 0) return text;
+
+        var sb = new StringBuilder(text.Length);
+        int done = 0;
+        while (at >= 0)
+        {
+            int start = at;
+            while (start > 0 && IsNameChar(text[start - 1])) start--;
+            int end = at;
+            while (end < text.Length && (IsNameChar(text[end]) || text[end] is '@' or '$')) end++;
+
+            sb.Append(text, done, start - done).Append(Mangler.DisplayName(text[start..end]));
+            done = end;
+
+            at = -1;
+            for (int i = end + 1; i < text.Length; i++)
+                if (text[i] == '@' && IsNameChar(text[i - 1])) { at = i; break; }
+        }
+        return sb.Append(text, done, text.Length - done).ToString();
+    }
+
+    /// <summary>
+    /// Rewrites each hint the same way, allocating nothing when none of them carries a name.
+    /// </summary>
+    private static string[] Readable(string[]? hints)
+    {
+        if (hints == null || hints.Length == 0) return [];
+        string[]? copy = null;
+        for (int i = 0; i < hints.Length; i++)
+        {
+            string r = Readable(hints[i]);
+            if (ReferenceEquals(r, hints[i])) continue;
+            copy ??= (string[])hints.Clone();
+            copy[i] = r;
+        }
+        return copy ?? hints;
+    }
+
+    private static bool IsNameChar(char c) => char.IsAsciiLetterOrDigit(c) || c == '_';
 
     /// <summary>
     /// Gets the line number of the specified diagnostic.

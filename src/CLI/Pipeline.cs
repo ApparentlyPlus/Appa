@@ -71,13 +71,14 @@ internal static class Pipeline
         Mangler.ResetDense();
         Mangler.ResetGenericDisplay();
         Mangler.ResetScopeDisplay();
-        var scopes = new ScopeBinder(diag).Bind(programs);
+        var scopes = new ScopeBinder(diag).Bind(programs, visible);
         var genericRequestFile = new Monomorphizer(diag).Process(programs);
         var collected = new SymbolCollector(diag).Collect([.. programs.Select(t => (t.path, t.prog))]);
         var module = new TypeResolver(collected.Sym, collected.HasInit,
                                       collected.PreDefinedStructs, collected.OpaqueFieldClasses, visible,
                                       genericRequestFile, releaseMode: mode == Mode.Release, diag)
                          .Resolve([.. programs.Select(t => (t.prog, t.path))]);
+        ValidateCNames(module, diag);
         if (diag.HasErrors)
             return (module, new Dictionary<string, string>(), new CapabilityScan(module));
         module = new Desugar(collected.Sym, diag).Run(module);
@@ -184,9 +185,6 @@ internal static class Pipeline
         var probe = new EnvProbe(module.Symbols);
         probe.Run(module);
 
-        // The topology launcher calls _env_proc_create/_env_thread_spawn directly - that's
-        // IR-directed codegen not visible to EnvProbe's expression walk. Only matters when
-        // a launcher will actually be emitted (dual-realm: kernel + user both present).
         if (module.Processes.Count > 0 && module.HasKernelRealm && module.HasUserRealm)
         {
             probe.Refs.Add(module.Symbols.FloorName(Roles.EnvProcCreate));
@@ -212,6 +210,68 @@ internal static class Pipeline
     private static readonly string[] ArcRoles =
         [Roles.Alloc, Roles.Retain, Roles.Release, Roles.ObjHeader, Roles.ObjInit];
 
+
+    /// <summary>
+    /// Reports two declarations that would be emitted under one C name. Every readable mangling
+    /// joins its parts with '_', which is also a legal character in each part, so 'class A_B { M }'
+    /// and 'class A { B_M }' both spell 'gata_A_B_M'. Caught here rather than left to the C
+    /// compiler, which reports it against generated names the author never wrote.
+    /// </summary>
+    public static void ValidateCNames(IrModule module, DiagnosticBag diag)
+    {
+        var seen = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        void Claim(string cname, string what)
+        {
+            if (string.IsNullOrEmpty(cname)) return;
+            if (seen.TryAdd(cname, what)) return;
+            if (seen[cname] == what) return;
+            diag.Error(Codes.DuplicateName, "<runtime>", TextSpan.None,
+                $"{what} and {seen[cname]} are both emitted as the C name '{cname}'",
+                ["rename one of them; a readable C name joins its parts with '_', " +
+                 "which two differently split names can spell the same way"]);
+        }
+
+        foreach (var c in module.Classes)
+        {
+            Claim(c.CName, $"type '{Mangler.DisplayName(c.Name)}'");
+            foreach (var m in c.Methods)
+                Claim(m.CName, $"method '{Mangler.DisplayName(c.Name)}.{m.Name}'");
+            foreach (var op in c.Operators)
+                Claim(op.CName, $"operator '{Mangler.DisplayName(c.Name)}.{op.Op}'");
+        }
+        foreach (var e in module.Enums)
+        {
+            Claim(e.CName, $"enum '{Mangler.DisplayName(e.Name)}'");
+            foreach (var (member, _) in e.Members)
+                Claim(Mangler.EnumMember(e.Name, member),
+                      $"enum member '{Mangler.DisplayName(e.Name)}.{member}'");
+        }
+        foreach (var u in module.Unions) Claim(u.CName, $"union '{Mangler.DisplayName(u.Name)}'");
+        foreach (var n in module.NativeTypes) Claim(n.CName, $"native type '{Mangler.DisplayName(n.Name)}'");
+
+        foreach (var f in module.FreeFunctions)
+            Claim(f.CName, $"function '{Mangler.DisplayName(f.Name)}'");
+
+        foreach (var fp in module.FuncPtrTypes) Claim(fp.ToCType(), $"the function type '{fp.MangledName}'");
+        foreach (var ar in module.ArrayTypes) Claim(ar.ToCType(), $"the array type '{ar.MangledName}'");
+
+        // Names the compiler emits itself. An @extern declaring one of these links, binds to the
+        // generated definition, and calls something the author never wrote.
+        Claim(Layout.LauncherName, "the generated process launcher");
+
+        foreach (var (name, cname) in module.Symbols.Externs())
+            Claim(cname, $"'@extern' declaration of '{name}'");
+
+        // Named with the realm, because two processes of one name in different realms are the case
+        // this exists for, and without it the two describe identically and read as one declaration.
+        foreach (var p in module.Processes)
+            foreach (var t in p.Threads)
+                if (t.EntryFunc is { } e)
+                    Claim(e.CName,
+                          $"thread '{(e.Vis == Visibility.Kernel ? "kernel" : "userspace")}.{p.Name}.{t.Name}'");
+    }
+
     /// <summary>
     /// Requires the standard library to bind the whole ARC contract whenever a reference-counted
     /// class survives to codegen. Here rather than in BuildModule, which runs over stdlib-free
@@ -219,9 +279,6 @@ internal static class Pipeline
     /// </summary>
     public static void ValidateIntrinsics(IrModule module, DiagnosticBag diag)
     {
-        // Every non-module class left after DCE is reference-counted, and each one causes the
-        // emitter to reach for the full ARC set. No such class means the program never touches
-        // the runtime, so an unbound role costs it nothing.
         bool needsArc = module.Classes.Any(c => !c.IsModule);
         if (!needsArc) return;
 

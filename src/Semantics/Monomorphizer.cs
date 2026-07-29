@@ -13,12 +13,56 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
         public readonly Dictionary<string, string> CMap = c ?? [];
 
         /// <summary>
-        /// Also rewrite bare identifiers that name a substituted type, not just type positions.
-        /// Off for monomorphization, where the keys are type parameters and an identifier spelled
-        /// like one is a variable that must be left alone. On for scope binding, where the keys are
-        /// type names and 'Tagged.Ident(...)' has to follow 'let Tagged x'.
+        /// Rewrites the base name of a generic reference: 'Box[int]' inside a realm declaring Box
+        /// means 'Box@kernel[int]'. SpecMap binds whole types and cannot say this. Empty for
+        /// monomorphization, where a template's base is never scoped.
+        /// </summary>
+        public Dictionary<string, string> NameMap { get; init; } = [];
+
+        /// <summary>
+        /// Also rewrite bare identifiers naming a substituted type, not just type positions. Off
+        /// for monomorphization, where an identifier spelled like a type parameter is a variable;
+        /// on for scope binding, where 'Tagged.Ident(...)' has to follow 'let Tagged x'.
         /// </summary>
         public bool RewriteTypeNames { get; init; }
+
+        /// <summary>
+        /// Resolves an explicitly qualified type or name against the scope tree. Set only by scope
+        /// binding; a resolution here is terminal, since the name it produces is already the one the
+        /// author asked for and must not then be re-mapped by SpecMap.
+        /// </summary>
+        public Func<NamedSpec, NamedSpec>? ScopedType { get; init; }
+
+        public Func<ScopedNameExpr, Expr>? ScopedExpr { get; init; }
+
+        // Names a local binding owns at the point being rewritten. Only RewriteTypeNames needs it:
+        // rewriting bare identifiers is otherwise blind, so 'let int Cfg' would go on reading as
+        // the scoped type - a variable losing to a type name, which never happens at file scope.
+        private readonly List<string> _bound = [];
+
+        /// <summary>
+        /// The current binding depth, to be handed back to Release when the scope closes.
+        /// </summary>
+        public int Mark() => _bound.Count;
+
+        /// <summary>
+        /// Drops every binding made since the mark.
+        /// </summary>
+        public void Release(int mark) => _bound.RemoveRange(mark, _bound.Count - mark);
+
+        /// <summary>
+        /// Records that a name now belongs to a local, a parameter or a pattern binding.
+        /// </summary>
+        public void Bind(string name) => _bound.Add(name);
+
+        public void Bind(Param[] ps) { foreach (var p in ps) _bound.Add(p.Name); }
+
+        public void Bind(string[] names) { foreach (var n in names) _bound.Add(n); }
+
+        /// <summary>
+        /// True when a local binding, not a declaration in some scope, owns this name here.
+        /// </summary>
+        public bool IsBound(string name) => _bound.Contains(name);
 
         /// <summary>
         /// Substitutes type parameters in raw native C text, replacing whole words that match a
@@ -68,6 +112,22 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
             {
                 case null:
                     return null;
+                case NamedSpec { Scope: not null } q when ScopedType != null:
+                {
+                    var resolved = ScopedType(q);
+                    NamedSpec[]? qArgs = null;
+                    for (int i = 0; i < resolved.Args.Length; i++)
+                    {
+                        var na = SubArg(resolved.Args[i]);
+                        if (!ReferenceEquals(na, resolved.Args[i]) && qArgs == null)
+                        {
+                            qArgs = new NamedSpec[resolved.Args.Length];
+                            Array.Copy(resolved.Args, qArgs, i);
+                        }
+                        qArgs?[i] = na;
+                    }
+                    return qArgs == null ? resolved : resolved with { Args = qArgs };
+                }
                 case NamedSpec { Args.Length: 0 } n:
                     return SpecMap.TryGetValue(n.Name, out var bound) ? bound : t;
                 case NamedSpec n:
@@ -83,7 +143,9 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
                         }
                         newArgs?[i] = na;
                     }
-                    return newArgs == null ? t : n with { Args = newArgs };
+                    string newName = NameMap.GetValueOrDefault(n.Name, n.Name);
+                    if (newArgs == null && newName == n.Name) return t;
+                    return n with { Name = newName, Args = newArgs ?? n.Args };
                 }
                 case PtrSpec p:
                 {
@@ -133,6 +195,28 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     }
 
     /// <summary>
+    /// Every declaration in a program, descending into realm and process bodies. The single walk
+    /// shared by template collection, owner lookup and the splice, so a declaration form one of
+    /// them can see is never one another silently cannot.
+    /// </summary>
+    private static IEnumerable<TopLevel> EachDecl(IEnumerable<TopLevel> items)
+    {
+        foreach (var item in items)
+        {
+            yield return item;
+            switch (item)
+            {
+                case ContextDecl cd:
+                    foreach (var inner in EachDecl(cd.Items)) yield return inner;
+                    break;
+                case ProcessDecl pd:
+                    foreach (var inner in EachDecl(pd.Items)) yield return inner;
+                    break;
+            }
+        }
+    }
+
+    /// <summary>
     /// Stamps a concrete class per distinct instantiation breadth-first, rewriting each program's
     /// Items to replace templates with instances. A use deferred because one template reaches
     /// another through its own parameters replays once its owner is stamped.
@@ -142,7 +226,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
         var templates = new Dictionary<string, Template>();
         var tmplNames = new HashSet<string>();
         foreach (var (path, prog) in programs)
-            foreach (var item in prog.Items)
+            foreach (var item in EachDecl(prog.Items))
             {
                 var (declName, genericParams) = item switch
                 {
@@ -161,16 +245,13 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
                 foreach (var gp in genericParams!)
                     if (!seenParams.Add(gp))
                         diag.Error(Codes.DuplicateName, path, item.Span,
-                            $"generic type '{baseName}' declares the type parameter '{gp}' twice");
+                            $"generic type '{Mangler.DisplayName(baseName)}' declares the type parameter '{gp}' twice");
 
                 if (templates.ContainsKey(baseName))
                     diag.Error(Codes.DuplicateName, path, item.Span,
-                        $"generic type '{baseName}' is already declared");
+                        $"generic type '{Mangler.DisplayName(baseName)}' is already declared");
                 templates[baseName] = new Template(item, genericParams!, baseName);
                 Mangler.RegisterGenericTemplate(baseName);
-                // The template's own mangled name, derived through the same composer every request
-                // uses. A self-reference inside the body parses as an instantiation over the type
-                // parameter itself, and this is what stops it asking to stamp a copy.
                 tmplNames.Add(Mangler.GenericInstance(baseName, genericParams!));
             }
 
@@ -180,17 +261,11 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
         var deferredByOwner = new Dictionary<string, List<(GenericUse Use, string File)>>();
         foreach (var (path, prog) in programs)
         {
-            var ownersInFile = templates.Values.Where(t => prog.Items.Contains(t.Decl)).ToList();
-            var funcOwners = new List<FuncDecl>();
-            void CollectFuncOwners(TopLevel[] items)
-            {
-                foreach (var item in items)
-                {
-                    if (item is FuncDecl { GenericParams.Length: > 0 } fdt) funcOwners.Add(fdt);
-                    else if (item is ContextDecl cdt) CollectFuncOwners(cdt.Items);
-                }
-            }
-            CollectFuncOwners(prog.Items);
+            var declsInFile = new HashSet<TopLevel>(EachDecl(prog.Items));
+            var ownersInFile = templates.Values.Where(t => declsInFile.Contains(t.Decl)).ToList();
+            var funcOwners = EachDecl(prog.Items).OfType<FuncDecl>()
+                                                 .Where(f => f.GenericParams.Length > 0)
+                                                 .ToList();
             foreach (var use in prog.GenericUses)
             {
                 if (funcOwners.Any(fd =>
@@ -271,24 +346,50 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
         {
             var (path, prog) = programs[i];
             bool changed = false;
-            var rewritten = new List<TopLevel>(prog.Items.Length);
-            foreach (var item in prog.Items)
+            var hoisted = new List<TopLevel>();
+
+            TopLevel[] Strip(TopLevel[] items)
             {
-                string? tmplBase = item switch
+                var kept = new List<TopLevel>(items.Length);
+                foreach (var item in items)
                 {
-                    ClassDecl cd when cd.GenericParams.Length > 0 => cd.BaseName,
-                    UnionDecl ud when ud.GenericParams.Length > 0 => ud.BaseName,
-                    _ => null,
-                };
-                if (tmplBase != null)
-                {
-                    changed = true;
-                    if (instancesByBase.TryGetValue(tmplBase, out var instances))
-                        rewritten.AddRange(instances);
+                    string? tmplBase = item switch
+                    {
+                        ClassDecl cd when cd.GenericParams.Length > 0 => cd.BaseName,
+                        UnionDecl ud when ud.GenericParams.Length > 0 => ud.BaseName,
+                        _ => null,
+                    };
+                    if (tmplBase != null)
+                    {
+                        changed = true;
+                        if (instancesByBase.TryGetValue(tmplBase, out var instances))
+                            hoisted.AddRange(instances);
+                        continue;
+                    }
+                    switch (item)
+                    {
+                        case ContextDecl cd:
+                        {
+                            var inner = Strip(cd.Items);
+                            kept.Add(ReferenceEquals(inner, cd.Items) ? cd : cd with { Items = inner });
+                            break;
+                        }
+                        case ProcessDecl pd:
+                        {
+                            var inner = Strip(pd.Items);
+                            kept.Add(ReferenceEquals(inner, pd.Items) ? pd : pd with { Items = inner });
+                            break;
+                        }
+                        default:
+                            kept.Add(item);
+                            break;
+                    }
                 }
-                else rewritten.Add(item);
+                return kept.Count == items.Length && !changed ? items : [.. kept];
             }
-            if (changed) programs[i] = (path, prog with { Items = [..rewritten] });
+
+            var rewritten = Strip(prog.Items);
+            if (changed) programs[i] = (path, prog with { Items = [.. hoisted, .. rewritten] });
         }
 
         return requestedFrom;
@@ -466,7 +567,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     {
         var newRet = ctx.SubType(md.ReturnType);
         var newParams = SubParams(md.Params, ctx);
-        var newBody = SubBody(md.Body, ctx);
+        var newBody = SubBody(md.Body, md.Params, ctx);
         if (ReferenceEquals(newRet, md.ReturnType) && ReferenceEquals(newParams, md.Params) && ReferenceEquals(newBody, md.Body))
             return md;
         return new MethodDecl(md.Modifiers, md.Annotations, newRet, md.Name, md.GenericParams, newParams, md.IsEntry, md.Throws, newBody, md.Span);
@@ -480,7 +581,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     {
         var newParams = SubParams(od.Params, ctx);
         var newRet = ctx.SubType(od.ReturnType);
-        var newBody = SubBody(od.Body, ctx);
+        var newBody = SubBody(od.Body, od.Params, ctx);
         if (ReferenceEquals(newParams, od.Params) && ReferenceEquals(newRet, od.ReturnType) && ReferenceEquals(newBody, od.Body))
             return od;
         return new OperatorDecl(od.Modifiers, od.Op, newParams, newRet, newBody, od.Span);
@@ -523,6 +624,18 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     {
         var ctx = new SubstitutionContext(g, c);
         return SubBody(b, ctx);
+    }
+
+    /// <summary>
+    /// Substitutes type parameters in a method body, dispatching to the native or block form.
+    /// </summary>
+    internal static MethodBody SubBody(MethodBody b, Param[] ps, SubstitutionContext ctx)
+    {
+        int mark = ctx.Mark();
+        ctx.Bind(ps);
+        var result = SubBody(b, ctx);
+        ctx.Release(mark);
+        return result;
     }
 
     /// <summary>
@@ -587,11 +700,13 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     /// </summary>
     internal static Block SubBlock(Block b, SubstitutionContext ctx)
     {
+        int mark = ctx.Mark();
         Stmt[]? newStmts = null;
         for (int i = 0; i < b.Stmts.Length; i++)
         {
             var s = b.Stmts[i];
             var ns = SubStmt(s, ctx);
+            if (s is LetStmt let) ctx.Bind(let.Name);
             if (!ReferenceEquals(s, ns))
             {
                 if (newStmts == null)
@@ -602,6 +717,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
             }
             newStmts?[i] = ns;
         }
+        ctx.Release(mark);
         if (newStmts == null) return b;
         return new Block(newStmts, b.Span);
     }
@@ -654,10 +770,13 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
                 return new WhileStmt(newWCond, newWBody, ws.Span) { Span = s.Span };
 
             case ForStmt fs:
+                int forMark = ctx.Mark();
                 var newFInit = fs.Init is null ? null : SubStmt(fs.Init, ctx);
+                if (fs.Init is LetStmt fLet) ctx.Bind(fLet.Name);
                 var newFCond = fs.Cond is null ? null : SubExpr(fs.Cond, ctx);
                 var newFStep = fs.Step is null ? null : SubStmt(fs.Step, ctx);
                 var newFBody = SubBlock(fs.Body, ctx);
+                ctx.Release(forMark);
                 if (ReferenceEquals(newFInit, fs.Init) && ReferenceEquals(newFCond, fs.Cond) &&
                     ReferenceEquals(newFStep, fs.Step) && ReferenceEquals(newFBody, fs.Body))
                     return s;
@@ -665,7 +784,10 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
 
             case ForInStmt fi:
                 var newFiColl = SubExpr(fi.Collection, ctx);
+                int inMark = ctx.Mark();
+                ctx.Bind(fi.Var);
                 var newFiBody = SubBlock(fi.Body, ctx);
+                ctx.Release(inMark);
                 if (ReferenceEquals(newFiColl, fi.Collection) && ReferenceEquals(newFiBody, fi.Body))
                     return s;
                 return new ForInStmt(fi.Var, newFiColl, newFiBody, fi.Span) { Span = s.Span };
@@ -758,7 +880,10 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
                 for (int i = 0; i < ms.Cases.Length; i++)
                 {
                     var c = ms.Cases[i];
+                    int caseMark = ctx.Mark();
+                    ctx.Bind(c.Bindings);
                     var newMsBody = SubBlock(c.Body, ctx);
+                    ctx.Release(caseMark);
                     if (!ReferenceEquals(newMsBody, c.Body))
                     {
                         if (newMsCases == null)
@@ -794,10 +919,10 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     {
         switch (e)
         {
-            // A type name can appear in expression position too - as the receiver of a union
-            // construction or a static call. Only rewritten when the caller opts in; see
-            // SubstitutionContext.RewriteTypeNames.
-            case IdentExpr id when ctx.RewriteTypeNames:
+            case ScopedNameExpr sn when ctx.ScopedExpr != null:
+                return ctx.ScopedExpr(sn);
+
+            case IdentExpr id when ctx.RewriteTypeNames && !ctx.IsBound(id.Name):
                 return ctx.SpecMap.TryGetValue(id.Name, out var bound)
                     && bound is NamedSpec { Args.Length: 0 } ns
                     ? new IdentExpr(ns.Name, id.Span) { Span = e.Span }

@@ -42,11 +42,18 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
     /// is set (classes and native types only).
     /// </summary>
     private void BindIntrinsics(Annotation[]? anns, string cName, string file, TextSpan span,
-        bool allowKeep = false, bool allowBuiltin = false)
+        bool allowKeep = false, bool allowBuiltin = false, bool allowShadows = false)
     {
         if (anns == null) return;
         foreach (var a in anns)
         {
+            if (a is ShadowsAnnotation)
+            {
+                if (!allowShadows)
+                    diag.Error(Codes.WrongAnnotationKind, file, span,
+                        "'@shadows' has no effect here; it belongs on a declaration inside a realm or process");
+                continue;
+            }
             if (a is KeepAnnotation)
             {
                 if (!allowKeep)
@@ -107,6 +114,9 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
             case ContextDecl ctx:
                 foreach (var i in ctx.Items) P1Top(i, file);
                 break;
+            case ProcessDecl proc:
+                foreach (var i in proc.Items) P1Top(i, file);
+                break;
             case FuncDecl fd:
                 P1Func(fd, file);
                 break;
@@ -115,14 +125,14 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
                 break;
             case EnumDecl ed:
                 if (!_declaredTypes.Add(ed.Name))
-                    diag.Error(Codes.DuplicateName, file, ed.Span, $"type '{ed.Name}' is already declared");
+                    diag.Error(Codes.DuplicateName, file, ed.Span, $"type '{Mangler.DisplayName(ed.Name)}' is already declared");
                 var enumNames = new string[ed.Members.Length];
                 for (int i = 0; i < enumNames.Length; i++) enumNames[i] = ed.Members[i].Name;
                 _sym.RegisterEnum(ed.Name, enumNames);
                 break;
             case UnionDecl ud:
                 if (!_declaredTypes.Add(ud.Name))
-                    diag.Error(Codes.DuplicateName, file, ud.Span, $"type '{ud.Name}' is already declared");
+                    diag.Error(Codes.DuplicateName, file, ud.Span, $"type '{Mangler.DisplayName(ud.Name)}' is already declared");
                 _sym.RegisterUnion(ud.Name, [.. ud.Variants]);
                 break;
         }
@@ -133,19 +143,15 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
     /// </summary>
     private void P1Class(ClassDecl cd, string file)
     {
-        // Throw an error if the class name is already declared, but still register it so the
-        // resolver can find it.
+        // Reported but still registered, so the resolver can go on finding it.
         if (!_declaredTypes.Add(cd.Name))
             diag.Error(Codes.DuplicateName, file, cd.Span, $"type '{Mangler.DisplayName(cd.Name)}' is already declared");
 
-        // Register the class in the symbol table, and if it's a module, add it to the modules set.
         _sym.RegisterClass(cd.Name, file);
         if (cd.IsModule) _sym.Modules.Add(cd.Name);
 
-        // Bind any @builtin(name) annotation to this class's readable Gata name - the
-        // resolver compares against this name throughout, not the (not-yet-assigned) C name.
-        BindIntrinsics(cd.Annotations, cd.Name, file, cd.Span, allowBuiltin: true);
-
+        // @builtin binds to the readable Gata name, which is what the resolver compares against
+        BindIntrinsics(cd.Annotations, cd.Name, file, cd.Span, allowKeep: true, allowBuiltin: true, allowShadows: true);
 
         var fieldNames = _declaredFieldNames.TryGetValue(cd.Name, out var fs)  ? fs : (_declaredFieldNames[cd.Name]  = []);
         var methodNames = _declaredMethodNames.TryGetValue(cd.Name, out var ms) ? ms : (_declaredMethodNames[cd.Name] = []);
@@ -169,14 +175,10 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
                     if (!fieldNames.Add(fd.Name) || methodNames.Contains(fd.Name))
                         diag.Error(Codes.DuplicateName, file, fd.Span,
                             $"'{Mangler.DisplayName(cd.Name)}' already declares a member '{fd.Name}'");
-                    
-                    // A typeless field infers from its literal initializer (TypeResolver emits
-                    // CannotInfer for non literal ones. 'int' here just keeps later lookups sane).
+
                     _sym.RegisterField(cd.Name, fd.Name,
                         fd.Type ?? TypeResolver.InferFieldTypeSpec(fd.Init) ?? new NamedSpec("int", fd.Span));
                     
-                    // Private by default. A member needs an explicit 'public' to be callable
-                    // from outside its declaring class or module.
                     if ((fd.Modifiers & Modifiers.Public) == 0) _sym.PrivateMembers.Add(new(cd.Name, fd.Name));
                     break;
                 case MethodDecl md:
@@ -194,32 +196,22 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
                         break;
                     }
 
-                    // Register the method in the symbol table, and if it's private, add it to the
-                    // private members set.
                     methodNames.Add(md.Name);
                     var sig = new MethodSig(md.ReturnType, [.. md.Params],
                         (md.Modifiers & Modifiers.Static) != 0 || cd.IsModule, md.Throws, md.IsEntry, [.. md.Annotations]);
 
                     _sym.RegisterMethod(cd.Name, md.Name, sig);
 
-                    // Private by default. A member needs an explicit 'public' to be callable from
-                    // outside its declaring class or module.
                     if ((md.Modifiers & Modifiers.Public) == 0) _sym.PrivateMembers.Add(new(cd.Name, md.Name));
 
-                    // Bind any @intrinsic annotations to the C name the method is emitted under.
                     BindIntrinsics(md.Annotations, Mangler.Method(cd.Name, md.Name, md.Params, overloaded: false), file, md.Span);
 
-                    // Lifecycle methods are invoked by generated code (the allocator and the
-                    // destructor), which has no way to receive a Result - throws is a hard error.
                     if (md.Name is Lifecycle.Init or Lifecycle.Deinit && md.Throws)
                         diag.Error(Codes.LifecycleThrows, file, md.Span,
                             $"'{md.Name}' cannot be 'throws'; it is called by generated allocator/destructor code that cannot handle a Result");
 
-                    // Track _init so the resolver can check constructor calls.
                     if (md.Name == Lifecycle.Init) _hasInit.Add(cd.Name);
 
-                    // If the method throws, register its return type in the symbol table so the
-                    // resolver can check for missing result typedefs.
                     if (md.Throws) _sym.RegisterThrows(md.ReturnType);
                     break;
                 case OperatorDecl od:
@@ -227,8 +219,6 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
                     TypeSpec retType = od.ReturnType
                         ?? new NamedSpec(OperatorRules.DefaultReturn(od.Op, cd.Name), od.Span);
 
-                    // The duplicate key includes arity so unary '-' (0 params) and binary '-'
-                    // (1 param) can coexist on one class without colliding.
                     string opSigKey = od.Op == "as" && od.Params.Length == 1
                         ? "as/param/" + od.Params[0].Type.ToSpecString()
                         : od.Op + "/" + od.Params.Length;
@@ -241,12 +231,8 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
                         break;
                     }
                     
-                    // Register the operator in the symbol table, using the operator name as the
-                    // return type if it's not specified, and using "void" for assignment operators.
                     _sym.RegisterOperator(cd.Name, od.Op, retType, [.. od.Params]);
 
-                    // Private by default, same as every other member. Keyed as "operator <sym>"
-                    // - the space keeps it disjoint from any field/method identifier.
                     if ((od.Modifiers & Modifiers.Public) == 0) _sym.PrivateMembers.Add(new(cd.Name, $"operator {od.Op}"));
                     break;
                 }
@@ -259,8 +245,6 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
     /// </summary>
     private void P1Func(FuncDecl fd, string file)
     {
-        // `static` only means anything on a class/module method; it's a category
-        // error on a free function, not a redundant-but-harmless spelling.
         if ((fd.Modifiers & Modifiers.Static) != 0)
             diag.Error(Codes.StaticOnFreeFunc, file, fd.Span,
                 $"'static' has no meaning on the free function '{Mangler.DisplayName(fd.Name)}' — it is never an instance member");
@@ -273,7 +257,7 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
             if (!_declaredPrivateFuncSigs.Add((file, fd.Name + "/" + Mangler.OverloadSuffix(fd.Params))))
             {
                 diag.Error(Codes.DuplicateName, file, fd.Span,
-                    $"private function '{fd.Name}' is already declared in this file with the same parameter types");
+                    $"private function '{Mangler.DisplayName(fd.Name)}' is already declared in this file with the same parameter types");
                 return;
             }
             _sym.RegisterPrivateFunc(file, fd.Name, sig);
@@ -281,16 +265,16 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
             return;
         }
 
-        if (!_declaredFuncSigs.Add(fd.Name + "/" + Mangler.OverloadSuffix(fd.Params)))
+        if (!_declaredFuncSigs.Add(fd.Name + "/" + Mangler.OverloadSuffix(fd.Params) + (fd.IsEntry ? "/entry" : "")))
         {
             diag.Error(Codes.DuplicateName, file, fd.Span,
-                $"function '{fd.Name}' is already declared with the same parameter types");
+                $"function '{Mangler.DisplayName(fd.Name)}' is already declared with the same parameter types");
             return;
         }
         _declaredFuncs.Add(fd.Name);
         _sym.RegisterFreeFunc(fd.Name, sig, file);
         BindIntrinsics(fd.Annotations, Mangler.FreeFunc(fd.Name, fd.Params, overloaded: false, fd.IsEntry, isExtern: false),
-            file, fd.Span, allowKeep: true);
+            file, fd.Span, allowKeep: true, allowShadows: !fd.IsEntry);
         if (fd.Throws) _sym.RegisterThrows(fd.ReturnType);
     }
 
@@ -300,10 +284,10 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
     private void P1NativeType(NativeTypeDecl nd, string file)
     {
         if (!_declaredTypes.Add(nd.Name))
-            diag.Error(Codes.DuplicateName, file, nd.Span, $"type '{nd.Name}' is already declared");
+            diag.Error(Codes.DuplicateName, file, nd.Span, $"type '{Mangler.DisplayName(nd.Name)}' is already declared");
         _sym.RegisterClass(nd.Name, file);
         _preDefinedStructs.Add(nd.Name);
-        BindIntrinsics(nd.Annotations, Mangler.Class(nd.Name), file, nd.Span, allowBuiltin: true);
+        BindIntrinsics(nd.Annotations, Mangler.Class(nd.Name), file, nd.Span, allowBuiltin: true, allowShadows: true);
     }
 
     /// <summary>
@@ -325,7 +309,7 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
         if (_declaredFuncs.Contains(ed.Name))
         {
             if (!_externFuncs.Contains(ed.Name))
-                diag.Error(Codes.DuplicateName, file, ed.Span, $"'{ed.Name}' is already declared as a function");
+                diag.Error(Codes.DuplicateName, file, ed.Span, $"'{Mangler.DisplayName(ed.Name)}' is already declared as a function");
         }
         else
         {
@@ -334,6 +318,6 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
         }
         var sig = new MethodSig(ed.ReturnType, [.. ed.Params], true, false, false, [], IsExtern: true);
         _sym.RegisterFreeFunc(ed.Name, sig, file);
-        BindIntrinsics(ed.Annotations, ed.Name, file, ed.Span);
+        BindIntrinsics(ed.Annotations, ed.Name, file, ed.Span, allowShadows: true);
     }
 }

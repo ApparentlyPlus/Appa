@@ -45,9 +45,21 @@ throws Counter func MaybeCounter(int k) {
     return c;
 }
 
+// Shadowed at three levels below, so the boot image proves '@shadows' is a compile-time rule with
+// no runtime cost: each level's Depth() is a different function, picked by where the call is written.
+int func Depth() { return 1; }
+
+// Called from the kernel realm but written outside it, so it still sees the root Depth - the
+// displacement is confined to the scope that declared it.
+int func Deep() { return Depth(); }
+
 realm kernel {
+    @shadows int func Depth() { return 2; }
+
     entry func Main() {
         debug "M:start";
+        Console.PrintLine($"depth={Depth()} root={Deep()}");
+        debug "M:shadowing";
 
         // arithmetic + explicit narrowing
         let int64 total = (0 as int64);
@@ -248,13 +260,30 @@ realm kernel {
         if (acc == 9 && shown == 9900) { Console.PrintLine("REGRESSION_OK"); }
         debug "M:done";
     }
+
+    // Deliberately the same process and thread names the userspace realm uses below. Realms are
+    // separate namespaces, so both are legal - and both used to mangle to one C symbol, defined
+    // once in each translation unit.
+    background process App {
+        thread T {
+            entry func Run() { debug "M:kernel-thread"; }
+        }
+    }
 }
 
 realm userspace {
+    @shadows int func Depth() { return 3; }
+
     foreground process App {
+        @shadows int func Depth() { return 4; }
+
         thread T {
             entry func Run() {
                 debug "M:user-thread";
+                // Four Depths, one name. Which one each call means is decided by the qualifier, so
+                // this line is the whole scope tree read back from a running kernel.
+                Console.PrintLine($"udepth={Depth()} q={userspace.App.Depth()}{userspace.Depth()}{::Depth()}");
+                debug "M:qualified";
                 let double p = Math.Pi();
                 let Payload load = new Payload();
                 load.Add(2);

@@ -1,27 +1,11 @@
 namespace Appa;
 
-/// <summary>
-/// A declaration scope, interned into a <see cref="ScopeTree"/>. Deliberately a 4-byte struct: it
-/// is a dictionary key on every name lookup, so it must hash and compare without touching a string.
-/// </summary>
 internal readonly record struct ScopeId(int Value)
 {
-    /// <summary>The file/import scope every program starts in. Names here are unqualified.</summary>
     public static readonly ScopeId Root = new(0);
-
     public bool IsRoot => Value == 0;
 }
 
-/// <summary>
-/// The tree of declaration scopes in a program: root (imports) -> realm -> process. Three levels,
-/// each corresponding to something real. A realm is a translation unit; a process is an address
-/// space, which is exactly the boundary across which threads share memory.
-///
-/// This is the *name* axis, and it is deliberately separate from the *visibility* axis carried by
-/// <see cref="Realm"/>. A process contributes a segment to a name's scope path but inherits its
-/// realm's visibility, so <see cref="RealmOf"/> walks to the nearest enclosing realm rather than
-/// reading the node itself.
-/// </summary>
 internal sealed class ScopeTree
 {
     /// <summary>
@@ -29,7 +13,6 @@ internal sealed class ScopeTree
     /// happens once per declaration and per type reference.
     /// </summary>
     private readonly record struct Node(ScopeId Parent, string Segment, Realm Realm, string Suffix);
-
     private readonly List<Node> _nodes = [new(default, "", Realm.None, "")];
     private readonly Dictionary<(int Parent, string Segment), ScopeId> _index = [];
 
@@ -40,9 +23,6 @@ internal sealed class ScopeTree
     public ScopeId Intern(ScopeId parent, string segment, Realm realm)
     {
         if (_index.TryGetValue((parent.Value, segment), out var existing)) return existing;
-
-        // '@' and '$' cannot appear in a Gata identifier, so a qualified name can never collide
-        // with one a user wrote by hand.
         string suffix = parent.IsRoot ? $"@{segment}" : $"{Suffix(parent)}${segment}";
         var id = new ScopeId(_nodes.Count);
         _nodes.Add(new Node(parent, segment, realm, suffix));
@@ -90,8 +70,32 @@ internal sealed class ScopeTree
     {
         if (s.IsRoot) return name;
         var parts = new List<string>();
-        for (var cur = s; !cur.IsRoot; cur = Parent(cur)) parts.Add(Segment(cur));
+        for (var cur = s; !cur.IsRoot; cur = Parent(cur))
+        {
+            parts.Add(_nodes[cur.Value].Segment);
+        }
         parts.Reverse();
         return string.Join('.', parts) + "." + name;
+    }
+
+    /// <summary>
+    /// The child scope for a segment, or null when this scope has no such child. Lookup only: a
+    /// written qualifier must not bring a scope into existence.
+    /// </summary>
+    public ScopeId? Child(ScopeId parent, string segment) =>
+        _index.TryGetValue((parent.Value, segment), out var id) ? id : null;
+
+    /// <summary>
+    /// True when <paramref name="outer"/> is <paramref name="inner"/> or encloses it. The whole
+    /// visibility rule for a written qualifier: outward is a disambiguator, inward would be a new
+    /// way to see into a sibling.
+    /// </summary>
+    public bool Encloses(ScopeId outer, ScopeId inner)
+    {
+        for (var s = inner; ; s = Parent(s))
+        {
+            if (s == outer) return true;
+            if (s.IsRoot) return false;
+        }
     }
 }

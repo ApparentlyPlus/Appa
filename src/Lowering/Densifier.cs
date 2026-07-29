@@ -4,10 +4,22 @@ internal sealed class Densifier(IrModule m)
 {
     private int _seq;
 
+    // Names that already mean something in the emitted C and so cannot be handed out as a token.
+    // An '@extern' may be spelled '_g5', and nothing else stops the sequence from reaching it.
+    private HashSet<string>? _taken;
+
     /// <summary>
-    /// Returns the next dense token in base-36 sequence, prefixed with _g.
+    /// Returns the next dense token in base-36 sequence, prefixed with _g, skipping any the program
+    /// already spells for itself.
     /// </summary>
     private string Next()
+    {
+        string t;
+        do { t = NextRaw(); } while (_taken != null && _taken.Contains(t));
+        return t;
+    }
+
+    private string NextRaw()
     {
         int v = _seq++;
         const string D = "0123456789abcdefghijklmnopqrstuvwxyz";
@@ -53,32 +65,43 @@ internal sealed class Densifier(IrModule m)
             totalMembers += m.Classes[i].Methods.Count + m.Classes[i].Operators.Count;
         int fnCapacity = m.FreeFunctions.Count + totalMembers;
 
+        _taken = [];
+        foreach (var (_, cname) in m.Symbols.Externs()) _taken.Add(cname);
+        foreach (var f in m.FreeFunctions)
+            if (f.IsEntry || f.Annotations.Any(a => a is KeepAnnotation)) _taken.Add(f.CName);
+        foreach (var c in m.Classes) if (c.Keep) _taken.Add(c.CName);
+        foreach (var e in m.Enums) _taken.Add(e.CName);
+        foreach (var u in m.Unions) _taken.Add(u.CName);
+        foreach (var n in m.NativeTypes) _taken.Add(n.CName);
+
         var fn = new Dictionary<string, string>(fnCapacity);
         var classTok = new Dictionary<string, string>(classCount);
         var src = new Dictionary<string, string>(fnCapacity + classCount);
 
-        void MapFn(string old)
+        void MapFn(string old, string readable)
         {
             if (fn.ContainsKey(old)) return;
-            string d = Next(); fn[old] = d; src[d] = old;
+            string d = Next(); fn[old] = d; src[d] = readable;
         }
 
         // Internal free functions and all methods/operators get dense names.
         // Entries and @keep free functions keep their readable names.
         foreach (var f in m.FreeFunctions)
-            if (!f.IsEntry && !f.Annotations.Any(a => a is KeepAnnotation)) MapFn(f.CName);
+            if (!f.IsEntry && !f.Annotations.Any(a => a is KeepAnnotation))
+                MapFn(f.CName, Mangler.DisplayName(f.Name));
         foreach (var c in m.Classes)
         {
-            foreach (var mm in c.Methods) MapFn(mm.CName);
-            foreach (var o in c.Operators) MapFn(o.CName);
+            string owner = Mangler.DisplayName(c.Name);
+            foreach (var mm in c.Methods) MapFn(mm.CName, $"{owner}.{mm.Name}");
+            foreach (var o in c.Operators) MapFn(o.CName, $"{owner}.operator{o.Op}");
         }
         
         // @keep classes keep their readable CName so native text that references
         // them by the readable gata_<Name> form continues to resolve correctly.
         foreach (var c in m.Classes)
         {
-            if (c.Keep) { classTok[c.Name] = c.CName; src[c.CName] = c.CName; continue; }
-            string d = Next(); classTok[c.Name] = d; src[d] = c.CName;
+            if (c.Keep) { classTok[c.Name] = c.CName; src[c.CName] = Mangler.DisplayName(c.Name); continue; }
+            string d = Next(); classTok[c.Name] = d; src[d] = Mangler.DisplayName(c.Name);
         }
 
         var renamed = new CallRenamer(fn).Run(m);

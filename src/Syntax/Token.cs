@@ -12,15 +12,13 @@ internal enum TK : byte
     NativeContent, NativeTypeDecl,
 
     // Keywords (Structure)
-    // 'userspace', 'process' and 'thread' are deliberately absent: they are contextual, matched by
-    // value where the grammar already forces them, so they stay usable as ordinary identifiers.
-    Import, Realm, Kernel,
+    Import, Realm, Kernel, Userspace,
     Foreground, Background,
     Class, Module, Func, Static, Public, Private,
     Entry, Throws, Operator, As, Fields, Ref,
 
     // Annotations (@ prefix, parsed as keywords)
-    AtIntrinsic, AtPreamble, AtExtern, AtEnvironment, AtKeep, AtBuiltin,
+    AtIntrinsic, AtPreamble, AtExtern, AtEnvironment, AtKeep, AtBuiltin, AtShadows,
 
     // Keywords (Flow control)
     Return, If, Else, While, For, In, Break, Continue, Switch, Case,
@@ -43,7 +41,7 @@ internal enum TK : byte
 
     // Structural punctuation
     LParen, RParen, LBrace, RBrace, LBrack, RBrack,
-    Semi, Comma, Colon, Dot, Eq,
+    Semi, Comma, Colon, ColonColon, Dot, Eq,
 
     // Catch-all for remaining single-char operators: + - * / % & | ^ < > ! ~
     Punct,

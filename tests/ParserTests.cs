@@ -208,10 +208,9 @@ public class ParserTests
     #region Generic names
 
     /// <summary>
-    /// A generic declaration folds its parameter list into Name so a self-reference in the body
-    /// resolves, and carries the name the user wrote in BaseName. Recovering the base by stripping
-    /// "_T" off the tail instead is a guess that fails open - it returns the whole string - and a
-    /// template that cannot identify its own base is never matched to its instantiations again.
+    /// A generic declaration folds its parameter list into Name so a self-reference resolves, and
+    /// keeps the written name in BaseName. Stripping "_T" off the tail instead fails open, and a
+    /// template that cannot identify its base is never matched to its instantiations again.
     /// </summary>
     [Theory]
     [InlineData("class List[T] { T v; }", "List_T", "List")]
@@ -239,7 +238,7 @@ public class ParserTests
     /// they call the same composer, not because two independent concatenations happen to match.
     /// </summary>
     [Fact]
-    public void ParserComposesGenericNamesThroughTheManglerParserAndPassesAgree()
+    public void GenericNamesComposeThroughTheMangler()
     {
         var cd = Assert.IsType<ClassDecl>(SingleFileCompile.Parse("class Map[K, V] { K k; V v; }").Items[0]);
         Assert.Equal(Mangler.GenericInstance(cd.BaseName, cd.GenericParams), cd.Name);
@@ -250,7 +249,7 @@ public class ParserTests
     /// never parsed back. Nesting must compose the same way at every depth.
     /// </summary>
     [Fact]
-    public void NestedGenericTypeReferencesMangleStructurally()
+    public void NestedGenericRefsMangleStructurally()
     {
         var inner = new NamedSpec("List", [new NamedSpec("int")], TextSpan.None);
         var outer = new NamedSpec("Box", [inner], TextSpan.None);
@@ -264,7 +263,7 @@ public class ParserTests
     /// never has to recover it from the mangled form.
     /// </summary>
     [Fact]
-    public void GenericDeclarationRegistersItsUseUnderTheBaseName()
+    public void GenericDeclUsesItsBaseName()
     {
         var prog = SingleFileCompile.Parse("class List[T] { T v; }");
         var use = Assert.Single(prog.GenericUses.Where(u => u.Base == "List"));

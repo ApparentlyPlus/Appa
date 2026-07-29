@@ -425,11 +425,24 @@ internal sealed class SymbolTable
     }
 
     /// <summary>
+    /// Every '@extern' declaration in the build, as (Gata name, C name)
+    /// </summary>
+    public IEnumerable<(string Name, string CName)> Externs()
+    {
+        foreach (var (name, list) in _funcs)
+            foreach (var s in list)
+                if (s.Sig is { IsExtern: true }) yield return (name, s.CName);
+    }
+
+    /// <summary>
     /// Returns the last registered overload of the named free function, or null if not found.
     /// </summary>
     public Symbol? LookupFreeFunc(string name)
     {
-        return _funcs.TryGetValue(name, out var l) ? l[^1] : null;
+        if (!_funcs.TryGetValue(name, out var l)) return null;
+        for (int i = l.Count - 1; i >= 0; i--)
+            if (l[i].Sig is not { IsEntry: true }) return l[i];
+        return l[^1];
     }
 
     /// <summary>
@@ -483,7 +496,9 @@ internal sealed class SymbolTable
     /// </summary>
     public IReadOnlyList<Symbol> FuncOverloads(string name)
     {
-        return _funcs.TryGetValue(name, out var l) ? l : [];
+        if (!_funcs.TryGetValue(name, out var l)) return [];
+        var callable = l.Where(s => s.Sig is not { IsEntry: true }).ToList();
+        return callable.Count > 0 ? callable : l;
     }
 
     /// <summary>

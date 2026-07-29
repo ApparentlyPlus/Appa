@@ -62,6 +62,15 @@ public class HostedEndToEndTests
 
         int func Twice(int n) { return n * 2; }
 
+        // Displaced inside the realm below, so '::Cfg' and '::Widen' only reach these if a
+        // qualifier picks the symbol rather than the name.
+        class Cfg { public int w; func _init() { self.w = 9; } }
+        int func Widen(Cfg c) { return c.w; }
+
+        // Reads the file-scope Twice from outside the realm, so the displacement below is confined
+        // to the scope that declared it rather than changing what this file's own code means.
+        int func OuterTwice(int n) { return Twice(n); }
+
         union Note { Blank, Titled(String t), Numbered(int v) }
 
         int func NoteWeight(Note n) {
@@ -80,7 +89,17 @@ public class HostedEndToEndTests
         }
 
         realm userspace {
+            @shadows int func Twice(int n) { return n * 3; }
+
+            // Declared beside a local of the same name below, so the rule that a local owns its
+            // name against a scoped declaration is proved by a value rather than by a type check.
+            @shadows class Cfg { public int a; }
+
+            @shadows int func Widen(Cfg c) { return c.a; }
+
             entry func Main() {
+                let int Cfg = 5;
+
                 let List[int] xs = new List[int]();
                 xs.Add(3);
                 xs.Add(Twice(4));
@@ -157,6 +176,11 @@ public class HostedEndToEndTests
                 Console.PrintLine($"len={xs.Length()} map={m.Length()} bumps={c.Value()}");
                 Console.PrintLine($"arr={arr[2]} deref={deref} abs={Math.Abs(-9)}");
                 Console.PrintLine($"generic={cs.Length()} first={cs.Get(0).Value()}");
+                // 6 is the realm's Twice, 4 the file's - one name, two meanings, decided by where
+                // the call is written. xs holds 12 rather than 8 for the same reason.
+                // The realm's Twice, the file's reached past it, and the realm's named outright.
+                Console.PrintLine($"shadow={Twice(2)} outer={OuterTwice(2)} xs1={xs.Get(1)} local={Cfg}");
+                Console.PrintLine($"qual={::Twice(2)}{userspace.Twice(2)} qt={::Widen(new ::Cfg())}");
             }
         }
         """;
@@ -167,7 +191,9 @@ public class HostedEndToEndTests
         "note=hi7 weight=27\n" +
         "len=2 map=2 bumps=2\n" +
         "arr=7 deref=42 abs=9\n" +
-        "generic=2 first=2\n";
+        "generic=2 first=2\n" +
+        "shadow=6 outer=4 xs1=12 local=5\n" +
+        "qual=46 qt=9\n";
 
     [Fact]
     public void StdlibProgramCompilesAndRuns()

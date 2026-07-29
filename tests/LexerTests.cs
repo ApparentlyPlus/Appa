@@ -28,9 +28,9 @@ public class LexerTests
     [InlineData("import", nameof(TK.Import))]
     [InlineData("realm", nameof(TK.Realm))]
     [InlineData("kernel", nameof(TK.Kernel))]
-    // 'userspace', 'process' and 'thread' are contextual keywords, so they lex as plain
-    // identifiers and stay usable as variable and field names.
-    [InlineData("userspace", nameof(TK.Ident))]
+    // Both realm names are reserved: a scope qualifier has to be recognisable before anything is
+    // resolved. 'process' and 'thread' stay contextual, and usable as ordinary identifiers.
+    [InlineData("userspace", nameof(TK.Userspace))]
     [InlineData("process", nameof(TK.Ident))]
     [InlineData("thread", nameof(TK.Ident))]
     [InlineData("class", nameof(TK.Class))]

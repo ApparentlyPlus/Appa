@@ -94,10 +94,8 @@ internal static class Mangler
     }
 
     /// <summary>
-    /// Composes the internal name of a generic instantiation from its base and type arguments:
-    /// ("List", ["int"]) becomes "List_int". The single place this rule is spelled - every caller
-    /// that needs the name asks for it rather than concatenating its own, so the composition and
-    /// the decomposition can never drift apart.
+    /// Composes the internal name of a generic instantiation: ("List", ["int"]) is "List_int". The
+    /// single place this rule is spelled, so no caller's own concatenation can drift from it.
     /// </summary>
     public static string GenericInstance(string baseName, IEnumerable<string> args)
     {
@@ -171,12 +169,51 @@ internal static class Mangler
     [ThreadStatic] private static Dictionary<string, string>? _scopeDisplayTls;
     private static Dictionary<string, string> _scopeDisplay => _scopeDisplayTls ??= [];
 
+    // Bare name to the readable paths of every scope declaring it. Lets a diagnostic say where a
+    // name it could not resolve does exist, instead of insisting it does not exist at all.
+    [ThreadStatic] private static Dictionary<string, List<string>>? _scopedByBareTls;
+    private static Dictionary<string, List<string>> _scopedByBare => _scopedByBareTls ??= [];
+
+    // What each scope qualified name was declared as: "a type", "a function", "a generic type". A
+    // scope holds one meaning per name, so a use in the wrong position can be told what it found
+    // instead of being answered with "unknown type".
+    [ThreadStatic] private static Dictionary<string, string>? _scopeKindTls;
+    private static Dictionary<string, string> _scopeKind => _scopeKindTls ??= [];
+
+    /// <summary>
+    /// Records what kind of declaration a scope-qualified name refers to.
+    /// </summary>
+    public static void RegisterScopedKind(string qualified, string kind) => _scopeKind[qualified] = kind;
+
+    /// <summary>
+    /// What a scope-qualified name was declared as, or null when nothing scoped declares it.
+    /// </summary>
+    public static string? ScopedKind(string qualified) => _scopeKind.GetValueOrDefault(qualified);
+
     /// <summary>
     /// Records the readable, fully-qualified form of a scope-qualified name.
     /// </summary>
     public static void RegisterScopedName(string qualified, string display)
     {
         _scopeDisplay[qualified] = display;
+
+        int dot = display.LastIndexOf('.');
+        if (dot < 0) return;
+        string bare = display[(dot + 1)..];
+        if (!_scopedByBare.TryGetValue(bare, out var paths)) _scopedByBare[bare] = paths = [];
+        if (!paths.Contains(display)) paths.Add(display);
+    }
+
+    /// <summary>
+    /// The readable paths of every scope declaring this bare name, ordinally sorted. Empty when
+    /// nothing scoped declares it, which is the ordinary case.
+    /// </summary>
+    public static List<string> ScopedCandidates(string bare)
+    {
+        if (!_scopedByBare.TryGetValue(bare, out var paths)) return [];
+        var copy = new List<string>(paths);
+        copy.Sort(StringComparer.Ordinal);
+        return copy;
     }
 
     /// <summary>
@@ -187,21 +224,41 @@ internal static class Mangler
     public static void ResetScopeDisplay()
     {
         _scopeDisplayTls = [];
+        _scopedByBareTls = [];
+        _scopeKindTls = [];
     }
 
     /// <summary>
-    /// Returns the user-readable display name for a type, expanding generic instantiations
-    /// recursively, e.g. List_int becomes List[int], and unqualifying scoped names.
+    /// Returns the user readable display name for a type, expanding generic instantiations
+    /// recursively, eg. List_int becomes List[int], and unqualifying scoped names.
     /// </summary>
     public static string DisplayName(string name)
     {
         if (!_genericInfo.ContainsKey(name))
         {
-            return _scopeDisplay.GetValueOrDefault(name, name);
+            if (_scopeDisplay.TryGetValue(name, out var plain)) return plain;
+            return name.Contains('@') ? UnstampedScoped(name) : name;
         }
         var sb = new System.Text.StringBuilder();
         AppendDisplayName(sb, name);
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// The readable form of a scope-qualified instantiation.
+    /// 'Box[int]' over a scoped 'Box' that is not generic. The longest registered prefix is
+    /// the base, and what follows it the arguments, as GenericInstance wrote them.
+    /// </summary>
+    private static string UnstampedScoped(string name)
+    {
+        for (int cut = name.LastIndexOf('_'); cut > 0; cut = name.LastIndexOf('_', cut - 1))
+        {
+            if (!_scopeDisplay.TryGetValue(name[..cut], out var head)) continue;
+            var args = name[(cut + 1)..].Split('_');
+            for (int i = 0; i < args.Length; i++) args[i] = DisplayName(args[i]);
+            return $"{head}[{string.Join(", ", args)}]";
+        }
+        return name;
     }
 
     /// <summary>
@@ -211,7 +268,7 @@ internal static class Mangler
     {
         if (_genericInfo.TryGetValue(name, out var info))
         {
-            sb.Append(info.Base).Append('[');
+            sb.Append(_scopeDisplay.GetValueOrDefault(info.Base, info.Base)).Append('[');
             for (int i = 0; i < info.Args.Count; i++)
             {
                 if (i > 0) sb.Append(", ");
@@ -229,10 +286,8 @@ internal static class Mangler
 
     /// <summary>
     /// Turns a scope-qualified Gata name into a C-safe fragment: 'Config@kernel$P' becomes
-    /// 'Config_s3f2a71c9'. Unqualified names pass through untouched, so a program that declares
-    /// nothing inside a realm or process emits byte-identical C to one compiled before scopes
-    /// existed. The token is a hash of the scope suffix rather than the suffix itself, to keep C
-    /// names short and stable regardless of how deeply nested the scope is.
+    /// 'Config_s3f2a71c9'. The token hashes the suffix, so depth costs no length; an unqualified
+    /// name passes through, so a program declaring nothing in a scope emits identical C.
     /// </summary>
     public static string Sanitize(string name)
     {
@@ -390,9 +445,6 @@ internal static class Mangler
     {
         string bare = $"gata_{Sanitize(owner)}_{OpSuffix(op)}";
         if (!overloaded) return bare;
-        
-        // Note here: A zero param overload is the unary form of a symbol that also has a binary form. 
-        // "unary" keeps it distinct from the binary overload's param type suffix.
         string suffix = ps.Count > 0 ? OverloadSuffix(ps) : "unary";
         return $"{bare}_{suffix}";
     }

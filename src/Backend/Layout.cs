@@ -13,6 +13,12 @@ internal record OutputFile(string Name, string Content);
 internal static class Layout
 {
     /// <summary>
+    /// The C function umain.c generates to create every process and spawn its threads. Named here
+    /// so the collision check can reserve it against a declaration that would take it over.
+    /// </summary>
+    public const string LauncherName = "uapps";
+
+    /// <summary>
     /// Composes the emitter output into the set of translation-unit files for the build.
     /// Kernel-only builds produce kmain.c; user-only produce program.c; both produce kmain.c,
     /// uproc.c, uproc.h, and umain.c with a generated process launcher.
@@ -142,21 +148,22 @@ internal static class Layout
             $"extern void  {procHide}(void* proc);",
             $"extern void  {threadSpawn}(void* proc, const char* name, void (*entry)(void*), int is_user);",
             "");
-        using (w.Block("void uapps(void) {"))
+        using (w.Block($"void {LauncherName}(void) {{"))
         {
             for (int i = 0; i < procs.Count; i++)
             {
                 var proc = procs[i];
-                w.Line($"void* {proc.Name} = {procCreate}(\"{proc.Name}\");");
+                string handle = $"_p{i}";
+                w.Line($"void* {handle} = {procCreate}(\"{proc.Name}\");");
                 if (proc.Mode == "background")
-                    w.Line($"{procHide}({proc.Name});");
+                    w.Line($"{procHide}({handle});");
                 for (int j = 0; j < proc.Threads.Count; j++)
                 {
                     var t = proc.Threads[j];
                     if (t.EntryFunc is { } e)
                     {
                         string isUser = e.Vis == Visibility.Kernel ? "0" : "1";
-                        w.Line($"{threadSpawn}({proc.Name}, \"{t.Name}\", {e.CName}, {isUser});");
+                        w.Line($"{threadSpawn}({handle}, \"{t.Name}\", {e.CName}, {isUser});");
                     }
                 }
             }

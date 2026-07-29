@@ -9,6 +9,12 @@ namespace Appa;
 internal record Program(TopLevel[] Items)
 {
     public GenericUse[] GenericUses { get; init; } = [];
+
+    /// <summary>
+    /// True when the file writes a scope qualifier anywhere. Lets the ScopeBinder keep its
+    /// do-nothing path for a program that declares nothing scoped and names nothing scoped.
+    /// </summary>
+    public bool HasScopedRefs { get; init; }
 }
 
 /// <summary>
@@ -16,7 +22,10 @@ internal record Program(TopLevel[] Items)
 /// copies to stamp. Args is mangled ("int"); ArgSpecs keeps the same arguments unflattened, so
 /// substituting inside them is structural rather than string surgery.
 /// </summary>
-internal record GenericUse(string Base, string[] Args, TextSpan Span, NamedSpec[]? ArgSpecs = null);
+internal record GenericUse(string Base, string[] Args, TextSpan Span, NamedSpec[]? ArgSpecs = null)
+{
+    public string[]? Scope { get; init; }
+}
 
 #region Top-level declarations
 
@@ -53,13 +62,6 @@ internal record NativeBlock(NativeBody Body, TextSpan Span, Annotation[]? Annota
 internal record ClassDecl(string Name, string[] GenericParams, Annotation[] Annotations,
                  ClassMember[] Members, TextSpan Span, bool IsModule = false) : TopLevel(Span)
 {
-    /// <summary>
-    /// The name as the user wrote it, before the generic parameter list was folded into Name.
-    /// "class List[T]" has Name "List_T" and BaseName "List"; for a non-generic declaration the two
-    /// are the same. Carried rather than recovered: stripping "_T" off the tail of Name is a guess
-    /// that silently returns the whole string when it is wrong, and a template that fails to
-    /// identify its own base is simply never found again.
-    /// </summary>
     public string BaseName { get; init; } = Name;
 }
 
@@ -82,7 +84,10 @@ internal record FuncDecl(Modifiers Modifiers, Annotation[] Annotations, TypeSpec
 /// A process declaration is pure deployment topology. A process is a named bag of threads; it holds
 /// no logic of its own. Mode is the deployment mode ("foreground" or "background").
 /// </summary>
-internal record ProcessDecl(string Name, string Mode, ThreadDecl[] Threads, TextSpan Span) : TopLevel(Span);
+internal record ProcessDecl(string Name, string Mode, ThreadDecl[] Threads, TextSpan Span) : TopLevel(Span)
+{
+    public TopLevel[] Items { get; init; } = [];
+}
 
 /// <summary>
 /// An extern function pre-declaration that tells the compiler a C function exists so it can be
@@ -116,10 +121,6 @@ internal record EnumMember(string Name, Expr? Value, TextSpan Span);
 internal record UnionDecl(string Name, string[] GenericParams, UnionVariant[] Variants,
                           TextSpan Span, Annotation[]? Annotations = null) : TopLevel(Span)
 {
-    /// <summary>
-    /// The name as the user wrote it, before the generic parameter list was folded into Name. See
-    /// <see cref="ClassDecl.BaseName"/>.
-    /// </summary>
     public string BaseName { get; init; } = Name;
 }
 
@@ -160,6 +161,13 @@ internal record PreambleAnnotation(string Target, TextSpan Span) : Annotation;
 /// through static analysis.
 /// </summary>
 internal record KeepAnnotation(TextSpan Span) : Annotation;
+
+/// <summary>
+/// @shadows: declares that this scoped declaration deliberately displaces one of the same name from
+/// an enclosing scope. Shadowing is legal but never silent - unmarked, it is a hard error, so a name
+/// changing meaning is always something the author wrote down.
+/// </summary>
+internal record ShadowsAnnotation(TextSpan Span) : Annotation;
 
 /// <summary>
 /// @builtin(name): binds a class or native type declaration to a named compiler builtin type slot
@@ -260,8 +268,21 @@ internal abstract record TypeSpec(TextSpan Span)
 /// </summary>
 internal sealed record NamedSpec(string Name, NamedSpec[] Args, TextSpan Span) : TypeSpec(Span)
 {
+    /// <summary>
+    /// The name a type spec takes once the reason it could not be resolved has been reported. No
+    /// source can spell it, so reaching it means exactly one error was already issued.
+    /// </summary>
+    public const string Poison = "<error>";
+
     public NamedSpec(string name) : this(name, [], TextSpan.None) { }
     public NamedSpec(string name, TextSpan span) : this(name, [], span) { }
+
+    /// <summary>
+    /// The scope this name was written under: ["kernel", "P"] for 'kernel.P.Config', empty for the
+    /// root scope written '::Config', null when the name was written bare. The ScopeBinder resolves
+    /// it into Name and clears it, so every later pass sees an ordinary flat name.
+    /// </summary>
+    public string[]? Scope { get; init; }
 
     public string Mangled
     {
@@ -572,6 +593,19 @@ internal record InterpStrExpr(Expr[] Parts, TextSpan Span) : Expr(Span);
 /// A bare identifier used as an expression, eg. a variable or function name.
 /// </summary>
 internal record IdentExpr(string Name, TextSpan Span) : Expr(Span);
+
+/// <summary>
+/// A name reached through an explicit scope qualifier: 'kernel.Step', 'kernel.P.Config', '::Helper'.
+/// Path holds every dotted segment after it, because only the scope tree can tell a process segment
+/// from the name or from a trailing member access. The ScopeBinder splits it and rewrites the node.
+/// </summary>
+internal record ScopedNameExpr(string[] Scope, string[] Path, TextSpan Span) : Expr(Span);
+
+/// <summary>
+/// Stands in for an expression whose meaning was already reported as an error, so nothing downstream
+/// invents a type for it and complains again. The AST-level twin of IrType.Error.
+/// </summary>
+internal record PoisonExpr(TextSpan Span) : Expr(Span);
 
 /// <summary>
 /// An explicit type cast, eg. (int) x. TargetType is the destination type name.

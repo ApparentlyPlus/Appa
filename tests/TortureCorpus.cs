@@ -279,6 +279,11 @@ public static class TortureCorpus
         ("environment",   "@environment"),
         ("generic-class", "class Gen[T] { T v; }"),
         ("generic-func",  "T func Gen[T](T v) { return v; }"),
+        // Crossed with every container, so the annotation is probed at root, in each realm, in a
+        // process, in a thread, in a class and in a function body without a case each.
+        ("shadows-class", "@shadows class Inner { int n; }"),
+        ("shadows-func",  "@shadows void func Helper() { }"),
+        ("shadows-enum",  "@shadows enum Inner { A }"),
     ];
 
     /// <summary>
@@ -939,32 +944,557 @@ public static class TortureCorpus
         // point of the feature, so it gets a case rather than only a unit test.
         yield return new("scope/realm-type-not-visible-outside",
             "void func Take(Config c) { } realm kernel { class Config { int n; } entry func Main() { } }",
-            Expect.Rejected);
+            Expect.Rejected, Codes.ScopedNameNotVisible);
 
         yield return new("scope/realm-type-not-visible-from-sibling",
             "realm kernel { class Config { int n; } entry func Main() { } } " +
             "realm userspace { void func Take(Config c) { } }",
-            Expect.Rejected);
+            Expect.Rejected, Codes.ScopedNameNotVisible);
 
         // A realm may shadow a top-level name; the inner one wins, silently.
         yield return new("scope/realm-shadows-top-level", """
             class Config { public int narrow; }
             realm kernel {
-                // Shadows the top-level Config. The inner one wins here, silently, and the outer
-                // one stays reachable everywhere else.
-                class Config { public int wide; }
+                // Displaces the top-level Config, and says so. The inner one wins here; the outer
+                // one stays what it was everywhere else.
+                @shadows class Config { public int wide; }
                 void func Use(Config c) { let int v = c.wide; }
                 entry func Main() { }
             }
             """, Expect.Accepted);
 
+        // The same program without the annotation. Shadowing is legal, never implicit.
+        yield return new("scope/realm-shadows-top-level-unmarked",
+            "class Config { public int narrow; } " +
+            "realm kernel { class Config { public int wide; } entry func Main() { } }",
+            Expect.Rejected, Codes.UnmarkedShadow);
+
+        // Marked but displacing nothing: the annotation has to mean something where it is written.
+        yield return new("scope/shadows-nothing",
+            "realm kernel { @shadows class Config { public int n; } entry func Main() { } }",
+            Expect.Rejected, Codes.UnmarkedShadow);
+
+        // Every declaration kind that can be scoped, shadowing the same kind at the top level -
+        // marked, then not. A kind the annotation forgets is one that shadows in silence.
+        yield return new("scope/shadows-kind-class",
+            "class Twin { int n; } realm kernel { @shadows class Twin { int m; } entry func Main() { } }",
+            Expect.Accepted);
+
+        yield return new("scope/shadows-kind-class-unmarked",
+            "class Twin { int n; } realm kernel { class Twin { int m; } entry func Main() { } }",
+            Expect.Rejected, Codes.UnmarkedShadow);
+
+        yield return new("scope/shadows-kind-module",
+            "module Twin { public static int func F() { return 1; } } realm kernel { @shadows module Twin { public static int func F() { return 2; } } entry func Main() { } }",
+            Expect.Accepted);
+
+        yield return new("scope/shadows-kind-module-unmarked",
+            "module Twin { public static int func F() { return 1; } } realm kernel { module Twin { public static int func F() { return 2; } } entry func Main() { } }",
+            Expect.Rejected, Codes.UnmarkedShadow);
+
+        yield return new("scope/shadows-kind-enum",
+            "enum Twin { A } realm kernel { @shadows enum Twin { B } entry func Main() { } }",
+            Expect.Accepted);
+
+        yield return new("scope/shadows-kind-enum-unmarked",
+            "enum Twin { A } realm kernel { enum Twin { B } entry func Main() { } }",
+            Expect.Rejected, Codes.UnmarkedShadow);
+
+        yield return new("scope/shadows-kind-union",
+            "union Twin { A(int n) } realm kernel { @shadows union Twin { B(int n) } entry func Main() { } }",
+            Expect.Accepted);
+
+        yield return new("scope/shadows-kind-union-unmarked",
+            "union Twin { A(int n) } realm kernel { union Twin { B(int n) } entry func Main() { } }",
+            Expect.Rejected, Codes.UnmarkedShadow);
+
+        yield return new("scope/shadows-kind-func",
+            "void func Twin() { } realm kernel { @shadows void func Twin() { } entry func Main() { } }",
+            Expect.Accepted);
+
+        yield return new("scope/shadows-kind-func-unmarked",
+            "void func Twin() { } realm kernel { void func Twin() { } entry func Main() { } }",
+            Expect.Rejected, Codes.UnmarkedShadow);
+
+        yield return new("scope/shadows-kind-generic",
+            "class Twin[T] { public T v; } realm kernel { @shadows class Twin[T] { public T w; } entry func Main() { } }",
+            Expect.Accepted);
+
+        yield return new("scope/shadows-kind-generic-unmarked",
+            "class Twin[T] { public T v; } realm kernel { class Twin[T] { public T w; } entry func Main() { } }",
+            Expect.Rejected, Codes.UnmarkedShadow);
+
+        yield return new("scope/shadows-kind-generic-union",
+            "union Twin[T] { A(T v), B } realm kernel { @shadows union Twin[T] { C(T v), D } entry func Main() { } }",
+            Expect.Accepted);
+
+        yield return new("scope/shadows-kind-generic-union-unmarked",
+            "union Twin[T] { A(T v), B } realm kernel { union Twin[T] { C(T v), D } entry func Main() { } }",
+            Expect.Rejected, Codes.UnmarkedShadow);
+
+        yield return new("scope/shadows-kind-native-type",
+            "native type Twin { int fd; } realm kernel { @shadows native type Twin { int gd; } entry func Main() { } }",
+            Expect.Accepted);
+
+        yield return new("scope/shadows-kind-native-type-unmarked",
+            "native type Twin { int fd; } realm kernel { native type Twin { int gd; } entry func Main() { } }",
+            Expect.Rejected, Codes.UnmarkedShadow);
+
+        // A process shadowing its own realm, one level further in.
+        yield return new("scope/shadows-process-over-realm",
+            "realm kernel { class Twin { int n; } foreground process P { @shadows class Twin { int m; } " +
+            "thread T { entry func R() { } } } entry func Main() { } }",
+            Expect.Accepted);
+
+        yield return new("scope/shadows-process-over-realm-unmarked",
+            "realm kernel { class Twin { int n; } foreground process P { class Twin { int m; } " +
+            "thread T { entry func R() { } } } entry func Main() { } }",
+            Expect.Rejected, Codes.UnmarkedShadow);
+
+        // A process shadowing the file's root past a realm that declares nothing of the name.
+        yield return new("scope/shadows-process-over-root",
+            "class Twin { int n; } realm kernel { foreground process P { @shadows class Twin { int m; } " +
+            "thread T { entry func R() { } } } entry func Main() { } }",
+            Expect.Accepted);
+
+        // Sibling realms cannot see each other, so neither shadows the other and marking is wrong.
+        yield return new("scope/sibling-realms-do-not-shadow",
+            "realm kernel { class Twin { int n; } entry func Main() { } } " +
+            "realm userspace { class Twin { int m; } foreground process P { thread T { entry func R() { } } } }",
+            Expect.Accepted);
+
+        yield return new("scope/sibling-realms-marked-is-an-error",
+            "realm kernel { class Twin { int n; } entry func Main() { } } " +
+            "realm userspace { @shadows class Twin { int m; } foreground process P { thread T { entry func R() { } } } }",
+            Expect.Rejected, Codes.UnmarkedShadow);
+
+        // Sibling processes cannot see each other either.
+        yield return new("scope/sibling-processes-do-not-shadow",
+            "realm kernel { foreground process A { class Twin { int n; } thread T { entry func R() { } } } " +
+            "background process B { class Twin { int m; } thread U { entry func R() { } } } entry func Main() { } }",
+            Expect.Accepted);
+
+        // A declaration written before the one it shadows: the realm's Twin comes after the process.
+        yield return new("scope/shadows-declaration-written-later",
+            "realm kernel { foreground process P { @shadows class Twin { int m; } thread T { entry func R() { } } } " +
+            "class Twin { int n; } entry func Main() { } }",
+            Expect.Accepted);
+
+        // Illegal positions: the annotation belongs on a scoped declaration and nowhere else.
+        yield return new("scope/shadows-on-class-member",
+            "class C { @shadows int func F() { return 1; } } realm kernel { entry func Main() { } }",
+            Expect.Rejected);
+
+        // Every position that is not a scoped declaration. The list is the answer to "what can be
+        // shadowed", so it is pinned rather than left to the reader of DeclareItem.
+        yield return new("scope/shadows-on-local",
+            "realm kernel { entry func Main() { let int x = 1; if (true) { @shadows let int x = 2; } } }",
+            Expect.Rejected);
+
+        yield return new("scope/shadows-on-field",
+            "class Twin { int n; } realm kernel { class C { @shadows int Twin; } entry func Main() { } }",
+            Expect.Rejected, Codes.BadAnnotation);
+
+        yield return new("scope/shadows-on-method",
+            "void func Helper() { } " +
+            "realm kernel { class C { @shadows public int func Helper() { return 1; } } entry func Main() { } }",
+            Expect.Rejected, Codes.WrongAnnotationKind);
+
+        yield return new("scope/shadows-on-param",
+            "void func Twin() { } realm kernel { void func F(@shadows int Twin) { } entry func Main() { } }",
+            Expect.Rejected);
+
+        yield return new("scope/shadows-on-thread",
+            "realm kernel { foreground process P { @shadows thread T { entry func R() { } } } entry func Main() { } }",
+            Expect.Rejected, Codes.BadAnnotation);
+
+        yield return new("scope/shadows-on-enum-member",
+            "class A { int n; } realm kernel { enum E { @shadows A } entry func Main() { } }",
+            Expect.Rejected);
+
+        yield return new("scope/shadows-on-union-variant",
+            "class A { int n; } realm kernel { union U { @shadows A(int n) } entry func Main() { } }",
+            Expect.Rejected);
+
+        yield return new("scope/shadows-on-import",
+            "@shadows import gata; realm kernel { entry func Main() { } }",
+            Expect.Rejected, Codes.BadAnnotation);
+
+        yield return new("scope/shadows-on-extern",
+            "@extern int func puts(String s); " +
+            "realm kernel { @shadows @extern int func puts(String s); entry func Main() { } }",
+            Expect.Rejected, Codes.UnmarkedShadow);
+
+        yield return new("scope/shadows-on-process",
+            "realm kernel { @shadows foreground process P { thread T { entry func R() { } } } entry func Main() { } }",
+            Expect.Rejected, Codes.BadAnnotation);
+
+        yield return new("scope/shadows-on-realm",
+            "@shadows realm kernel { entry func Main() { } }",
+            Expect.Rejected, Codes.BadAnnotation);
+
+        yield return new("scope/shadows-on-native-block",
+            "realm kernel { @shadows native { int zz; } entry func Main() { } }",
+            Expect.Rejected, Codes.UnmarkedShadow);
+
+        yield return new("scope/shadows-on-entry-func",
+            "class Main { int n; } realm kernel { @shadows entry func Main() { } }",
+            Expect.Rejected);
+
+        // Two marks on one declaration, and the mark beside another annotation.
+        yield return new("scope/shadows-twice",
+            "class Twin { int n; } realm kernel { @shadows @shadows class Twin { int m; } entry func Main() { } }",
+            Expect.Any);
+
+        yield return new("scope/shadows-beside-keep",
+            "module Twin { public static int func F() { return 1; } } " +
+            "realm kernel { @keep @shadows module Twin { public static int func F() { return 2; } } entry func Main() { } }",
+            Expect.Accepted);
+
+        yield return new("scope/shadows-at-root-shadows-nothing",
+            "@shadows class Config { public int n; } realm kernel { entry func Main() { } }",
+            Expect.Rejected, Codes.UnmarkedShadow);
+
+        // Same name twice in one scope is still a collision - shadowing is between scopes, never
+        // within one. Pinned here because the message names a scoped type, and a raw internal
+        // spelling reaching a user is a bug AllDiagnosticsAreWellFormed watches for.
+        yield return new("scope/duplicate-generic-in-one-realm",
+            "realm kernel { class Box[T] { T v; } class Box[T] { T w; } entry func Main() { } }",
+            Expect.Rejected, Codes.DuplicateName);
+
+        yield return new("scope/duplicate-class-in-one-realm",
+            "realm kernel { class Cargo { int n; } class Cargo { int w; } entry func Main() { } }",
+            Expect.Rejected, Codes.DuplicateName);
+
+        yield return new("scope/duplicate-class-in-one-process",
+            "realm kernel { foreground process P { class Cargo { int n; } class Cargo { int w; } " +
+            "thread T { entry func R() { } } } entry func Main() { } }",
+            Expect.Rejected, Codes.DuplicateName);
+
+        // Three levels, one name at each. The discriminator is the field name: every Cargo has a
+        // different one, so if two stamps of Box[Cargo] ever merged, a field access would fail to
+        // resolve rather than silently compiling to the wrong type.
+        yield return new("scope/three-levels-of-the-same-name", """
+            class Box[T] { public T v; }
+            class Cargo { public int root; }
+            void func UseRoot(Box[Cargo] b) { let int n = b.v.root; }
+            realm kernel {
+                @shadows class Box[T] { public T v; }
+                @shadows class Cargo { public int inRealm; }
+                void func UseRealm(Box[Cargo] b) { let int n = b.v.inRealm; }
+                foreground process P {
+                    @shadows class Box[T] { public T v; }
+                    @shadows class Cargo { public int inProc; }
+                    void func UseProc(Box[Cargo] b) { let int n = b.v.inProc; }
+                    thread T { entry func Run() { } }
+                }
+                entry func Main() { }
+            }
+            """, Expect.Accepted);
+
+        // A local owns its name against a scoped declaration exactly as it does against a root one.
+        // The rewrite that qualifies scoped names walked bare identifiers blindly, so each of these
+        // read as the type and the emitted C never got as far as a compiler.
+        yield return new("scope/local-named-like-a-scoped-type", """
+            realm kernel {
+                class Cfg { public int a; }
+                module M { public static int func G() { return 7; } }
+                int func Param(int Cfg) { return Cfg; }
+                int func Field(Cfg before) { return before.a; }
+                entry func Main() {
+                    let int Cfg = 5;
+                    let int q = Cfg + Param(1) + M.G();
+                    for (let int M = 0; M < 2; M++) { let int inner = M; }
+                    let int after = M.G();
+                }
+            }
+            """, Expect.Accepted);
+
+        // One meaning per name in a scope. A type and a function of one name are both reachable at
+        // root only because nothing there can shadow them; a scoped declaration takes the whole
+        // name, so the pairing has no answer and was accepted in silence.
+        yield return new("scope/type-and-func-of-one-name",
+            "class Twin { public int n; } int func Twin() { return 1; } realm kernel { entry func Main() { } }",
+            Expect.Rejected, Codes.DuplicateName);
+
+        yield return new("scope/type-and-func-of-one-name-in-realm",
+            "realm kernel { class Twin { public int n; } int func Twin() { return 1; } entry func Main() { } }",
+            Expect.Rejected, Codes.DuplicateName);
+
+        yield return new("scope/generic-and-plain-of-one-name",
+            "realm kernel { class Box { public int n; } class Box[T] { public T v; } entry func Main() { } }",
+            Expect.Rejected, Codes.DuplicateName);
+
+        yield return new("scope/process-and-type-of-one-name",
+            "realm kernel { class P { public int n; } foreground process P { thread T { entry func R() { } } } " +
+            "entry func Main() { } }",
+            Expect.Rejected, Codes.DuplicateName);
+
+        // A scoped declaration takes over its whole name, so a use in the wrong position finds it
+        // rather than the outer one it displaced - and must be told exactly that, once.
+        yield return new("scope/scoped-func-read-as-a-type",
+            "class Twin { public int n; } realm kernel { @shadows int func Twin() { return 1; } " +
+            "entry func Main() { let Twin v = new Twin(); } }",
+            Expect.Rejected, Codes.UndefinedType);
+
+        yield return new("scope/scoped-type-read-as-a-function",
+            "int func Twin() { return 1; } realm kernel { @shadows class Twin { public int n; } " +
+            "entry func Main() { let int n = Twin(); } }",
+            Expect.Rejected, Codes.UndefinedMethod);
+
+        // The repeat declares nothing, including when it holds the only scoped declarations in the
+        // build - the rewrite that empties it used to be skipped as a no-op in exactly that case.
+        yield return new("scope/duplicate-process-declares-nothing",
+            "realm kernel { foreground process P { thread T { entry func R() { } } } " +
+            "foreground process P { int func Only() { return 7; } } entry func Main() { } }",
+            Expect.Rejected, Codes.DuplicateName);
+
+        // An @extern names a C symbol under its own spelling and cannot be qualified, but a scoped
+        // declaration of that name still takes the name over.
+        yield return new("scope/shadows-an-extern",
+            "@extern int func gata_probe(int n); realm kernel { @shadows int func gata_probe(int n) { return n; } " +
+            "entry func Main() { let int q = gata_probe(1); } }",
+            Expect.Accepted);
+
+        yield return new("scope/shadows-an-extern-unmarked",
+            "@extern int func gata_probe(int n); realm kernel { int func gata_probe(int n) { return n; } " +
+            "entry func Main() { } }",
+            Expect.Rejected, Codes.UnmarkedShadow);
+
+        #region Scope qualifiers
+
+        // What '@shadows' declares, a qualifier undoes: each level's name stays reachable from
+        // inside the one that displaced it. Every accepted case here is linked, because a qualifier
+        // resolving to the wrong symbol still compiles per translation unit.
+        yield return new("qualify/realm-from-process", """
+            realm kernel {
+                int func Step() { return 1; }
+                foreground process P {
+                    @shadows int func Step() { return 2; }
+                    thread T { entry func R() { let int a = Step(); let int b = kernel.Step(); } }
+                }
+                entry func Main() { }
+            }
+            """, Expect.Accepted);
+
+        yield return new("qualify/root-from-realm",
+            "int func Step() { return 1; } realm kernel { @shadows int func Step() { return 2; } " +
+            "entry func Main() { let int a = Step(); let int b = ::Step(); } }",
+            Expect.Accepted);
+
+        yield return new("qualify/every-level-from-a-thread", """
+            int func D() { return 1; }
+            realm userspace {
+                @shadows int func D() { return 2; }
+                foreground process P {
+                    @shadows int func D() { return 3; }
+                    thread T {
+                        entry func R() { let int q = D() + userspace.P.D() + userspace.D() + ::D(); }
+                    }
+                }
+            }
+            realm kernel { entry func Main() { } }
+            """, Expect.Accepted);
+
+        // A type position, which is most of what shadowing applies to: four of the six forms a
+        // '@shadows' may mark are types, so an expression-only qualifier would be half a feature.
+        yield return new("qualify/type-position", """
+            class Cargo { public int root; }
+            realm kernel {
+                @shadows class Cargo { public int inr; }
+                class Holder { public ::Cargo held; }
+                int func Outer(::Cargo c) { return c.root; }
+                int func Inner(Cargo c) { return c.inr; }
+                entry func Main() { }
+            }
+            """, Expect.Accepted);
+
+        yield return new("qualify/process-type-from-a-thread",
+            "realm kernel { foreground process P { class C { public int a; } " +
+            "int func Read(kernel.P.C x) { return x.a; } thread T { entry func R() { } } } " +
+            "entry func Main() { } }",
+            Expect.Accepted);
+
+        // A qualified type argument: the stamp must be over the scope the argument names, not the
+        // one the instantiation was written in.
+        yield return new("qualify/generic-argument",
+            "class Box[T] { public T v; } class Cargo { public int r; } " +
+            "realm kernel { @shadows class Cargo { public int k; } " +
+            "void func U(Box[::Cargo] b) { let int n = b.v.r; } entry func Main() { } }",
+            Expect.Accepted);
+
+        yield return new("qualify/generic-base",
+            "class Box[T] { public T v; } " +
+            "realm kernel { @shadows class Box[T] { public T w; } class Cargo { public int a; } " +
+            "void func U(::Box[Cargo] b) { let int n = b.v.a; } entry func Main() { } }",
+            Expect.Accepted);
+
+        // A module reached past a class that displaced its name, then its member: the segment split
+        // that only the scope tree can make.
+        yield return new("qualify/module-member",
+            "module Algo { public static int func Min(int a, int b) { return a; } } " +
+            "realm kernel { @shadows class Algo { public int Min; } " +
+            "entry func Main() { let int z = ::Algo.Min(1, 2); } }",
+            Expect.Accepted);
+
+        // Outward only. A sibling realm and a sibling process are exactly what scopes exist to
+        // separate, so naming one is an error rather than a way in.
+        yield return new("qualify/sibling-realm",
+            "realm kernel { class Cfg { public int a; } entry func Main() { } } " +
+            "realm userspace { void func F() { let kernel.Cfg c = new kernel.Cfg(); } }",
+            Expect.Rejected, Codes.ScopeNotEnclosing);
+
+        yield return new("qualify/sibling-process",
+            "realm kernel { foreground process A { class Cfg { public int a; } thread T { entry func R() { } } } " +
+            "foreground process B { thread T { entry func R() { let kernel.A.Cfg c = new kernel.A.Cfg(); } } } " +
+            "entry func Main() { } }",
+            Expect.Rejected, Codes.ScopeNotEnclosing);
+
+        yield return new("qualify/realm-from-root",
+            "realm kernel { int func Step() { return 1; } entry func Main() { } } " +
+            "int func Outer() { return kernel.Step(); }",
+            Expect.Rejected, Codes.ScopeNotEnclosing);
+
+        yield return new("qualify/no-such-scope",
+            "realm kernel { entry func Main() { let int z = kernel.Q.Nope(); } }",
+            Expect.Rejected, Codes.UnknownInScope);
+
+        // A qualifier names one exact scope, so a name it does not declare is an error rather than
+        // a quiet walk further out.
+        yield return new("qualify/name-not-in-scope",
+            "realm kernel { entry func Main() { let int z = kernel.Nope(); } }",
+            Expect.Rejected, Codes.UnknownInScope);
+
+        yield return new("qualify/name-not-at-root",
+            "realm kernel { entry func Main() { let int z = ::Nope(); } }",
+            Expect.Rejected, Codes.UnknownInScope);
+
+        // The qualifier does not replace '@shadows': one declares the intent, the other reaches
+        // past it, and writing the second never excuses omitting the first.
+        yield return new("qualify/does-not-excuse-shadows",
+            "int func Step() { return 1; } realm kernel { int func Step() { return 2; } " +
+            "entry func Main() { let int z = ::Step(); } }",
+            Expect.Rejected, Codes.UnmarkedShadow);
+
+        yield return new("qualify/redundant-is-allowed",
+            "realm kernel { int func Step() { return 1; } entry func Main() { let int z = kernel.Step(); } }",
+            Expect.Accepted);
+
+        yield return new("qualify/bare-realm-is-not-a-value",
+            "realm kernel { entry func Main() { let int z = kernel; } }",
+            Expect.Rejected, Codes.Syntax);
+
+        yield return new("qualify/realm-name-is-reserved",
+            "class userspace { public int a; } realm kernel { entry func Main() { } }",
+            Expect.Rejected, Codes.Syntax);
+
+        // Every readable C name joins its parts with '_', which is also legal inside each part, so
+        // two differently split names can spell the same symbol. Reported here rather than left to
+        // the C compiler, which names it against a generated symbol the author never wrote.
+        yield return new("qualify/method-name-join-collides",
+            "class A_B { public int func M() { return 1; } } class A { public int func B_M() { return 2; } } " +
+            "realm kernel { entry func Main() { } }",
+            Expect.Rejected, Codes.DuplicateName);
+
+        yield return new("qualify/thread-name-join-collides",
+            "realm kernel { entry func Main() { } } " +
+            "realm userspace { foreground process A_B { thread T { entry func R() { } } } " +
+            "foreground process A { thread B_T { entry func R() { } } } }",
+            Expect.Rejected, Codes.DuplicateName);
+
+        // Realms are separate namespaces, so one process name in each is legal - and has to reach
+        // the emitter as two symbols, or each translation unit defines the same thread entry.
+        yield return new("qualify/one-process-name-per-realm",
+            "realm kernel { foreground process App { thread T { entry func R() { } } } entry func Main() { } } " +
+            "realm userspace { foreground process App { thread T { entry func R() { } } } }",
+            Expect.Accepted);
+
+        // An '@extern' names a C symbol that already exists, so it is the one declaration that can
+        // take over a name the compiler generates - and it links, binding to the generated body.
+        yield return new("qualify/extern-takes-a-generated-name",
+            "@extern void func uapps(); realm kernel { entry func Main() { uapps(); } } " +
+            "realm userspace { foreground process P { thread T { entry func R() { } } } }",
+            Expect.Rejected, Codes.DuplicateName);
+
+        yield return new("qualify/extern-takes-the-entry-symbol",
+            "@extern void func gata_kernelspace_main(); realm kernel { entry func Main() { } }",
+            Expect.Rejected, Codes.DuplicateName);
+
+        // A process name is a runtime string, not a C identifier, so a C keyword is fine.
+        yield return new("qualify/process-named-like-a-c-keyword",
+            "realm kernel { entry func Main() { } } " +
+            "realm userspace { foreground process register { thread T { entry func R() { } } } }",
+            Expect.Accepted);
+
+        #endregion
+
+        // A generic template may be declared inside a scope, and its stamps follow it there.
         yield return new("scope/generic-class-in-realm",
-            "realm kernel { class Box[T] { T v; } entry func Main() { } }",
-            Expect.Rejected, Codes.GenericInScope);
+            "realm kernel { class Box[T] { public T v; } void func Use(Box[int] b) { } entry func Main() { } }",
+            Expect.Accepted);
 
         yield return new("scope/generic-func-in-realm",
-            "realm kernel { T func Id[T](T v) { return v; } entry func Main() { } }",
-            Expect.Rejected, Codes.GenericInScope);
+            "realm kernel { T func Id[T](T v) { return v; } entry func Main() { let int n = Id(1); } }",
+            Expect.Accepted);
+
+        // The bar the whole design was aimed at: one template name per realm, one per process, each
+        // stamped over its own scope's type, all four distinct in the emitted C.
+        yield return new("scope/same-generic-in-both-realms", """
+            realm kernel {
+                class Box[T] { public T v; }
+                class Cargo { public int n; }
+                void func Use(Box[Cargo] b) { }
+                entry func Main() { }
+            }
+            realm userspace {
+                class Box[T] { public T v; }
+                class Cargo { public int n; }
+                void func Use(Box[Cargo] b) { }
+                foreground process App { thread T { entry func Run() { } } }
+            }
+            """, Expect.Accepted);
+
+        yield return new("scope/same-generic-in-two-processes", """
+            realm kernel { entry func Main() { } }
+            realm userspace {
+                foreground process One {
+                    class Box[T] { public T v; }
+                    class Cargo { public int n; }
+                    void func Use(Box[Cargo] b) { }
+                    thread T { entry func Run() { } }
+                }
+                background process Two {
+                    class Box[T] { public T v; }
+                    class Cargo { public int w; }
+                    void func Use(Box[Cargo] b) { }
+                    thread T { entry func Run() { } }
+                }
+            }
+            """, Expect.Accepted);
+
+        // A scoped generic over a scoped type, and the outer generic of the same name over the
+        // outer type, side by side.
+        yield return new("scope/scoped-generic-shadows-top-level-generic", """
+            class Box[T] { public T v; }
+            class Cargo { public int outer; }
+            realm kernel {
+                @shadows class Box[T] { public T v; }
+                @shadows class Cargo { public int inner; }
+                void func Inside(Box[Cargo] b) { }
+                entry func Main() { }
+            }
+            void func Outside(Box[Cargo] b) { }
+            """, Expect.Accepted);
+
+        // A generic union declared in a scope, whose variant payload is a scoped type.
+        yield return new("scope/generic-union-in-realm", """
+            realm kernel {
+                enum Grade { Low, High }
+                union Slot[T] { Full(T v), Empty }
+                void func Use(Slot[Grade] s) { }
+                entry func Main() { }
+            }
+            """, Expect.Accepted);
 
         // A top-level generic instantiated over a realm-scoped type: the template stays global, the
         // argument is scoped, and the stamp is per-realm. This is the case that must keep working.
@@ -976,6 +1506,148 @@ public static class TortureCorpus
                 entry func Main() { }
             }
             """, Expect.Accepted);
+
+        // A process is the address space on the target, so a declaration here is shared by exactly
+        // the threads that share memory. Accepted, so the emitted C goes through the host compiler.
+        yield return new("scope/process-scoped-declarations", """
+            realm kernel { entry func Main() { } }
+            realm userspace {
+                foreground process App {
+                    class Frame { public int w; }
+                    enum Phase { Boot, Ready }
+                    int func Step(int n) { return n + 1; }
+                    thread A { entry func Run() { let Phase p = Phase.Boot; let int n = Step(1); } }
+                    thread B { entry func Run() { let int n = Step(2); } }
+                }
+            }
+            """, Expect.Accepted);
+
+        yield return new("scope/same-names-in-two-processes", """
+            realm kernel { entry func Main() { } }
+            realm userspace {
+                foreground process One {
+                    class Frame { public int w; }
+                    int func Step(int n) { return n + 1; }
+                    thread T { entry func Run() { let int n = Step(1); } }
+                }
+                background process Two {
+                    class Frame { public int h; }
+                    int func Step(int n) { return n + 2; }
+                    thread T { entry func Run() { let int n = Step(1); } }
+                }
+            }
+            """, Expect.Accepted);
+
+        // Symmetric: a kernel-realm process is a process too.
+        yield return new("scope/process-scope-in-kernel-realm", """
+            realm kernel {
+                foreground process Svc {
+                    class Frame { public int w; }
+                    int func Step(int n) { return n + 1; }
+                    thread T { entry func Run() { let int n = Step(1); } }
+                }
+                entry func Main() { }
+            }
+            """, Expect.Accepted);
+
+        // A process's declarations are its own: the realm around it cannot see them.
+        yield return new("scope/process-type-not-visible-from-realm",
+            "realm kernel { foreground process P { class Frame { int w; } thread T { entry func R() { } } } " +
+            "void func Take(Frame f) { } entry func Main() { } }",
+            Expect.Rejected, Codes.ScopedNameNotVisible);
+
+        yield return new("scope/process-type-not-visible-from-sibling-process",
+            "realm kernel { entry func Main() { } } realm userspace { " +
+            "foreground process One { class Frame { int w; } thread T { entry func R() { } } } " +
+            "background process Two { void func Take(Frame f) { } thread T { entry func R() { } } } }",
+            Expect.Rejected, Codes.ScopedNameNotVisible);
+
+        // A process may shadow a realm name, and the innermost wins.
+        yield return new("scope/process-shadows-realm", """
+            realm kernel {
+                class Frame { public int outer; }
+                foreground process P {
+                    @shadows class Frame { public int inner; }
+                    void func Take(Frame f) { let int v = f.inner; }
+                    thread T { entry func R() { } }
+                }
+                entry func Main() { }
+            }
+            """, Expect.Accepted);
+
+        yield return new("scope/entry-func-in-process",
+            "realm kernel { foreground process P { entry func Oops() { } thread T { entry func R() { } } } entry func Main() { } }",
+            Expect.Rejected, Codes.EntryOutsideKernel);
+
+        yield return new("scope/nested-process",
+            "realm kernel { foreground process P { foreground process Q { } thread T { entry func R() { } } } entry func Main() { } }",
+            Expect.Rejected, Codes.InvalidNesting);
+
+        // A type argument that is itself an instantiation is one flat string on the request, and no
+        // scope declares that string - so the request has to be rebuilt from the structural spec or
+        // it names a stamp nothing will ever produce.
+        yield return new("scope/nested-generic-argument", """
+            realm kernel {
+                class Box[T] { public T v; }
+                class Cargo { public int n; }
+                void func Use(Box[Box[Cargo]] b) { let int n = b.v.v.n; }
+                entry func Main() { }
+            }
+            """, Expect.Accepted);
+
+        yield return new("scope/nested-generic-argument-outer-template", """
+            class Box[T] { public T v; }
+            realm kernel {
+                class Cargo { public int n; }
+                void func Use(Box[Box[Cargo]] b) { let int n = b.v.v.n; }
+                entry func Main() { }
+            }
+            """, Expect.Accepted);
+
+        // A function declared in a process, called from the realm around it. The name exists but
+        // not here, and saying only "undefined" would be a lie about what is wrong.
+        yield return new("scope/process-func-not-visible-from-realm",
+            "realm kernel { foreground process P { int func Step(int n) { return n; } thread T { entry func R() { } } } " +
+            "entry func Main() { let int n = Step(1); } }",
+            Expect.Rejected, Codes.ScopedNameNotVisible);
+
+        // Topology has to live where a realm can place it. A process outside every realm used to
+        // parse clean and then emit nothing at all - threads included.
+        yield return new("scope/process-outside-realm",
+            "foreground process P { thread T { entry func R() { } } } realm kernel { entry func Main() { } }",
+            Expect.Rejected, Codes.TopologyOutsideRealm);
+
+        yield return new("scope/thread-outside-process",
+            "realm kernel { thread T { entry func R() { } } entry func Main() { } }",
+            Expect.Rejected, Codes.TopologyOutsideRealm);
+
+        yield return new("scope/import-inside-realm",
+            "realm kernel { import gata; entry func Main() { } }",
+            Expect.Rejected, Codes.TopologyOutsideRealm);
+
+        yield return new("scope/import-inside-process",
+            "realm kernel { foreground process P { import gata; thread T { entry func R() { } } } entry func Main() { } }",
+            Expect.Rejected, Codes.TopologyOutsideRealm);
+
+        yield return new("scope/environment-inside-process",
+            "realm kernel { foreground process P { @environment thread T { entry func R() { } } } entry func Main() { } }",
+            Expect.Rejected, Codes.MisplacedEnvironment);
+
+        // Two processes of one name intern to one scope, so their declarations merge. Reported at
+        // the process, not as a collision between the declarations it dragged together.
+        yield return new("scope/duplicate-process-in-one-realm",
+            "realm kernel { foreground process P { class A { int n; } thread T { entry func R() { } } } " +
+            "foreground process P { class A { int m; } thread U { entry func R() { } } } entry func Main() { } }",
+            Expect.Rejected, Codes.DuplicateName);
+
+        yield return new("scope/same-process-name-across-realms",
+            "realm kernel { foreground process P { thread T { entry func R() { } } } entry func Main() { } } " +
+            "realm userspace { foreground process P { thread T { entry func R() { } } } }",
+            Expect.Accepted);
+
+        yield return new("scope/realm-generic-not-visible-outside",
+            "realm kernel { class Box[T] { public T v; } entry func Main() { } } void func Use(Box[int] b) { }",
+            Expect.Rejected, Codes.ScopedNameNotVisible);
         #endregion
 
         #region realms / structure
@@ -1080,6 +1752,15 @@ public static class TortureCorpus
         #endregion
 
         #region annotations
+        // @keep is what roots a symbol named only from raw C, so it must survive DCE - which is why
+        // the class form needs the ARC runtime a corpus case has no way to supply, and is pinned by
+        // KeepIsAcceptedWhereItIsConsumed instead.
+        yield return new("ann/keep-on-module",
+            "@keep module M { public static int func F() { return 1; } } realm kernel { entry func Main() { } }",
+            Expect.Accepted);
+        yield return new("ann/keep-on-free-func",
+            "@keep int func F() { return 1; } realm kernel { entry func Main() { } }", Expect.Accepted);
+
         yield return new("ann/on-enum", "@keep enum E { A } realm kernel { entry func Main() { } }", Expect.Rejected, Codes.BadAnnotation);
         yield return new("ann/on-field", "class C { @keep int n; } realm kernel { entry func Main() { } }", Expect.Rejected);
         yield return new("ann/unknown-intrinsic",

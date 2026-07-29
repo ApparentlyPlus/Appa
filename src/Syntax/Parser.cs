@@ -37,6 +37,10 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     // Generic instantiation sites collected during parsing, consumed by the Monomorphizer.
     private readonly List<GenericUse> _gu = [];
 
+    // Set the moment any scope qualifier is written, so the ScopeBinder knows whether a file that
+    // declares nothing scoped still needs its rewrite sweep.
+    private bool _scopedRef;
+
     #region Core stream helpers
 
     /// <summary>
@@ -105,7 +109,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
             TK.LParen => "'('", TK.RParen => "')'",
             TK.LBrace => "'{'", TK.RBrace => "'}'",
             TK.LBrack => "'['", TK.RBrack => "']'",
-            TK.Semi => "';'", TK.Comma => "','", TK.Colon => "':'",
+            TK.Semi => "';'", TK.Comma => "','", TK.Colon => "':'", TK.ColonColon => "'::'",
             TK.Dot => "'.'", TK.Eq => "'='", TK.Arrow => "'->'",
             TK.EOF => "end of file",
             _ => $"'{k.ToString().ToLowerInvariant()}'"
@@ -131,10 +135,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Returns true if a process declaration starts here. 'process' is contextual, so the bare form
-    /// needs two tokens of lookahead: only a process is spelled 'process' Ident '{' or
-    /// 'process' Ident ':'. A free function is 'Ident func Ident', a field is 'Ident Ident ;', and a
-    /// method is 'Ident func Ident (' - none of which can be confused with this.
+    /// Returns true if a process declaration starts here.
     /// </summary>
     private bool AtProcessStart()
     {
@@ -212,6 +213,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
             else if (At(TK.AtPreamble)) { var t = Advance(); anns ??= []; anns.Add(new PreambleAnnotation(t.Value, t.Span)); }
             else if (At(TK.AtKeep)) { var t = Advance(); anns ??= []; anns.Add(new KeepAnnotation(t.Span)); }
             else if (At(TK.AtBuiltin)) { var t = Advance(); anns ??= []; anns.Add(new BuiltinAnnotation(t.Value, t.Span)); }
+            else if (At(TK.AtShadows)) { var t = Advance(); anns ??= []; anns.Add(new ShadowsAnnotation(t.Span)); }
             else break;
         }
         return anns?.ToArray() ?? [];
@@ -222,10 +224,12 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     /// @intrinsic and @preamble bind only to native blocks, native types and functions; @keep and
     /// @builtin are what a class or module may carry, and everything else rejects all of them.
     /// </summary>
-    private static void RejectAnns(Annotation[] anns, string what, bool allowKeep = false, bool allowBuiltin = false)
+    private static void RejectAnns(Annotation[] anns, string what, bool allowKeep = false,
+                                   bool allowBuiltin = false, bool allowShadows = true)
     {
         foreach (var a in anns)
         {
+            if (allowShadows && a is ShadowsAnnotation) continue;
             if (allowKeep && a is KeepAnnotation) continue;
             if (allowBuiltin && a is BuiltinAnnotation) continue;
             FailAt(AnnSpan(a), $"annotations have no effect on {what}", Codes.BadAnnotation);
@@ -243,6 +247,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
             PreambleAnnotation p => p.Span,
             KeepAnnotation k => k.Span,
             BuiltinAnnotation b => b.Span,
+            ShadowsAnnotation s => s.Span,
             _ => TextSpan.None
         };
     }
@@ -258,7 +263,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     {
         List<TopLevel> items = [];
         while (!At(TK.EOF)) items.Add(ParseTopLevel());
-        return new Program([.. items]) { GenericUses = [.. _gu] };
+        return new Program([.. items]) { GenericUses = [.. _gu], HasScopedRefs = _scopedRef };
     }
 
     /// <summary>
@@ -308,6 +313,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         if (At(TK.AtEnvironment)) { int es = Cur.Span.Start; Advance(); return new EnvironmentDecl(To(es)); }
         int s = Cur.Span.Start;
         var anns = ParseAnnotations();
+        if (At(TK.Import)) RejectAnns(anns, "an import", allowShadows: false);
         if (At(TK.NativeContent)) return new NativeBlock(ParseNativeBody(Advance()), To(s), anns);
         if (At(TK.NativeTypeDecl)) return ParseNativeType(anns, s);
 
@@ -317,12 +323,41 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         if (At(TK.Union)) { RejectAnns(anns, "a union"); return ParseUnionDecl(anns, s); }
         if (At(TK.Class)) { RejectAnns(anns, "a class", allowKeep: true, allowBuiltin: true); return ParseClassDecl(anns, s); }
         if (At(TK.Module)) { RejectAnns(anns, "a module", allowKeep: true); return ParseModuleDecl(anns, s); }
-        if (At(TK.Realm)) { RejectAnns(anns, "a realm"); return ParseRealmDecl(); }
+        if (At(TK.Realm)) { RejectAnns(anns, "a realm", allowShadows: false); return ParseRealmDecl(); }
         if (At(TK.Kernel)) RequireRealmKeyword();
         if (AtProcessStart())
-            { RejectAnns(anns, "a process"); return ParseProcessDeclTop(); }
+            Fail("a 'process' must be declared inside a 'realm' block", Codes.TopologyOutsideRealm,
+                 ["wrap it in 'realm kernel { ... }' or 'realm userspace { ... }'"]);
+        RejectStrayThread();
+        RejectModifierOnType();
         if (At(TK.AtExtern)) return ParseExternDecl(anns, s);
         return ParseFreeFuncDecl(anns, s);
+    }
+
+    /// <summary>
+    /// Reports a visibility or 'static' modifier written on a top-level type declaration. Only a
+    /// free function takes one there; without this the modifier is read as the start of a function
+    /// and the error lands on the 'class' keyword, naming the wrong thing entirely.
+    /// </summary>
+    private void RejectModifierOnType()
+    {
+        if (Cur.Kind is not (TK.Public or TK.Private or TK.Static)) return;
+        string what = Peek().Kind switch
+        {
+            TK.Class => "a class",
+            TK.Module => "a module",
+            TK.Enum => "an enum",
+            TK.Union => "a union",
+            TK.NativeTypeDecl => "a native type",
+            _ => "",
+        };
+        if (what.Length == 0) return;
+
+        string mod = Cur.Value;
+        FailAt(Cur.Span, $"'{mod}' has no meaning on {what}", Codes.BadDeclHeader,
+            [mod == "private"
+                ? "a top-level type is visible to every file that imports this one; there is no file-local type"
+                : $"remove '{mod}'; only a free function takes one here"]);
     }
 
     /// <summary>
@@ -390,7 +425,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         Advance(); // 'realm'
         Realm kind = Realm.None;
         if (At(TK.Kernel)) { kind = Realm.Kernel; Advance(); }
-        else if (AtValue("userspace")) { kind = Realm.User; Advance(); }
+        else if (At(TK.Userspace)) { kind = Realm.User; Advance(); }
         else
             Fail($"unknown realm {Found()}; the only realms are 'kernel' and 'userspace'",
                  Codes.UnknownRealm,
@@ -420,8 +455,13 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     {
         if (At(TK.Realm)) Fail("a 'realm' block cannot be nested inside another", Codes.InvalidNesting);
         if (At(TK.Kernel)) RequireRealmKeyword();
+        RejectStrayImport();
+        RejectStrayThread();
         int s = Cur.Span.Start;
+        if (At(TK.AtEnvironment)) { Advance(); return new EnvironmentDecl(To(s)); }
         var anns = ParseAnnotations();
+        RejectStrayImport();
+        RejectStrayThread();
         if (At(TK.NativeContent)) return new NativeBlock(ParseNativeBody(Advance()), To(s), anns);
         if (At(TK.NativeTypeDecl)) return ParseNativeType(anns, s);
         if (At(TK.AtExtern)) return ParseExternDecl(anns, s);
@@ -430,7 +470,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         if (At(TK.Class)) { RejectAnns(anns, "a class", allowKeep: true, allowBuiltin: true); return ParseClassDecl(anns, s); }
         if (At(TK.Module)) { RejectAnns(anns, "a module", allowKeep: true); return ParseModuleDecl(anns, s); }
         if (AtProcessStart())
-            { RejectAnns(anns, "a process"); return ParseProcessDeclTop(); }
+            { RejectAnns(anns, "a process", allowShadows: false); return ParseProcessDeclTop(); }
         return ParseFreeFuncDecl(anns, s);
     }
 
@@ -456,10 +496,6 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
             generics.Add(ExpectBareGenericParam());
             while (Try(TK.Comma)) generics.Add(ExpectBareGenericParam());
             Expect(TK.RBrack);
-
-            // Register the instantiation site and mangle the name before parsing the body, so a
-            // self-reference in the body resolves. Composed through Mangler so the one function
-            // that builds this name is the one every other pass asks for it from.
             var genericsArray = generics.ToArray();
             _gu.Add(new GenericUse(name, genericsArray, To(ns)));
             name = Mangler.GenericInstance(name, genericsArray);
@@ -616,18 +652,59 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     private NamedSpec ParseTypeNameInner()
     {
         int s = Cur.Span.Start;
-        string name = ParseSimpleTypeName();
-        if (!At(TK.LBrack)) return new NamedSpec(name, To(s));
+        string[]? scope = ParseScopeQualifier();
+        if (scope != null)
+        {
+            var path = new List<string>();
+            do { path.Add(ExpectIdent("a scope or type name")); } while (Try(TK.Dot));
+            scope = [.. scope, .. path[..^1]];
+            return FinishTypeName(path[^1], scope, s);
+        }
+        return FinishTypeName(ParseSimpleTypeName(), null, s);
+    }
+
+    /// <summary>
+    /// Completes a type name once its base and any explicit scope are known: the optional argument
+    /// list, and the instantiation request that goes with it.
+    /// </summary>
+    private NamedSpec FinishTypeName(string name, string[]? scope, int s)
+    {
+        if (!At(TK.LBrack)) return new NamedSpec(name, To(s)) { Scope = scope };
         Advance();
         List<NamedSpec> args = [ParseTypeName()];
         while (Try(TK.Comma)) args.Add(ParseTypeName());
         if (!At(TK.RBrack)) Fail($"invalid type argument in '{name}[...]', found {Found()}");
         Expect(TK.RBrack);
-        var spec = new NamedSpec(name, [.. args], To(s));
+        var spec = new NamedSpec(name, [.. args], To(s)) { Scope = scope };
         var mangledArgs = new string[args.Count];
         for (int i = 0; i < args.Count; i++) mangledArgs[i] = args[i].Mangled;
-        _gu.Add(new GenericUse(name, mangledArgs, To(s), [.. args]));
+        _gu.Add(new GenericUse(name, mangledArgs, To(s), [.. args]) { Scope = scope });
         return spec;
+    }
+
+    /// <summary>
+    /// Consumes a leading scope qualifier and returns its segments, or null when there is none.
+    /// '::' is the root scope and so has no segments at all.
+    /// </summary>
+    private string[]? ParseScopeQualifier()
+    {
+        if (Try(TK.ColonColon)) { _scopedRef = true; return []; }
+        if (!At(TK.Kernel) && !At(TK.Userspace)) return null;
+        if (Peek().Kind != TK.Dot) return null;
+        string realm = Advance().Value;
+        Advance();
+        _scopedRef = true;
+        return [realm];
+    }
+
+    /// <summary>
+    /// Consumes an identifier, reporting what was wanted rather than the generic token mismatch.
+    /// </summary>
+    private string ExpectIdent(string what)
+    {
+        if (At(TK.Ident)) return Advance().Value;
+        Fail($"expected {what}, found {Found()}");
+        return "";
     }
 
     /// <summary>
@@ -907,9 +984,84 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
                  [$"write 'foreground process {name}' or 'background process {name}'"]);
         Expect(TK.LBrace);
         List<ThreadDecl> threads = [];
-        while (!At(TK.RBrace) && !At(TK.EOF)) threads.Add(ParseThreadDecl());
+        List<TopLevel> items = [];
+        while (!At(TK.RBrace) && !At(TK.EOF))
+        {
+            if (AtNestedProcess()) Fail("a process cannot be nested inside another process", Codes.InvalidNesting);
+            if (AtThreadStart()) threads.Add(ParseThreadDecl());
+            else items.Add(ParseProcessItem());
+        }
         Expect(TK.RBrace);
-        return new ProcessDecl(name, mode, [.. threads], To(s));
+        return new ProcessDecl(name, mode, [.. threads], To(s)) { Items = [.. items] };
+    }
+
+    /// <summary>
+    /// Reports an 'import' written anywhere but the top level of a file. Otherwise it reaches the
+    /// free-function parser and comes back as "expected a type name, found 'import'".
+    /// </summary>
+    private void RejectStrayImport()
+    {
+        if (At(TK.Import))
+            Fail("an 'import' must be at the top level of the file", Codes.TopologyOutsideRealm,
+                 ["move it above the block; imports apply to the whole file"]);
+    }
+
+    /// <summary>
+    /// Reports a 'thread' outside a process body. 'thread' is contextual, so a stray one otherwise
+    /// parses as a type name and reports a missing 'func'.
+    /// </summary>
+    private void RejectStrayThread()
+    {
+        if (AtValue("thread") && Peek().Kind == TK.Ident && Peek(2).Kind == TK.LBrace)
+            Fail("a 'thread' must be declared inside a 'process' block", Codes.TopologyOutsideRealm,
+                 ["threads are a process's entry points; wrap it in 'foreground process P { ... }'"]);
+    }
+
+    /// <summary>
+    /// True if a thread declaration starts here. A foreground/background prefix is accepted so the
+    /// resolver can reject it as G043 with a message about modes, rather than the parser rejecting
+    /// it as an unknown declaration.
+    /// </summary>
+    private bool AtThreadStart()
+    {
+        return AtValue("thread") || At(TK.Foreground) || At(TK.Background);
+    }
+
+    /// <summary>
+    /// True if a process declaration starts here, including the foreground/background-prefixed form
+    /// that a thread declaration also uses.
+    /// </summary>
+    private bool AtNestedProcess()
+    {
+        if (At(TK.Foreground) || At(TK.Background))
+            return Peek().Kind == TK.Ident && Peek().Value == "process";
+        return AtProcessStart();
+    }
+
+    /// <summary>
+    /// Dispatches a single non-thread declaration inside a process body. A process holds the same
+    /// declaration forms a realm does, minus the two that cannot nest.
+    /// </summary>
+    private TopLevel ParseProcessItem()
+    {
+        if (At(TK.Realm)) Fail("a 'realm' block cannot appear inside a process", Codes.InvalidNesting);
+        if (At(TK.Kernel)) RequireRealmKeyword();
+        if (AtProcessStart()) Fail("a process cannot be nested inside another process", Codes.InvalidNesting);
+        RejectStrayImport();
+
+        int s = Cur.Span.Start;
+        if (At(TK.AtEnvironment)) { Advance(); return new EnvironmentDecl(To(s)); }
+        var anns = ParseAnnotations();
+        RejectStrayImport();
+        if (AtValue("thread")) RejectAnns(anns, "a thread", allowShadows: false);
+        if (At(TK.NativeContent)) return new NativeBlock(ParseNativeBody(Advance()), To(s), anns);
+        if (At(TK.NativeTypeDecl)) return ParseNativeType(anns, s);
+        if (At(TK.AtExtern)) return ParseExternDecl(anns, s);
+        if (At(TK.Enum)) { RejectAnns(anns, "an enum"); return ParseEnumDecl(anns, s); }
+        if (At(TK.Union)) { RejectAnns(anns, "a union"); return ParseUnionDecl(anns, s); }
+        if (At(TK.Class)) { RejectAnns(anns, "a class", allowKeep: true, allowBuiltin: true); return ParseClassDecl(anns, s); }
+        if (At(TK.Module)) { RejectAnns(anns, "a module", allowKeep: true); return ParseModuleDecl(anns, s); }
+        return ParseFreeFuncDecl(anns, s);
     }
 
     /// <summary>
@@ -923,7 +1075,9 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         string? mode = null;
         if (At(TK.Foreground)) { mode = "foreground"; Advance(); }
         else if (At(TK.Background)) { mode = "background"; Advance(); }
-        if (!AtValue("thread")) Fail("a process body may only contain 'thread' declarations", Codes.BadDeclHeader);
+        if (!AtValue("thread"))
+            Fail($"expected 'thread' after '{mode}', found {Found()}", Codes.BadDeclHeader,
+                 ["a process body may contain classes, modules, enums, unions, functions, and threads"]);
         Advance();
         var name = Expect(TK.Ident).Value;
         Expect(TK.LBrace);
@@ -941,9 +1095,6 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     private EntryFuncDecl ParseThreadEntry()
     {
         int s = Cur.Span.Start;
-        // 'thread' is contextual, so this must test the spelling. Without it a nested thread falls
-        // through to the entry-func parse and reports "expected 'entry'", which is strictly worse
-        // advice for a construct people do try to write.
         if (AtValue("thread")) Fail("threads cannot be nested", Codes.InvalidNesting);
         var mods = ParseMods();
         if (!Try(TK.Entry)) Fail("a thread body must contain a single 'entry func'", Codes.BadDeclHeader);
@@ -1151,9 +1302,17 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         {
             n++;
         }
-        else if (Peek(n).Kind == TK.Ident)
+        else if (Peek(n).Kind is TK.Ident or TK.ColonColon or TK.Kernel or TK.Userspace)
         {
+            if (Peek(n).Kind == TK.ColonColon) n++;
+            else if (Peek(n).Kind is TK.Kernel or TK.Userspace)
+            {
+                if (Peek(n + 1).Kind != TK.Dot) return -1;
+                n += 2;
+            }
+            if (Peek(n).Kind != TK.Ident) return -1;
             n++;
+            while (Peek(n).Kind == TK.Dot && Peek(n + 1).Kind == TK.Ident) n += 2;
             if (Peek(n).Kind == TK.LBrack) { n = SkipBrackets(n); if (n < 0) return -1; }
         }
         else return -1;
@@ -1182,6 +1341,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         if (IsPrim(Cur.Kind)) return true;
         if (At(TK.Func)) return true;
         if (At(TK.LBrack) && Peek().Kind == TK.IntLit && Peek(2).Kind == TK.RBrack) return true;
+        if (At(TK.ColonColon)) return true;
+        if (At(TK.Kernel) || At(TK.Userspace)) return Peek().Kind == TK.Dot;
         if (!At(TK.Ident)) return false;
         return Peek().Kind == TK.Ident
             || Peek().Kind == TK.LBrack
@@ -1379,6 +1540,9 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         if (!AtP("?")) return left;
         Advance();
         var then = ParseExpr();
+        if (At(TK.ColonColon))
+            Fail("'::' names the root scope and cannot be the ':' of a conditional",
+                 Codes.Syntax, ["put a space after the ':', as in 'c ? a : ::Name'"]);
         Expect(TK.Colon);
         return new TernaryExpr(left, then, ParseTernary(), To(s));
     }
@@ -1708,6 +1872,15 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     private Expr ParsePrimaryInner()
     {
         int s = Cur.Span.Start;
+
+        // A scope qualifier swallows the dotted run after it: which segment ends the scope, which
+        // is the name, and which are member accesses is a question only the scope tree can answer.
+        if (ParseScopeQualifier() is { } scope)
+        {
+            List<string> path = [ExpectIdent("a scope or declaration name")];
+            while (At(TK.Dot) && Peek().Kind == TK.Ident) { Advance(); path.Add(Advance().Value); }
+            return new ScopedNameExpr(scope, [.. path], To(s));
+        }
 
         // Literals and identifiers are all single-token forms.
         if (At(TK.IntLit)) { var t = Advance(); return new IntLitExpr(t.Value, t.Span); }

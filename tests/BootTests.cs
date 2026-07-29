@@ -21,6 +21,7 @@ public class BootTests(BootFixture fixture)
     private static readonly string[] KernelMarkers =
     [
         "M:start",              // entry reached
+        "M:shadowing",          // @shadows: three levels of one name, each meaning its own
         "M:arith",              // overload selection, int64 arithmetic, explicit narrowing
         "M:arc",                // reference-counted allocation churn in a loop
         "M:generics",           // nested generic containers and for..in
@@ -37,6 +38,7 @@ public class BootTests(BootFixture fixture)
         "M:c-keywords",         // locals named struct/register/signed, and a ref parameter
         "M:private-mangling",   // two files' same-named private functions
         "M:unsafe",             // pointer round trip
+        "M:kernel-thread",      // a kernel process reusing the userspace realm's process and thread names
         "M:done",               // ran to the end of the entry function
     ];
 
@@ -48,6 +50,7 @@ public class BootTests(BootFixture fixture)
     private static readonly string[] UserMarkers =
     [
         "M:user-thread", // the spawned user thread's entry ran
+        "M:qualified",   // a scope qualifier reached each of the four Depths from the innermost
         "M:user-arc",    // a class from the other file, allocated in userspace
         "M:user-done",   // ran to the end of the thread entry
     ];
@@ -77,7 +80,15 @@ public class BootTests(BootFixture fixture)
         // (equality within one instantiation); the cross-instantiation comparison adds nothing.
         // 'leaves=3' walks a recursive Tree[int] through a generic function inferring from it.
         "gsum=107 leaves=3",
+        // Three declarations of one name, each meaning its own. 'root=1' is the load-bearing half:
+        // a function written outside the realm still sees the outer Depth, so a scope's displacement
+        // does not leak past the scope that declared it.
+        "depth=2 root=1",
         "REGRESSION_OK",
+        // The innermost of the four Depths is what a bare call means; the qualifiers then name the
+        // other three explicitly, from inside the scope that displaced them. 'q=431' is the proof
+        // that a qualifier is a compile-time choice of symbol, not a runtime lookup.
+        "udepth=4 q=431",
         "pi*2=6 load=3",
     ];
 

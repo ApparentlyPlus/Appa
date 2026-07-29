@@ -36,7 +36,7 @@ public class GitHubDirDownloaderTests
         new(HttpStatusCode.OK) { Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json") };
 
     [Fact]
-    public async Task DownloadsFilesUnderRequestedDirectoriesFromASingleTreeFetch()
+    public async Task DownloadsRequestedDirsFromOneTreeFetch()
     {
         var handler = new FakeGitHubHandler();
         handler.On(u => u.Contains("/git/trees/"), _ => Json("""
@@ -95,7 +95,7 @@ public class GitHubDirDownloaderTests
     }
 
     [Fact]
-    public async Task DetectsGitLfsPointerAndRefetchesFromMediaCdn()
+    public async Task RefetchesGitLfsPointersFromMediaCdn()
     {
         var handler = new FakeGitHubHandler();
         handler.On(u => u.Contains("/git/trees/"), _ => Json("""

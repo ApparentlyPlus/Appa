@@ -46,7 +46,7 @@ public class ScopeTreeTests
     /// different types.
     /// </summary>
     [Fact]
-    public void SameProcessNameInDifferentRealmsDoesNotCollide()
+    public void SameProcessNameAcrossRealmsIsDistinct()
     {
         var t = new ScopeTree();
         var kp = t.Intern(t.Intern(ScopeId.Root, "kernel", Realm.Kernel), "P", Realm.None);
@@ -75,7 +75,7 @@ public class ScopeTreeTests
     /// one by hand and collide with a generated one.
     /// </summary>
     [Fact]
-    public void QualifiedNamesUseCharactersIdentifiersCannotContain()
+    public void QualifiedNamesCannotBeTypedAsIdentifiers()
     {
         var t = new ScopeTree();
         var proc = t.Intern(t.Intern(ScopeId.Root, "userspace", Realm.User), "App", Realm.None);
@@ -179,7 +179,7 @@ public class ScopeTreeTests
     }
 
     [Fact]
-    public void ScopeOfReportsWhereAQualifiedNameWasDeclared()
+    public void ScopeOfNamesTheDeclaringScope()
     {
         var t = new ScopeTree();
         var index = new ScopeIndex(t);

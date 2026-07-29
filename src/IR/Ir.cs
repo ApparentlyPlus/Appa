@@ -124,9 +124,11 @@ internal abstract record IrType
     public virtual bool IsChar    => false;
     public virtual bool IsString  => false;
     public virtual bool IsVoid    => false;
+    public virtual bool IsError   => false;
 
     // Singletons for primitives (CName is the canonical token, see PrimTypes)
     public static readonly IrVoidType Void   = new();
+    public static readonly IrErrorType Error = new();
     public static readonly IrPrimType Bool   = new("bool");
     public static readonly IrPrimType Int    = new("int");
     public static readonly IrPrimType Char   = new("char");
@@ -153,6 +155,18 @@ internal record IrVoidType : IrType
 }
 
 /// <summary>
+/// The type of an expression the resolver could not type because it already reported why. It never
+/// reaches the backend: a build with errors stops before emission, so ToCType exists only to keep
+/// the abstract contract total and names itself loudly if that ever stops being true.
+/// </summary>
+internal record IrErrorType : IrType
+{
+    public override string ToCType() => "gata_ERROR_TYPE";
+    public override string MangledName => "error";
+    public override bool IsError => true;
+}
+
+/// <summary>
 /// A primitive scalar type. CName is the canonical token; ToCType lowers it to the corresponding
 /// fixed-width C type.
 /// </summary>
@@ -170,8 +184,8 @@ internal record IrPrimType(string CName) : IrType
 
     public override string MangledName => CName;
     public override bool IsNumeric => _isNumeric;
-    public override bool IsFloat   => _isFloat;
-    public override bool IsChar    => _isChar;
+    public override bool IsFloat => _isFloat;
+    public override bool IsChar => _isChar;
 }
 
 /// <summary>
@@ -197,7 +211,7 @@ internal record IrClassRef(string ClassName) : IrType
 #region Composite types
 
 /// <summary>
-/// A named integer-backed enum type. Distinct from int with no implicit conversion, but comparable,
+/// A named integer backed enum type. Distinct from int with no implicit conversion, but comparable,
 /// assignable, and usable as a switch scrutinee. Lowers to a C enum.
 /// </summary>
 internal record IrEnumType(string Name) : IrType
@@ -662,10 +676,9 @@ internal record IrPanic(string Raw) : IrStmt;
 internal enum Visibility { Shared, Kernel, User }
 
 /// <summary>
-/// Which realm a declaration was written in. This is the *visibility* axis: it decides which
-/// translation unit a declaration is emitted into, and nothing else. The orthogonal *name* axis -
-/// which enclosing scope a declaration's name belongs to - is carried separately by ScopeId, so
-/// that a process can contribute to a name's scope while inheriting its realm's visibility.
+/// Which realm a declaration was written in: the visibility axis, deciding which translation unit
+/// it is emitted into and nothing else. The name axis is ScopeId's, kept separate so a process can
+/// contribute to a name's scope while inheriting its realm's visibility.
 /// </summary>
 internal enum Realm { None, Kernel, User }
 

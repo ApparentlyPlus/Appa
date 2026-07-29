@@ -17,6 +17,30 @@ public partial class TortureTests
     [GeneratedRegex(@"\w@(kernel|userspace)(\$\w+)?")]
     private static partial Regex ScopeQualifiedName();
 
+    /// <summary>
+    /// Every single-quoted run in a diagnostic message - how the compiler names things.
+    /// </summary>
+    [GeneratedRegex(@"'([^']*)'")]
+    private static partial Regex Quoted();
+
+    /// <summary>
+    /// The first quoted name that is a mangled instantiation rather than the 'Box[int]' the user
+    /// wrote, or null. Either the Mangler knows a readable form and the raw key was printed anyway,
+    /// or the name is a registered template plus a suffix - an instantiation never stamped.
+    /// </summary>
+    private static string? RawInternalName(string text)
+    {
+        foreach (Match m in Quoted().Matches(text))
+        {
+            string name = m.Groups[1].Value;
+            if (name.Length == 0 || !name.All(ch => char.IsLetterOrDigit(ch) || ch == '_')) continue;
+            if (Mangler.DisplayName(name) != name) return name;
+            for (int i = name.IndexOf('_'); i > 0; i = name.IndexOf('_', i + 1))
+                if (Mangler.IsGenericTemplate(name[..i])) return name;
+        }
+        return null;
+    }
+
     #region Sweep plumbing
 
     /// <summary>
@@ -146,13 +170,23 @@ public partial class TortureTests
                 if (string.IsNullOrWhiteSpace(d.Message)) fails.Add($"{where}: empty message");
                 else if (d.Message.Contains('\n')) fails.Add($"{where}: multi-line message -- '{d.Message}'");
 
-                // A scope-qualified name is an internal spelling - 'Config@kernel', 'Config@kernel$P'
-                // - and must never reach a user; the readable form is 'kernel.P.Config'. Matching
-                // the shape rather than a bare '@' keeps annotation names like '@intrinsic(alloc)',
-                // which legitimately appear in messages, from tripping this.
+                // 'Config@kernel$P' is an internal spelling and must never reach a user; the
+                // readable form is 'kernel.P.Config'. Matching the shape rather than a bare '@'
+                // keeps legitimate '@intrinsic(alloc)' mentions from tripping this.
                 foreach (string text in new[] { d.Message }.Concat(d.Hints))
+                {
                     if (ScopeQualifiedName().IsMatch(text))
                         fails.Add($"{where}: raw scope-qualified name leaked into user-facing text -- '{text}'");
+                    if (RawInternalName(text) is { } raw)
+                        fails.Add($"{where}: raw internal name '{raw}' leaked into user-facing text -- '{text}'");
+
+                    // The poison type stands in for "already reported"; naming it means a second
+                    // diagnostic was written about a type the resolver invented.
+                    if (text.Contains(IrType.Error.ToCType(), StringComparison.Ordinal))
+                        fails.Add($"{where}: the poison type reached user-facing text -- '{text}'");
+                    if (text.Contains(NamedSpec.Poison, StringComparison.Ordinal))
+                        fails.Add($"{where}: the poison type name reached user-facing text -- '{text}'");
+                }
 
                 // TextSpan.None is the deliberate "this diagnostic is about the build,
                 // not a place in a file" marker, and an empty file has nothing to point at.
@@ -168,10 +202,82 @@ public partial class TortureTests
     }
 
     /// <summary>
+    /// A class carrying @keep survives DCE, which needs the ARC runtime no corpus case supplies -
+    /// so the rule is pinned here instead: whatever else the build says, it must not be that the
+    /// annotation does not belong.
+    /// </summary>
+    [Fact]
+    public void KeepIsAcceptedWhereItIsConsumed()
+    {
+        foreach (string decl in (string[])
+                 ["@keep class A { public int n; }",
+                  "@keep module M { public static int func F() { return 1; } }",
+                  "@keep int func F() { return 1; }"])
+        {
+            var (diag, _, crash) = TryCheck($"{decl} realm kernel {{ entry func Main() {{ }} }}");
+            Assert.Null(crash);
+            Assert.DoesNotContain(diag!.All, d => d.Message.Contains("'@keep'", StringComparison.Ordinal));
+        }
+    }
+
+    /// <summary>
+    /// One mistake, one error. A repeated process merges its twin's scope, and an unresolved call
+    /// has no type - both used to report again at every declaration or expression they touched.
+    /// </summary>
+    [Theory]
+    [InlineData("realm kernel { foreground process P { class A { int n; } thread T { entry func R() { } } } " +
+                "foreground process P { class A { int m; } thread U { entry func R() { } } } entry func Main() { } }",
+                Codes.DuplicateName)]
+    [InlineData("realm kernel { entry func Main() { let int n = Nope(1) + 2; if (Nope(3)) { } } }",
+                Codes.UndefinedMethod)]
+    [InlineData("realm kernel { class A { public int n; } entry func Main() { } } " +
+                "void func Use() { let A a = new A(); let int m = a.n + 1; }",
+                Codes.ScopedNameNotVisible)]
+    public void OneMistakeReportsItsCauseOnce(string src, string code)
+    {
+        var (diag, _, crash) = TryCheck(src);
+        Assert.Null(crash);
+        // G019 is the corpus harness having no libgata to bind the ARC roles, not a cascade.
+        var errors = diag!.All.Where(d => d.Severity == Severity.Error && d.Code != Codes.MissingIntrinsic);
+        Assert.All(errors, e => Assert.Equal(code, e.Code));
+    }
+
+    /// <summary>
+    /// A generic instantiated over another instantiation of a scoped type must reach a stamp that
+    /// exists. The request carries the argument as one flat mangled string, which no scope declares,
+    /// so only the structural spec can be requalified - and G007 is what a missed one looks like.
+    /// </summary>
+    [Fact]
+    public void NestedScopedInstantiationsResolve()
+    {
+        foreach (string src in (string[])
+                 ["""
+                  class Holder[T] { public T v; }
+                  realm kernel {
+                      union Node[T] { Leaf(T v), Branch(Holder[Node[T]] kids) }
+                      void func Use(Node[int] n) { }
+                      entry func Main() { }
+                  }
+                  """,
+                  """
+                  realm kernel {
+                      class Box[T] { public T v; }
+                      class Cargo { public int n; }
+                      void func Use(Box[Box[Cargo]] b) { let int n = b.v.v.n; }
+                      entry func Main() { }
+                  }
+                  """])
+        {
+            var (diag, _, crash) = TryCheck(src);
+            Assert.Null(crash);
+            Assert.DoesNotContain(diag!.All, d => d.Code is Codes.UndefinedType or Codes.ScopedNameNotVisible);
+        }
+    }
+
+    /// <summary>
     /// A process body means the same thing in either realm, so every declaration probe must get the
-    /// same verdict inside 'realm kernel' as inside 'realm userspace'. The realm decides which
-    /// translation unit a declaration is emitted into and nothing else; it must never decide
-    /// whether the declaration is legal. Asymmetry here is a bug in the rule, not in the input.
+    /// same verdict in each. The realm picks a translation unit and nothing else; it must never
+    /// decide whether a declaration is legal, so asymmetry is a bug in the rule, not the input.
     /// </summary>
     [Fact]
     public void ProcessBodyRulesAreRealmSymmetric()
@@ -326,7 +432,10 @@ public partial class TortureTests
             "int", "bool", "char", "void", "String", "Main", "x", "T",
             "{", "}", "(", ")", "[", "]", ";", ",", ".", ":", "=", "==", "->", "+", "-", "*", "/",
             "%", "&", "|", "^", "!", "~", "<", ">", "?", "++", "--", "&&", "||", "<<", ">>",
-            "1", "0x10", "\"s\"", "'c'", "$\"{x}\"", "@keep", "@extern", "@environment",
+            "1", "0x10", "\"s\"", "'c'", "$\"{x}\"", "@keep", "@extern", "@environment", "@shadows",
+            // Scope qualifiers, in pieces: the soup writes '::' beside ':', a realm name where a
+            // value belongs, and dotted runs that end nowhere.
+            "::", "kernel.", "userspace.", "kernel.P.", "::Main", "kernel.x",
         ];
 
         var rng = new Random(20260727); // fixed seed: a failure is always reproducible

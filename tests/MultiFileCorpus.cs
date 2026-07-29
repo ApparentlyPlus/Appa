@@ -277,6 +277,72 @@ public static class MultiFileCorpus
             F("src/main.g", Main("import \"src/k.g\";", "")),
         ], Expect.Any);
 
+        // A realm may take a name an import already gave the file, but only by saying so. Marked,
+        // the inner one wins and the build is clean; unmarked, it is a hard error.
+        yield return new("realm/shadows-imported-class",
+        [
+            F("src/lib.g", "class Widget { public int n; }"),
+            F("src/main.g", "import \"src/lib.g\";\nrealm userspace { @shadows class Widget { public int m; } " +
+                            "entry func Main() { let Widget w = new Widget(); let int v = w.m; } }\n"),
+        ], Expect.Accepted);
+
+        // '::' reaches the imported name a realm displaced, across the file boundary that made the
+        // displacement invisible in the first place.
+        yield return new("realm/qualifier-reaches-an-import",
+        [
+            F("src/lib.g", "class Widget { public int n; }\npublic int func Helper() { return 1; }"),
+            F("src/main.g", "import \"src/lib.g\";\nrealm userspace { @shadows class Widget { public int m; } " +
+                            "@shadows int func Helper() { return 2; } " +
+                            "entry func Main() { let ::Widget w = new ::Widget(); " +
+                            "let int v = w.n + ::Helper() + Helper(); } }\n"),
+        ], Expect.Accepted);
+
+        yield return new("realm/qualifier-into-a-sibling-file-realm",
+        [
+            F("src/lib.g", "realm kernel { class Cfg { public int a; } }"),
+            F("src/main.g", "import \"src/lib.g\";\nrealm userspace { " +
+                            "void func F() { let kernel.Cfg c; } entry func Main() { } }\n"),
+        ], Expect.Rejected, Codes.ScopeNotEnclosing);
+
+        yield return new("realm/shadows-imported-class-unmarked",
+        [
+            F("src/lib.g", "class Widget { public int n; }"),
+            F("src/main.g", "import \"src/lib.g\";\nrealm userspace { class Widget { public int m; } " +
+                            "entry func Main() { } }\n"),
+        ], Expect.Rejected, Codes.UnmarkedShadow);
+
+        yield return new("realm/shadows-imported-func",
+        [
+            F("src/lib.g", "public int func Helper() { return 1; }"),
+            F("src/main.g", "import \"src/lib.g\";\nrealm userspace { @shadows int func Helper() { return 2; } " +
+                            "entry func Main() { let int v = Helper(); } }\n"),
+        ], Expect.Accepted);
+
+        yield return new("realm/shadows-imported-func-unmarked",
+        [
+            F("src/lib.g", "public int func Helper() { return 1; }"),
+            F("src/main.g", "import \"src/lib.g\";\nrealm userspace { int func Helper() { return 2; } " +
+                            "entry func Main() { } }\n"),
+        ], Expect.Rejected, Codes.UnmarkedShadow);
+
+        // A name in a file nothing imports is not a name that already means something here, so
+        // marking it is the mistake rather than omitting the mark.
+        yield return new("realm/shadows-unimported-name",
+        [
+            F("src/lib.g", "class Widget { public int n; }"),
+            F("src/main.g", "realm userspace { @shadows class Widget { public int m; } entry func Main() { } }\n"),
+        ], Expect.Rejected, Codes.UnmarkedShadow);
+
+        // A realm split across two files is one namespace, so a process shadows what the other file
+        // declared into the same realm - which only holds because declaring runs to completion first.
+        yield return new("realm/process-shadows-realm-from-another-file",
+        [
+            F("src/lib.g", "realm userspace { class Frame { public int outer; } }"),
+            F("src/main.g", "import \"src/lib.g\";\nrealm userspace { foreground process App { " +
+                            "class Frame { public int inner; } thread T { entry func R() { } } } " +
+                            "entry func Main() { } }\n"),
+        ], Expect.Rejected, Codes.UnmarkedShadow);
+
         yield return new("realm/no-entry-anywhere",
         [
             F("src/lib.g", "public int func Helper() { return 1; }"),
