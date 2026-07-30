@@ -18,6 +18,17 @@ internal static class Mangler
             "_Noreturn", "_Static_assert", "_Thread_local",
             "bool", "true", "false", "NULL", "alignas", "alignof", "static_assert",
             "thread_local", "complex", "imaginary", "noreturn",
+
+            // Object-like macros from the standard headers a hosted preamble includes
+            "stdin", "stdout", "stderr", "EOF", "BUFSIZ", "FILENAME_MAX", "FOPEN_MAX", "TMP_MAX",
+            "SEEK_SET", "SEEK_CUR", "SEEK_END", "L_tmpnam", "_IOFBF", "_IOLBF", "_IONBF",
+            "EXIT_SUCCESS", "EXIT_FAILURE", "RAND_MAX", "MB_CUR_MAX", "errno", "CLOCKS_PER_SEC",
+            "CHAR_BIT", "CHAR_MAX", "CHAR_MIN", "SCHAR_MAX", "SCHAR_MIN", "UCHAR_MAX",
+            "SHRT_MAX", "SHRT_MIN", "USHRT_MAX", "INT_MAX", "INT_MIN", "UINT_MAX",
+            "LONG_MAX", "LONG_MIN", "ULONG_MAX", "LLONG_MAX", "LLONG_MIN", "ULLONG_MAX",
+            "HUGE_VAL", "HUGE_VALF", "INFINITY", "NAN", "M_PI", "M_E",
+            "DBL_MAX", "DBL_MIN", "DBL_EPSILON", "FLT_MAX", "FLT_MIN", "FLT_EPSILON",
+            "SIZE_MAX", "PTRDIFF_MAX", "INTPTR_MAX", "UINTPTR_MAX",
         ], StringComparer.Ordinal);
 
     /// <summary>
@@ -91,7 +102,22 @@ internal static class Mangler
     {
         _genericInfo.Clear();
         _genericTemplates.Clear();
+        _genericFailed.Clear();
     }
+
+    // Instantiations the Monomorphizer rejected and therefore never stamped
+    [ThreadStatic] private static HashSet<string>? _genericFailedTls;
+    private static HashSet<string> _genericFailed => _genericFailedTls ??= [];
+
+    /// <summary>
+    /// Records that this instantiation was rejected with a diagnostic of its own.
+    /// </summary>
+    public static void MarkGenericFailed(string mangled) => _genericFailed.Add(mangled);
+
+    /// <summary>
+    /// True if this instantiation was already rejected, so a missing-type report would cascade.
+    /// </summary>
+    public static bool GenericFailed(string mangled) => _genericFailed.Contains(mangled);
 
     /// <summary>
     /// Composes the internal name of a generic instantiation: ("List", ["int"]) is "List_int". The

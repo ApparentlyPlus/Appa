@@ -276,6 +276,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         var mods = ParseMods();
         bool isEntry = Try(TK.Entry);
         bool isThrow = Try(TK.Throws);
+        if (!isEntry) isEntry = Try(TK.Entry);
         TypeSpec? ret = ParseOptionalReturnType();
         if (ret != null && At(TK.LBrace))
             Fail("expected 'func', found '{'", Codes.BadDeclHeader,
@@ -819,6 +820,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         var mods = ParseMods();
         bool isEntry = Try(TK.Entry);
         bool isThrow = Try(TK.Throws);
+        if (!isEntry) isEntry = Try(TK.Entry);
 
         if (At(TK.Operator))
         {
@@ -1097,7 +1099,12 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         int s = Cur.Span.Start;
         if (AtValue("thread")) Fail("threads cannot be nested", Codes.InvalidNesting);
         var mods = ParseMods();
+        bool throwsFirst = Try(TK.Throws);
         if (!Try(TK.Entry)) Fail("a thread body must contain a single 'entry func'", Codes.BadDeclHeader);
+        if (throwsFirst || At(TK.Throws))
+            Fail("a thread entry cannot be 'throws' - the runtime starts it, so there is no caller to receive the error",
+                 Codes.BadEntrySignature,
+                 ["handle failure inside the thread: 'let T x = f() catch { assign <fallback>; };'"]);
         TypeSpec? ret = At(TK.Func) && Peek().Kind == TK.Ident ? null : ParseTypeSpec();
         Expect(TK.Func);
         if (At(TK.Ident)) Advance(); // entry name is documentation only; the thread is what names it
@@ -1796,6 +1803,10 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         Rewind(typeEnd with { Uses = start.Uses });
         _gu.AddRange(typeUses);
 
+        var outerArgs = new string[typeArgs.Length];
+        for (int i = 0; i < typeArgs.Length; i++) outerArgs[i] = typeArgs[i].Mangled;
+        _gu.Add(new GenericUse(id.Name, outerArgs, To(s), typeArgs));
+
         return new GenericTypeRefExpr(id.Name, typeArgs, indexForm, To(s));
     }
 
@@ -1879,6 +1890,14 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         {
             List<string> path = [ExpectIdent("a scope or declaration name")];
             while (At(TK.Dot) && Peek().Kind == TK.Ident) { Advance(); path.Add(Advance().Value); }
+
+            if (At(TK.LBrack))
+            {
+                var spec = FinishTypeName(path[^1], [.. scope, .. path[..^1]], s);
+                List<string> members = [];
+                while (At(TK.Dot) && Peek().Kind == TK.Ident) { Advance(); members.Add(Advance().Value); }
+                return new ScopedNameExpr(scope, [.. members], To(s), spec);
+            }
             return new ScopedNameExpr(scope, [.. path], To(s));
         }
 

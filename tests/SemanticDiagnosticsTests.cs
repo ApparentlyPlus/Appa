@@ -559,9 +559,11 @@ public class SemanticDiagnosticsTests
                 "unknown generic type 'Nope'")]
     [InlineData("union U { A(int v), B } realm kernel { entry func Main() { let U x = U[int].A(1); } }",
                 "'U' is not generic")]
+    // A stamped generic class is an ordinary class, so the reason the call fails is the missing
+    // method - not that the type is not a union, which was true and beside the point.
     [InlineData("class Box[T] { public T v; func _init() { } } " +
                 "realm kernel { entry func Main() { let Box[int] b = new Box[int](); let int n = Box[int].Nope(); } }",
-                "'Box[int]' is not a union")]
+                "'Box[int]' has no method 'Nope'")]
     public void TypeRefErrorsNameWhatWasWritten(string src, string expected)
     {
         var (diag, _) = SingleFileCompile.Check(src);

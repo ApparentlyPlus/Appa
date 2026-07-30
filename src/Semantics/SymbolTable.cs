@@ -16,6 +16,7 @@ internal static class Roles
     public const string ObjHeader      = "obj_header";
     public const string ObjInit        = "obj_init";
     public const string StringifyInt   = "stringify_int";
+    public const string StringifyUint  = "stringify_uint";
     public const string StringifyFloat = "stringify_float";
     public const string StringifyChar  = "stringify_char";
 
@@ -33,7 +34,7 @@ internal static class Roles
     public static readonly FrozenSet<string> All = FrozenSet.ToFrozenSet(
     [
         Alloc, Retain, Release, ObjHeader, ObjInit,
-        StringifyInt, StringifyFloat, StringifyChar,
+        StringifyInt, StringifyUint, StringifyFloat, StringifyChar,
         EnvDebug, EnvPanic, EnvProcCreate, EnvProcHide, EnvThreadSpawn, EnvRead, EnvAlloc, EnvTime
     ]);
 

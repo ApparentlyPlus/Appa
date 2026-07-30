@@ -217,14 +217,21 @@ internal sealed class TypeResolver(
                 if (ClassInScope(name)) return;
                 if (sym.IsClass(name))
                 {
+                    var scopeHints = new List<string>();
+                    AddInstantiationHint(scopeHints, ctx);
                     diag.Error(Codes.UndefinedType, ctx.File, Sp(nm, span),
-                        $"type '{Mangler.DisplayName(name)}' is not in scope; import its module");
+                        $"type '{Mangler.DisplayName(name)}' is not in scope; import its module",
+                        scopeHints.Count == 0 ? null : [.. scopeHints]);
                     return;
                 }
                 if (ReportNotVisible("type", nm.Name, ctx.File, Sp(nm, span))) return;
                 if (ReportWrongKind(Codes.UndefinedType, nm.Args.Length > 0 ? "a generic type" : "a type",
                                     nm.Name, ctx.File, Sp(nm, span))) return;
-                diag.Error(Codes.UndefinedType, ctx.File, Sp(nm, span), $"unknown type '{Written(nm)}'");
+                if (Mangler.GenericFailed(name)) return;
+                var unknownHints = new List<string>();
+                AddInstantiationHint(unknownHints, ctx);
+                diag.Error(Codes.UndefinedType, ctx.File, Sp(nm, span), $"unknown type '{Written(nm)}'",
+                    unknownHints.Count == 0 ? null : [.. unknownHints]);
                 return;
             }
         }
@@ -437,7 +444,7 @@ internal sealed class TypeResolver(
         if (value is IrLitNull) return to is IrClassRef or IrPtrType or IrFuncPtrType;
         if (SameType(from, to)) return true;
         if (to is IrVoidType) return false;
-        if (value is IrLitInt or IrLitChar && IsNum(to)) return true;
+        if ((value is IrLitChar || LiteralValue(value) is not null) && IsNum(to)) return true;
         if (value is IrLitFloat && to.IsFloat) return true;
         if (IsNum(from) && IsNum(to)) return NumRank(from) <= NumRank(to);
         if (from.IsString && to.IsString) return true;
@@ -483,8 +490,55 @@ internal sealed class TypeResolver(
     {
         if (value.Type is IrResultType || target is IrResultType) return;
         if (!Assignable(value, target))
+        {
             diag.Error(code, ctx.File, value.Span,
                 $"cannot assign '{Describe(value.Type)}' to {what} of type '{Describe(target)}'");
+            return;
+        }
+        CheckLiteralFits(value, target, what, ctx);
+    }
+
+    /// <summary>
+    /// Rejects an integer literal too large for the type it is being stored in
+    /// </summary>
+    private void CheckLiteralFits(IrExpr value, IrType target, string what, ResolveCtx ctx)
+    {
+        if (LiteralValue(value) is not { } n) return;
+        if (target is not IrPrimType pt) return;
+        int bits = PrimTypes.IntBits(pt.CName);
+        if (bits is 0 or 1 or 64) return;
+
+        bool unsigned = target.IsUnsigned;
+        long lo = unsigned ? 0 : -(1L << (bits - 1));
+        long hi = unsigned ? (1L << bits) - 1 : (1L << (bits - 1)) - 1;
+        if (n >= lo && n <= hi) return;
+
+        diag.Error(Codes.TypeMismatch, ctx.File, value.Span,
+            $"{n} does not fit in '{Describe(target)}', the type of {what}",
+            [$"'{Describe(target)}' holds {lo} to {hi}; the conversion is silent, so this would store " +
+             $"{Truncate(n, bits, unsigned)}",
+             "widen the type, or write the value you meant"]);
+    }
+
+    /// <summary>
+    /// The constant an expression denotes when it is an integer literal, optionally negated. Only
+    /// these two shapes: anything else may depend on values this pass cannot see.
+    /// </summary>
+    private static long? LiteralValue(IrExpr e) => e switch
+    {
+        IrLitInt li => li.Value,
+        IrUnaryOp { Op: UnOp.Neg, Operand: IrLitInt li } => -li.Value,
+        _ => null
+    };
+
+    /// <summary>
+    /// What C would actually store, for the hint.
+    /// </summary>
+    private static long Truncate(long n, int bits, bool unsigned)
+    {
+        ulong masked = (ulong)n & (bits == 64 ? ulong.MaxValue : (1UL << bits) - 1);
+        if (unsigned || bits == 64) return (long)masked;
+        return (masked & (1UL << (bits - 1))) != 0 ? (long)(masked - (1UL << bits)) : (long)masked;
     }
 
     /// <summary>
@@ -505,8 +559,6 @@ internal sealed class TypeResolver(
     {
         if (src is CallExpr or NewExpr) return;
         if (!IsPure(e)) return;
-        // The "did you mean '='" hint has to recognise a union comparison too, which is a call
-        // by this point rather than an IrBinOp.
         bool isComparison = e is IrBinOp { Op: BinOp.Eq or BinOp.Ne }
                             || (e is IrStaticCall sc2 && IsUnionEqCall(sc2))
                             || (e is IrUnaryOp { Op: UnOp.Not, Operand: IrStaticCall sc3 } && IsUnionEqCall(sc3));
@@ -657,16 +709,42 @@ internal sealed class TypeResolver(
         }
     }
 
+    // The stamped instance whose body is being resolved, or null at top level
+    private string? _curInstance;
+
+    /// <summary>
+    /// Sets the stamped instance being resolved for the duration of the returned scope, or leaves
+    /// it unchanged when the name is not an instantiation.
+    /// </summary>
+    private IDisposable TrackInstance(string name)
+    {
+        var previous = _curInstance;
+        if (Mangler.TryGetGenericInstance(name, out _, out _)) _curInstance = name;
+        return new InstanceReset(this, previous);
+    }
+
+    private sealed class InstanceReset(TypeResolver r, string? previous) : IDisposable
+    {
+        public void Dispose() => r._curInstance = previous;
+    }
+
     /// <summary>
     /// Names the generic instantiation an error came from. A stamped instance lives in the
     /// template's file, so 'Map[String, int]' reports a cast error inside Map.g with nothing to say
     /// which of the author's types is at fault.
     /// </summary>
-    private static void AddInstantiationHint(List<string> hints, ResolveCtx ctx)
+    private void AddInstantiationHint(List<string> hints, ResolveCtx ctx) =>
+        AddInstantiationHint(hints, _curInstance ?? ctx.CurClass);
+
+    /// <summary>
+    /// The same hint for a named stamped instance, for declaration kinds a ResolveCtx does not
+    /// carry. A union is not a class, so its fields resolve with no CurClass to read.
+    /// </summary>
+    private static void AddInstantiationHint(List<string> hints, string? instance)
     {
-        if (string.IsNullOrEmpty(ctx.CurClass)) return;
-        if (!Mangler.TryGetGenericInstance(ctx.CurClass, out _, out _)) return;
-        hints.Add($"this comes from the instantiation '{Mangler.DisplayName(ctx.CurClass)}'; " +
+        if (string.IsNullOrEmpty(instance)) return;
+        if (!Mangler.TryGetGenericInstance(instance, out _, out _)) return;
+        hints.Add($"this comes from the instantiation '{Mangler.DisplayName(instance)}'; " +
                   $"the type arguments have to satisfy what the generic's body does with them");
     }
 
@@ -765,7 +843,8 @@ internal sealed class TypeResolver(
 
     /// <summary>
     /// Returns true when the statement contains a 'break' that would exit the enclosing loop. Does
-    /// not descend into nested loops, whose breaks target the inner loop instead.
+    /// not descend into nested loops, whose breaks target the inner loop instead. A catch handler
+    /// is part of the enclosing loop, so a 'break' inside one does exit it.
     /// </summary>
     private static bool HasLoopBreak(IrStmt s)
     {
@@ -774,6 +853,8 @@ internal sealed class TypeResolver(
             IrBreak => true,
             IrBlock b => b.Stmts.Any(HasLoopBreak),
             IrUnsafeBlock u => HasLoopBreak(u.Body),
+            IrDeclVar { Init: not null } d => HasHandlerBreak(d.Init),
+            IrExprStmt es => HasHandlerBreak(es.Expr),
             IrIf i => HasLoopBreak(i.Then) || (i.Else != null && HasLoopBreak(i.Else)),
             IrTryCatch t => HasLoopBreak(t.Try) || HasLoopBreak(t.Catch),
             IrSwitch sw => sw.Cases.Any(c => HasLoopBreak(c.Body)) || (sw.Default != null && HasLoopBreak(sw.Default)),
@@ -781,6 +862,12 @@ internal sealed class TypeResolver(
             _ => false
         };
     }
+
+    /// <summary>
+    /// Returns true when a root-position expression carries a catch handler containing a 'break'.
+    /// Handlers only ever sit at the root of a declaration or expression statement.
+    /// </summary>
+    private static bool HasHandlerBreak(IrExpr e) => e is IrCatchCall cc && HasLoopBreak(cc.Handler);
 
     /// <summary>
     /// Rejects 'throws' return types that have no valid Result_T typedef spelling. Pointer,
@@ -817,7 +904,7 @@ internal sealed class TypeResolver(
             diag.Warn(Codes.RedundantReturn, ctx.File, span, "redundant trailing 'return;'");
 
         var visitor = new BodyQualityVisitor();
-        visitor.St(body);
+        visitor.Run(body);
 
         // A native body is opaque C: it can read anything by name, so neither locals nor
         // parameters can be proven unused.
@@ -849,112 +936,32 @@ internal sealed class TypeResolver(
     private static bool DeliberatelyUnused(string name) => name.Length > 0 && name[0] == '_';
 
     /// <summary>
-    /// Stack-allocated visitor that collects variable declarations and usages in a function body,
-    /// used by CheckBodyQuality to detect unused local variables without heap allocation.
+    /// Collects local declarations and the names a function body reads, for CheckBodyQuality's
+    /// unused-local and unused-parameter warnings. Built on IrWalker so a newly added node cannot
+    /// silently hide a use and turn a correct program into a false warning.
     /// </summary>
-    private struct BodyQualityVisitor
+    private sealed class BodyQualityVisitor : IrWalker
     {
         public readonly List<(string Name, TextSpan Span)> Decls = [];
         public readonly HashSet<string> Used = [];
-        public bool Native = false;
+        public bool Native;
 
-        public BodyQualityVisitor() {}
+        public void Run(IrBlock body) => WalkStmt(body);
 
-        /// <summary>
-        /// Records variable usages in the expression and recurses into sub-expressions.
-        /// </summary>
-        public readonly void Ex(IrExpr? e)
-        {
-            if (e == null) return;
-            if (e is IrVar v) Used.Add(v.Name);
-            switch (e)
-            {
-                case IrFieldLoad fl: Ex(fl.Obj); break;
-                case IrIndex ix: Ex(ix.Obj); Ex(ix.Idx); break;
-                case IrStaticCall sc:
-                    for (int i = 0; i < sc.Args.Count; i++) Ex(sc.Args[i]);
-                    break;
-                case IrInstanceCall ic:
-                    Ex(ic.Recv);
-                    for (int i = 0; i < ic.Args.Count; i++) Ex(ic.Args[i]);
-                    break;
-                case IrThrowsCall tc:
-                    for (int i = 0; i < tc.Args.Count; i++) Ex(tc.Args[i]);
-                    break;
-                case IrThrowsInstanceCall ti:
-                    Ex(ti.Recv);
-                    for (int i = 0; i < ti.Args.Count; i++) Ex(ti.Args[i]);
-                    break;
-                case IrBinOp b: Ex(b.Left); Ex(b.Right); break;
-                case IrTernary t: Ex(t.Cond); Ex(t.Then); Ex(t.Else); break;
-                case IrUnaryOp u: Ex(u.Operand); break;
-                case IrPostfix p: Ex(p.Operand); break;
-                case IrCast c: Ex(c.Value); break;
-                case IrNew n:
-                    for (int i = 0; i < n.Args.Count; i++) Ex(n.Args[i]);
-                    break;
-                case IrNewInit ni:
-                    for (int i = 0; i < ni.Args.Count; i++) Ex(ni.Args[i]);
-                    for (int i = 0; i < ni.Inits.Count; i++) Ex(ni.Inits[i]);
-                    break;
-                case IrArrayLit al:
-                    for (int i = 0; i < al.Elems.Count; i++) Ex(al.Elems[i]);
-                    break;
-                case IrInterp ip:
-                    for (int i = 0; i < ip.Parts.Count; i++) Ex(ip.Parts[i]);
-                    break;
-                case IrAddrOf a: Ex(a.Target); break;
-                case IrDeref d: Ex(d.Ptr); break;
-                case IrIndirectCall ic:
-                    Ex(ic.Target);
-                    for (int i = 0; i < ic.Args.Count; i++) Ex(ic.Args[i]);
-                    break;
-                case IrUnionConstruct uc:
-                    for (int i = 0; i < uc.Args.Count; i++) Ex(uc.Args[i]);
-                    break;
-                case IrUnionField uf: Ex(uf.Union); break;
-            }
-        }
-
-        /// <summary>
-        /// Records variable declarations and usages in the statement, recursing into nested
-        /// statements.
-        /// </summary>
-        public void St(IrStmt s)
+        protected override void WalkStmt(IrStmt s)
         {
             switch (s)
             {
-                case IrDeclVar d: Decls.Add((d.Name, d.Span)); Ex(d.Init); break;
-                case IrAssign a: Ex(a.Target); Ex(a.Value); break;
-                case IrExprStmt es: Ex(es.Expr); break;
-                case IrReturn r: Ex(r.Value); break;
-                case IrIf i: Ex(i.Cond); St(i.Then); if (i.Else != null) St(i.Else); break;
-                case IrWhile w: Ex(w.Cond); St(w.Body); break;
-                case IrFor f: if (f.Init != null) St(f.Init); Ex(f.Cond); if (f.Step != null) St(f.Step); St(f.Body); break;
-                case IrForIn fi: Ex(fi.Collection); St(fi.Body); break;
-                case IrTryCatch t: St(t.Try); St(t.Catch); break;
-                case IrSwitch sw:
-                    Ex(sw.Scrutinee);
-                    for (int i = 0; i < sw.Cases.Count; i++)
-                    {
-                        var c = sw.Cases[i];
-                        for (int j = 0; j < c.Labels.Count; j++) Ex(c.Labels[j]);
-                        St(c.Body);
-                    }
-                    if (sw.Default != null) St(sw.Default);
-                    break;
-                case IrMatch ms:
-                    Ex(ms.Scrutinee);
-                    for (int i = 0; i < ms.Cases.Count; i++) St(ms.Cases[i].Body);
-                    if (ms.Default != null) St(ms.Default);
-                    break;
-                case IrUnsafeBlock u: St(u.Body); break;
-                case IrDefer dfr: St(dfr.Action); break;
-                case IrBlock b:
-                    for (int i = 0; i < b.Stmts.Count; i++) St(b.Stmts[i]);
-                    break;
+                case IrDeclVar d: Decls.Add((d.Name, d.Span)); break;
                 case IrNativeStmt: Native = true; break;
             }
+            base.WalkStmt(s);
+        }
+
+        protected override void WalkExpr(IrExpr e)
+        {
+            if (e is IrVar v) Used.Add(v.Name);
+            base.WalkExpr(e);
         }
     }
 
@@ -1078,6 +1085,7 @@ internal sealed class TypeResolver(
             {
                 case IrDeclVar { Init: not null } d: WalkRoot(d.Init); break;
                 case IrExprStmt e: WalkRoot(e.Expr); break;
+                case IrAssign { Op: AssignOp.Assign } a: WalkExpr(a.Target); WalkRoot(a.Value); break;
                 default: base.WalkStmt(s); break;
             }
         }
@@ -1107,11 +1115,10 @@ internal sealed class TypeResolver(
                 case IrThrowsCall or IrThrowsInstanceCall:
                     Report(e.Span, "throwing call cannot appear inside a larger expression", null);
                     break;
-                case IrCatchCall:
-                    Report(e.Span,
-                        "a 'catch' handler must cover a whole declaration or statement, not a call nested inside a larger expression",
-                        ["bind the call to its own local first, then use that local here"]);
-                    break;
+                case IrCatchCall cc:
+                    Report(e.Span, CatchNotAtRoot, CatchNotAtRootHints);
+                    WalkStmt(cc.Handler);
+                    return;
             }
             base.WalkExpr(e);
         }
@@ -1159,9 +1166,7 @@ internal sealed class TypeResolver(
                 break;
             case IrCatchCall cc:
                 if (!allowRoot)
-                    diag.Error(Codes.ThrowsOutsideTry, ctx.File, cc.Span,
-                        "a 'catch' handler must cover a whole declaration or statement, not a call nested inside a larger expression",
-                        ["bind the call to its own local first, then use that local here"]);
+                    ReportPlacementOnce(cc.Span, CatchNotAtRoot, CatchNotAtRootHints, ctx);
                 else
                     ForbidNestedThrows(cc.Call, ctx, allowRoot: true);
                 break;
@@ -1199,6 +1204,74 @@ internal sealed class TypeResolver(
     #endregion
 
     #region IR utilities
+
+    // A catch handler supplies the value for the storage it is attached to, so a declaration or a
+    // plain assignment are the only places one can sit. Spelled once: two sites report it.
+    private const string CatchNotAtRoot =
+        "a 'catch' handler must cover a whole declaration or assignment, not a call nested inside a larger expression";
+
+    private static readonly string[] CatchNotAtRootHints =
+    [
+        "a handler supplies the value for one target, so it can only sit at one: " +
+            "'let T x = f() catch { ... };' or 'x = f() catch { ... };'",
+        "bind the call to its own local first, then use that local here",
+    ];
+
+    /// <summary>
+    /// Checks a value in a position that may hold a throwing call: a declaration initializer or an
+    /// assignment right-hand side. Both name storage the result lands in, which is what a handler's
+    /// 'assign' needs and what makes propagation well-defined.
+    /// </summary>
+    private IrExpr CheckRootThrowsValue(IrExpr value, IrType targetType, string what,
+                                        ResolveCtx ctx, TextSpan span)
+    {
+        ForbidNestedThrows(value, ctx, allowRoot: true);
+
+        if (value is IrCatchCall cc && !AssignsOrExits(cc.Handler))
+            diag.Error(Codes.CatchHandlerNoAssign, ctx.File, cc.Handler.Span,
+                $"this 'catch' handler can finish without supplying a value for {what}",
+                ["end every path with 'assign <value>;'",
+                 "or leave the handler through 'return', 'throw', 'break', or 'continue'"]);
+
+        if (value.Type is IrResultType rt)
+        {
+            if (!Assignable(new IrVar("_v", rt.Inner), targetType))
+                diag.Error(Codes.TypeMismatch, ctx.File, span,
+                    $"this throwing call produces '{Describe(rt.Inner)}', " +
+                    $"which cannot be assigned to {what} of type '{Describe(targetType)}'");
+            return value;
+        }
+
+        value = Coerce(value, targetType, ctx);
+        CheckAssign(value, targetType, what, ctx, Codes.TypeMismatch);
+        return value;
+    }
+
+    /// <summary>
+    /// Reports a misplaced throwing call unless something already complained about the same span,
+    /// so a form-specific message and this general one never both fire.
+    /// </summary>
+    private void ReportPlacementOnce(TextSpan span, string message, string[]? hints, ResolveCtx ctx)
+    {
+        foreach (var d in diag.All)
+            if (d.Code == Codes.ThrowsOutsideTry && d.Loc.Span == span) return;
+        diag.Error(Codes.ThrowsOutsideTry, ctx.File, span, message, hints);
+    }
+
+    /// <summary>
+    /// Rejects a throwing call in an assignment form that has nowhere to put the result: a compound
+    /// assignment, whose target is read as well as written, and an index setter, which is a call.
+    /// </summary>
+    private void ForbidThrowsInAssignForm(IrExpr value, string form, ResolveCtx ctx)
+    {
+        if (value is not (IrCatchCall or IrThrowsCall or IrThrowsInstanceCall)) return;
+        // Reported at the value's own span, which is where the per-body backstop would report it
+        // too - that is what stops the two from both firing.
+        diag.Error(Codes.ThrowsOutsideTry, ctx.File, value.Span,
+            $"a throwing call cannot be the value of {form}",
+            ["bind it first: 'let T tmp = f() catch { assign <fallback>; };', then use 'tmp' here"]);
+    }
+
     /// <summary>
     /// Returns true when the expression is side-effect-free and safe to re-emit multiple times.
     /// </summary>
@@ -1224,6 +1297,122 @@ internal sealed class TypeResolver(
 
             _ => false
         };
+    }
+
+    /// <summary>
+    /// Warns when an 'unsafe' block builds a managed value
+    /// </summary>
+    private void WarnUnsafeManagedTemporary(IrBlock body, ResolveCtx ctx)
+    {
+        var finder = new UnsafeAllocFinder(IsManagedRef,
+            sym.IntrinsicOrNull(Roles.Retain), sym.IntrinsicOrNull(Roles.Release));
+        finder.Run(body);
+        if (finder.HandManaged || finder.Found is not { } site) return;
+
+        diag.Warn(Codes.UnsafeAllocatingTemporary, ctx.File, site.Span,
+            $"this builds a '{Describe(site.Type)}' inside an 'unsafe' block, where it is never released",
+            ["'unsafe' turns off reference counting for the whole block, including values like this " +
+             "one that it did not need to be turned off for",
+             "move it out of the block, or bind it outside and use the binding here"]);
+    }
+
+    /// <summary>
+    /// Finds the first expression in an unsafe block that allocates a managed value: an
+    /// interpolation, a 'new', or a call handing one back. Reading an existing managed binding is
+    /// fine - nothing was allocated, so nothing leaks.
+    /// </summary>
+    private sealed class UnsafeAllocFinder(Func<IrType, bool> isManaged, string? retain, string? release)
+        : IrWalker
+    {
+        public IrExpr? Found { get; private set; }
+
+        /// <summary>
+        /// True once the block names retain or release, meaning the author is counting by hand.
+        /// </summary>
+        public bool HandManaged { get; private set; }
+
+        public void Run(IrBlock body) => WalkStmt(body);
+
+        private IrExpr? _owned;
+
+        protected override void WalkStmt(IrStmt s)
+        {
+            if (s is IrUnsafeBlock) return;
+            _owned = s switch
+            {
+                IrDeclVar { Init: not null } d => d.Init,
+                IrReturn { Value: not null } r => r.Value,
+                _ => null
+            };
+            base.WalkStmt(s);
+        }
+
+        protected override void WalkExpr(IrExpr e)
+        {
+            if (e is IrStaticCall sc && (sc.CName == retain || sc.CName == release)) HandManaged = true;
+            if (Found == null && !ReferenceEquals(e, _owned) && Allocates(e) && isManaged(e.Type)) Found = e;
+            base.WalkExpr(e);
+        }
+
+        private static bool Allocates(IrExpr e) =>
+            e is IrInterp or IrNew or IrNewInit or IrStaticCall or IrInstanceCall
+                or IrThrowsCall or IrThrowsInstanceCall or IrIndirectCall;
+    }
+
+    /// <summary>
+    /// Warns that a fixed array of a managed element type never releases what it holds
+    /// </summary>
+    private void WarnManagedFixedArray(IrType type, string what, ResolveCtx ctx, TextSpan span)
+    {
+        if (type is not IrArrayType at || !IsManagedRef(at.Elem)) return;
+        diag.Warn(Codes.ManagedFixedArray, ctx.File, span,
+            $"{what} is a fixed array of '{Describe(at.Elem)}', whose elements are never released",
+            ["a fixed array is raw storage with no destructor, so whatever it still holds when it " +
+             "goes out of scope is leaked; stores into it are counted correctly, so nothing dangles",
+             $"use 'List[{Describe(at.Elem)}]' for owned elements, or clear the slots by hand before it dies"]);
+    }
+
+    // The four relational operators, which - unlike '==' and '!=' - never derive from one another.
+    private static readonly string[] Relational = ["<", ">", "<=", ">="];
+
+    /// <summary>
+    /// Warns when a class overloads some relational operators but not their mirrors
+    /// </summary>
+    private void WarnPartialRelationalSet(ClassDecl cd, ResolveCtx ctx)
+    {
+        var declared = new HashSet<string>();
+        foreach (var m in cd.Members)
+            if (m is OperatorDecl { Params.Length: 1 } od && Relational.Contains(od.Op)) declared.Add(od.Op);
+        if (declared.Count == 0) return;
+
+        var missing = new List<string>();
+        foreach (var (a, b) in (ReadOnlySpan<(string, string)>)[("<", ">"), ("<=", ">=")])
+            if (declared.Contains(a) != declared.Contains(b))
+                missing.Add(declared.Contains(a) ? b : a);
+        if (missing.Count == 0) return;
+
+        string shown = Mangler.DisplayName(cd.Name);
+        diag.Warn(Codes.PartialOperatorSet, ctx.File, cd.Span,
+            $"'{shown}' overloads {string.Join(" and ", declared.OrderBy(o => o).Select(o => $"'{o}'"))} " +
+            $"but not {string.Join(" or ", missing.Select(o => $"'{o}'"))}",
+            ["relational operators do not derive from one another the way '!=' derives from '==', " +
+             $"so '{missing[0]}' on two '{shown}' values is a type error at every call site",
+             $"declare the mirror, e.g. 'public operator bool func {missing[0]}({shown} other) {{ ... }}'"]);
+    }
+
+    /// <summary>
+    /// Explains a relational operator rejected on a class that overloads some of the family but not
+    /// this one, which otherwise reads as "not numeric" with no mention of the operators it has.
+    /// </summary>
+    private string[]? MissingRelationalHint(string? lhsClass, string op)
+    {
+        if (lhsClass == null) return null;
+        var have = Relational.Where(o => sym.LookupOperator(lhsClass, o, 1) != null).ToList();
+        if (have.Count == 0) return null;
+        string shown = Mangler.DisplayName(lhsClass);
+        return [$"'{shown}' overloads {string.Join(" and ", have.Select(o => $"'{o}'"))}, but not '{op}' - " +
+                "relational operators are each declared separately, none derives from another",
+                $"add 'public operator bool func {op}({shown} other) {{ ... }}'"];
     }
 
     /// <summary>
@@ -1336,7 +1525,10 @@ internal sealed class TypeResolver(
     {
         var n = sym.IntrinsicOrNull(role);
         if (n != null) return n;
-        diag.Error(Codes.MissingIntrinsic, ctx.File, span, $"no libappa symbol provides @intrinsic({role})");
+        diag.Error(Codes.MissingIntrinsic, ctx.File, span,
+            $"nothing in the build binds @intrinsic({role}), which this expression needs",
+            ["the binding lives in libgata; import the module that provides it, " +
+             "or update libgata if this compiler is newer than it"]);
         return $"appa_MISSING_{role}";
     }
 
@@ -1351,6 +1543,8 @@ internal sealed class TypeResolver(
             return new IrStaticCall(Intrinsic(Roles.StringifyFloat, ctx, e.Span), IrType.String, [e]) { Span = e.Span };
         if (e.Type.IsChar)
             return new IrStaticCall(Intrinsic(Roles.StringifyChar, ctx, e.Span), IrType.String, [e]) { Span = e.Span };
+        if (e.Type.IsUnsigned)
+            return new IrStaticCall(Intrinsic(Roles.StringifyUint, ctx, e.Span), IrType.String, [e]) { Span = e.Span };
         if (e.Type.IsNumeric)
             return new IrStaticCall(Intrinsic(Roles.StringifyInt, ctx, e.Span), IrType.String, [e]) { Span = e.Span };
         var cls = ClassNameOf(e.Type);
@@ -1906,6 +2100,7 @@ internal sealed class TypeResolver(
         // reported once rather than once per line of the template that happens to touch it.
         using var instanceScope = diag.InstanceScope(
             Mangler.TryGetGenericInstance(cd.Name, out _, out _) ? cd.Name : null);
+        using var instanceName = TrackInstance(cd.Name);
 
         var rawFields = new List<RawFieldBlock>();
         var fields = new List<IrField>();
@@ -1939,6 +2134,7 @@ internal sealed class TypeResolver(
                         ForbidNestedThrows(init, classCtx, allowRoot: false);
                         fieldInits[fd.Name] = init;
                     }
+                    WarnManagedFixedArray(ft, $"field '{fd.Name}'", classCtx, fd.Span);
                     fields.Add(new IrField(fd.Name, ft, init));
                     break;
                 case MethodDecl md when md.GenericParams.Length > 0:
@@ -1951,6 +2147,8 @@ internal sealed class TypeResolver(
                     break;
             }
         }
+
+        WarnPartialRelationalSet(cd, ctx);
 
         return new IrClass(
             cd.Name, Mangler.Class(cd.Name), lib, vis,
@@ -2537,6 +2735,14 @@ internal sealed class TypeResolver(
                         $"enum '{ed.Name}' member '{m.Name}' must be a constant integer expression " +
                         "(integer/char literals, earlier members, and + - * / % << >> & | ^ ~ -)");
             }
+            if (next is < int.MinValue or > int.MaxValue)
+            {
+                diag.Error(Codes.TypeMismatch, ctx.File, m.Span,
+                    $"enum '{Mangler.DisplayName(ed.Name)}' member '{m.Name}' is {next}, which does not fit in 'int'",
+                    [$"enum members are read as 'int', so this would be used as {Truncate(next, 32, false)}",
+                     "pick a value in -2147483648 to 2147483647"]);
+                next = 0;
+            }
             values[m.Name] = next;
             members.Add((m.Name, cval));
             next++;
@@ -2616,8 +2822,10 @@ internal sealed class TypeResolver(
 
     private IrUnion ResolveUnion(UnionDecl ud, ResolveCtx ctx)
     {
-        // Same reasoning as the empty-enum check: a union with no variants lowers to an
-        // empty tag enum and an empty payload union, neither of which is legal C.
+        using var instanceScope = diag.InstanceScope(
+            Mangler.TryGetGenericInstance(ud.Name, out _, out _) ? ud.Name : null);
+        using var instanceName = TrackInstance(ud.Name);
+
         if (ud.Variants.Length == 0)
             diag.Error(Codes.BadDeclHeader, ctx.File, ud.Span,
                 $"union '{ud.Name}' declares no variants",
@@ -2720,11 +2928,10 @@ internal sealed class TypeResolver(
                             "this assignment stores a value into itself and has no effect",
                             ["did you mean to assign a different value, or to write 'self." +
                              $"{(target is IrVar tv ? tv.Name : "field")}' on one side?"]);
-                    value = Coerce(value, target.Type, ctx);
-                    CheckAssign(value, target.Type, "the assignment target", ctx, Codes.TypeMismatch);
-                    ForbidNestedThrows(value, ctx, allowRoot: false);
+                    value = CheckRootThrowsValue(value, target.Type, "the assignment target", ctx, asgn.Span);
                     return new IrAssign(target, AssignOp.Assign, value);
                 }
+                ForbidThrowsInAssignForm(value, $"a '{asgn.Op.Sym()}' compound assignment", ctx);
                 string baseOp = asgn.Op.BaseOp()!.Value.Sym();
                 string? lhsClass = ClassNameOf(target.Type);
                 if (lhsClass != null && sym.LookupOperator(lhsClass, baseOp, 1) is { } opSym)
@@ -2811,7 +3018,9 @@ internal sealed class TypeResolver(
                 {
                     stmts.Add(ResolveStmt(ub.Stmts[i], uctx, retType));
                 }
-                return new IrUnsafeBlock(new IrBlock(stmts) { Span = ub.Span });
+                var body = new IrBlock(stmts) { Span = ub.Span };
+                WarnUnsafeManagedTemporary(body, ctx);
+                return new IrUnsafeBlock(body);
             }
 
             case SwitchStmt sw:
@@ -2839,11 +3048,8 @@ internal sealed class TypeResolver(
 
             case DeferStmt ds:
             {
-                // InDefer catches every nesting shape, including a defer wrapped in a
-                // block inside another defer's body
                 if (ctx.InDefer)
                     diag.Error(Codes.DeferTransfer, ctx.File, ds.Span, "a 'defer' body cannot itself 'defer'");
-                // A bare 'defer let x = ...;' declares a local that nothing can ever read
                 if (ds.Action is LetStmt dlet)
                     diag.Error(Codes.NoEffect, ctx.File, ds.Span,
                         $"a 'defer' body cannot be a declaration; '{dlet.Name}' would go out of scope immediately",
@@ -2945,8 +3151,6 @@ internal sealed class TypeResolver(
             return new IrForIn(fi.Var, at.Elem, "", "", collection, abody, at.Size);
         }
 
-        // Structural for..in: any class with zero-arg Length() -> int and single-int-arg Get(int)
-        // -> T.
         string? collClass = ClassNameOf(collection.Type);
         string lenCName = "", getCName = "";
         IrType elemType;
@@ -2962,7 +3166,7 @@ internal sealed class TypeResolver(
         }
         else if (collection.Type.IsError)
         {
-            elemType = IrType.Error;   // already reported; the subject has no type to complain about
+            elemType = IrType.Error;
         }
         else
         {
@@ -3213,6 +3417,7 @@ internal sealed class TypeResolver(
             diag.Warn(Codes.ShadowedVariable, ctx.File, ls.Span,
                 $"'{ls.Name}' shadows a variable of the same name from an enclosing scope",
                 ["rename this one if the outer variable was meant to stay reachable"]);
+        WarnManagedFixedArray(type, $"'{ls.Name}'", ctx, ls.Span);
         ctx.Locals.Declare(ls.Name, type);
         return new IrDeclVar(ls.Name, type, init);
     }
@@ -3496,7 +3701,8 @@ internal sealed class TypeResolver(
         {
             if (!(IsArith(left.Type) && IsArith(right.Type)))
                 diag.Error(Codes.TypeMismatch, ctx.File, be.Span,
-                    $"operator '{be.Op.Sym()}' requires numeric operands, got '{Describe(left.Type)}' and '{Describe(right.Type)}'");
+                    $"operator '{be.Op.Sym()}' requires numeric operands, got '{Describe(left.Type)}' and '{Describe(right.Type)}'",
+                    MissingRelationalHint(lhsClass, be.Op.Sym()));
             return new IrBinOp(be.Op, left, right, IrType.Bool);
         }
 
@@ -3804,9 +4010,14 @@ internal sealed class TypeResolver(
             if (sym.IsUnion(gt.Mangled))
                 return ResolveUnionConstruct(gt.Mangled, gma.Member, args, ctx, ce.Span);
 
+            if (ClassInScope(gt.Mangled))
+                return ResolveCall(
+                    ce with { Callee = new MemberAccessExpr(new IdentExpr(gt.Mangled, gt.Span), gma.Member, gma.Span) },
+                    ctx);
+
             diag.Error(Codes.UndefinedType, ctx.File, gt.Span,
-                $"'{gt.Written}' is not a union, so it has no variant '{gma.Member}'");
-            return new IrVar(gt.Name, IrType.Int);
+                $"'{gt.Written}' names no union or class, so it has no '{gma.Member}'");
+            return Poison(gt.Span);
         }
 
         // member access call: obj.Method(args) or ClassName.StaticMethod(args)
@@ -4102,6 +4313,7 @@ internal sealed class TypeResolver(
             {
                 var value = Coerce(ResolveExpr(asgn.Value, ctx), valType, ctx);
                 CheckAssign(value, valType, "the assignment target", ctx, Codes.TypeMismatch);
+                ForbidThrowsInAssignForm(value, "an index assignment through a '[]=' operator", ctx);
                 ForbidNestedThrows(value, ctx, allowRoot: false);
                 return new IrExprStmt(new IrInstanceCall(obj, setOp.CName, IrType.Void, [idx, value])) { Span = asgn.Span };
             }
@@ -4167,9 +4379,7 @@ internal sealed class TypeResolver(
         if (asgn.Op == AssignOp.Assign)
         {
             var target = new IrIndex(obj, idx, elem) { Span = ixt.Span };
-            val = Coerce(val, target.Type, ctx);
-            CheckAssign(val, target.Type, "the assignment target", ctx, Codes.TypeMismatch);
-            ForbidNestedThrows(val, ctx, allowRoot: false);
+            val = CheckRootThrowsValue(val, target.Type, "the assignment target", ctx, asgn.Span);
             return new IrAssign(target, AssignOp.Assign, val);
         }
         string elemBaseOp = asgn.Op.BaseOp()!.Value.Sym();
@@ -4209,27 +4419,38 @@ internal sealed class TypeResolver(
 
         string typeName = ne.Type.ToSpecString();
         if (typeName == NamedSpec.Poison) return Poison(ne.Span);
+        if (Mangler.GenericFailed(typeName)) return Poison(ne.Span);
         if (sym.Modules.Contains(typeName))
         {
             diag.Error(Codes.NewOnNonClass, ctx.File, ne.Span,
-                $"'{Mangler.DisplayName(typeName)}' is a module and cannot be instantiated");
-            return new IrNew(typeName, args);
+                $"'{Mangler.DisplayName(typeName)}' is a module and cannot be instantiated",
+                ["a module has no instances; call its members directly, as " +
+                 $"'{Mangler.DisplayName(typeName)}.Member(...)'"]);
+            return Poison(ne.Span);
         }
         if (!ClassInScope(typeName))
         {
+            string shown = Mangler.DisplayName(typeName);
             if (sym.IsClass(typeName))
                 diag.Error(Codes.NewOnNonClass, ctx.File, ne.Span,
-                    $"'{Mangler.DisplayName(typeName)}' is not in scope; import its module");
+                    $"'{shown}' is not in scope; import its module");
             else if (SymbolTable.Primitives.Contains(typeName))
                 diag.Error(Codes.NewOnNonClass, ctx.File, ne.Span,
-                    $"'{Mangler.DisplayName(typeName)}' is a primitive; use 'let', not 'new'");
+                    $"'{shown}' is a primitive; use 'let', not 'new'");
+            else if (sym.IsUnion(typeName))
+                diag.Error(Codes.NewOnNonClass, ctx.File, ne.Span,
+                    $"'{shown}' is a union and cannot be instantiated with 'new'",
+                    [$"a union value is one of its variants; construct one by calling it, as '{shown}.Variant(...)'"]);
+            else if (sym.IsEnum(typeName))
+                diag.Error(Codes.NewOnNonClass, ctx.File, ne.Span,
+                    $"'{shown}' is an enum and cannot be instantiated with 'new'",
+                    [$"an enum value is one of its members; name one directly, as '{shown}.Member'"]);
             else if (!ReportNotVisible("type", ne.Type is NamedSpec nn ? nn.Name : typeName, ctx.File, ne.Span)
                      && !ReportWrongKind(Codes.NewOnNonClass,
                                          ne.Type is NamedSpec { Args.Length: > 0 } ? "a generic type" : "a type",
                                          ne.Type is NamedSpec nk ? nk.Name : typeName, ctx.File, ne.Span))
-                diag.Error(Codes.NewOnNonClass, ctx.File, ne.Span,
-                    $"'{Mangler.DisplayName(typeName)}' is not a class");
-            return new IrNew(typeName, args);
+                diag.Error(Codes.NewOnNonClass, ctx.File, ne.Span, $"'{shown}' is not a class");
+            return Poison(ne.Span);
         }
         var init = sym.LookupMethod(typeName, Lifecycle.Init);
         if (init?.Sig is { } isig && isig.Params.Count > 0)
@@ -4321,7 +4542,7 @@ internal sealed class TypeResolver(
         else
             diag.Error(Codes.UndefinedType, ctx.File, g.Span, $"unknown generic type '{g.Name}'");
 
-        return new IrVar(g.Name, IrType.Int);
+        return Poison(g.Span);
     }
 
     /// <summary>

@@ -4,6 +4,10 @@ using System.Diagnostics;
 
 internal static class Pipeline
 {
+    // Stands in for a file path on diagnostics that belong to the build as a whole rather than
+    // to any one source file. Without it the header renders as a bare ": error[...]".
+    private const string ProjectWide = "<project>";
+
     #region Project discovery
 
     /// <summary>
@@ -170,7 +174,8 @@ internal static class Pipeline
             .SelectMany(t => t.prog.Items.OfType<EnvironmentDecl>().Select(e => (t.path, e.Span)))
             .ToList();
         if (envs.Count == 0)
-            diag.Error(Codes.File, "", TextSpan.None, "no @environment file in the build");
+            diag.Error(Codes.File, ProjectWide, TextSpan.None, "no @environment file in the build",
+                ["exactly one .g file in the build must be marked '@environment'; pass it with --env, or put it in the project directory"]);
         else
             foreach (var (path, span) in envs.Skip(1))
                 diag.Error(Codes.File, path, span, "multiple @environment files; exactly one is allowed");
@@ -285,13 +290,17 @@ internal static class Pipeline
         var missing = ArcRoles.Where(r => module.Symbols.IntrinsicOrNull(r) == null).ToList();
         if (missing.Count == 0) return;
 
+        bool none = missing.Count == ArcRoles.Length;
         string roles = string.Join(", ", missing.Select(r => $"@intrinsic({r})"));
         diag.Error(Codes.MissingIntrinsic, "<runtime>", TextSpan.None,
-            $"the standard library binds no {roles}",
+            none ? $"this build declares a class, but nothing in it binds {roles}"
+                 : $"the standard library binds no {roles}",
             [
                 "reference counting needs the whole set: " +
                     string.Join(", ", ArcRoles.Select(r => $"@intrinsic({r})")),
-                "the standard library is incomplete, not your program; check libgata's Runtime.g and Mem.g"
+                none ? "nothing in the build provides them - import a libgata module (any of them pulls in 'Mem'), " +
+                       "or drop the class if this file is meant to stand alone"
+                     : "the standard library is incomplete, not your program; check libgata's Runtime.g and Mem.g"
             ]);
     }
 
@@ -321,7 +330,9 @@ internal static class Pipeline
 
             if (userBlocks.Count == 0)
             {
-                diag.Error(Codes.MissingRealm, "", TextSpan.None, "no 'realm userspace { }' block found in any .g file - a Hosted build requires exactly one");
+                diag.Error(Codes.MissingRealm, ProjectWide, TextSpan.None,
+                    "no 'realm userspace { }' block found in any .g file - a Hosted build requires exactly one",
+                    ["wrap the entry point in 'realm userspace { entry func Main() { ... } }'"]);
                 return;
             }
             foreach (var (file, span, _) in userBlocks.Skip(1))
@@ -340,6 +351,15 @@ internal static class Pipeline
                     diag.Error(Codes.DuplicateEntry, file, span, "the 'realm userspace { }' block declares more than one 'entry func'");
             return;
         }
+        foreach (var (path, prog) in programs)
+            foreach (var item in prog.Items)
+                if (item is ContextDecl ctx)
+                    foreach (var inner in ctx.Items)
+                        if (inner is ProcessDecl { Threads.Length: 0 } pd)
+                            diag.Error(Codes.ProcessWithoutThreads, path, pd.Span,
+                                $"process '{pd.Name}' declares no threads",
+                                ["a process runs only through its threads, so this one would be created and never do anything",
+                                 $"give it one: 'thread Worker {{ entry func Run() {{ }} }}', or remove '{pd.Name}'"]);
 
         var kernelEntryFuncs = new List<(string file, TextSpan span)>();
         foreach (var (path, prog) in programs)
@@ -367,7 +387,9 @@ internal static class Pipeline
 
         if (kernelBlocks.Count == 0)
         {
-            diag.Error(Codes.MissingEntryPoint, "", TextSpan.None, "no 'realm kernel { }' entry point found in any .g file");
+            diag.Error(Codes.MissingEntryPoint, ProjectWide, TextSpan.None,
+                "no 'realm kernel { }' entry point found in any .g file",
+                ["a GatOS build boots into the kernel realm: add 'realm kernel { entry func Main() { ... } }'"]);
             return;
         }
 

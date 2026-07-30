@@ -9,7 +9,8 @@ using System.Collections.Frozen;
 // one line that cannot drift across passes.
 internal static class PrimTypes
 {
-    internal readonly record struct PrimInfo(string CType, bool IsInt, bool IsFloatTy, int Rank);
+    internal readonly record struct PrimInfo(string CType, bool IsInt, bool IsFloatTy, int Rank,
+                                            bool IsUnsigned = false);
 
     private static readonly FrozenDictionary<string, PrimInfo> Table = FrozenDictionary.ToFrozenDictionary(
         new Dictionary<string, PrimInfo>
@@ -17,15 +18,15 @@ internal static class PrimTypes
             ["bool"]    = new("bool",      IsInt: true,  IsFloatTy: false, Rank: 1),
             ["char"]    = new("char",      IsInt: true,  IsFloatTy: false, Rank: 2),
             ["sbyte"]   = new("int8_t",    IsInt: true,  IsFloatTy: false, Rank: 2),
-            ["byte"]    = new("uint8_t",   IsInt: true,  IsFloatTy: false, Rank: 2),
+            ["byte"]    = new("uint8_t",   IsInt: true,  IsFloatTy: false, Rank: 2, IsUnsigned: true),
             ["short"]   = new("int16_t",   IsInt: true,  IsFloatTy: false, Rank: 3),
-            ["ushort"]  = new("uint16_t",  IsInt: true,  IsFloatTy: false, Rank: 3),
+            ["ushort"]  = new("uint16_t",  IsInt: true,  IsFloatTy: false, Rank: 3, IsUnsigned: true),
             ["int"]     = new("int32_t",   IsInt: true,  IsFloatTy: false, Rank: 4),
-            ["uint"]    = new("uint32_t",  IsInt: true,  IsFloatTy: false, Rank: 4),
+            ["uint"]    = new("uint32_t",  IsInt: true,  IsFloatTy: false, Rank: 4, IsUnsigned: true),
             ["int64"]   = new("int64_t",   IsInt: true,  IsFloatTy: false, Rank: 5),
-            ["uint64"]  = new("uint64_t",  IsInt: true,  IsFloatTy: false, Rank: 5),
-            ["usize"]   = new("size_t",    IsInt: true,  IsFloatTy: false, Rank: 5),
-            ["uintptr"] = new("uintptr_t", IsInt: true,  IsFloatTy: false, Rank: 5),
+            ["uint64"]  = new("uint64_t",  IsInt: true,  IsFloatTy: false, Rank: 5, IsUnsigned: true),
+            ["usize"]   = new("size_t",    IsInt: true,  IsFloatTy: false, Rank: 5, IsUnsigned: true),
+            ["uintptr"] = new("uintptr_t", IsInt: true,  IsFloatTy: false, Rank: 5, IsUnsigned: true),
             ["float"]   = new("float",     IsInt: false, IsFloatTy: true,  Rank: 6),
             ["double"]  = new("double",    IsInt: false, IsFloatTy: true,  Rank: 7),
             ["void"]    = new("void",      IsInt: false, IsFloatTy: false, Rank: 0),
@@ -85,6 +86,15 @@ internal static class PrimTypes
     }
 
     /// <summary>
+    /// Returns true if the canonical token is an unsigned integer spelling. These need their own
+    /// formatting path: handing one to a signed printer reinterprets the high bit.
+    /// </summary>
+    public static bool IsUnsignedCanon(string canon)
+    {
+        return Table.TryGetValue(canon, out var i) && i.IsUnsigned;
+    }
+
+    /// <summary>
     /// Returns the width in bits of an integer primitive, or 0 for anything else.
     /// </summary>
     public static int IntBits(string canon)
@@ -119,9 +129,10 @@ internal abstract record IrType
     /// </summary>
     public abstract string MangledName { get; }
 
-    public virtual bool IsNumeric => false;
-    public virtual bool IsFloat   => false;
-    public virtual bool IsChar    => false;
+    public virtual bool IsNumeric  => false;
+    public virtual bool IsFloat    => false;
+    public virtual bool IsChar     => false;
+    public virtual bool IsUnsigned => false;
     public virtual bool IsString  => false;
     public virtual bool IsVoid    => false;
     public virtual bool IsError   => false;
@@ -176,6 +187,7 @@ internal record IrPrimType(string CName) : IrType
     private readonly bool _isNumeric = PrimTypes.IsIntCanon(CName);
     private readonly bool _isFloat = PrimTypes.IsFloat(CName);
     private readonly bool _isChar = CName == "char";
+    private readonly bool _isUnsigned = PrimTypes.IsUnsignedCanon(CName);
 
     public override string ToCType()
     {
@@ -186,6 +198,7 @@ internal record IrPrimType(string CName) : IrType
     public override bool IsNumeric => _isNumeric;
     public override bool IsFloat => _isFloat;
     public override bool IsChar => _isChar;
+    public override bool IsUnsigned => _isUnsigned;
 }
 
 /// <summary>
@@ -255,15 +268,6 @@ internal record IrArrayType(IrType Elem, int Size) : IrType
     }
 
     public override string MangledName => $"Arr_{Elem.MangledName}_{Size}";
-
-    /// <summary>
-    /// Produces a stable C-identifier mangling of a type, used to name array structs and
-    /// function-pointer typedefs.
-    /// </summary>
-    public static string Mangle(IrType t)
-    {
-        return t.MangledName;
-    }
 }
 
 /// <summary>

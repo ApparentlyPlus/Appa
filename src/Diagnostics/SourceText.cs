@@ -89,17 +89,6 @@ internal sealed class SourceText
         int end = i + 1 < _ls.Length ? _ls[i + 1] : Text.Length;
         return Text.AsSpan(start, end - start).TrimEnd("\r\n");
     }
-
-    /// <summary>
-    /// Returns the text of a given line number (1-indexed). If the line number is out of range,
-    /// returns an empty string.
-    /// </summary>
-    public string LineText(int line)
-    {
-        // Slices first, performing at most one string allocation
-        ReadOnlySpan<char> span = LineSpan(line);
-        return span.IsEmpty ? "" : new string(span);
-    }
 }
 
 /// <summary>

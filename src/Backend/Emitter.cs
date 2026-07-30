@@ -1199,8 +1199,8 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             case IrReturn rs:     w.Line(rs.Value == null ? "return;" : $"return {EmitExpr(rs.Value)};"); break;
             case IrBreak:         w.Line("break;"); break;
             case IrContinue:      w.Line("continue;"); break;
-            case IrDebug d:       w.Line($"{module.Symbols.FloorName(Roles.EnvDebug)}({d.Raw});"); break;
-            case IrPanic p:       w.Line($"{module.Symbols.FloorName(Roles.EnvPanic)}({p.Raw});"); break;
+            case IrDebug d:       w.Line($"{module.Symbols.FloorName(Roles.EnvDebug)}({NoTrigraphs(d.Raw)});"); break;
+            case IrPanic p:       w.Line($"{module.Symbols.FloorName(Roles.EnvPanic)}({NoTrigraphs(p.Raw)});"); break;
             case IrIf ifs:        EmitIf(ifs, w); break;
             case IrWhile ws:      w.Line($"while ({EmitExpr(ws.Cond)})"); EmitBlock(ws.Body, w); break;
             case IrFor fr:        EmitFor(fr, w); break;
@@ -1271,7 +1271,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             IrLitChar lc => lc.Codepoint.ToString(),
             IrLitFloat lf => lf.Raw,
             IrLitBool lb => lb.Value ? "true" : "false",
-            IrLitString ls => $"GATA_STRLIT({IrType.String.ToCType().TrimEnd('*')}, {ls.Raw})",
+            IrLitString ls => $"GATA_STRLIT({IrType.String.ToCType().TrimEnd('*')}, {NoTrigraphs(ls.Raw)})",
             IrLitNull => "NULL",
             IrEnumConst ec => Mangler.EnumMember(ec.EnumName, ec.Member),
             IrVar v => v.IsRef ? $"(*{Mangler.Local(v.Name)})" : Mangler.Local(v.Name),
@@ -1397,6 +1397,12 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     #endregion
 
     #region Utilities
+
+    /// <summary>
+    /// Escapes '?' in a string literal being handed to C.
+    /// </summary>
+    private static string NoTrigraphs(string raw) =>
+        raw.Contains('?') ? raw.Replace("?", "\\?") : raw;
 
     /// <summary>
     /// Strips uniform leading indentation from raw C text so embedded native bodies re-indent

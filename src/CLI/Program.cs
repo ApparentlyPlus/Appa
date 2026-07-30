@@ -215,13 +215,28 @@ static (IrModule Module, IReadOnlyDictionary<string, string> Sourcemap, Capabili
 {
     var inputFiles = new List<string> { Path.GetFullPath(envPath), Path.GetFullPath(entryPath) };
     var (programs, attempted, imports, diag) = Pipeline.Transpile(inputFiles, projectRoot, stdlibDir);
+    // A file that failed to load or parse leaves the name universe incomplete, so the semantic
+    // passes below report names as missing that the build was supposed to have. Their findings
+    // are kept only when loading actually succeeded.
+    bool loaded = !diag.HasErrors;
+    int afterLoad = diag.All.Count;
+
     var visible = Pipeline.VisibleModules(imports);
     var (module, sourcemap, caps) = Pipeline.BuildModule(programs, visible, manifest?.Mode ?? Mode.Debug, diag);
+
+    if (!loaded)
+    {
+        diag.TruncateTo(afterLoad);
+        Pipeline.ReportGataFiles(attempted, diag, warnAsError, stdlibDir);
+        return (module, sourcemap, caps, diag);
+    }
+
+    Target target = manifest?.Target ?? (module.HasKernelRealm ? Target.GatOS : Target.Hosted);
 
     Pipeline.ValidateEnvironment(programs, diag);
     Pipeline.ValidateFloor(module, diag);
     Pipeline.ValidateIntrinsics(module, diag);
-    Pipeline.ValidateStructure(programs, manifest?.Target, diag);
+    Pipeline.ValidateStructure(programs, target, diag);
     if (manifest?.Target == Target.Hosted && module.HasKernelRealm)
         diag.Error(Codes.KernelBlockInHosted, "<environment>", TextSpan.None,
             "the active environment declares a kernel preamble, which is not allowed for a Hosted build");

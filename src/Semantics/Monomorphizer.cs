@@ -316,6 +316,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
                     $"generic '{baseName}' expects {tmpl.Params.Length} type argument(s) " +
                     $"({string.Join(", ", tmpl.Params)}), got {args.Length} ({string.Join(", ", args)})");
                 Mangler.RegisterGenericInstance(mangled, baseName, [..args]);
+                Mangler.MarkGenericFailed(mangled);
                 continue;
             }
             if (Array.Exists(args, a => a.Trim() == "void"))
@@ -323,6 +324,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
                 diag.Error(Codes.UndefinedType, file, span,
                     $"'void' is not a valid type argument to '{baseName}'");
                 Mangler.RegisterGenericInstance(mangled, baseName, [..args]);
+                Mangler.MarkGenericFailed(mangled);
                 continue;
             }
             var (concrete, binds) = Instantiate(tmpl, args, mangled);
@@ -945,8 +947,10 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
                     argsChanged |= !ReferenceEquals(subArgs[i], gt.Args[i]);
                 }
                 var subIndex = gt.IndexForm == null ? null : SubExpr(gt.IndexForm, ctx);
-                if (!argsChanged && ReferenceEquals(subIndex, gt.IndexForm)) return e;
-                return new GenericTypeRefExpr(gt.Name, subArgs, subIndex, gt.Span) { Span = e.Span };
+                string subName = ctx.RewriteTypeNames && !ctx.IsBound(gt.Name)
+                    ? ctx.NameMap.GetValueOrDefault(gt.Name, gt.Name) : gt.Name;
+                if (!argsChanged && ReferenceEquals(subIndex, gt.IndexForm) && subName == gt.Name) return e;
+                return new GenericTypeRefExpr(subName, subArgs, subIndex, gt.Span) { Span = e.Span };
             }
 
             case TernaryExpr te:

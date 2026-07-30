@@ -489,6 +489,15 @@ internal sealed class ScopeBinder(DiagnosticBag diag)
     /// </summary>
     private Expr ResolveScopedExpr(ScopedNameExpr sn, ScopeTree tree, ScopeIndex index, ScopeId from, string file)
     {
+        if (sn.Generic is { } g)
+        {
+            var resolved = ResolveScopedType(g, tree, index, from, file);
+            if (resolved.Name == NamedSpec.Poison) return Fallback(sn);
+            Expr gen = new GenericTypeRefExpr(resolved.Name, resolved.Args, null, sn.Span);
+            foreach (var m in sn.Path) gen = new MemberAccessExpr(gen, m, sn.Span);
+            return gen;
+        }
+
         var path = new List<string>(sn.Scope);
         var scope = ScopeId.Root;
         if (sn.Scope.Length > 0)

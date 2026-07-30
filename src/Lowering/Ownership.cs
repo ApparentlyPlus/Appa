@@ -87,9 +87,12 @@ internal sealed class Ownership(IrModule module)
     private bool _inThrowsFunc;
     private IrResultType? _resultType;
 
-    // The variable an `assign` inside the current catch handler stores into. Null outside a
-    // handler; the resolver has already rejected any `assign` that could reach here with it unset.
-    private IrVar? _assignTarget;
+    // The storage an `assign` inside the current catch handler writes to
+    private IrExpr? _assignTarget;
+
+    // True when the target already holds a value, so a store has to release the old one. A
+    // declaration's target starts null and must not.
+    private bool _assignTargetOwns;
 
     // Inside `unsafe`, ARC is suppressed: owning stores, owner tracking, consume-retains and
     // producer hoisting all step aside, and the author manages lifetimes by hand. Exits still
@@ -481,8 +484,36 @@ internal sealed class Ownership(IrModule module)
         outs.Add(new IrDeclVar(dv.Name, dv.Type, null) { Span = dv.Span });
         if (managed) RegisterOwner(dv.Name, dv.Type);
 
+        CatchBranch(cc, new IrVar(dv.Name, dv.Type), $"_res_{dv.Name}", call, clStart,
+                    ownsOldValue: false, outs);
+    }
+
+    /// <summary>
+    /// Lowers `x = f() catch {...};` onto storage that already exists
+    /// </summary>
+    private void LowerCatchAssign(IrAssign a, IrCatchCall cc, List<IrStmt> outs)
+    {
+        int preStart = _pre.Count;
+        int clStart = _cl.Count;
+
+        IrExpr target = Flatten(a.Target, false);
+        var call = FlattenThrows(cc.Call);
+
+        for (int i = preStart; i < _pre.Count; i++) outs.Add(_pre[i]);
+        _pre.RemoveRange(preStart, _pre.Count - preStart);
+
+        CatchBranch(cc, target, Tmp("_res_asg"), call, clStart,
+                    ownsOldValue: IsManaged(a.Target.Type) && !_inUnsafe, outs);
+    }
+
+    /// <summary>
+    /// The branch both catch forms share: bind the Result, then either run the handler or store
+    /// the value the call produced. Whichever arm stores, it stores into the same target.
+    /// </summary>
+    private void CatchBranch(IrCatchCall cc, IrExpr target, string res, IrExpr call,
+                             int clStart, bool ownsOldValue, List<IrStmt> outs)
+    {
         var rt = (IrResultType)cc.Call.Type;
-        string res = $"_res_{dv.Name}";
         outs.Add(new IrDeclVar(res, cc.Call.Type, call));
 
         int clCount = _cl.Count - clStart;
@@ -491,9 +522,10 @@ internal sealed class Ownership(IrModule module)
         _cl.RemoveRange(clStart, clCount);
 
         // The handler's own frame
-        var target = new IrVar(dv.Name, dv.Type);
         var prevTarget = _assignTarget;
+        bool prevOwns = _assignTargetOwns;
         _assignTarget = target;
+        _assignTargetOwns = ownsOldValue;
         var handlerStmts = new List<IrStmt>();
         var handlerFrame = new Frame();
         _frames.Push(handlerFrame);
@@ -501,12 +533,11 @@ internal sealed class Ownership(IrModule module)
         ReleaseFrame(handlerFrame, handlerStmts);
         _frames.Pop();
         _assignTarget = prevTarget;
+        _assignTargetOwns = prevOwns;
 
-        // Success arm
-        var okStmts = new List<IrStmt>
-        {
-            new IrAssign(target, AssignOp.Assign, ResultValueOf(res, rt))
-        };
+        // Success arm: the call already handed back a +1 value.
+        var okStmts = new List<IrStmt>();
+        StoreInto(target, ResultValueOf(res, rt), ownsOldValue && IsManaged(target.Type), okStmts);
 
         outs.Add(new IrIf(ResultHasErrorOf(res, rt), new IrBlock(handlerStmts), new IrBlock(okStmts)));
     }
@@ -551,8 +582,8 @@ internal sealed class Ownership(IrModule module)
     }
 
     /// <summary>
-    /// Lowers `assign v;` into a store to the declaration its handler belongs to. A managed value
-    /// is consumed (+1) so the variable owns it, matching what the success arm gets from the call.
+    /// Lowers `assign v;` into a store to the storage its handler belongs to. A managed value is
+    /// consumed (+1) so the target owns it, matching what the success arm gets from the call.
     /// </summary>
     private void LowerAssignValue(IrAssignValue av, List<IrStmt> outs)
     {
@@ -566,7 +597,7 @@ internal sealed class Ownership(IrModule module)
         for (int i = preStart; i < _pre.Count; i++) outs.Add(_pre[i]);
         _pre.RemoveRange(preStart, _pre.Count - preStart);
 
-        outs.Add(new IrAssign(target, AssignOp.Assign, value));
+        StoreInto(target, value, managed && _assignTargetOwns, outs);
 
         int clCount = _cl.Count - clStart;
         for (int i = 0; i < clCount; i++)
@@ -575,10 +606,31 @@ internal sealed class Ownership(IrModule module)
     }
 
     /// <summary>
+    /// Stores an already-owned (+1) value into a target. When the target already holds a value the
+    /// old one is released first, through a temp so that self-assignment does not free the value
+    /// being stored.
+    /// </summary>
+    private void StoreInto(IrExpr target, IrExpr value, bool releaseOld, List<IrStmt> outs)
+    {
+        if (!releaseOld)
+        {
+            outs.Add(new IrAssign(target, AssignOp.Assign, value));
+            return;
+        }
+        string tmp = Tmp("_cas");
+        outs.Add(new IrDeclVar(tmp, target.Type, value));
+        outs.Add(ReleaseStmt(target));
+        outs.Add(new IrAssign(target, AssignOp.Assign, new IrVar(tmp, target.Type)));
+    }
+
+    /// <summary>
     /// Lowers an assignment statement, releasing the old value if the target is a managed type.
     /// </summary>
     private void LowerAssign(IrAssign a, List<IrStmt> outs)
     {
+        if (a.Value is IrCatchCall cc) { LowerCatchAssign(a, cc, outs); return; }
+        if (a.Value is IrThrowsCall or IrThrowsInstanceCall) { LowerThrowsAssign(a, outs); return; }
+
         int preStart = _pre.Count;
         int clStart = _cl.Count;
 
@@ -618,6 +670,36 @@ internal sealed class Ownership(IrModule module)
         for (int i = 0; i < clCount2; i++)
             outs.Add(ReleaseStmt(new IrVar(_cl[clStart + i].Name, _cl[clStart + i].Type)));
         _cl.RemoveRange(clStart, clCount2);
+    }
+
+    /// <summary>
+    /// Lowers `x = f();` where f throws and no handler is attached: the Result is bound, the
+    /// failure path taken by ThrowsCheck, and only then is the value stored - so a propagating
+    /// failure leaves the target holding whatever it held before.
+    /// </summary>
+    private void LowerThrowsAssign(IrAssign a, List<IrStmt> outs)
+    {
+        int preStart = _pre.Count;
+        int clStart = _cl.Count;
+
+        IrExpr target = Flatten(a.Target, false);
+        var call = FlattenThrows(a.Value);
+
+        for (int i = preStart; i < _pre.Count; i++) outs.Add(_pre[i]);
+        _pre.RemoveRange(preStart, _pre.Count - preStart);
+
+        var rt = (IrResultType)a.Value.Type;
+        string res = Tmp("_res_asg");
+        outs.Add(new IrDeclVar(res, a.Value.Type, call));
+
+        int clCount = _cl.Count - clStart;
+        for (int i = 0; i < clCount; i++)
+            outs.Add(ReleaseStmt(new IrVar(_cl[clStart + i].Name, _cl[clStart + i].Type)));
+        _cl.RemoveRange(clStart, clCount);
+
+        ThrowsCheck(res, rt, outs);
+        StoreInto(target, ResultValueOf(res, rt),
+                  IsManaged(a.Target.Type) && !_inUnsafe && IsManaged(target.Type), outs);
     }
 
     /// <summary>

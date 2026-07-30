@@ -51,11 +51,12 @@ public class IntrinsicValidationTests
     }
 
     /// <summary>
-    /// The diagnostic carries actionable hints. These are what tell the reader the standard library
-    /// is at fault rather than their own program, so they are part of the contract.
+    /// With every role unbound, nothing in the build provides ARC at all - which is the author
+    /// importing no libgata, not a broken libgata. Blaming the standard library there sends the
+    /// reader to a file that is fine.
     /// </summary>
     [Fact]
-    public void MissingArcBindingsCarryHints()
+    public void NoArcBindingsAtAllBlamesTheBuild()
     {
         var d = Assert.Single(ValidateOf("""
             class Box { int v; }
@@ -64,7 +65,26 @@ public class IntrinsicValidationTests
 
         Assert.NotEmpty(d.Hints);
         Assert.Contains(d.Hints, h => h.Contains("whole set"));
+        Assert.Contains(d.Hints, h => h.Contains("import a libgata module"));
+        Assert.DoesNotContain(d.Hints, h => h.Contains("standard library is incomplete"));
+    }
+
+    /// <summary>
+    /// Some roles bound and some not is a genuinely incomplete standard library, and the hint says
+    /// so - that is the case the reader cannot fix from their own file.
+    /// </summary>
+    [Fact]
+    public void PartialArcBindingsBlameTheLibrary()
+    {
+        var d = Assert.Single(ValidateOf("""
+            @intrinsic(alloc) @extern void* func alloc(usize n);
+            @intrinsic(retain) @extern void* func retain(void* p);
+            class Box { int v; }
+            realm kernel { entry func Main() { let Box b = new Box(); } }
+            """));
+
         Assert.Contains(d.Hints, h => h.Contains("standard library is incomplete"));
+        Assert.DoesNotContain(d.Hints, h => h.Contains("import a libgata module"));
     }
 
     /// <summary>

@@ -599,7 +599,8 @@ internal record IdentExpr(string Name, TextSpan Span) : Expr(Span);
 /// Path holds every dotted segment after it, because only the scope tree can tell a process segment
 /// from the name or from a trailing member access. The ScopeBinder splits it and rewrites the node.
 /// </summary>
-internal record ScopedNameExpr(string[] Scope, string[] Path, TextSpan Span) : Expr(Span);
+internal record ScopedNameExpr(string[] Scope, string[] Path, TextSpan Span, NamedSpec? Generic = null)
+    : Expr(Span);
 
 /// <summary>
 /// Stands in for an expression whose meaning was already reported as an error, so nothing downstream

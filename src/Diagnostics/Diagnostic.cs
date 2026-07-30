@@ -119,6 +119,10 @@ internal static class Codes
     public const string UnmarkedShadow             = "G088";
     public const string ScopeNotEnclosing          = "G089";
     public const string UnknownInScope             = "G090";
+    public const string ProcessWithoutThreads      = "G091";
+    public const string PartialOperatorSet         = "G092";
+    public const string UnsafeAllocatingTemporary  = "G093";
+    public const string ManagedFixedArray          = "G094";
 }
 
 internal static class Suggest
@@ -198,6 +202,17 @@ internal sealed class DiagnosticBag(SourceSet sources)
     // resolver as it walks a stamped instance's members.
     private string? _instanceScope;
     private readonly HashSet<(string Scope, string Code, string Message)> _instanceSeen = [];
+
+    /// <summary>
+    /// Drops every diagnostic added after the given count.
+    /// </summary>
+    public void TruncateTo(int count)
+    {
+        if (count >= _d.Count) return;
+        for (int i = count; i < _d.Count; i++)
+            if (_d[i].Severity == Severity.Error) _errCount--; else _warnCount--;
+        _d.RemoveRange(count, _d.Count - count);
+    }
 
     /// <summary>
     /// Marks diagnostics until disposal as coming from one generic instantiation, where the same
