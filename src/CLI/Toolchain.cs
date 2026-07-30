@@ -175,7 +175,32 @@ internal static class Toolchain
     /// the kernel.
     /// </summary>
     internal static bool IsUserspace(string rel) =>
-        rel.StartsWith("ulibc/") || rel == "kernel/uproc.c";
+        rel.StartsWith("ulibc/") || rel == GeneratedUserTu;
+
+    /// <summary>
+    /// The one userspace translation unit appa generates rather than GatOS shipping: the lowered
+    /// Gata of the userspace realm. Flags that change language semantics must not be applied here.
+    /// </summary>
+    internal const string GeneratedUserTu = "kernel/uproc.c";
+
+    /// <summary>
+    /// The compiler flags for one GatOS translation unit. Split out from the compile loop so the
+    /// choices below can be asserted without a toolchain present - the flags that matter most here
+    /// are the ones whose effect is invisible in a build that succeeds.
+    /// </summary>
+    internal static List<string> CFlagsFor(
+        string rel, string srcDir, IEnumerable<string> modeFlags, IEnumerable<string> defines, bool isMac)
+    {
+        var cflags = new List<string>(GatosFlags.Common) { $"-I{srcDir}" };
+        cflags.AddRange(modeFlags);
+        cflags.AddRange(defines);
+        if (!IsUserspace(rel))
+        {
+            if (!isMac) cflags.Add("-flto");
+            if (GatosFlags.InterruptPath.Contains(rel)) cflags.AddRange(GatosFlags.FpuRestrictions);
+        }
+        return cflags;
+    }
 
     /// <summary>
     /// Compiles all C and assembly files in parallel, reporting in-place progress. On the first
@@ -192,18 +217,7 @@ internal static class Toolchain
         {
             string rel = Path.GetRelativePath(srcDir, src).Replace('\\', '/');
             string obj = Path.Combine(objDir, rel.Replace('/', '_') + ".o");
-            var cflags = new List<string>(GatosFlags.Common) { $"-I{srcDir}" };
-            cflags.AddRange(modeFlags);
-            cflags.AddRange(defines);
-            if (IsUserspace(rel))
-                cflags.Add("-ffast-math");
-            else
-            {
-                if (!isMac) cflags.Add("-flto");
-                if (GatosFlags.InterruptPath.Contains(rel))
-                    cflags.AddRange(GatosFlags.FpuRestrictions);
-            }
-            jobs.Add((src, obj, cflags.ToArray()));
+            jobs.Add((src, obj, [.. CFlagsFor(rel, srcDir, modeFlags, defines, isMac)]));
         }
 
         foreach (var src in asmFiles)

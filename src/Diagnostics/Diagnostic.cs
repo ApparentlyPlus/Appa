@@ -123,6 +123,11 @@ internal static class Codes
     public const string PartialOperatorSet         = "G092";
     public const string UnsafeAllocatingTemporary  = "G093";
     public const string ManagedFixedArray          = "G094";
+    public const string MixedSignedness            = "G095";
+    public const string CharArithmetic             = "G096";
+    public const string ExplicitTypeArgs           = "G097";
+    public const string UseBeforeAssignment        = "G098";
+    public const string DiscardedRetain            = "G099";
 }
 
 internal static class Suggest

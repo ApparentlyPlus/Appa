@@ -166,9 +166,13 @@ internal static class HostedRun
         if (env != null)
             foreach (var (k, v) in env) psi.Environment[k] = v;
         using var p = Process.Start(psi)!;
-        string stdout = p.StandardOutput.ReadToEnd();
-        string stderr = p.StandardError.ReadToEnd();
+        // Both pipes are drained concurrently. Reading one to completion and then the other deadlocks
+        // as soon as the child fills the pipe it is not being read from - a compiler emitting more than
+        // a pipe buffer of warnings blocks writing them, so it never exits, so the first read never
+        // returns. It takes a large generated program to reach, which is why it stayed hidden.
+        var stdout = p.StandardOutput.ReadToEndAsync();
+        var stderr = p.StandardError.ReadToEndAsync();
         p.WaitForExit(180_000);
-        return (p.ExitCode, stdout + stderr);
+        return (p.ExitCode, stdout.GetAwaiter().GetResult() + stderr.GetAwaiter().GetResult());
     }
 }

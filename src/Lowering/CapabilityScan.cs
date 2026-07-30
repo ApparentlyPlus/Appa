@@ -53,6 +53,10 @@ internal sealed class CapabilityScan(IrModule m) : IrWalker
         foreach (var p in m.Processes)
             foreach (var t in p.Threads)
                 if (t.EntryFunc is { } e) Enter(e.CName, e.Body);
+                
+        foreach (var c in m.Classes)
+            foreach (var mm in c.Methods)
+                if (mm.Name == Lifecycle.Deinit) Enter(mm.CName, mm.Body);
 
         while (_work.Count > 0) WalkStmt(_work.Dequeue());
         return this;

@@ -186,8 +186,8 @@ public class HostedEndToEndTests
         """;
 
     private const string ExpectedOutput =
-        "opt=10-1 11 at=3-1\n" +
-        "probe=101 v=14 set=10 or=1-1 vals=1\n" +
+        "opt=10-1 truetrue at=3-1\n" +
+        "probe=truefalsetrue v=14 set=truefalse or=1-1 vals=1\n" +
         "note=hi7 weight=27\n" +
         "len=2 map=2 bumps=2\n" +
         "arr=7 deref=42 abs=9\n" +

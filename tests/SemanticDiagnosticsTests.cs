@@ -323,7 +323,9 @@ public class SemanticDiagnosticsTests
         } }
         """);
         Assert.NotEmpty(files);
-        Assert.Contains(files, f => f.Content.Contains("i = (i + 1))"));
+        // The step belongs in the 'for' header, not as a statement at the end of the body. Matched
+        // loosely on purpose: the operator result also carries a cast pinning it to its Gata type.
+        Assert.Contains(files, f => f.Content.Contains("i = ((int32_t)(i + 1)))"));
     }
 
     [Theory]
@@ -620,6 +622,55 @@ public class SemanticDiagnosticsTests
     {
         AssertClean(OptDecl + """
             realm kernel { entry func Main() { let Opt[int] a = Opt.None(); let int n = Take(a); } }
+            """);
+    }
+
+    #endregion
+
+    #region Discarded retain
+
+    // Enough of the runtime for the retain role to be bound; the rule is about the call shape,
+    // so it needs nothing else from libgata.
+    private const string RetainStub = """
+        @intrinsic(retain)
+        void* func retain(void* p) native { return p; }
+        @intrinsic(release)
+        void func release(void* p) native { (void)p; }
+        """;
+
+    /// <summary>
+    /// 'retain' hands back the reference it counted. Called as a statement it adds the count to a
+    /// temporary the same scope then releases, so it compiles to nothing - which is never what
+    /// someone reaching for it wanted.
+    /// </summary>
+    [Theory]
+    [InlineData("unsafe { retain(&x); }")]
+    [InlineData("unsafe { retain(&x); retain(&x); }")]
+    [InlineData("if (x == 1) { unsafe { retain(&x); } }")]
+    public void DiscardingRetainsResultIsRejected(string body)
+    {
+        AssertError(Codes.DiscardedRetain,
+            $$"""
+            {{RetainStub}}
+            realm kernel { entry func Main() { let int x = 1; {{body}} } }
+            """);
+    }
+
+    /// <summary>
+    /// The forms that keep the reference stay legal - this is how libgata hands values to storage
+    /// reference counting cannot see - and 'release' returns nothing, so discarding it is the only
+    /// way to call it. A rule that rejected these would break the standard library.
+    /// </summary>
+    [Theory]
+    [InlineData("unsafe { let int* kept = retain(&x); *kept = 2; }")]
+    [InlineData("unsafe { release(&x); }")]
+    [InlineData("unsafe { release(retain(&x)); }")]
+    public void KeepingTheReferenceStaysLegal(string body)
+    {
+        AssertClean(
+            $$"""
+            {{RetainStub}}
+            realm kernel { entry func Main() { let int x = 1; {{body}} } }
             """);
     }
 

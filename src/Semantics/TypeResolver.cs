@@ -505,19 +505,38 @@ internal sealed class TypeResolver(
     {
         if (LiteralValue(value) is not { } n) return;
         if (target is not IrPrimType pt) return;
-        int bits = PrimTypes.IntBits(pt.CName);
-        if (bits is 0 or 1 or 64) return;
-
-        bool unsigned = target.IsUnsigned;
-        long lo = unsigned ? 0 : -(1L << (bits - 1));
-        long hi = unsigned ? (1L << bits) - 1 : (1L << (bits - 1)) - 1;
+        if (Range(pt) is not var (lo, hi)) return;
         if (n >= lo && n <= hi) return;
 
+        int bits = PrimTypes.IntBits(pt.CName);
+        bool unsigned = target.IsUnsigned;
         diag.Error(Codes.TypeMismatch, ctx.File, value.Span,
             $"{n} does not fit in '{Describe(target)}', the type of {what}",
             [$"'{Describe(target)}' holds {lo} to {hi}; the conversion is silent, so this would store " +
              $"{Truncate(n, bits, unsigned)}",
              "widen the type, or write the value you meant"]);
+    }
+
+    /// <summary>
+    /// The inclusive range of an integer primitive, or null for a type whose range does not fit in a
+    /// long - 'bool', the 64-bit widths, and the non-integers.
+    /// </summary>
+    private static (long Lo, long Hi)? Range(IrPrimType t)
+    {
+        int bits = PrimTypes.IntBits(t.CName);
+        if (bits is 0 or 1 or 64) return null;
+        return t.IsUnsigned
+            ? (0L, (1L << bits) - 1)
+            : (-(1L << (bits - 1)), (1L << (bits - 1)) - 1);
+    }
+
+    /// <summary>
+    /// True when a known constant is representable in the given primitive. A type whose range Range
+    /// cannot express holds any long, which is every constant this pass can see.
+    /// </summary>
+    private static bool FitsIn(long n, IrPrimType t)
+    {
+        return Range(t) is not var (lo, hi) || (n >= lo && n <= hi);
     }
 
     /// <summary>
@@ -568,6 +587,27 @@ internal sealed class TypeResolver(
             isComparison
                 ? ["'==' compares two values; use '=' to assign"]
                 : ["remove it, or use its result"]);
+    }
+
+    /// <summary>
+    /// Rejects a call to the retain intrinsic whose result is thrown away.
+    /// </summary>
+    private void RejectDiscardedRetain(Expr src, ResolveCtx ctx)
+    {
+        if (src is not CallExpr { Callee: IdentExpr id }) return;
+        var fsym = sym.LookupFreeFunc(id.Name);
+        if (fsym == null || !FuncInScope(fsym)) return;
+        if (fsym.CName != sym.IntrinsicOrNull(Roles.Retain)) return;
+
+        diag.Error(Codes.DiscardedRetain, ctx.File, src.Span,
+            $"'{id.Name}' returns the reference it counted, and this call discards it",
+            [
+                "as a statement it does nothing: the count is added to a temporary that this scope releases again",
+                $"store it where something owns it: 'self.data[i] = {id.Name}(v);'",
+                $"or hand it on: 'unsafe {{ return {id.Name}(self.data[i]); }}'",
+                "keeping an object alive in storage reference counting cannot see - a raw slot in a "
+                + "native block - means counting it in the native body that stores the pointer",
+            ]);
     }
 
     /// <summary>
@@ -643,6 +683,19 @@ internal sealed class TypeResolver(
         else if (!okValue)
             diag.Error(Codes.TypeMismatch, ctx.File, value.Span,
                 $"operator '{op.Sym()}' requires a{(bitwise ? "n integer" : " numeric")} right-hand side, got '{Describe(value.Type)}'");
+    }
+
+    /// <summary>
+    /// Applies to 'a op= b' the operator checks and the operand conversion that 'a = a op b' would have
+    /// got from ResolveBin, and returns the value to store.
+    /// </summary>
+    private IrExpr CompoundValue(AssignStmt asgn, IrExpr target, IrExpr value, ResolveCtx ctx)
+    {
+        if (asgn.Op.BaseOp() is not { } op) return value;
+        CheckShiftCount(op, target.Type, value, ctx, asgn.Value.Span);
+        CheckZeroDivisor(op, value, ctx, asgn.Value.Span);
+        CheckMixedSignedness(op, target, value, ctx, asgn.Span);
+        return op is BinOp.Shl or BinOp.Shr ? value : InType(value, target.Type);
     }
 
     /// <summary>
@@ -837,8 +890,22 @@ internal sealed class TypeResolver(
                            && DefinitelyReturns(sw.Default),
             IrMatch ms => ms.Cases.All(c => DefinitelyReturns(c.Body))
                           && (ms.Default == null || DefinitelyReturns(ms.Default)),
-            _ => false
+            IrDeclVar or IrAssign or IrExprStmt => false,
+            IrForIn => false,
+            IrDefer => false,
+            IrNativeStmt => false,
+            _ => NotReturning(s, "TypeResolver.DefinitelyReturns")
         };
+    }
+
+    /// <summary>
+    /// Default arm of a control-flow analysis: answers "no" after asserting in debug builds that the
+    /// statement really has nothing the analysis needed to look inside.
+    /// </summary>
+    private static bool NotReturning(IrStmt s, string where)
+    {
+        NodeCoverage.AssertNoNestedFlow(s, where);
+        return false;
     }
 
     /// <summary>
@@ -854,18 +921,23 @@ internal sealed class TypeResolver(
             IrBlock b => b.Stmts.Any(HasLoopBreak),
             IrUnsafeBlock u => HasLoopBreak(u.Body),
             IrDeclVar { Init: not null } d => HasHandlerBreak(d.Init),
+            IrAssign a => HasHandlerBreak(a.Value),
             IrExprStmt es => HasHandlerBreak(es.Expr),
             IrIf i => HasLoopBreak(i.Then) || (i.Else != null && HasLoopBreak(i.Else)),
             IrTryCatch t => HasLoopBreak(t.Try) || HasLoopBreak(t.Catch),
             IrSwitch sw => sw.Cases.Any(c => HasLoopBreak(c.Body)) || (sw.Default != null && HasLoopBreak(sw.Default)),
             IrMatch m => m.Cases.Any(c => HasLoopBreak(c.Body)) || (m.Default != null && HasLoopBreak(m.Default)),
-            _ => false
+            IrWhile or IrFor or IrForIn => false,
+            IrDefer => false,
+            IrNativeStmt => false,
+            IrDeclVar => false,
+            _ => NotReturning(s, "TypeResolver.HasLoopBreak")
         };
     }
 
     /// <summary>
     /// Returns true when a root-position expression carries a catch handler containing a 'break'.
-    /// Handlers only ever sit at the root of a declaration or expression statement.
+    /// Handlers only ever sit at the root of a declaration, an assignment, or an expression statement.
     /// </summary>
     private static bool HasHandlerBreak(IrExpr e) => e is IrCatchCall cc && HasLoopBreak(cc.Handler);
 
@@ -889,8 +961,43 @@ internal sealed class TypeResolver(
     private void CheckMissingReturn(IrBlock? body, IrType ret, bool isThrows, TextSpan span, string display, ResolveCtx ctx)
     {
         if (body == null || isThrows || ret is IrVoidType || ret is IrResultType) return;
-        if (!ReturnsList(body.Stmts))
-            diag.Error(Codes.MissingReturn, ctx.File, span, $"'{display}' must return '{Describe(ret)}' on every path");
+        if (ReturnsList(body.Stmts)) return;
+
+        string[] hints = HasNativeStmt(body.Stmts)
+            ? ["a 'native { }' block is raw C, so a 'return' inside one is not visible to this check",
+               "either make the whole body native - put 'native' after the signature instead of inside " +
+               "the braces - or have the native block store its result in a local and return that local"]
+            : [];
+        diag.Error(Codes.MissingReturn, ctx.File, span,
+            $"'{display}' must return '{Describe(ret)}' on every path", hints);
+    }
+
+    /// <summary>
+    /// True when the statement list contains a native block at any depth reachable without leaving
+    /// the function body.
+    /// </summary>
+    private static bool HasNativeStmt(IReadOnlyList<IrStmt> stmts)
+    {
+        var finder = new NativeStmtFinder();
+        foreach (var s in stmts) finder.Run(s);
+        return finder.Found;
+    }
+
+    /// <summary>
+    /// Reports whether a native block appears anywhere in a statement subtree. Built on IrWalker so
+    /// a new statement kind cannot quietly hide one.
+    /// </summary>
+    private sealed class NativeStmtFinder : IrWalker
+    {
+        public bool Found { get; private set; }
+
+        public void Run(IrStmt s) => WalkStmt(s);
+
+        protected override void WalkStmt(IrStmt s)
+        {
+            if (s is IrNativeStmt) Found = true;
+            base.WalkStmt(s);
+        }
     }
 
     /// <summary>
@@ -906,9 +1013,8 @@ internal sealed class TypeResolver(
         var visitor = new BodyQualityVisitor();
         visitor.Run(body);
 
-        // A native body is opaque C: it can read anything by name, so neither locals nor
-        // parameters can be proven unused.
         if (visitor.Native) return;
+        CheckDefiniteAssignment(body, ctx);
         var seen = new HashSet<string>();
         for (int i = 0; i < visitor.Decls.Count; i++)
         {
@@ -1300,6 +1406,195 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
+    /// Reports a local read before anything can have been stored into it.
+    /// </summary>
+    private void CheckDefiniteAssignment(IrBlock body, ResolveCtx ctx)
+    {
+        var pass = new DefiniteAssignment();
+        pass.Run(body);
+        foreach (var (name, span) in pass.Unassigned)
+            diag.Error(Codes.UseBeforeAssignment, ctx.File, span,
+                $"'{name}' is read before it is assigned",
+                ["a 'let' with no initialiser leaves the variable holding whatever was already there",
+                 $"give it a value at the declaration - 'let T {name} = ...;' - or assign it on " +
+                 "every path that reaches this read"]);
+    }
+
+    /// <summary>
+    /// Walks a body in execution order tracking which uninitialised locals have been stored into.
+    /// Built on IrWalker only for the expression side; statement order and branch merging are
+    /// explicit here, because both matter and IrWalker's traversal order does not promise either.
+    /// </summary>
+    private sealed class DefiniteAssignment
+    {
+        private readonly Dictionary<string, TextSpan> _pending = [];   // declared, not yet stored into
+        private readonly HashSet<string> _assigned = [];
+        private readonly List<(string Name, TextSpan Span)> _found = [];
+
+        public IReadOnlyList<(string Name, TextSpan Span)> Unassigned => _found;
+
+        public void Run(IrBlock body) => WalkStmt(body);
+
+        /// <summary>
+        /// Marks every variable that any statement in the subtree stores into, without walking reads.
+        /// Used ahead of a loop body and each branch arm, so a store later in the subtree still counts
+        /// as having possibly happened before a read earlier in it.
+        /// </summary>
+        private void PreAssign(IrStmt? s)
+        {
+            if (s == null) return;
+            var finder = new StoreFinder();
+            finder.Run(s);
+            foreach (var n in finder.Stored) _assigned.Add(n);
+        }
+
+        /// <summary>
+        ///  Walks a statement in execution order, tracking which variables have been stored into and
+        ///  reporting any read of a variable that has not yet been stored into.
+        /// </summary>
+        private void WalkStmt(IrStmt s)
+        {
+            switch (s)
+            {
+                case IrBlock b:
+                    foreach (var st in b.Stmts) WalkStmt(st);
+                    break;
+                case IrUnsafeBlock u: WalkStmt(u.Body); break;
+
+                case IrDeclVar d:
+                    if (d.Init != null) { WalkExpr(d.Init); _assigned.Add(d.Name); }
+                    else if (d.Type is IrPrimType) _pending[d.Name] = d.Span;
+                    break;
+
+                case IrAssign a:
+                    WalkExpr(a.Value);
+                    if (a.Op != AssignOp.Assign) WalkExpr(a.Target);
+                    if (a.Target is IrVar v) _assigned.Add(v.Name);
+                    else WalkExpr(a.Target);
+                    break;
+
+                case IrIf i:
+                    WalkExpr(i.Cond);
+                    PreAssign(i.Then); PreAssign(i.Else);
+                    WalkStmt(i.Then);
+                    if (i.Else != null) WalkStmt(i.Else);
+                    break;
+
+                case IrWhile w: PreAssign(w.Body); WalkExpr(w.Cond); WalkStmt(w.Body); break;
+                case IrFor f:
+                    if (f.Init != null) WalkStmt(f.Init);
+                    PreAssign(f.Body); PreAssign(f.Step);
+                    if (f.Cond != null) WalkExpr(f.Cond);
+                    WalkStmt(f.Body);
+                    if (f.Step != null) WalkStmt(f.Step);
+                    break;
+                case IrForIn fi:
+                    WalkExpr(fi.Collection);
+                    _assigned.Add(fi.Var);
+                    PreAssign(fi.Body);
+                    WalkStmt(fi.Body);
+                    break;
+
+                case IrTryCatch t: PreAssign(t.Try); PreAssign(t.Catch); WalkStmt(t.Try); WalkStmt(t.Catch); break;
+                case IrSwitch sw:
+                    WalkExpr(sw.Scrutinee);
+                    foreach (var c in sw.Cases) PreAssign(c.Body);
+                    PreAssign(sw.Default);
+                    foreach (var c in sw.Cases) WalkStmt(c.Body);
+                    if (sw.Default != null) WalkStmt(sw.Default);
+                    break;
+                case IrMatch m:
+                    WalkExpr(m.Scrutinee);
+                    foreach (var c in m.Cases) PreAssign(c.Body);
+                    PreAssign(m.Default);
+                    foreach (var c in m.Cases) { foreach (var b2 in c.Binds) _assigned.Add(b2.BindName); WalkStmt(c.Body); }
+                    if (m.Default != null) WalkStmt(m.Default);
+                    break;
+                case IrDefer d2: PreAssign(d2.Action); break;
+                case IrReturn r: if (r.Value != null) WalkExpr(r.Value); break;
+                case IrExprStmt es: WalkExpr(es.Expr); break;
+                case IrAssignValue av: WalkExpr(av.Value); break;
+                case IrNativeStmt: _assigned.UnionWith(_pending.Keys); break;
+
+                default: NodeCoverage.AssertNoNestedFlow(s, "TypeResolver.DefiniteAssignment"); break;
+            }
+        }
+
+        private void WalkExpr(IrExpr? e)
+        {
+            if (e == null) return;
+            switch (e)
+            {
+                case IrVar v:
+                    if (_pending.TryGetValue(v.Name, out var span) && !_assigned.Contains(v.Name))
+                    {
+                        _found.Add((v.Name, v.Span == TextSpan.None ? span : v.Span));
+                        _assigned.Add(v.Name);
+                    }
+                    break;
+                case IrAddrOf { Target: IrVar av }: _assigned.Add(av.Name); break;
+                case IrCatchCall cc: WalkExpr(cc.Call); PreAssign(cc.Handler); WalkStmt(cc.Handler); break;
+                default:
+                    foreach (var child in Children(e)) WalkExpr(child);
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// The sub-expressions of a node, gathered through IrWalker so a new expression kind cannot
+        /// hide a read from this pass.
+        /// </summary>
+        private static IEnumerable<IrExpr> Children(IrExpr e)
+        {
+            var c = new ChildCollector();
+            return c.Of(e);
+        }
+
+        private sealed class ChildCollector : IrWalker
+        {
+            private readonly List<IrExpr> _out = [];
+            private bool _root = true;
+
+            public List<IrExpr> Of(IrExpr e) { WalkExpr(e); return _out; }
+
+            protected override void WalkExpr(IrExpr e)
+            {
+                if (_root) { _root = false; base.WalkExpr(e); return; }
+                _out.Add(e);
+            }
+        }
+
+        /// <summary>
+        /// Collects every variable a subtree stores into, by assignment, by for-in binding, by match
+        /// binding, or by having its address taken.
+        /// </summary>
+        private sealed class StoreFinder : IrWalker
+        {
+            public readonly HashSet<string> Stored = [];
+
+            public void Run(IrStmt s) => WalkStmt(s);
+
+            protected override void WalkStmt(IrStmt s)
+            {
+                switch (s)
+                {
+                    case IrAssign { Target: IrVar v }: Stored.Add(v.Name); break;
+                    case IrForIn fi: Stored.Add(fi.Var); break;
+                    case IrDeclVar { Init: not null } d: Stored.Add(d.Name); break;
+                    case IrNativeStmt: Stored.Add("*"); break;
+                }
+                base.WalkStmt(s);
+            }
+
+            protected override void WalkExpr(IrExpr e)
+            {
+                if (e is IrAddrOf { Target: IrVar av }) Stored.Add(av.Name);
+                base.WalkExpr(e);
+            }
+        }
+    }
+
+    /// <summary>
     /// Warns when an 'unsafe' block builds a managed value
     /// </summary>
     private void WarnUnsafeManagedTemporary(IrBlock body, ResolveCtx ctx)
@@ -1404,8 +1699,13 @@ internal sealed class TypeResolver(
     /// Explains a relational operator rejected on a class that overloads some of the family but not
     /// this one, which otherwise reads as "not numeric" with no mention of the operators it has.
     /// </summary>
-    private string[]? MissingRelationalHint(string? lhsClass, string op)
+    private string[]? MissingRelationalHint(string? lhsClass, string op, IrType left, IrType right)
     {
+        if (left is IrEnumType le && right is IrEnumType re && le.Name == re.Name)
+            return [$"an enum is a set of names, not an ordered range, so '{op}' is not defined on " +
+                    $"'{Mangler.DisplayName(le.Name)}'",
+                    $"compare the values instead: 'a as int {op} b as int'",
+                    "'==' and '!=' do work directly, and 'match' covers one arm per member"];
         if (lhsClass == null) return null;
         var have = Relational.Where(o => sym.LookupOperator(lhsClass, o, 1) != null).ToList();
         if (have.Count == 0) return null;
@@ -1543,10 +1843,20 @@ internal sealed class TypeResolver(
             return new IrStaticCall(Intrinsic(Roles.StringifyFloat, ctx, e.Span), IrType.String, [e]) { Span = e.Span };
         if (e.Type.IsChar)
             return new IrStaticCall(Intrinsic(Roles.StringifyChar, ctx, e.Span), IrType.String, [e]) { Span = e.Span };
+        if (e.Type is IrPrimType { CName: "bool" }
+            && sym.Builtins.GetValueOrDefault(BuiltinTypes.String, BuiltinTypes.String) is { } strCls
+            && FindAsOperator(strCls, e.Type) is { } boolAs)
+            return new IrStaticCall(boolAs.CName, IrType.String, [e]) { Span = e.Span };
+
         if (e.Type.IsUnsigned)
             return new IrStaticCall(Intrinsic(Roles.StringifyUint, ctx, e.Span), IrType.String, [e]) { Span = e.Span };
         if (e.Type.IsNumeric)
-            return new IrStaticCall(Intrinsic(Roles.StringifyInt, ctx, e.Span), IrType.String, [e]) { Span = e.Span };
+        {
+            string role = e.Type is IrPrimType p && PrimTypes.IntBits(p.CName) > 32
+                ? Roles.StringifyLong
+                : Roles.StringifyInt;
+            return new IrStaticCall(Intrinsic(role, ctx, e.Span), IrType.String, [e]) { Span = e.Span };
+        }
         var cls = ClassNameOf(e.Type);
         if (cls != null && sym.LookupMethod(cls, "ToString") is { } ts)
             return new IrInstanceCall(e, ts.CName, IrType.String, []) { Span = e.Span };
@@ -2945,7 +3255,7 @@ internal sealed class TypeResolver(
                 }
                 CheckCompound(asgn.Op, target, value, ctx);
                 ForbidNestedThrows(value, ctx, allowRoot: false);
-                return new IrAssign(target, asgn.Op, value);
+                return new IrAssign(target, asgn.Op, CompoundValue(asgn, target, value, ctx));
             }
 
             case ExprStmt es:
@@ -2956,6 +3266,7 @@ internal sealed class TypeResolver(
                     diag.Error(Codes.AssignOutsideCatch, ctx.File, sc.Handler.Span,
                         "'assign' needs a declaration to supply a value for, and this call's result is discarded",
                         [$"bind the call first: 'let T x = ... catch {{ assign <value>; }};'"]);
+                RejectDiscardedRetain(es.E, ctx);
                 WarnIfNoEffect(es.E, e, ctx);
                 return new IrExprStmt(e);
             }
@@ -2971,8 +3282,6 @@ internal sealed class TypeResolver(
                             $"function must return '{Describe(retType)}'");
                     return new IrReturn(null);
                 }
-                // The declared return type is what the value is expected to be, which is what
-                // lets 'return Maybe.Missing();' pick an instantiation its arguments cannot.
                 var retCtx = retType is IrResultType rrt
                     ? ctx with { Expected = rrt.Inner }
                     : ctx with { Expected = retType };
@@ -3702,8 +4011,10 @@ internal sealed class TypeResolver(
             if (!(IsArith(left.Type) && IsArith(right.Type)))
                 diag.Error(Codes.TypeMismatch, ctx.File, be.Span,
                     $"operator '{be.Op.Sym()}' requires numeric operands, got '{Describe(left.Type)}' and '{Describe(right.Type)}'",
-                    MissingRelationalHint(lhsClass, be.Op.Sym()));
-            return new IrBinOp(be.Op, left, right, IrType.Bool);
+                    MissingRelationalHint(lhsClass, be.Op.Sym(), left.Type, right.Type));
+            else CheckMixedSignedness(be.Op, left, right, ctx, be.Span);
+            IrType ct = NumRank(left.Type) >= NumRank(right.Type) ? left.Type : right.Type;
+            return new IrBinOp(be.Op, InType(left, ct), InType(right, ct), IrType.Bool);
         }
 
         if (be.Op is BinOp.BitAnd or BinOp.BitOr or BinOp.BitXor or BinOp.Shl or BinOp.Shr)
@@ -3712,40 +4023,119 @@ internal sealed class TypeResolver(
                 diag.Error(Codes.TypeMismatch, ctx.File, be.Span,
                     $"operator '{be.Op.Sym()}' requires integer operands, got '{Describe(left.Type)}' and '{Describe(right.Type)}'");
 
-            // Shifts are undefined behaviour if the count is negative or >= the bit width of the left operand
-            if (be.Op is BinOp.Shl or BinOp.Shr && right is IrLitInt sh
-                && left.Type is IrPrimType lp && PrimTypes.IntBits(lp.CName) is var bits and > 0
-                && (sh.Value < 0 || sh.Value >= bits))
-                diag.Error(Codes.BadShiftCount, ctx.File, be.Right.Span,
-                    $"shift count {sh.Value} is out of range for '{Describe(left.Type)}' ({bits} bits)",
-                    [sh.Value < 0
-                        ? "a negative shift count is undefined behaviour"
-                        : $"the count must be between 0 and {bits - 1}"]);
-            IrType bt = be.Op is BinOp.Shl or BinOp.Shr ? left.Type
-                      : NumRank(left.Type) >= NumRank(right.Type) ? left.Type : right.Type;
-            return new IrBinOp(be.Op, left, right, bt);
+            CheckShiftCount(be.Op, left.Type, right, ctx, be.Right.Span);
+            if (be.Op is BinOp.Shl or BinOp.Shr)
+                return new IrBinOp(be.Op, InType(left, left.Type), right, left.Type);
+
+            IrType bt = NumRank(left.Type) >= NumRank(right.Type) ? left.Type : right.Type;
+            return new IrBinOp(be.Op, InType(left, bt), InType(right, bt), bt);
         }
 
         if (!(IsArith(left.Type) && IsArith(right.Type)))
             diag.Error(Codes.TypeMismatch, ctx.File, be.Span,
                 $"operator '{be.Op.Sym()}' cannot be applied to '{Describe(left.Type)}' and '{Describe(right.Type)}'");
 
-        // C's '%' is defined on integers only - there is no floating-point remainder
-        // operator - so a double operand lowers to C that the compiler rejects outright.
         if (be.Op == BinOp.Mod && IsArith(left.Type) && IsArith(right.Type)
             && !(IsInteger(left.Type) && IsInteger(right.Type)))
             diag.Error(Codes.TypeMismatch, ctx.File, be.Span,
                 $"operator '%' requires integer operands, got '{Describe(left.Type)}' and '{Describe(right.Type)}'",
                 ["for a floating-point remainder, call the library's Math function instead"]);
 
-        // An integer divisor that is literally zero traps at runtime on every target, so
-        // there is no program for which this is correct. Reject it at compile time.
-        if (be.Op is BinOp.Div or BinOp.Mod && IsInteger(right.Type) && right is IrLitInt { Value: 0 })
-            diag.Error(Codes.DivisionByZero, ctx.File, be.Right.Span,
-                $"integer {(be.Op == BinOp.Div ? "division" : "remainder")} by a literal zero",
-                ["this traps at runtime; guard the divisor or use a non-zero constant"]);
+        CheckZeroDivisor(be.Op, right, ctx, be.Right.Span);
+        CheckMixedSignedness(be.Op, left, right, ctx, be.Span);
+        WarnOnCharAddition(be.Op, left.Type, right.Type, ctx, be.Span);
         IrType t = NumRank(left.Type) >= NumRank(right.Type) ? left.Type : right.Type;
-        return new IrBinOp(be.Op, left, right, t);
+        return new IrBinOp(be.Op, InType(left, t), InType(right, t), t);
+    }
+
+    /// <summary>
+    /// Converts an operand into the type the operator was resolved at, so the operation runs in the
+    /// domain Gata said it would rather than the one C's promotions pick.
+    /// </summary>
+    private static IrExpr InType(IrExpr e, IrType t)
+    {
+        if (e.Type is not IrPrimType || t is not IrPrimType) return e;
+        return e.Type == t ? e : new IrCast(t, e) { Span = e.Span };
+    }
+
+    /// <summary>
+    /// Warns when '+' joins two 'char' values, which almost always means text was intended.
+    /// </summary>
+    private void WarnOnCharAddition(BinOp op, IrType l, IrType r, ResolveCtx ctx, TextSpan span)
+    {
+        if (op != BinOp.Add || !l.IsChar || !r.IsChar) return;
+
+        diag.Warn(Codes.CharArithmetic, ctx.File, span,
+            "'+' on two 'char' values adds their codepoints; it does not join them into text",
+            ["the result is a 'char', so ''a' + 'b'' is codepoint 195, not \"ab\"",
+             "to build text, convert one side first: 'a as String + b'",
+             "if the codepoint arithmetic is what you meant, say so with a cast: 'a as int + b as int'"]);
+    }
+
+    /// <summary>
+    /// Rejects a shift whose count is a literal outside [0, width of the shifted type). Both ends are
+    /// undefined behaviour in C.
+    /// </summary>
+    private void CheckShiftCount(BinOp op, IrType shifted, IrExpr count, ResolveCtx ctx, TextSpan span)
+    {
+        if (op is not (BinOp.Shl or BinOp.Shr)) return;
+        if (LiteralValue(count) is not { } n) return;
+        if (shifted is not IrPrimType p) return;
+        int bits = PrimTypes.IntBits(p.CName);
+        if (bits <= 0 || (n >= 0 && n < bits)) return;
+
+        diag.Error(Codes.BadShiftCount, ctx.File, span,
+            $"shift count {n} is out of range for '{Describe(shifted)}' ({bits} bits)",
+            [n < 0 ? "a negative shift count is undefined behaviour"
+                   : $"the count must be between 0 and {bits - 1}"]);
+    }
+
+    /// <summary>
+    /// Rejects an integer divisor that is literally zero. It traps at runtime on every target, so
+    /// there is no program for which it is correct.
+    /// </summary>
+    private void CheckZeroDivisor(BinOp op, IrExpr divisor, ResolveCtx ctx, TextSpan span)
+    {
+        if (op is not (BinOp.Div or BinOp.Mod)) return;
+        if (!IsInteger(divisor.Type) || LiteralValue(divisor) is not 0) return;
+
+        diag.Error(Codes.DivisionByZero, ctx.File, span,
+            $"integer {(op == BinOp.Div ? "division" : "remainder")} by a literal zero",
+            ["this traps at runtime; guard the divisor or use a non-zero constant"]);
+    }
+
+    /// <summary>
+    /// Rejects a signed operand mixed with an unsigned one of the same width, for the operators whose
+    /// answer depends on which of the two signednesses wins.
+    /// </summary>
+    private void CheckMixedSignedness(BinOp op, IrExpr left, IrExpr right, ResolveCtx ctx, TextSpan span)
+    {
+        if (op is not (BinOp.Div or BinOp.Mod or BinOp.Lt or BinOp.Gt or BinOp.Le or BinOp.Ge)) return;
+        IrType l = left.Type, r = right.Type;
+        if (l is not IrPrimType lp || r is not IrPrimType rp) return;
+        if (lp.IsUnsigned == rp.IsUnsigned) return;
+
+        var signedSide = lp.IsUnsigned ? right : left;
+        var (signed, unsigned) = lp.IsUnsigned ? (rp, lp) : (lp, rp);
+        if (LiteralValue(signedSide) is { } known && known >= 0 && FitsIn(known, unsigned)) return;
+
+        var target = NumRank(l) >= NumRank(r) ? lp : rp;
+        if (!target.IsUnsigned && NumRank(unsigned) < NumRank(signed)) return;
+
+        string verb = op is BinOp.Div or BinOp.Mod ? "compute" : "compare";
+        var (lost, lostAs) = target.IsUnsigned ? (signed, "negative values wrap") : (unsigned, "large values go negative");
+        List<string> hints =
+        [
+            $"'{op.Sym()}' resolves at '{Describe(target)}', so the '{Describe(lost)}' side converts " +
+            $"into it and {lostAs} - which changes the answer rather than just its type",
+            $"cast the side you mean: 'x as {Describe(signed)}' to {verb} as signed, or " +
+            $"'x as {Describe(unsigned)}' to {verb} as unsigned",
+        ];
+        if (NumRank(signed) < 5 && NumRank(unsigned) < 5)
+            hints.Add("or widen both sides to 'int64', which holds every value of either type");
+        diag.Error(Codes.MixedSignedness, ctx.File, span,
+            $"operator '{op.Sym()}' mixes signed '{Describe(signed)}' with unsigned '{Describe(unsigned)}'",
+            [.. hints]);
     }
 
     /// <summary>

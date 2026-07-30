@@ -1202,7 +1202,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             case IrDebug d:       w.Line($"{module.Symbols.FloorName(Roles.EnvDebug)}({NoTrigraphs(d.Raw)});"); break;
             case IrPanic p:       w.Line($"{module.Symbols.FloorName(Roles.EnvPanic)}({NoTrigraphs(p.Raw)});"); break;
             case IrIf ifs:        EmitIf(ifs, w); break;
-            case IrWhile ws:      w.Line($"while ({EmitExpr(ws.Cond)})"); EmitBlock(ws.Body, w); break;
+            case IrWhile ws:      w.Line($"while ({EmitCond(ws.Cond)})"); EmitBlock(ws.Body, w); break;
             case IrFor fr:        EmitFor(fr, w); break;
             default: throw new System.Diagnostics.UnreachableException($"[Emitter] unhandled IrStmt: {s.GetType().Name}");
         }
@@ -1224,7 +1224,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// </summary>
     private void EmitIf(IrIf ifs, CodeWriter w)
     {
-        w.Line($"if ({EmitExpr(ifs.Cond)})");
+        w.Line($"if ({EmitCond(ifs.Cond)})");
         EmitBlock(ifs.Then, w);
         if (ifs.Else != null) { w.Line("else"); EmitBlock(ifs.Else, w); }
     }
@@ -1243,7 +1243,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             IrExprStmt e => EmitExpr(e.Expr),
             _            => ""
         };
-        string cond = fr.Cond != null ? EmitExpr(fr.Cond) : "";
+        string cond = fr.Cond != null ? EmitCond(fr.Cond) : "";
         string step = fr.Step switch
         {
             IrAssign sa  => $"{EmitExpr(sa.Target)} {sa.Op.Sym()} {EmitExpr(sa.Value)}",
@@ -1285,9 +1285,9 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
                                 : $"{EmitExpr(ix.Obj)}[{EmitExpr(ix.Idx)}]",
             IrStaticCall sc => $"{sc.CName}({EmitArgs(sc.Args)})",
             IrInstanceCall ic => $"{ic.CName}({EmitArgs(ic.Args, EmitExpr(ic.Recv))})",
-            IrBinOp bo => $"({EmitExpr(bo.Left)} {bo.Op.Sym()} {EmitExpr(bo.Right)})",
+            IrBinOp bo => Narrow(bo.Type, $"({EmitExpr(bo.Left)} {bo.Op.Sym()} {EmitExpr(bo.Right)})"),
             IrTernary tn => $"({EmitExpr(tn.Cond)} ? {EmitExpr(tn.Then)} : {EmitExpr(tn.Else)})",
-            IrUnaryOp uo => $"({uo.Op.Sym()}{EmitExpr(uo.Operand)})",
+            IrUnaryOp uo => Narrow(uo.Type, $"({uo.Op.Sym()}{EmitExpr(uo.Operand)})"),
             IrPostfix pf => $"({EmitExpr(pf.Operand)}{pf.Op.Sym()})",
             IrCast c => $"(({c.To.ToCType()}){EmitExpr(c.Value)})",
             IrNew n => $"{Mangler.Allocator(n.ClassName)}({EmitArgs(n.Args)})",
@@ -1305,6 +1305,25 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             IrUnionField uf => $"{EmitExpr(uf.Union)}.payload.{UnionVariantName(uf.Union.Type, uf.VariantIndex)}.{uf.Field}",
             _ => throw new System.Diagnostics.UnreachableException($"[Emitter] unhandled IrExpr: {e.GetType().Name}")
         };
+    }
+
+    /// <summary>
+    /// Pins an integer operator result to the type the front end gave it, which C would otherwise
+    /// have chosen for itself.
+    /// </summary>
+    private string EmitCond(IrExpr e) =>
+        e is IrBinOp bo && bo.Type is IrPrimType { CName: "bool" }
+            ? $"{EmitExpr(bo.Left)} {bo.Op.Sym()} {EmitExpr(bo.Right)}"
+            : EmitExpr(e);
+
+    // <summary>
+    // Narrows a numeric expression to the given type, unless it's a boolean or non-numeric type,
+    // in which case the expression is returned as-is
+    // </summary>
+    private static string Narrow(IrType t, string c)
+    {
+        if (t is not IrPrimType p || !p.IsNumeric || p.CName == "bool") return c;
+        return $"(({p.ToCType()}){c})";
     }
 
     /// <summary>

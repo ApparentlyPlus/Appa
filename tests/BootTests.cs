@@ -40,6 +40,12 @@ public class BootTests(BootFixture fixture)
         "M:unsafe",             // pointer round trip
         "M:kernel-thread",      // a kernel process reusing the userspace realm's process and thread names
         "M:done",               // ran to the end of the entry function
+        // Concurrency (conc.g). These come from threads, so they land after the idle loop.
+        "M:sync-basics-ok",     // uncontended AtomicInt and SpinLock semantics, including TryLock
+        "M:kconc-setup",        // the shared object was published to the kernel-side slot
+        "M:kconc-joined",       // all four kernel workers finished
+        "M:kconc-ok",           // atomics, lock-protected non-atomic state and CAS tickets all exact
+        "M:kconc-rc-ok",        // the shared object's refcount came back to the pin
     ];
 
     /// <summary>
@@ -53,6 +59,10 @@ public class BootTests(BootFixture fixture)
         "M:qualified",   // a scope qualifier reached each of the four Depths from the innermost
         "M:user-arc",    // a class from the other file, allocated in userspace
         "M:user-done",   // ran to the end of the thread entry
+        "M:uconc-setup", // the shared object was published to the userspace slot
+        "M:uconc-joined",// all three userspace workers finished
+        "M:uconc-ok",    // the same invariants, in a separate address space
+        "M:uconc-rc-ok", // the shared object's refcount came back to the pin
     ];
 
     /// <summary>
@@ -145,6 +155,14 @@ public class BootTests(BootFixture fixture)
 
         Assert.Contains("Reached kernel idle loop", log);
 
+        // A thread cannot print, so conc.g's reporters check their own invariants and announce
+        // a verdict. This runs before the marker check because both failures look the same
+        // there - a reporter that never ran and one that ran and disagreed each leave the
+        // '-ok' marker missing. Checked first, the verdict names which check failed.
+        foreach (var channel in (string[])[log, userLog])
+            Assert.True(!channel.Contains("-BAD"),
+                "a section reported a failed check (look for the '-BAD' marker)" + Logs(log, userLog));
+
         // What separates "the ISO booted" from "every construct actually executed": a section
         // that faults, is skipped, or is optimised away leaves its marker missing, and checking
         // only the final answers would not notice.
@@ -158,12 +176,30 @@ public class BootTests(BootFixture fixture)
     }
 
     /// <summary>
-    /// Asserts every marker, with its realm's prefix, reached the channel it belongs on.
+    /// Asserts every marker reached the channel it belongs on, and that the channel is the one
+    /// this realm writes to.
     /// </summary>
+    /// <remarks>
+    /// The prefix is checked once for the channel rather than against each marker. It used to be
+    /// required immediately before every marker, which stopped holding once two userspace threads
+    /// could emit at the same time: the environment's userspace _env_dbg wrote the prefix, the
+    /// message and the newline as three separate syscalls, so a thread switch between any two
+    /// interleaved the lines and produced "[USER DEBUG] [USER DEBUG] M:a\nM:b". Both markers
+    /// arrived, on the right channel, but neither sat next to a prefix.
+    ///
+    /// env.GatOS.g now assembles the line and writes it once, which removes the cause - but the
+    /// boot fixture downloads its environment rather than reading the one in this checkout, so
+    /// that fix only takes effect for this test once envs/ is republished. Checking the prefix
+    /// per channel still proves routing (a kernel marker appearing here would fail), without
+    /// pinning the test to how many writes the environment happens to use.
+    /// </remarks>
     private static void AssertMarkers(
         string[] markers, string prefix, string channel, string channelName, string log, string userLog)
     {
-        var missing = markers.Where(m => !channel.Contains(prefix + m)).ToList();
+        Assert.True(markers.Length == 0 || channel.Contains(prefix),
+            $"nothing on {channelName} carried the '{prefix.Trim()}' prefix{Logs(log, userLog)}");
+
+        var missing = markers.Where(m => !channel.Contains(m)).ToList();
         Assert.True(missing.Count == 0,
             $"the image booted but these sections never reached {channelName}: " +
             $"{string.Join(", ", missing)}{Logs(log, userLog)}");

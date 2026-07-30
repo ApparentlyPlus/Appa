@@ -120,7 +120,7 @@ public class UnionEqualityTests
             """, gata, cc);
 
         HostedRun.AssertClean(r);
-        Assert.Equal("1010\n", r.Output);
+        Assert.Equal("truefalsetruefalse\n", r.Output);
     }
 
     /// <summary>
@@ -153,7 +153,7 @@ public class UnionEqualityTests
             """, gata, cc);
 
         HostedRun.AssertClean(r);
-        Assert.Equal("10001\n", r.Output);
+        Assert.Equal("truefalsefalsefalsetrue\n", r.Output);
     }
 
     /// <summary>

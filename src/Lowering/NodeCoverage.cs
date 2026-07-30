@@ -55,6 +55,20 @@ internal static class NodeCoverage
             "its child nodes will be skipped by every pass built on this traversal"));
     }
     
+    /// <summary>
+    /// Asserts that a statement reaching the default arm of a control-flow analysis - the hand-rolled
+    /// switches in DefinitelyReturns and HasLoopBreak - carries nothing those analyses would need to
+    /// look inside.
+    /// </summary>
+    [Conditional("DEBUG")]
+    public static void AssertNoNestedFlow(IrStmt s, string where)
+    {
+        if (s is IrGoto or IrLabel or IrBreak or IrContinue or IrThrow or IrDebug or IrPanic
+                or IrReturn or IrAssignValue) return;
+        throw new UnreachableException(Message(where, s.GetType().Name,
+            "the control flow inside it is invisible to this analysis"));
+    }
+
     private static string Message(string where, string node, string consequence)
     {
         return $"[{where}] no case for {node}, and it is not in the inert set. " +

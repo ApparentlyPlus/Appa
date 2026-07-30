@@ -281,4 +281,32 @@ public class ParserDiagnosticsTests
     {
         Assert.IsType<FuncDecl>(SingleFileCompile.Parse(src).Items[0]);
     }
+
+
+    /// <summary>
+    /// 'for (x in xs)' is the range loop spelled the way C# and Python spell it. The C-style reading
+    /// then failed on the 'in' with "expected ';'", naming a token the author was never reaching for.
+    /// The 'let' variant is the same habit arriving from a language that declares the binding.
+    /// </summary>
+    [Theory]
+    [InlineData("func F() { for (v in xs) { } }")]
+    [InlineData("func F() { for (let v in xs) { } }")]
+    public void ParenthesisedForInNamesTheRealForm(string src)
+    {
+        var ex = Parse(src);
+        Assert.Contains("without parentheses", ex.Message);
+        Assert.Contains("for x in xs", string.Join(" ", ex.Hints ?? []));
+    }
+
+    /// <summary>
+    /// The loops that are spelled correctly must still parse. The check keys on 'in' right after the
+    /// paren, so an ordinary C-style header has to be untouched by it.
+    /// </summary>
+    [Theory]
+    [InlineData("func F() { for v in xs { } }")]
+    [InlineData("func F() { for (let int i = 0; i < 2; i = i + 1) { } }")]
+    [InlineData("func F() { for (i = 0; i < 2; i = i + 1) { } }")]
+    [InlineData("func F() { for (;;) { } }")]
+    public void TheLoopFormsThatAreSpelledRightStillParse(string src) =>
+        Assert.NotEmpty(SingleFileCompile.Parse(src).Items);
 }

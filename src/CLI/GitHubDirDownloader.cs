@@ -21,7 +21,7 @@ internal static class GitHubDirDownloader
     /// name="toLocalPath"/>) into its paired local directory, stripping the source prefix from each
     /// file's path.
     /// </summary>
-    public static async Task DownloadDirectoriesAsync(
+    public static async Task<IReadOnlyDictionary<string, List<string>>> DownloadDirectoriesAsync(
         string owner, string repo, string @ref,
         IReadOnlyDictionary<string, string> toLocalPath,
         HttpClient client,
@@ -30,14 +30,26 @@ internal static class GitHubDirDownloader
         var (truncated, entries) = await FetchTreeAsync(owner, repo, @ref, client, ct);
 
         var files = new List<(TreeEntry Entry, string LocalPath)>();
+        var written = new Dictionary<string, List<string>>();
         foreach (var (prefix, localDir) in toLocalPath)
         {
             IReadOnlyList<TreeEntry> matches = truncated
                 ? await WalkContentsApiAsync(owner, repo, @ref, prefix.TrimEnd('/'), client, ct)
                 : [.. entries.Where(e => e.Type == "blob" && e.Path.StartsWith(prefix, StringComparison.Ordinal))];
 
+            if (matches.Count == 0)
+                throw new InvalidOperationException(
+                    $"{owner}/{repo}@{@ref} has no files under '{prefix}' - the repository layout has " +
+                    "changed, or the ref is wrong; nothing was installed for it");
+
+            var local = new List<string>();
             foreach (var entry in matches)
-                files.Add((entry, Path.Combine(localDir, entry.Path[prefix.Length..].Replace('/', Path.DirectorySeparatorChar))));
+            {
+                string dest = Path.Combine(localDir, entry.Path[prefix.Length..].Replace('/', Path.DirectorySeparatorChar));
+                files.Add((entry, dest));
+                local.Add(dest);
+            }
+            written[prefix] = local;
         }
 
         using var gate = new SemaphoreSlim(Concurrency);
@@ -48,6 +60,7 @@ internal static class GitHubDirDownloader
             finally { gate.Release(); }
         });
         await Task.WhenAll(tasks);
+        return written;
     }
 
     /// <summary>

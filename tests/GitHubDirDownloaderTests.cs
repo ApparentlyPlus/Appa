@@ -147,4 +147,57 @@ public class GitHubDirDownloaderTests
         Assert.Contains("token", ex.Message, StringComparison.OrdinalIgnoreCase);
         Assert.False(Directory.Exists(dest));
     }
+
+    /// <summary>
+    /// A prefix that matches nothing used to download nothing and report success, leaving an empty
+    /// libgata behind for the next build to fail on. Upstream renaming or moving the directory is
+    /// exactly how that happens, and it is indistinguishable from a healthy install at the time.
+    /// </summary>
+    [Fact]
+    public async Task APrefixThatMatchesNothingIsAnError()
+    {
+        var handler = new FakeGitHubHandler();
+        handler.On(u => u.Contains("/git/trees/"), _ => Json("""
+            {"truncated": false, "tree": [
+                {"path": "stdlib/String.g", "type": "blob"}
+            ]}
+            """));
+        using var client = new HttpClient(handler);
+        using var root = TempDir.Create("appa-ghdl-");
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            GitHubDirDownloader.DownloadDirectoriesAsync("Owner", "Repo", "main",
+                new Dictionary<string, string> { ["libgata/"] = root.Combine("libgata") }, client));
+        Assert.Contains("libgata/", ex.Message);
+        Assert.Contains("nothing was installed", ex.Message);
+    }
+
+    /// <summary>
+    /// The written paths come back so the caller can tell what the mirror now consists of, which is
+    /// what makes pruning a file dropped upstream possible at all.
+    /// </summary>
+    [Fact]
+    public async Task ReportsWhatItWrotePerPrefix()
+    {
+        var handler = new FakeGitHubHandler();
+        handler.On(u => u.Contains("/git/trees/"), _ => Json("""
+            {"truncated": false, "tree": [
+                {"path": "libgata/String.g", "type": "blob"},
+                {"path": "libgata/Int.g", "type": "blob"},
+                {"path": "envs/env.hosted.g", "type": "blob"}
+            ]}
+            """));
+        handler.On(u => u.Contains("raw.githubusercontent.com"),
+            _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("x") });
+
+        using var client = new HttpClient(handler);
+        using var root = TempDir.Create("appa-ghdl-");
+        var written = await GitHubDirDownloader.DownloadDirectoriesAsync("Owner", "Repo", "main",
+            new Dictionary<string, string>
+            { ["libgata/"] = root.Combine("libgata"), ["envs/"] = root.Combine("envs") }, client);
+
+        Assert.Equal(2, written["libgata/"].Count);
+        Assert.Single(written["envs/"]);
+        Assert.Contains(written["libgata/"], p => p.EndsWith("Int.g"));
+    }
 }

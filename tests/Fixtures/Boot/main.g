@@ -4,6 +4,7 @@ import Int;
 import String;
 import Math;
 import "src/lib.g";
+import "src/conc.g";
 
 int func combine(int a, int b) { return a + b; }
 int64 func combine(int64 a, int64 b) { return a + b; }
@@ -269,6 +270,41 @@ realm kernel {
             entry func Run() { debug "M:kernel-thread"; }
         }
     }
+
+
+    // Two processes of two threads each, so threads of one process and threads of different
+    // processes both reach the same kernel-space object.
+    background process ConcA {
+        thread Setup {
+            entry func Run() {
+                if (SyncBasics()) { debug "M:sync-basics-ok"; }
+                else              { debug "M:sync-basics-BAD"; }
+                KShared.Set(PrepareShared(ConcKWorkers(), true));
+                debug "M:kconc-setup";
+                Grind(AwaitShared(true), true);
+            }
+        }
+        thread W { entry func Run() { Grind(AwaitShared(true), true); } }
+    }
+    background process ConcB {
+        thread W { entry func Run() { Grind(AwaitShared(true), true); } }
+        thread X { entry func Run() { Grind(AwaitShared(true), true); } }
+    }
+    background process ConcReport {
+        thread R {
+            entry func Run() {
+                let Shared s = AwaitShared(true);
+                while (s.done.Get() < (ConcKWorkers() as int64)) { Sys.Yield(); }
+                debug "M:kconc-joined";
+                if (VerifyShared(s, ConcKWorkers(), true)) { debug "M:kconc-ok"; }
+                else                                 { debug "M:kconc-BAD"; }
+                // 's' plus the pin are the only references left, so the count must be back to
+                // exactly 2. Anything else means a retain or a release was lost along the way.
+                if (KShared.Rc() == (2 as int64)) { debug "M:kconc-rc-ok"; }
+                else                              { debug "M:kconc-rc-BAD"; }
+            }
+        }
+    }
 }
 
 realm userspace {
@@ -290,6 +326,37 @@ realm userspace {
                 debug "M:user-arc";
                 Console.PrintLine($"pi*2={Math.Round(p + p) as int} load={load.weight}");
                 debug "M:user-done";
+            }
+        }
+    }
+
+
+    // One process, three threads. A userspace process has its own address space, so this shares
+    // through the userspace translation unit's own slot rather than the kernel's.
+    //
+    // Background, not foreground: a second foreground process competes with App above for the
+    // visible TTY, and App's thread then intermittently missed the image's time budget. The
+    // reporter's verdict markers carry every invariant, so nothing is lost by not printing.
+    background process ConcU {
+        thread Setup {
+            entry func Run() {
+                UShared.Set(PrepareShared(ConcUWorkers(), false));
+                debug "M:uconc-setup";
+                Grind(AwaitShared(false), false);
+            }
+        }
+        thread W { entry func Run() { Grind(AwaitShared(false), false); } }
+
+        thread R {
+            entry func Run() {
+                let Shared s = AwaitShared(false);
+                while (s.done.Get() < (ConcUWorkers() as int64)) { Sys.Yield(); }
+                debug "M:uconc-joined";
+                if (VerifyShared(s, ConcUWorkers(), false)) { debug "M:uconc-ok"; }
+                else                                 { debug "M:uconc-BAD"; }
+                if (UShared.Rc() == (2 as int64)) { debug "M:uconc-rc-ok"; }
+                else                              { debug "M:uconc-rc-BAD"; }
+
             }
         }
     }

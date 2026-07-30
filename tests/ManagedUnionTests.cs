@@ -454,7 +454,7 @@ public class ManagedUnionTests
             "basic=7 hi -1\n" +
             "ret=4 -1\n" +
             "either=1x\n" +
-            "eq=101\n" +
+            "eq=truefalsetrue\n" +
             "list=2 idx=0\n" +
             "during=1\n" +
             "after=0\n", r.Output);
@@ -711,7 +711,7 @@ public class ManagedUnionTests
         // sum is 0..19 = 190; hits is 20 of every 30 over 200 iterations. 43 built, 42 alive:
         // slot's original is the one TryGet released before overwriting - 44 would mean the
         // release was skipped, 41 that the caller's live value was freed.
-        Assert.Equal("sum=190 hits=140 find=101 or=10,-1 during=42\nlive=0\n", r.Output);
+        Assert.Equal("sum=190 hits=140 find=truefalsetrue or=10,-1 during=42\nlive=0\n", r.Output);
     }
 
     /// <summary>

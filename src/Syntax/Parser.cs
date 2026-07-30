@@ -1413,6 +1413,14 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
 
         // C-style for (init; cond; step) { }
         Expect(TK.LParen);
+        
+        if ((At(TK.Ident) && Peek().Kind == TK.In)
+            || (At(TK.Let) && Peek().Kind == TK.Ident && Peek(2).Kind == TK.In))
+            Fail("a 'for ... in' loop is written without parentheses",
+                 hints: ["write 'for x in xs { ... }'",
+                         "the parenthesised form is the C-style loop, which takes " +
+                         "'for (init; condition; step)'"]);
+
         Stmt? init = null;
         if (!At(TK.Semi))
             init = At(TK.Let) ? ParseLetNoSemi() : ParseForClause();
@@ -1758,6 +1766,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     /// </summary>
     private Expr ParseBracketed(Expr expr, int s)
     {
+        RejectExplicitTypeArgs();
         if (expr is not IdentExpr id) return ParseIndexRest(expr, s);
 
         var start = Mark();
@@ -1796,10 +1805,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
             var idx = ParseExpr();
             if (At(TK.RBrack)) { Advance(); indexForm = idx; }
         }
-        catch (ParseException) { /* not an expression; the type reading stands alone */ }
+        catch (ParseException) { /* not an expression */ }
 
-        // Settle on the type reading: its registrations are restored from the copy taken above
-        // rather than by parsing the same tokens a third time.
         Rewind(typeEnd with { Uses = start.Uses });
         _gu.AddRange(typeUses);
 
@@ -1808,6 +1815,41 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         _gu.Add(new GenericUse(id.Name, outerArgs, To(s), typeArgs));
 
         return new GenericTypeRefExpr(id.Name, typeArgs, indexForm, To(s));
+    }
+
+    /// <summary>
+    /// True for a token that can only ever begin a type. The primitive spellings are split across
+    /// several kinds rather than sharing one, so every branch has to be named.
+    /// </summary>
+    private static bool IsTypeKeyword(TK k) =>
+        k is TK.TPrim or TK.TInt or TK.TBool or TK.TChar or TK.TFloat or TK.TDouble
+             or TK.TShort or TK.TVoid;
+
+    /// <summary>
+    /// Reports an attempt to pass explicit type arguments to a call - 'Sort[int](xs)'.
+    /// </summary>
+    private void RejectExplicitTypeArgs()
+    {
+        int i = _pp + 1;
+        int end = _tokens.Length;
+        bool sawPrim = false;
+        for (int depth = 1; i < end; i++)
+        {
+            var k = _tokens[i].Kind;
+            if (k == TK.LBrack) depth++;
+            else if (k == TK.RBrack && --depth == 0) break;
+            else if (IsTypeKeyword(k)) sawPrim = true;
+            else if (k is TK.LParen or TK.Semi or TK.LBrace) return;   // not a bracket group at all
+        }
+        if (!sawPrim || i >= end || _tokens[i].Kind != TK.RBrack) return;
+        if (i + 1 >= end || _tokens[i + 1].Kind != TK.LParen) return;
+
+        Fail("a function call cannot take explicit type arguments",
+             Codes.ExplicitTypeArgs,
+             hints: ["type parameters are inferred from the argument types, so write 'f(x)' rather " +
+                     "than 'f[T](x)'",
+                     "if the element at an index is what you meant to call, the index has to be an " +
+                     "expression - a type name is not one"]);
     }
 
     /// <summary>

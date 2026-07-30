@@ -493,9 +493,10 @@ internal static class Pipeline
             var list = ds.OrderBy(diag.LineOf).ToList();
             foreach (var d in list) Console.Error.WriteLine(diag.Render(d));
             Console.Error.WriteLine();
-            Console.Error.WriteLine(CountSummary(
-                list.Count(d => d.Severity == Severity.Error),
-                list.Count(d => d.Severity == Severity.Warning)));
+            int errs = list.Count(d => d.Severity == Severity.Error);
+            int warns = list.Count(d => d.Severity == Severity.Warning);
+            Console.Error.WriteLine(CountSummary(errs, warns) +
+                (errs == 0 && warns > 0 && warnAsError ? " (--werror: treated as errors)" : ""));
             Environment.Exit(1);
         }
 

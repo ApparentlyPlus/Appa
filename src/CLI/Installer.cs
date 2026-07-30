@@ -34,9 +34,6 @@ internal static class Installer
         bool isWin = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
         bool isMac = RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
 
-        // Ask about PATH first (setup only, interactive only). Putting appa on PATH is a
-        // privileged, system-wide change, so we decide up front: if the user wants it but
-        // we're not elevated, tell them to re-run with privileges and continue without it.
         bool wantsPath = false;
         if (!isUpdate && !Console.IsInputRedirected)
         {
@@ -62,17 +59,16 @@ internal static class Installer
         Log.Step("Extracting toolchain...");
         ZipFile.ExtractToDirectory(tcZip, AppaPaths.ToolchainDir, true);
         File.Delete(tcZip);
-
-        // libgata and envs are fetched live from the Gata repo's "main" branch (not a
-        // release zip), so this content is never duplicated - the Gata repo is the only
-        // source of truth.
         Log.Step("Fetching libgata and envs from GitHub...");
         using (var ghClient = new HttpClient { Timeout = TimeSpan.FromMinutes(5) })
         {
-            await GitHubDirDownloader.DownloadDirectoriesAsync(
-                Urls.GataOwner, Urls.GataRepo, Urls.GataRef,
-                new Dictionary<string, string> { ["envs/"] = AppaPaths.EnvsDir, ["libgata/"] = AppaPaths.LibgataDir },
-                ghClient);
+            var targets = new Dictionary<string, string>
+                { ["envs/"] = AppaPaths.EnvsDir, ["libgata/"] = AppaPaths.LibgataDir };
+            var written = await GitHubDirDownloader.DownloadDirectoriesAsync(
+                Urls.GataOwner, Urls.GataRepo, Urls.GataRef, targets, ghClient);
+
+            foreach (var (prefix, localDir) in targets)
+                PruneStale(localDir, written[prefix]);
         }
 
         string tmplZip = Path.Combine(Path.GetTempPath(), "appa_template.zip");
@@ -108,6 +104,55 @@ internal static class Installer
         Log.Ok(isUpdate
             ? "Update complete. Toolchain, libgata, template, and appa are now up to date."
             : "Setup complete. Run 'appa init <project>' to create a new project.");
+    }
+
+    /// <summary>
+    /// True for the failures 'appa setup' can hit through no fault of the compiler: the network, the
+    /// GitHub API, a corrupt download, or the filesystem it installs into.
+    /// </summary>
+    internal static bool IsExpectedSetupFailure(Exception ex) =>
+        ex is HttpRequestException
+              or TaskCanceledException
+              or InvalidOperationException
+              or InvalidDataException
+              or UnauthorizedAccessException
+              or IOException;
+
+    /// <summary>
+    /// What to try next, chosen by what actually went wrong. Every one of these leaves the install
+    /// partly written, so re-running setup is the recovery in all cases and the hint says so.
+    /// </summary>
+    internal static string SetupFailureHint(Exception ex) => ex switch
+    {
+        HttpRequestException or TaskCanceledException =>
+            "check the network connection and run 'appa setup' again; the install is incomplete until it succeeds",
+        UnauthorizedAccessException =>
+            $"appa could not write to {AppaPaths.Root} - check its permissions, or remove it and run 'appa setup' again",
+        InvalidDataException =>
+            "the download was corrupt; run 'appa setup' again to fetch it fresh",
+        InvalidOperationException when ex.Message.Contains("rate limit") =>
+            "set GITHUB_TOKEN to a personal access token to raise the limit from 60 to 5000 requests an hour",
+        _ => "the install is incomplete; run 'appa setup' again once the cause is fixed",
+    };
+
+    /// <summary>
+    /// Deletes .g files in a downloaded directory that the download did not write.
+    /// </summary>
+    internal static void PruneStale(string localDir, IReadOnlyList<string> written)
+    {
+        if (!Directory.Exists(localDir)) return;
+        var keep = new HashSet<string>(written.Select(Path.GetFullPath), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var path in Directory.GetFiles(localDir, "*.g", SearchOption.AllDirectories))
+        {
+            if (keep.Contains(Path.GetFullPath(path))) continue;
+            try
+            {
+                File.Delete(path);
+                Log.Info($"Removed {Path.GetFileName(path)} - no longer part of libgata");
+            }
+            catch (Exception ex) { Log.Warn($"Could not remove stale {path}: {ex.Message}"); }
+        }
     }
 
     /// <summary>

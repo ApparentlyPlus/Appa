@@ -32,10 +32,13 @@ try
             break;
     }
 }
+catch (Exception ex) when (args[0] is "setup" or "update" && Installer.IsExpectedSetupFailure(ex))
+{
+    Log.Error($"setup could not complete: {ex.Message}", Installer.SetupFailureHint(ex));
+    Environment.Exit(1);
+}
 catch (Exception ex)
 {
-    // Last-resort net: every expected failure already reports through Log/DiagnosticBag
-    // and exits on its own. Reaching here means a genuine compiler-internal bug.
     Log.Error($"internal compiler error: {ex.Message}");
     Console.Error.WriteLine(ex);
     Environment.Exit(1);
@@ -215,9 +218,6 @@ static (IrModule Module, IReadOnlyDictionary<string, string> Sourcemap, Capabili
 {
     var inputFiles = new List<string> { Path.GetFullPath(envPath), Path.GetFullPath(entryPath) };
     var (programs, attempted, imports, diag) = Pipeline.Transpile(inputFiles, projectRoot, stdlibDir);
-    // A file that failed to load or parse leaves the name universe incomplete, so the semantic
-    // passes below report names as missing that the build was supposed to have. Their findings
-    // are kept only when loading actually succeeded.
     bool loaded = !diag.HasErrors;
     int afterLoad = diag.All.Count;
 
@@ -324,14 +324,14 @@ static class Templates
 import Misc;
 import Console;
 
-kernel {
+realm kernel {
     entry func Main() {
         Misc.PrintBanner();
         Console.PrintLine("Hello from {{name}}!");
     }
 }
 
-user {
+realm userspace {
     foreground process App {
         thread Main {
             entry func Run() {
