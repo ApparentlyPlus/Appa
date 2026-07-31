@@ -240,7 +240,8 @@ internal sealed class Ownership(IrModule module)
             var t = p.Threads[i];
             threads.Add(t.EntryFunc == null ? t : t with { EntryFunc = LowerFunction(t.EntryFunc) });
         }
-        return p with { Threads = threads };
+        var init = p.StateInit == null ? null : LowerFunction(p.StateInit);
+        return p with { Threads = threads, StateInit = init };
     }
 
     /// <summary>

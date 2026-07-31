@@ -37,7 +37,7 @@ internal static class NodeCoverage
     public static void AssertInertIrExpr(IrExpr e, string where)
     {
         if (e is IrLitInt or IrLitFloat or IrLitString or IrLitChar or IrLitBool or IrLitNull
-                or IrVar or IrSelfExpr or IrFuncRef or IrEnumConst or IrSizeof or IrDefault) return;
+                or IrVar or IrGlobal or IrSelfExpr or IrFuncRef or IrEnumConst or IrSizeof or IrDefault) return;
         throw new UnreachableException(Message(where, e.GetType().Name,
             "its child expressions will be skipped by every pass built on this traversal"));
     }

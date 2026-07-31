@@ -128,6 +128,7 @@ internal static class Codes
     public const string ExplicitTypeArgs           = "G097";
     public const string UseBeforeAssignment        = "G098";
     public const string DiscardedRetain            = "G099";
+    public const string UninitialisedProcessVar    = "G100";
 }
 
 internal static class Suggest

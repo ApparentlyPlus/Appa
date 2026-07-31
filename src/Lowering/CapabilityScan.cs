@@ -51,8 +51,11 @@ internal sealed class CapabilityScan(IrModule m) : IrWalker
 
         foreach (var f in m.FreeFunctions) if (f.IsEntry) Enter(f.CName, f.Body);
         foreach (var p in m.Processes)
+        {
+            if (p.StateInit is { } si) Enter(si.CName, si.Body);
             foreach (var t in p.Threads)
                 if (t.EntryFunc is { } e) Enter(e.CName, e.Body);
+        }
                 
         foreach (var c in m.Classes)
             foreach (var mm in c.Methods)

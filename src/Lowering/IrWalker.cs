@@ -163,7 +163,6 @@ internal abstract class IrWalker
             case IrUnionField uf:
                 WalkExpr(uf.Union);
                 break;
-            // Literals, IrVar, IrSelfExpr, IrFuncRef, IrSizeof, IrDefault: no children.
             default: NodeCoverage.AssertInertIrExpr(e, "IrWalker.WalkExpr"); break;
         }
     }

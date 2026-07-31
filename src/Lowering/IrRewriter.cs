@@ -61,7 +61,10 @@ internal abstract class IrRewriter
     private IrProcess RewriteProcess(IrProcess p)
     {
         var threads = MapThreads(p.Threads);
-        return ReferenceEquals(threads, p.Threads) ? p : p with { Threads = threads };
+        var init = p.StateInit is { Body: { } b } si ? si with { Body = RewriteBlock(b) } : p.StateInit;
+        return ReferenceEquals(threads, p.Threads) && ReferenceEquals(init, p.StateInit)
+            ? p
+            : p with { Threads = threads, StateInit = init };
     }
 
     /// <summary>

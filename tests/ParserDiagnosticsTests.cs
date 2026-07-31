@@ -62,6 +62,40 @@ public class ParserDiagnosticsTests
         Assert.Contains("end of file", Parse("func F() {").Message);
     }
 
+    /// <summary>
+    /// 'public' on a free function changes nothing - a free function is already visible to every
+    /// importer - so it is rejected the way 'public class C' already was. Accepting it was worse
+    /// than redundant: it let a file mark some free functions 'public' and not others, which reads
+    /// as if the bare ones were restricted.
+    /// </summary>
+    [Theory]
+    [InlineData("public int func F() { return 1; }")]
+    [InlineData("public throws int func F() { throw; }")]
+    [InlineData("public T func F[T](T x) { return x; }")]
+    [InlineData("realm kernel { public int func F() { return 1; } entry func Main() { } }")]
+    [InlineData("realm kernel { entry func Main() { } background process P { " +
+                "public int func F() { return 1; } thread T { entry func R() { } } } }")]
+    public void PublicOnAFreeFunctionIsRejected(string src)
+    {
+        var ex = Parse(src);
+        Assert.Equal(Codes.BadDeclHeader, ex.Code);
+        Assert.Contains("'public' has no meaning on a free function", ex.Message);
+    }
+
+    /// <summary>
+    /// The two spellings that still mean something there, and the one member position where
+    /// 'public' is the modifier that does the work - so the rule above cannot have reached it.
+    /// </summary>
+    [Theory]
+    [InlineData("int func F() { return 1; }")]
+    [InlineData("private int func F() { return 1; }")]
+    [InlineData("class C { public int v; public int func F() { return self.v; } }")]
+    [InlineData("module M { public static int func F() { return 1; } }")]
+    public void TheSpellingsThatStillMeanSomethingAreAccepted(string src)
+    {
+        SingleFileCompile.Parse(src);   // throws ParseException on failure
+    }
+
     [Fact]
     public void ProcessColonWithoutModeIsRejected()
     {

@@ -126,6 +126,11 @@ realm kernel {
         let Crate[Counter] crate = new Crate[Counter]();
         crate.item = new Counter();
         crate.item.Bump(4);
+        // A generic free function in lib.g, over a class declared here, whose body instantiates a
+        // second generic in that same file: the transitive stamping path.
+        let Counter relayed = Relay(new Counter());
+        relayed.Bump(6);
+        let int relayVal = relayed.Value() as int;
         debug "M:cross-file-generic";
 
         // an enum and a union declared in another file; the union carries a fixed array, so
@@ -252,7 +257,7 @@ realm kernel {
         Console.PrintLine($"counter={c.Value() as int} acc={acc}");
         Console.PrintLine($"defer={deferSum} caught={caught} unwrap={unwrapped}/{failed}");
         Console.PrintLine($"grade={gradeVal} read={readSum} zeros={zeros[0]} neg={negated} flip={flipped}");
-        Console.PrintLine($"keywords={signed} scaled={scaled} deref={deref} crate={crate.item.Value() as int}");
+        Console.PrintLine($"keywords={signed} scaled={scaled} deref={deref} crate={crate.item.Value() as int} relay={relayVal}");
         Console.PrintLine($"recursed={recursed} strchurn={strChurn}");
         Console.PrintLine($"uweights={weights} umade={unionMade} ulive={unionLive} uchurn={churn} uchurnlive={churnLive}");
         Console.PrintLine($"ueq={eqBits} ueqlive={eqLive}");
@@ -275,16 +280,58 @@ realm kernel {
     // Two processes of two threads each, so threads of one process and threads of different
     // processes both reach the same kernel-space object.
     background process ConcA {
+        let AtomicInt owned = new AtomicInt();
+        let AtomicInt settled = new AtomicInt();
+        let SpinLock  ownedGuard = new SpinLock();
+        let int       step = 3;
+        let int64     unguarded = 0 as int64;
+        let String    tag = "conca";
+        let func(int) -> int scale = Triple;
+
+        int func Triple(int x) { return x * 3; }
+
+        void func Contribute() {
+            let int i = 0;
+            while (i < 40) {
+                owned.Add(step as int64);
+                ownedGuard.Lock();
+                unguarded = unguarded + (1 as int64);
+                ownedGuard.Unlock();
+                i = i + 1;
+            }
+            settled.Increment();
+        }
+
         thread Setup {
             entry func Run() {
                 if (SyncBasics()) { debug "M:sync-basics-ok"; }
                 else              { debug "M:sync-basics-BAD"; }
                 KShared.Set(PrepareShared(ConcKWorkers(), true));
                 debug "M:kconc-setup";
+                Contribute();
                 Grind(AwaitShared(true), true);
             }
         }
-        thread W { entry func Run() { Grind(AwaitShared(true), true); } }
+        thread W {
+            entry func Run() {
+                Contribute();
+                Grind(AwaitShared(true), true);
+            }
+        }
+        thread State {
+            entry func Run() {
+                while (settled.Get() < (2 as int64)) { Sys.Yield(); }
+                debug "M:state-joined";
+                // 2 threads x 40 rounds: 240 through the atomic, 80 through the lock. 'tag' pins
+                // that a managed initialiser survived to be read from a thread that did not run it.
+                let bool ok = owned.Get() == (240 as int64)
+                              && unguarded == (80 as int64)
+                              && step == 3
+                              && tag.Length() == 5
+                              && scale(7) == 21;
+                if (ok) { debug "M:state-ok"; } else { debug "M:state-BAD"; }
+            }
+        }
     }
     background process ConcB {
         thread W { entry func Run() { Grind(AwaitShared(true), true); } }

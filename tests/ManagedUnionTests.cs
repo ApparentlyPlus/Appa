@@ -342,8 +342,8 @@ public class ManagedUnionTests
 
                 union Node { Leaf(int v), Held(Res r) }
 
-                public Node func Make(String t) { return Node.Held(new Res(t)); }
-                public int func IsHeld(Node n) { match (n) { case Held(r) { return 1; } default { return 0; } } }
+                Node func Make(String t) { return Node.Held(new Res(t)); }
+                int func IsHeld(Node n) { match (n) { case Held(r) { return 1; } default { return 0; } } }
                 """,
             ["main.g"] = """
                 import Console;

@@ -414,7 +414,7 @@ public class WarningDiagnosticsTests
     /// </summary>
     [Theory]
     [InlineData("private")]
-    [InlineData("public")]
+    [InlineData("")]   // no modifier: the visible-to-importers case, which 'public' cannot spell
     public void InstancesAreCalledByTheirOwnName(string vis)
     {
         var (diag, module) = SingleFileCompile.Check(

@@ -47,8 +47,12 @@ internal sealed class Dce(IrModule m) : IrWalker
 
         foreach (var f in m.FreeFunctions) if (f.IsEntry) Root(new UnitKey(f.CName, true));
         foreach (var p in m.Processes)
+        {
+            if (p.StateInit is { } si) MarkFunc(si);
+            foreach (var v in p.State) MarkType(v.Type);
             foreach (var t in p.Threads)
                 if (t.EntryFunc is { } e) MarkFunc(e);
+        }
         foreach (var role in new[] { Roles.Alloc, Roles.Retain, Roles.Release, Roles.ObjInit })
             if (m.Symbols.IntrinsicOrNull(role) is { } cn) Ref(cn);
 

@@ -10,7 +10,24 @@ using System.Diagnostics;
 [Collection("Boot")]
 public class BootTests(BootFixture fixture)
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(35);
+    /// <summary>
+    /// How long the booted image gets to reach its idle loop. Passed to 'appa build --run', so it
+    /// bounds the QEMU run alone - the cross-compile ahead of it is not on this clock.
+    /// </summary>
+    private static readonly TimeSpan BootTimeout = TimeSpan.FromSeconds(35);
+
+    /// <summary>
+    /// Backstop for the whole 'appa build --run' process, which cross-compiles the kernel, builds an
+    /// ISO with grub-mkrescue and xorriso, and only then boots it.
+    /// </summary>
+    /// <remarks>
+    /// Generous on purpose. This is a "something hung" guard, not a performance assertion: QEMU is
+    /// already bounded by BootTimeout, so the only thing a tight budget here can do is fail the
+    /// build on a slow or loaded machine. It was BootTimeout + 15s, which covered the boot but not
+    /// the build in front of it, and killed the run mid-compile on a cold rebuild - reported as the
+    /// image never reaching its idle loop, which is the one thing that had not gone wrong.
+    /// </remarks>
+    private static readonly TimeSpan ProcessTimeout = TimeSpan.FromMinutes(10);
 
     #region Expectations
 
@@ -46,6 +63,9 @@ public class BootTests(BootFixture fixture)
         "M:kconc-joined",       // all four kernel workers finished
         "M:kconc-ok",           // atomics, lock-protected non-atomic state and CAS tickets all exact
         "M:kconc-rc-ok",        // the shared object's refcount came back to the pin
+        "M:state-joined",       // both threads finished contributing to their process's variables
+        "M:state-ok",           // process variables: shared across threads, reachable from a
+                                // process function, and a managed one still alive to be read
     ];
 
     /// <summary>
@@ -76,7 +96,7 @@ public class BootTests(BootFixture fixture)
         "counter=1999000 acc=9",
         "defer=380 caught=755 unwrap=7/100",
         "grade=5 read=7 zeros=0 neg=-5 flip=9",
-        "keywords=3 scaled=10 deref=42 crate=4",
+        "keywords=3 scaled=10 deref=42 crate=4 relay=6",
         "recursed=20100 strchurn=3835",
         // Managed unions. 'ulive'/'uchurnlive' are load-bearing: the live population once every
         // owner is out of scope, so anything but 0 means a release did not run. 'umade' against
@@ -133,7 +153,7 @@ public class BootTests(BootFixture fixture)
         // No --stdlib: this exercises the real, installed GatOS toolchain end to end, so it
         // discovers libgata the same way a real 'appa build' does.
         var psi = new ProcessStartInfo("dotnet",
-            $"\"{appaDll}\" build --run --headless --timeout={(int)Timeout.TotalSeconds}s")
+            $"\"{appaDll}\" build --run --headless --timeout={(int)BootTimeout.TotalSeconds}s")
         {
             UseShellExecute = false,
             RedirectStandardOutput = true,
@@ -146,7 +166,7 @@ public class BootTests(BootFixture fixture)
         using var proc = Process.Start(psi)!;
         var outTask = proc.StandardOutput.ReadToEndAsync(ct);
         var errTask = proc.StandardError.ReadToEndAsync(ct);
-        using var cts = new CancellationTokenSource(Timeout + TimeSpan.FromSeconds(15));
+        using var cts = new CancellationTokenSource(ProcessTimeout);
         try { await proc.WaitForExitAsync(cts.Token); }
         catch (OperationCanceledException) { try { proc.Kill(entireProcessTree: true); } catch { } }
 

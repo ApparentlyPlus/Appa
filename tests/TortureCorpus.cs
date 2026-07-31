@@ -284,6 +284,11 @@ public static class TortureCorpus
         ("shadows-class", "@shadows class Inner { int n; }"),
         ("shadows-func",  "@shadows void func Helper() { }"),
         ("shadows-enum",  "@shadows enum Inner { A }"),
+        // Process variables. Legal in a process body and nowhere else, so crossing them with every
+        // container is what checks the "nowhere else" half rather than only the one that works.
+        ("process-var",        "let int shared = 1;"),
+        ("process-var-noinit", "let int spare;"),
+        ("process-var-expr",   "let int shared = 1 + 2 * 3;"),
     ];
 
     /// <summary>
@@ -600,6 +605,92 @@ public static class TortureCorpus
             "throws void func T() { throw; } realm kernel { entry func Main() { T(); } }", Expect.Rejected, Codes.ThrowsOutsideTry);
         yield return new("throws/void-return-type",
             "throws void func T() { throw; } realm kernel { entry func Main() { try { T(); } catch { } } }", Expect.Accepted);
+        // Process variables. The accepted cases matter as much as the rejected ones: they are what
+        // the emitted-C suite hands to gcc, and a static plus its gate is code nothing else writes.
+        yield return new("procvar/basic",
+            "realm kernel { background process P { let int n = 1; thread T { entry func R() { let int a = n; } } } entry func Main() { } }",
+            Expect.Accepted);
+        yield return new("procvar/written-from-thread",
+            "realm kernel { background process P { let int n = 1; thread T { entry func R() { n = n + 1; } } } entry func Main() { } }",
+            Expect.Accepted);
+        yield return new("procvar/two-threads-share",
+            "realm kernel { background process P { let int n = 0; thread A { entry func R() { n = 1; } } thread B { entry func R() { n = 2; } } } entry func Main() { } }",
+            Expect.Accepted);
+        yield return new("procvar/read-by-process-func",
+            "realm kernel { background process P { let int n = 1; int func Get() { return n; } thread T { entry func R() { let int a = Get(); } } } entry func Main() { } }",
+            Expect.Accepted);
+        yield return new("procvar/same-name-two-processes",
+            "realm kernel { background process P { let int n = 1; thread T { entry func R() { let int a = n; } } } background process Q { let int n = 2; thread T { entry func R() { let int a = n; } } } entry func Main() { } }",
+            Expect.Accepted);
+        yield return new("procvar/union-enum-array",
+            "union Shape { Dot, Line(int n) } enum Col { Red, Blue } " +
+            "realm kernel { background process P { let Shape s = Shape.Line(7); let Col c = Col.Blue; " +
+            "let [4]int a = default([4]int); " +
+            "thread T { entry func R() { a[0] = 1; if (c == Col.Blue) { a[1] = 2; } " +
+            "match (s) { case Dot { } case Line(v) { a[2] = v; } } } } } entry func Main() { } }",
+            Expect.Accepted);
+        yield return new("procvar/compound-assign",
+            "realm kernel { background process P { let int n = 1; " +
+            "thread T { entry func R() { n += 2; n++; n = n * 2; } } } entry func Main() { } }",
+            Expect.Accepted);
+        yield return new("procvar/initialiser-reads-earlier-one",
+            "realm kernel { background process P { let int a = 2; let int b = a * 3; " +
+            "thread T { entry func R() { let int x = b; } } } entry func Main() { } }",
+            Expect.Accepted);
+        // Ordering, not scope: 'a' is a real variable of this process, it just has no value yet
+        // when the store above it runs.
+        yield return new("procvar/initialiser-reads-later-one",
+            "realm kernel { background process P { let int b = a * 3; let int a = 2; " +
+            "thread T { entry func R() { let int x = b; } } } entry func Main() { } }",
+            Expect.Rejected, Codes.UseBeforeAssignment);
+        yield return new("procvar/initialiser-reads-itself",
+            "realm kernel { background process P { let int a = a + 1; " +
+            "thread T { entry func R() { let int x = a; } } } entry func Main() { } }",
+            Expect.Rejected, Codes.UseBeforeAssignment);
+        yield return new("procvar/managed-initialiser-reads-itself",
+            "class Cell { public int v; func _init() { self.v = 1; } } " +
+            "realm kernel { background process P { let Cell c = c; " +
+            "thread T { entry func R() { let int x = c.v; } } } entry func Main() { } }",
+            Expect.Rejected, Codes.UseBeforeAssignment);
+        yield return new("procvar/catch-handler-without-assign",
+            "throws int func B(int x) { if (x < 0) { throw; } return x; } " +
+            "realm kernel { background process P { let int a = B(1) catch { }; " +
+            "thread T { entry func R() { let int x = a; } } } entry func Main() { } }",
+            Expect.Rejected, Codes.CatchHandlerNoAssign);
+        yield return new("procvar/catch-handler-with-assign",
+            "throws int func B(int x) { if (x < 0) { throw; } return x; } " +
+            "realm kernel { background process P { let int a = B(1) catch { assign 7; }; " +
+            "thread T { entry func R() { let int x = a; } } } entry func Main() { } }",
+            Expect.Accepted);
+        yield return new("procvar/catch-handler-returns",
+            "throws int func B(int x) { if (x < 0) { throw; } return x; } " +
+            "realm kernel { background process P { let int a = B(1) catch { return; }; let int b = 2; " +
+            "thread T { entry func R() { let int x = a + b; } } } entry func Main() { } }",
+            Expect.Rejected, Codes.UninitialisedProcessVar);
+        yield return new("procvar/funcptr-called-before-initialised",
+            "int func Twice(int x) { return x * 2; } " +
+            "realm kernel { background process P { let int a = f(2); let func(int) -> int f = Twice; " +
+            "thread T { entry func R() { let int x = a; } } } entry func Main() { } }",
+            Expect.Rejected, Codes.UseBeforeAssignment);
+        yield return new("procvar/funcptr-called-directly",
+            "int func Twice(int x) { return x * 2; } " +
+            "realm kernel { background process P { let func(int) -> int f = Twice; " +
+            "thread T { entry func R() { let int x = f(3); } } } entry func Main() { } }",
+            Expect.Accepted);
+        yield return new("procvar/no-initialiser",
+            "realm kernel { background process P { let int n; thread T { entry func R() { } } } entry func Main() { } }",
+            Expect.Rejected, Codes.UninitialisedProcessVar);
+        yield return new("procvar/not-visible-outside",
+            "realm kernel { background process P { let int n = 1; thread T { entry func R() { } } } entry func Main() { let int a = n; } }",
+            Expect.Rejected);
+        yield return new("procvar/duplicate",
+            "realm kernel { background process P { let int n = 1; let int n = 2; thread T { entry func R() { } } } entry func Main() { } }",
+            Expect.Rejected, Codes.DuplicateName);
+        yield return new("procvar/type-mismatch",
+            "realm kernel { background process P { let int n = default([2]int); thread T { entry func R() { } } } entry func Main() { } }",
+            Expect.Rejected, Codes.TypeMismatch);
+        yield return new("procvar/in-realm",
+            "realm kernel { let int n = 1; entry func Main() { } }", Expect.Rejected, Codes.Syntax);
         yield return new("throws/on-entry",
             "realm kernel { entry throws func Main() { throw; } }", Expect.Rejected);
         yield return new("throw/outside-throws-func",
@@ -2001,6 +2092,34 @@ public static class TortureCorpus
             Expect.Any);
         yield return new("gen/unused-param",
             "class Box[T] { int n; } realm kernel { entry func Main() { let Box[int] b = new Box[int](); } }", Expect.Any);
+
+        // A generic function whose body builds a generic type over its own parameter. Generic
+        // types are stamped by the Monomorphizer over the AST while generic functions are stamped
+        // later, during resolution, so 'Box[T]' only becomes 'Box[Widget]' after the pass that
+        // creates it has run. The pipeline now discovers these and runs the front end again with
+        // them seeded; these pin that the ordinary shapes compile rather than being rejected.
+        yield return new("gen/function-body-instantiates-a-generic-type",
+            "class Box[T] { public T v; func _init(T x) { self.v = x; } } class Widget { public int n; } " +
+            "T func Wrap[T](T x) { let Box[T] b = new Box[T](x); return b.v; } " +
+            "realm kernel { entry func Main() { let Widget w = Wrap(new Widget()); } }",
+            Expect.Any);
+        yield return new("gen/method-body-instantiates-a-generic-type",
+            "class Box[T] { public T v; func _init(T x) { self.v = x; } } class Widget { public int n; } " +
+            "class Util { public T func Wrap[T](T x) { let Box[T] b = new Box[T](x); return b.v; } } " +
+            "realm kernel { entry func Main() { let Util u = new Util(); let Widget w = u.Wrap(new Widget()); } }",
+            Expect.Any);
+        // A family with no fixed point: creating each level only reveals the next. Seeding is capped
+        // by nesting depth so this terminates with one diagnostic instead of looping. Written over a
+        // union of an unmanaged payload so the case needs no reference-counting runtime.
+        yield return new("gen/function-body-instantiation-never-settles",
+            "union Cell[T] { None, Some(T t) } " +
+            "int func Bad[T](T x) { let Cell[T] c = Cell[T].Some(x); return Bad(c); } " +
+            "realm kernel { entry func Main() { let int r = Bad(1); } }",
+            Expect.Rejected, Codes.UndefinedType);
+
+        // The positive controls - the seeded workaround, and a generic class body doing the same
+        // thing legally - need real ARC intrinsics, so they live in the multi-file corpus, which has
+        // an environment. See 'gen/function-body-instantiation-seeded-concretely' there.
 
         #endregion
 

@@ -675,4 +675,75 @@ public class SemanticDiagnosticsTests
     }
 
     #endregion
+
+    #region One error per mistake
+
+    private const string CrossPrelude = """
+        class Cell { public int v; func _init() { self.v = 1; } }
+        throws int func Risky(int x) { if (x < 0) { throw; } return x; }
+        T func Echo[T](T x) { return x; }
+        class Util { public T func Pick[T](T a) { return a; } }
+
+        """;
+
+    /// <summary>
+    /// A throwing call nested inside a generic call. The Result of a throwing call is a generated
+    /// type, so inferring a type argument from it stamped 'Echo_Result_int' and then reported three
+    /// further errors against names the author never wrote - including "unknown type 'Result_int'".
+    /// Only the two errors describing the actual mistake should survive.
+    /// </summary>
+    [Fact]
+    public void AThrowingCallInsideAGenericCallDoesNotCascade()
+    {
+        var (diag, _) = SingleFileCompile.Check(
+            CrossPrelude + "realm kernel { entry func Main() { let int a = Echo(Risky(1)); } }");
+        var errors = diag.All.Where(d => d.Severity == Severity.Error).ToList();
+        Assert.All(errors, d => Assert.DoesNotContain("Result_int", d.Message));
+        Assert.All(errors, d => Assert.Equal(Codes.ThrowsOutsideTry, d.Code));
+        Assert.Equal(2, errors.Count);
+    }
+
+    /// <summary>The same on the generic-method path, which infers type arguments separately.</summary>
+    [Fact]
+    public void AThrowingCallInsideAGenericMethodCallDoesNotCascade()
+    {
+        var (diag, _) = SingleFileCompile.Check(
+            CrossPrelude + "realm kernel { entry func Main() { let Util u = new Util(); " +
+            "let int a = u.Pick(Risky(1)); } }");
+        var errors = diag.All.Where(d => d.Severity == Severity.Error).ToList();
+        Assert.All(errors, d => Assert.DoesNotContain("Result_int", d.Message));
+        Assert.NotEmpty(errors);
+    }
+
+    /// <summary>
+    /// Calling something that exists but is not callable. "call to undefined function 'c'" was the
+    /// one description that is definitely wrong: the author is looking at the declaration.
+    /// </summary>
+    [Fact]
+    public void CallingANonCallableLocalNamesItsType()
+    {
+        var (diag, _) = SingleFileCompile.Check(
+            CrossPrelude + "realm kernel { entry func Main() { let Cell c = new Cell(); let int n = c(); } }");
+        var d = Assert.Single(diag.All, x => x.Severity == Severity.Error);
+        Assert.Contains("'c' is a 'Cell', which cannot be called", d.Message);
+    }
+
+    /// <summary>And the same for a process variable, which resolves through a different table.</summary>
+    [Fact]
+    public void CallingANonCallableProcessVariableNamesItsType()
+    {
+        var (diag, _) = SingleFileCompile.Check("""
+            realm kernel {
+                entry func Main() { }
+                background process P {
+                    let int n = 1;
+                    thread T { entry func Run() { let int q = n(); } }
+                }
+            }
+            """);
+        var d = Assert.Single(diag.All, x => x.Severity == Severity.Error);
+        Assert.Contains("process variable 'n' is a 'int', which cannot be called", d.Message);
+    }
+
+    #endregion
 }

@@ -90,6 +90,13 @@ internal record ProcessDecl(string Name, string Mode, ThreadDecl[] Threads, Text
 }
 
 /// <summary>
+/// A variable belonging to a process rather than to a scope inside it: one instance, shared by
+/// every thread of that process, initialised once before any of them is spawned and living as long
+/// as the process does.
+/// </summary>
+internal record ProcessVarDecl(string Name, TypeSpec Type, Expr? Init, TextSpan Span) : TopLevel(Span);
+
+/// <summary>
 /// An extern function pre-declaration that tells the compiler a C function exists so it can be
 /// called from Gata without a Gata body. Translated to a forward prototype in the backend.
 /// </summary>

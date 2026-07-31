@@ -273,7 +273,9 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     /// </summary>
     private FuncDecl ParseFreeFuncDecl(Annotation[] anns, int s)
     {
+        var modSpan = Cur.Span;
         var mods = ParseMods();
+        RejectPublicOnFreeFunc(mods, modSpan);
         bool isEntry = Try(TK.Entry);
         bool isThrow = Try(TK.Throws);
         if (!isEntry) isEntry = Try(TK.Entry);
@@ -288,6 +290,17 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         Expect(TK.LParen); var parms = ParseParamList(); Expect(TK.RParen);
         if (At(TK.Arrow)) Fail($"'{name}': return type goes before 'func', not after the parameter list", Codes.BadDeclHeader);
         return new FuncDecl(mods, anns, ret, name, generics, parms, isEntry, isThrow, ParseMethodBody(), To(s));
+    }
+
+    /// <summary>
+    /// Reports 'public' written on a free function, which changes nothing.
+    /// </summary>
+    private void RejectPublicOnFreeFunc(Modifiers mods, TextSpan span)
+    {
+        if ((mods & Modifiers.Public) == 0) return;
+        FailAt(span, "'public' has no meaning on a free function", Codes.BadDeclHeader,
+            ["a free function is already visible to every file that imports this one",
+             "remove it, or write 'private' to scope the function to this file"]);
     }
 
     /// <summary>
@@ -358,7 +371,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         FailAt(Cur.Span, $"'{mod}' has no meaning on {what}", Codes.BadDeclHeader,
             [mod == "private"
                 ? "a top-level type is visible to every file that imports this one; there is no file-local type"
-                : $"remove '{mod}'; only a free function takes one here"]);
+                : $"remove '{mod}'; only a free function takes 'private' here"]);
     }
 
     /// <summary>
@@ -716,6 +729,11 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     {
         if (At(TK.Ident)) return Advance().Value;
         if (IsPrim(Cur.Kind)) return PrimName(Advance());
+        if (At(TK.Let))
+            Fail("a variable cannot be declared here", Codes.Syntax,
+                 ["a variable belongs inside a function, or directly inside a process, "
+                  + "where it becomes state its threads share",
+                  "types, modules and functions are what a realm or a file can hold"]);
         Fail($"expected a type name, found {Found()}");
         return "";
     }
@@ -1063,7 +1081,29 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         if (At(TK.Union)) { RejectAnns(anns, "a union"); return ParseUnionDecl(anns, s); }
         if (At(TK.Class)) { RejectAnns(anns, "a class", allowKeep: true, allowBuiltin: true); return ParseClassDecl(anns, s); }
         if (At(TK.Module)) { RejectAnns(anns, "a module", allowKeep: true); return ParseModuleDecl(anns, s); }
+        if (At(TK.Let)) { RejectAnns(anns, "a process variable", allowShadows: false); return ParseProcessVarDecl(s); }
         return ParseFreeFuncDecl(anns, s);
+    }
+
+    /// <summary>
+    /// Parses a process-scoped variable.
+    /// </summary>
+    private ProcessVarDecl ParseProcessVarDecl(int s)
+    {
+        Expect(TK.Let);
+        var type = ParseTypeSpec();
+        var name = Expect(TK.Ident).Value;
+
+        Expr? init = null;
+        if (Try(TK.Eq)) init = ParseExpr();
+        else
+            Fail($"process variable '{name}' has no initial value", Codes.UninitialisedProcessVar,
+                 [$"write 'let <type> {name} = <value>;'",
+                  "every thread of the process shares this one variable, so there is no point later " +
+                  "in the program where a first assignment could be known to have run before a read"]);
+
+        Expect(TK.Semi);
+        return new ProcessVarDecl(name, type, init, To(s));
     }
 
     /// <summary>

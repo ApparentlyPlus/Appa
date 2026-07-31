@@ -1,5 +1,28 @@
 namespace Appa;
 
+/// <summary>
+/// A generic type instantiation the resolver found it needed but the Monomorphizer had no way to
+/// see: one written over a generic function's or method's own type parameter, which only becomes
+/// concrete when that function is stamped, in a later pass.
+/// </summary>
+/// <remarks>
+/// Args are the mangled spellings of the type arguments - the same form <see cref="GenericUse"/>
+/// carries - so seeding one reproduces exactly the request an ordinary syntactic use would have made.
+/// </remarks>
+internal readonly record struct GenericSeed(string Base, string[] Args, TextSpan Span, string File)
+{
+    /// <summary>The mangled instance name, which is what makes a seed comparable to another.</summary>
+    public string Key => Mangler.GenericInstance(Base, Args);
+
+    /// <summary>
+    /// The module scope in force where the instantiation was discovered. Carried rather than
+    /// recovered from File, because the discovery happens while resolving a stamped generic body,
+    /// whose file is the template's - the type argument came from somewhere that file need never
+    /// import. The stamped instance is resolved under this.
+    /// </summary>
+    public string[] Scope { get; init; } = [];
+}
+
 internal sealed class Monomorphizer(DiagnosticBag diag)
 {
     // A generic template, either a class or a union. Both are stamped through the same
@@ -221,7 +244,8 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     /// Items to replace templates with instances. A use deferred because one template reaches
     /// another through its own parameters replays once its owner is stamped.
     /// </summary>
-    public Dictionary<string, string> Process(List<(string path, Program prog)> programs)
+    public Dictionary<string, string> Process(List<(string path, Program prog)> programs,
+                                              IReadOnlyList<GenericSeed>? seeds = null)
     {
         var templates = new Dictionary<string, Template>();
         var tmplNames = new HashSet<string>();
@@ -251,7 +275,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
                     diag.Error(Codes.DuplicateName, path, item.Span,
                         $"generic type '{Mangler.DisplayName(baseName)}' is already declared");
                 templates[baseName] = new Template(item, genericParams!, baseName);
-                Mangler.RegisterGenericTemplate(baseName);
+                Mangler.RegisterGenericTemplate(baseName, genericParams!.Length);
                 tmplNames.Add(Mangler.GenericInstance(baseName, genericParams!));
             }
 
@@ -299,6 +323,9 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
             return true;
         }
         foreach (var (use, file) in directUses) AddRequest(use.Base, use.Args, use.Span, file, file);
+        
+        if (seeds != null)
+            foreach (var s in seeds) AddRequest(s.Base, s.Args, s.Span, s.File, s.File);
 
         var instancesByBase = new Dictionary<string, List<TopLevel>>();
         var requestedFrom = new Dictionary<string, string>();
@@ -917,7 +944,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     /// Substitutes type parameters in an expression, recursively processing any sub-expressions and
     /// types.
     /// </summary>
-    private static Expr SubExpr(Expr e, SubstitutionContext ctx)
+    internal static Expr SubExpr(Expr e, SubstitutionContext ctx)
     {
         switch (e)
         {

@@ -98,10 +98,11 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         for (int i = 0; i < processes.Length; i++)
         {
             var proc = processes[i];
+            EmitProcessState(proc);
             var threads = CollectionsMarshal.AsSpan(proc.Threads);
             for (int j = 0; j < threads.Length; j++)
             {
-                EmitThread(threads[j]);
+                EmitThread(threads[j], proc);
             }
         }
 
@@ -1120,15 +1121,71 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         using (w.Braces()) w.Line(body); w.Blank();
     }
 
+
+    /// <summary>
+    /// Emits a process's variables as statics in its realm's translation unit, plus the generated
+    /// function that assigns them.
+    /// </summary>
+    private void EmitProcessState(IrProcess proc)
+    {
+        if (proc.State.Count == 0) return;
+
+        bool kernel = proc.StateInit?.Vis == Visibility.Kernel;
+        var types = kernel ? _kTypes : _uTypes;
+        for (int i = 0; i < proc.State.Count; i++)
+        {
+            var v = proc.State[i];
+            types.Line($"static {v.Type.ToCType()} {v.CName};");
+        }
+        if (proc.StateInit != null) types.Line($"static volatile int {GateName(proc)} = 0;");
+        types.Blank();
+
+        if (proc.StateInit is not { Body: { } body } init) return;
+        var w = kernel ? _kFuncs : _uFunc;
+        w.Line($"static void {init.CName}(void)");
+        EmitBlock(body, w);
+        w.Blank();
+        w.Line($"static void {EnterName(proc)}(void)");
+        using (w.Braces())
+        {
+            w.Line("int _st = 0;");
+            w.Line($"if (__atomic_compare_exchange_n(&{GateName(proc)}, &_st, 1, 0, " +
+                   "__ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))");
+            using (w.Braces())
+            {
+                w.Line($"{init.CName}();");
+                w.Line($"__atomic_store_n(&{GateName(proc)}, 2, __ATOMIC_RELEASE);");
+                w.Line("return;");
+            }
+            w.Line("// Another thread got there first; wait for it to finish publishing.");
+            w.Line($"while (__atomic_load_n(&{GateName(proc)}, __ATOMIC_ACQUIRE) != 2) {{ }}");
+        }
+        w.Blank();
+    }
+
+    /// <summary>
+    /// The gate a process's threads race on to decide which one initialises its state.
+    /// </summary>
+    private static string GateName(IrProcess proc) => $"{proc.StateInit!.CName}_gate";
+
+    /// <summary>
+    /// The function each of a process's threads calls before its own body.
+    /// </summary>
+    private static string EnterName(IrProcess proc) => $"{proc.StateInit!.CName}_enter";
+
     /// <summary>
     /// Emits the entry function for a thread into its realm writer.
     /// </summary>
-    private void EmitThread(IrThread t)
+    private void EmitThread(IrThread t, IrProcess owner)
     {
         if (t.EntryFunc is not { } entry) return;
         var w = entry.Vis == Visibility.Kernel ? _kFuncs : _uFunc;
         w.Line($"void {entry.CName}(void* arg)");
-        EmitBlock(entry.Body!, w);
+        using (w.Braces())
+        {
+            if (owner.StateInit != null) w.Line($"{EnterName(owner)}();");
+            foreach (var s in entry.Body!.Stmts) EmitStmt(s, w);
+        }
         w.Blank();
     }
 
@@ -1275,8 +1332,8 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             IrLitNull => "NULL",
             IrEnumConst ec => Mangler.EnumMember(ec.EnumName, ec.Member),
             IrVar v => v.IsRef ? $"(*{Mangler.Local(v.Name)})" : Mangler.Local(v.Name),
+            IrGlobal g => g.CName,
             IrSelfExpr => "self",
-
             IrFieldLoad fl => fl.Obj.Type is IrUnionType or IrResultType
                                 ? $"{EmitExpr(fl.Obj)}.{fl.Field}"
                                 : $"{EmitExpr(fl.Obj)}->{fl.Field}",
@@ -1316,10 +1373,10 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             ? $"{EmitExpr(bo.Left)} {bo.Op.Sym()} {EmitExpr(bo.Right)}"
             : EmitExpr(e);
 
-    // <summary>
-    // Narrows a numeric expression to the given type, unless it's a boolean or non-numeric type,
-    // in which case the expression is returned as-is
-    // </summary>
+    /// <summary>
+    /// Narrows a numeric expression to the given type, unless it's a boolean or non-numeric type,
+    /// in which case the expression is returned as-is
+    /// </summary>
     private static string Narrow(IrType t, string c)
     {
         if (t is not IrPrimType p || !p.IsNumeric || p.CName == "bool") return c;

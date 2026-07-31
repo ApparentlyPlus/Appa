@@ -233,6 +233,7 @@ internal sealed class ScopeBinder(DiagnosticBag diag)
             EnumDecl ed => ed.Name,
             NativeTypeDecl nd => nd.Name,
             FuncDecl { IsEntry: false } fd => fd.Name,
+            ProcessVarDecl pv => pv.Name,
             _ => null,
         };
         if (name == null)
@@ -253,7 +254,7 @@ internal sealed class ScopeBinder(DiagnosticBag diag)
     /// and a function of one name would each be reachable at root, but a scoped declaration takes
     /// over the whole name, so the two spellings could not both survive being shadowed.
     /// </summary>
-    private enum NameKind { Type, Generic, Func, Process }
+    private enum NameKind { Type, Generic, Func, Process, State }
 
     private readonly record struct Named(string Name, ScopeId Scope, NameKind Kind, bool Private,
                                          string File, TextSpan Span);
@@ -288,6 +289,7 @@ internal sealed class ScopeBinder(DiagnosticBag diag)
         UnionDecl { GenericParams.Length: > 0 } => NameKind.Generic,
         FuncDecl => NameKind.Func,
         ExternFuncDecl => NameKind.Func,
+        ProcessVarDecl => NameKind.State,
         _ => NameKind.Type,
     };
 
@@ -304,6 +306,7 @@ internal sealed class ScopeBinder(DiagnosticBag diag)
         NameKind.Generic => "a generic type",
         NameKind.Func => "a function",
         NameKind.Process => "a process",
+        NameKind.State => "a process variable",
         _ => "a type",
     };
 
@@ -661,6 +664,12 @@ internal sealed class ScopeBinder(DiagnosticBag diag)
 
         return item switch
         {
+            ProcessVarDecl pv => pv with
+            {
+                Name = Q(pv.Name),
+                Type = sub.SubType(pv.Type),
+                Init = pv.Init == null ? null : Monomorphizer.SubExpr(pv.Init, sub),
+            },
             ClassDecl cd => cd with
             {
                 BaseName = Q(cd.BaseName),

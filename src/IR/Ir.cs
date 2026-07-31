@@ -387,6 +387,12 @@ internal record IrEnumConst(string EnumName, string Member) : IrExpr(new IrEnumT
 internal record IrVar(string Name, IrType T, bool IsRef = false) : IrExpr(T);
 
 /// <summary>
+/// A reference to a process variable: a translation-unit static, addressed by the C name it was
+/// given rather than by a local's mangling.
+/// </summary>
+internal record IrGlobal(string CName, IrType T) : IrExpr(T);
+
+/// <summary>
 /// A reference to the implicit self object inside a method body.
 /// </summary>
 internal record IrSelfExpr(string ClassName) : IrExpr(new IrClassRef(ClassName));
@@ -762,7 +768,25 @@ internal record IrClass(
 /// <summary>
 /// A process declaration grouping one or more threads.
 /// </summary>
-internal record IrProcess(string Name, string Mode, List<IrThread> Threads);
+internal record IrProcess(string Name, string Mode, List<IrThread> Threads)
+{
+    /// <summary>
+    /// The process's own variables, emitted as statics in its realm's translation unit.
+    /// </summary>
+    public List<IrProcessVar> State { get; init; } = [];
+
+    /// <summary>
+    /// Generated function assigning every variable its initial value, or null when the process has
+    /// none. The launcher calls it after creating the process and before spawning any thread, which
+    /// is what makes "initialised before first read" true rather than hoped for.
+    /// </summary>
+    public IrFunction? StateInit { get; init; }
+}
+
+/// <summary>
+/// One process variable: its written name, the C name of the static holding it, and its type.
+/// </summary>
+internal record IrProcessVar(string Name, string CName, IrType Type);
 
 /// <summary>
 /// A single thread within a process, with a fully-qualified name and optional entry function.

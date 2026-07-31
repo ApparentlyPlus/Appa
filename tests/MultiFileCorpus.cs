@@ -87,9 +87,264 @@ public static class MultiFileCorpus
         #region import resolution
         yield return new("import/basic",
         [
-            F("src/lib.g", "public int func Helper() { return 7; }"),
+            F("src/lib.g", "int func Helper() { return 7; }"),
             F("src/main.g", Main("import \"src/lib.g\";", "let int v = Helper();")),
         ], Expect.Accepted);
+
+        // A process variable whose type comes from another file: the initialiser is generated code
+        // in the process's own translation unit, so the type has to be reachable from there too.
+        yield return new("procvar/type-from-another-file",
+        [
+            F("src/lib.g", "class Cell { public int v; func _init() { self.v = 3; } }"),
+            F("src/main.g",
+                "import \"src/lib.g\";\n" +
+                "realm userspace { entry func Main() { }\n" +
+                "  background process P { let Cell c = new Cell();\n" +
+                "    thread T { entry func R() { let int a = c.v; } } } }\n"),
+        ], Expect.Accepted);
+
+        // The initialiser calls into another file. It becomes generated code inside the process's
+        // own unit, so whatever it reaches has to be linked from there as well as declared.
+        yield return new("procvar/initialiser-calls-another-file",
+        [
+            F("src/lib.g", "int func Seed() { return 11; }"),
+            F("src/main.g",
+                "import \"src/lib.g\";\n" +
+                "realm userspace { entry func Main() { }\n" +
+                "  background process P { let int n = Seed() * 2;\n" +
+                "    thread T { entry func R() { let int a = n; } } } }\n"),
+        ], Expect.Accepted);
+
+        // A generic stamped over a class from a third file and then held as process state. The
+        // instance is spliced into the template's file, so its scope has to be widened with the
+        // requesting file's imports before the initialiser in a fourth place can name the type.
+        yield return new("procvar/generic-over-another-files-class",
+        [
+            F("src/cell.g", "class Cell { public int v; func _init() { self.v = 4; } }"),
+            F("src/box.g", "class Box[T] { public T v; func _init(T x) { self.v = x; } }"),
+            F("src/main.g",
+                "import \"src/cell.g\";\nimport \"src/box.g\";\n" +
+                "realm userspace { entry func Main() { }\n" +
+                "  background process P { let Box[Cell] b = new Box[Cell](new Cell());\n" +
+                "    thread T { entry func R() { let int a = b.v.v; } } } }\n"),
+        ], Expect.Accepted);
+
+        // A union declared elsewhere, held by value in a static. Its typedef must survive DCE and
+        // be emitted ahead of the static that names it.
+        yield return new("procvar/union-from-another-file",
+        [
+            F("src/lib.g", "union Shape { Dot, Line(int n) }"),
+            F("src/main.g",
+                "import \"src/lib.g\";\n" +
+                "realm userspace { entry func Main() { }\n" +
+                "  background process P { let Shape s = Shape.Line(5);\n" +
+                "    thread T { entry func R() { match (s) { case Dot { } case Line(n) { } } } } } }\n"),
+        ], Expect.Accepted);
+
+        // A function pointer in process state, aimed at another file's function and called through
+        // the name. The call resolves against the process's own variables, not the free functions
+        // the importing file can see, so both halves have to line up across the file boundary.
+        yield return new("procvar/funcptr-across-files",
+        [
+            F("src/lib.g", "int func Twice(int x) { return x * 2; }"),
+            F("src/main.g",
+                "import \"src/lib.g\";\n" +
+                "realm userspace { entry func Main() { }\n" +
+                "  background process P { let func(int) -> int f = Twice;\n" +
+                "    thread T { entry func R() { let int a = f(3); } } } }\n"),
+        ], Expect.Accepted);
+
+        // An initialiser reading one declared below it is an ordering mistake, not a scope one, and
+        // stays that way when the type it names lives in another file - the two-pass registration
+        // has to happen before anything is resolved, imports included.
+        yield return new("procvar/initialiser-reads-later-one-across-files",
+        [
+            F("src/lib.g", "class Cell { public int v; func _init() { self.v = 3; } }"),
+            F("src/main.g",
+                "import \"src/lib.g\";\n" +
+                "realm userspace { entry func Main() { }\n" +
+                "  background process P { let int n = c.v; let Cell c = new Cell();\n" +
+                "    thread T { entry func R() { let int a = n; } } } }\n"),
+        ], Expect.Rejected, Codes.UseBeforeAssignment);
+
+        // A generic FREE FUNCTION instantiated over a class from the calling file. The instance is
+        // resolved in the template's file, which has never heard of that class, so its scope has to
+        // be widened with the caller's imports. The generic-class path was fixed for this and the
+        // function path was not: 'Box[Widget]' compiled while 'Echo(new Widget())' did not.
+        yield return new("gen/free-function-over-callers-class",
+        [
+            F("src/lib.g", "T func Echo[T](T x) { return x; }"),
+            F("src/main.g", "import \"src/lib.g\";\nclass Widget { public int n; }\n" +
+                            "realm userspace { entry func Main() { let Widget w = Echo(new Widget()); } }\n"),
+        ], Expect.Accepted);
+
+        // The same, with the type parameter named in a local declaration inside the body - the
+        // position that produced a third copy of the error.
+        yield return new("gen/free-function-body-names-the-parameter",
+        [
+            F("src/lib.g", "T func Echo[T](T x) { let T y = x; return y; }"),
+            F("src/main.g", "import \"src/lib.g\";\nclass Widget { public int n; }\n" +
+                            "realm userspace { entry func Main() { let Widget w = Echo(new Widget()); } }\n"),
+        ], Expect.Accepted);
+
+        // A generic METHOD on a non-generic class, same shape. Lazily stamped like a free function,
+        // so it shared the defect.
+        yield return new("gen/method-over-callers-class",
+        [
+            F("src/lib.g", "class Util { public T func Pick[T](T a) { return a; } }"),
+            F("src/main.g", "import \"src/lib.g\";\nclass Widget { public int n; }\n" +
+                            "realm userspace { entry func Main() { let Util u = new Util(); " +
+                            "let Widget w = u.Pick(new Widget()); } }\n"),
+        ], Expect.Accepted);
+
+        // The type argument declared in a third file neither the template nor the caller declares.
+        yield return new("gen/free-function-over-a-third-files-class",
+        [
+            F("src/lib.g", "T func Echo[T](T x) { return x; }"),
+            F("src/w.g", "class Widget { public int n; }"),
+            F("src/main.g", "import \"src/lib.g\";\nimport \"src/w.g\";\n" +
+                            "realm userspace { entry func Main() { let Widget w = Echo(new Widget()); } }\n"),
+        ], Expect.Accepted);
+
+        // Unions and enums as type arguments went through a different lookup and always worked;
+        // kept so a fix aimed at classes cannot regress them.
+        yield return new("gen/free-function-over-callers-union",
+        [
+            F("src/lib.g", "T func Echo[T](T x) { return x; }"),
+            F("src/main.g", "import \"src/lib.g\";\nunion Shape { Dot, Line(int n) }\n" +
+                            "realm userspace { entry func Main() { let Shape s = Echo(Shape.Dot()); } }\n"),
+        ], Expect.Accepted);
+
+        yield return new("gen/free-function-over-callers-enum",
+        [
+            F("src/lib.g", "T func Echo[T](T x) { return x; }"),
+            F("src/main.g", "import \"src/lib.g\";\nenum Col { Red, Blue }\n" +
+                            "realm userspace { entry func Main() { let Col c = Echo(Col.Red); } }\n"),
+        ], Expect.Accepted);
+
+        // Transitive: main.g asks lib.g, whose body asks lib2.g. The request has to carry the scope
+        // in force rather than the requesting file, or the innermost template widens only as far as
+        // the intermediate library - which has never heard of the caller's type either.
+        yield return new("gen/transitive-instantiation-two-libraries",
+        [
+            F("src/lib2.g", "T func Inner[T](T x) { return x; }"),
+            F("src/lib.g", "import \"src/lib2.g\";\nT func Outer[T](T x) { return Inner(x); }"),
+            F("src/main.g", "import \"src/lib.g\";\nclass Widget { public int n; }\n" +
+                            "realm userspace { entry func Main() { let Widget w = Outer(new Widget()); } }\n"),
+        ], Expect.Accepted);
+
+        yield return new("gen/transitive-instantiation-three-deep",
+        [
+            F("src/l3.g", "T func L3[T](T x) { return x; }"),
+            F("src/l2.g", "import \"src/l3.g\";\nT func L2[T](T x) { return L3(x); }"),
+            F("src/l1.g", "import \"src/l2.g\";\nT func L1[T](T x) { return L2(x); }"),
+            F("src/main.g", "import \"src/l1.g\";\nclass Widget { public int n; }\n" +
+                            "realm userspace { entry func Main() { let Widget w = L1(new Widget()); } }\n"),
+        ], Expect.Accepted);
+
+        // A generic class whose constructor calls a generic free function in a third file: the
+        // eager and lazy stampers crossing, with the type argument coming from a fourth.
+        yield return new("gen/generic-class-body-calls-generic-function",
+        [
+            F("src/lib2.g", "T func Inner[T](T x) { return x; }"),
+            F("src/box.g", "import \"src/lib2.g\";\n" +
+                           "class Box[T] { public T v; func _init(T x) { self.v = Inner(x); } }"),
+            F("src/main.g", "import \"src/box.g\";\nclass Widget { public int n; }\n" +
+                            "realm userspace { entry func Main() { " +
+                            "let Box[Widget] b = new Box[Widget](new Widget()); } }\n"),
+        ], Expect.Accepted);
+
+        // A generic function whose body builds a generic type over its own parameter, with the
+        // template, the container and the caller all in different files. This is the case the
+        // pipeline re-runs the front end for, and crossing a file boundary is what makes the seed's
+        // scope matter as well as its existence.
+        yield return new("gen/function-body-instantiates-a-generic-type-across-files",
+        [
+            F("src/box.g", "class Box[T] { public T v; func _init(T x) { self.v = x; } }"),
+            F("src/lib.g", "import \"src/box.g\";\nT func Wrap[T](T x) { let Box[T] b = new Box[T](x); return b.v; }"),
+            F("src/main.g", "import \"src/lib.g\";\nclass Widget { public int n; }\n" +
+                            "realm userspace { entry func Main() { let Widget w = Wrap(new Widget()); } }\n"),
+        ], Expect.Accepted);
+
+        // Two levels: the outer template's instantiation is what reveals the inner one's, so this
+        // needs a second round rather than just a second pass.
+        yield return new("gen/function-body-instantiation-two-rounds",
+        [
+            F("src/box.g", "class Box[T] { public T v; func _init(T x) { self.v = x; } }"),
+            F("src/lib.g", "import \"src/box.g\";\n" +
+                           "T func Inner[T](T x) { let Box[T] b = new Box[T](x); return b.v; }\n" +
+                           "T func Outer[T](T x) { let Box[T] b = new Box[T](Inner(x)); return b.v; }"),
+            F("src/main.g", "import \"src/lib.g\";\nclass Widget { public int n; }\n" +
+                            "realm userspace { entry func Main() { let Widget w = Outer(new Widget()); } }\n"),
+        ], Expect.Accepted);
+
+        // A nested container over the parameter. Substitution flattens the inner argument to a
+        // mangled name with no structure left, so recovering it needs the template registry.
+        yield return new("gen/function-body-instantiates-a-nested-generic",
+        [
+            F("src/box.g", "class Box[T] { public T v; func _init(T x) { self.v = x; } }"),
+            F("src/lib.g", "import \"src/box.g\";\n" +
+                           "T func Wrap[T](T x) { let Box[Box[T]] b = new Box[Box[T]](new Box[T](x)); return b.v.v; }"),
+            F("src/main.g", "import \"src/lib.g\";\nclass Widget { public int n; }\n" +
+                            "realm userspace { entry func Main() { let Widget w = Wrap(new Widget()); } }\n"),
+        ], Expect.Accepted);
+
+        // The workaround from before the fix must keep working: naming the instantiation concretely
+        // is now redundant rather than required, and must not become a duplicate definition.
+        yield return new("gen/function-body-instantiation-seeded-concretely",
+        [
+            F("src/box.g", "class Box[T] { public T v; func _init(T x) { self.v = x; } }"),
+            F("src/lib.g", "import \"src/box.g\";\nT func Wrap[T](T x) { let Box[T] b = new Box[T](x); return b.v; }"),
+            F("src/main.g", "import \"src/lib.g\";\nimport \"src/box.g\";\nclass Widget { public int n; }\n" +
+                            "realm userspace { entry func Main() { " +
+                            "let Box[Widget] seed = new Box[Widget](new Widget()); " +
+                            "let Widget w = Wrap(new Widget()); } }\n"),
+        ], Expect.Accepted);
+
+        // A generic union carrying a managed payload, with the union, the payload class and the use
+        // in three files: the eager stamper, managed-union ARC and cross-file scope all at once.
+        yield return new("gen/generic-union-managed-payload-across-files",
+        [
+            F("src/w.g", "class Widget { public int n; }"),
+            F("src/u.g", "union Wrap[T] { None, Some(T t) }"),
+            F("src/main.g", "import \"src/w.g\";\nimport \"src/u.g\";\n" +
+                            "realm userspace { entry func Main() { " +
+                            "let Wrap[Widget] w = Wrap[Widget].Some(new Widget()); " +
+                            "match (w) { case None { } case Some(t) { } } } }\n"),
+        ], Expect.Accepted);
+
+        // An operator overload reached only from inside a generic body in another file. Nothing
+        // names 'Vec + Vec' directly, so the instantiation is what has to find the operator.
+        yield return new("gen/operator-reached-only-through-a-generic",
+        [
+            F("src/v.g", "class Vec { public int n; func _init(int a) { self.n = a; } " +
+                         "public operator Vec func +(Vec o) { return new Vec(self.n + o.n); } }"),
+            F("src/lib.g", "T func Add[T](T a, T b) { return a + b; }"),
+            F("src/main.g", "import \"src/v.g\";\nimport \"src/lib.g\";\n" +
+                            "realm userspace { entry func Main() { " +
+                            "let Vec s = Add(new Vec(1), new Vec(2)); } }\n"),
+        ], Expect.Accepted);
+
+        // A generic instantiated only from a process variable's initialiser - generated code, in a
+        // process, in a different file from the template, over a class in a third place.
+        yield return new("gen/instantiated-only-from-a-process-variable",
+        [
+            F("src/lib.g", "T func Echo[T](T x) { return x; }"),
+            F("src/main.g", "import \"src/lib.g\";\nclass Widget { public int n; }\n" +
+                            "realm userspace { entry func Main() { }\n" +
+                            "  background process P { let Widget w = Echo(new Widget());\n" +
+                            "    thread T { entry func R() { let int q = w.n; } } } }\n"),
+        ], Expect.Accepted);
+
+        // Widening must add the caller's imports and nothing more: the template's file still cannot
+        // reach a type only some unrelated file declares.
+        yield return new("gen/widening-does-not-leak-unrelated-types",
+        [
+            F("src/lib.g", "T func Echo[T](T x) { return x; }\nint func Peek(Hidden h) { return h.n; }"),
+            F("src/hidden.g", "class Hidden { public int n; }"),
+            F("src/main.g", "import \"src/lib.g\";\nimport \"src/hidden.g\";\n" +
+                            "realm userspace { entry func Main() { } }\n"),
+        ], Expect.Rejected, Codes.UndefinedType);
 
         yield return new("import/missing-file",
         [
@@ -108,30 +363,30 @@ public static class MultiFileCorpus
 
         yield return new("import/cycle-two",
         [
-            F("src/a.g", "import \"src/b.g\";\npublic int func A() { return B(); }"),
-            F("src/b.g", "import \"src/a.g\";\npublic int func B() { return 1; }"),
+            F("src/a.g", "import \"src/b.g\";\nint func A() { return B(); }"),
+            F("src/b.g", "import \"src/a.g\";\nint func B() { return 1; }"),
             F("src/main.g", Main("import \"src/a.g\";", "let int v = A();")),
         ], Expect.Any);
 
         yield return new("import/cycle-three",
         [
-            F("src/a.g", "import \"src/b.g\";\npublic int func A() { return 1; }"),
-            F("src/b.g", "import \"src/c.g\";\npublic int func B() { return 2; }"),
-            F("src/c.g", "import \"src/a.g\";\npublic int func C() { return 3; }"),
+            F("src/a.g", "import \"src/b.g\";\nint func A() { return 1; }"),
+            F("src/b.g", "import \"src/c.g\";\nint func B() { return 2; }"),
+            F("src/c.g", "import \"src/a.g\";\nint func C() { return 3; }"),
             F("src/main.g", Main("import \"src/a.g\";", "let int v = A();")),
         ], Expect.Any);
 
         yield return new("import/duplicate",
         [
-            F("src/lib.g", "public int func Helper() { return 7; }"),
+            F("src/lib.g", "int func Helper() { return 7; }"),
             F("src/main.g", Main("import \"src/lib.g\";\nimport \"src/lib.g\";", "let int v = Helper();")),
         ], Expect.Any);
 
         yield return new("import/diamond",
         [
-            F("src/base.g", "public int func Base() { return 1; }"),
-            F("src/left.g", "import \"src/base.g\";\npublic int func Left() { return Base(); }"),
-            F("src/right.g", "import \"src/base.g\";\npublic int func Right() { return Base(); }"),
+            F("src/base.g", "int func Base() { return 1; }"),
+            F("src/left.g", "import \"src/base.g\";\nint func Left() { return Base(); }"),
+            F("src/right.g", "import \"src/base.g\";\nint func Right() { return Base(); }"),
             F("src/main.g", Main("import \"src/left.g\";\nimport \"src/right.g\";",
                                  "let int v = Left() + Right();")),
         ], Expect.Accepted);
@@ -151,15 +406,15 @@ public static class MultiFileCorpus
         #region visibility across files
         yield return new("visible/transitive",
         [
-            F("src/deep.g", "public int func Deep() { return 1; }"),
-            F("src/mid.g", "import \"src/deep.g\";\npublic int func Mid() { return Deep(); }"),
+            F("src/deep.g", "int func Deep() { return 1; }"),
+            F("src/mid.g", "import \"src/deep.g\";\nint func Mid() { return Deep(); }"),
             F("src/main.g", Main("import \"src/mid.g\";", "let int v = Deep();")),
         ], Expect.Accepted);
 
         yield return new("visible/not-imported",
         [
-            F("src/lib.g", "public int func Helper() { return 7; }"),
-            F("src/other.g", "public int func Other() { return 1; }"),
+            F("src/lib.g", "int func Helper() { return 7; }"),
+            F("src/other.g", "int func Other() { return 1; }"),
             F("src/main.g", Main("import \"src/lib.g\";", "let int v = Other();")),
         ], Expect.Any);
 
@@ -177,8 +432,8 @@ public static class MultiFileCorpus
 
         yield return new("visible/private-same-name-two-files",
         [
-            F("src/a.g", "private int func Shared() { return 1; }\npublic int func A() { return Shared(); }"),
-            F("src/b.g", "private int func Shared() { return 2; }\npublic int func B() { return Shared(); }"),
+            F("src/a.g", "private int func Shared() { return 1; }\nint func A() { return Shared(); }"),
+            F("src/b.g", "private int func Shared() { return 2; }\nint func B() { return Shared(); }"),
             F("src/main.g", Main("import \"src/a.g\";\nimport \"src/b.g\";", "let int v = A() + B();")),
         ], Expect.Accepted);
 
@@ -201,8 +456,8 @@ public static class MultiFileCorpus
 
         yield return new("dup/public-func-two-files",
         [
-            F("src/a.g", "public int func Helper() { return 1; }"),
-            F("src/b.g", "public int func Helper() { return 2; }"),
+            F("src/a.g", "int func Helper() { return 1; }"),
+            F("src/b.g", "int func Helper() { return 2; }"),
             F("src/main.g", Main("import \"src/a.g\";\nimport \"src/b.g\";", "let int v = Helper();")),
         ], Expect.Rejected, Codes.DuplicateName);
 
@@ -237,7 +492,7 @@ public static class MultiFileCorpus
         yield return new("dup/class-and-func-same-name",
         [
             F("src/a.g", "class Thing { public int n; }"),
-            F("src/b.g", "public int func Thing() { return 1; }"),
+            F("src/b.g", "int func Thing() { return 1; }"),
             F("src/main.g", Main("import \"src/a.g\";\nimport \"src/b.g\";", "")),
         ], Expect.Any);
 
@@ -290,7 +545,7 @@ public static class MultiFileCorpus
         // displacement invisible in the first place.
         yield return new("realm/qualifier-reaches-an-import",
         [
-            F("src/lib.g", "class Widget { public int n; }\npublic int func Helper() { return 1; }"),
+            F("src/lib.g", "class Widget { public int n; }\nint func Helper() { return 1; }"),
             F("src/main.g", "import \"src/lib.g\";\nrealm userspace { @shadows class Widget { public int m; } " +
                             "@shadows int func Helper() { return 2; } " +
                             "entry func Main() { let ::Widget w = new ::Widget(); " +
@@ -313,14 +568,14 @@ public static class MultiFileCorpus
 
         yield return new("realm/shadows-imported-func",
         [
-            F("src/lib.g", "public int func Helper() { return 1; }"),
+            F("src/lib.g", "int func Helper() { return 1; }"),
             F("src/main.g", "import \"src/lib.g\";\nrealm userspace { @shadows int func Helper() { return 2; } " +
                             "entry func Main() { let int v = Helper(); } }\n"),
         ], Expect.Accepted);
 
         yield return new("realm/shadows-imported-func-unmarked",
         [
-            F("src/lib.g", "public int func Helper() { return 1; }"),
+            F("src/lib.g", "int func Helper() { return 1; }"),
             F("src/main.g", "import \"src/lib.g\";\nrealm userspace { int func Helper() { return 2; } " +
                             "entry func Main() { } }\n"),
         ], Expect.Rejected, Codes.UnmarkedShadow);
@@ -345,7 +600,7 @@ public static class MultiFileCorpus
 
         yield return new("realm/no-entry-anywhere",
         [
-            F("src/lib.g", "public int func Helper() { return 1; }"),
+            F("src/lib.g", "int func Helper() { return 1; }"),
             F("src/main.g", "import \"src/lib.g\";\nrealm userspace { void func NotEntry() { } }\n"),
         ], Expect.Rejected);
 
@@ -377,8 +632,8 @@ public static class MultiFileCorpus
         yield return new("cross/generic-instantiated-in-two-files",
         [
             F("src/box.g", "class Box[T] { public T v; }"),
-            F("src/a.g", "import \"src/box.g\";\npublic int func A() { let Box[int] b = new Box[int](); return b.v; }"),
-            F("src/b.g", "import \"src/box.g\";\npublic int func B() { let Box[int] b = new Box[int](); return b.v; }"),
+            F("src/a.g", "import \"src/box.g\";\nint func A() { let Box[int] b = new Box[int](); return b.v; }"),
+            F("src/b.g", "import \"src/box.g\";\nint func B() { let Box[int] b = new Box[int](); return b.v; }"),
             F("src/main.g", Main("import \"src/a.g\";\nimport \"src/b.g\";", "let int v = A() + B();")),
         ], Expect.Accepted);
 
@@ -413,7 +668,7 @@ public static class MultiFileCorpus
         [
             F("src/p.g", "class Payload { public int n; }"),
             F("src/u.g", "import \"src/p.g\";\nunion Msg { Text(Payload p), Code(int n) }"),
-            F("src/mk.g", "import \"src/p.g\";\nimport \"src/u.g\";\npublic Msg func Make() { return Msg.Text(new Payload()); }"),
+            F("src/mk.g", "import \"src/p.g\";\nimport \"src/u.g\";\nMsg func Make() { return Msg.Text(new Payload()); }"),
             F("src/main.g", Main("import \"src/p.g\";\nimport \"src/u.g\";\nimport \"src/mk.g\";",
                                  "let Msg m = Make(); match (m) { case Text(p) { } case Code(n) { } }")),
         ], Expect.Accepted);
@@ -454,8 +709,8 @@ public static class MultiFileCorpus
         yield return new("cross/union-compared-in-two-files",
         [
             F("src/u.g", "union Msg { Text(int n), Code(int c) }"),
-            F("src/a.g", "import \"src/u.g\";\npublic bool func SameA(Msg x, Msg y) { return x == y; }"),
-            F("src/b.g", "import \"src/u.g\";\npublic bool func SameB(Msg x, Msg y) { return x != y; }"),
+            F("src/a.g", "import \"src/u.g\";\nbool func SameA(Msg x, Msg y) { return x == y; }"),
+            F("src/b.g", "import \"src/u.g\";\nbool func SameB(Msg x, Msg y) { return x != y; }"),
             F("src/main.g", Main("import \"src/u.g\";\nimport \"src/a.g\";\nimport \"src/b.g\";",
                                  "let bool b = SameA(Msg.Text(1), Msg.Code(1)) || SameB(Msg.Text(1), Msg.Code(1));")),
         ], Expect.Accepted);
@@ -527,8 +782,8 @@ public static class MultiFileCorpus
         yield return new("cross/generic-union-two-requesters",
         [
             F("src/m.g", "union Maybe[V] { Found(V v), Missing }"),
-            F("src/a.g", "import \"src/m.g\";\npublic Maybe[int] func MakeInt() { return Maybe.Found(1); }"),
-            F("src/b.g", "import \"src/m.g\";\npublic Maybe[bool] func MakeBool() { return Maybe.Found(true); }"),
+            F("src/a.g", "import \"src/m.g\";\nMaybe[int] func MakeInt() { return Maybe.Found(1); }"),
+            F("src/b.g", "import \"src/m.g\";\nMaybe[bool] func MakeBool() { return Maybe.Found(true); }"),
             F("src/main.g", Main("import \"src/m.g\";\nimport \"src/a.g\";\nimport \"src/b.g\";",
                                  "let Maybe[int] x = MakeInt(); let Maybe[bool] y = MakeBool();")),
         ], Expect.Accepted);
@@ -551,20 +806,20 @@ public static class MultiFileCorpus
 
         yield return new("cross/throws-function",
         [
-            F("src/r.g", "public throws int func Risky() { throw; }"),
+            F("src/r.g", "throws int func Risky() { throw; }"),
             F("src/main.g", Main("import \"src/r.g\";",
                                  "let int v = Risky() catch { assign 0; };")),
         ], Expect.Accepted);
 
         yield return new("cross/fixed-array-type",
         [
-            F("src/a.g", "public [4]int func Make() { return [1, 2, 3, 4]; }"),
+            F("src/a.g", "[4]int func Make() { return [1, 2, 3, 4]; }"),
             F("src/main.g", Main("import \"src/a.g\";", "let [4]int a = Make();")),
         ], Expect.Accepted);
 
         yield return new("cross/func-pointer-type",
         [
-            F("src/a.g", "public int func Twice(int n) { return n * 2; }"),
+            F("src/a.g", "int func Twice(int n) { return n * 2; }"),
             F("src/main.g", Main("import \"src/a.g\";",
                                  "let func(int) -> int f = Twice; let int v = f(2);")),
         ], Expect.Accepted);
@@ -607,10 +862,10 @@ public static class MultiFileCorpus
 
         yield return new("file/deep-chain",
         [
-            F("src/l1.g", "import \"src/l2.g\";\npublic int func L1() { return L2(); }"),
-            F("src/l2.g", "import \"src/l3.g\";\npublic int func L2() { return L3(); }"),
-            F("src/l3.g", "import \"src/l4.g\";\npublic int func L3() { return L4(); }"),
-            F("src/l4.g", "public int func L4() { return 4; }"),
+            F("src/l1.g", "import \"src/l2.g\";\nint func L1() { return L2(); }"),
+            F("src/l2.g", "import \"src/l3.g\";\nint func L2() { return L3(); }"),
+            F("src/l3.g", "import \"src/l4.g\";\nint func L3() { return L4(); }"),
+            F("src/l4.g", "int func L4() { return 4; }"),
             F("src/main.g", Main("import \"src/l1.g\";", "let int v = L1();")),
         ], Expect.Accepted);
 
@@ -618,7 +873,7 @@ public static class MultiFileCorpus
         [
             // "src/lib.g" and "src/./lib.g" name one file; Transpile canonicalises before
             // deduplicating, so it must be parsed once, not twice into duplicate symbols.
-            F("src/lib.g", "public int func Helper() { return 7; }"),
+            F("src/lib.g", "int func Helper() { return 7; }"),
             F("src/main.g", Main("import \"src/lib.g\";\nimport \"src/./lib.g\";", "let int v = Helper();")),
         ], Expect.Any);
 
@@ -676,7 +931,7 @@ public static class MultiFileCorpus
         yield return new("kind/enum-vs-free-func",
         [
             F("src/a.g", "enum Color { Red }"),
-            F("src/b.g", "public int func Color() { return 1; }"),
+            F("src/b.g", "int func Color() { return 1; }"),
             F("src/main.g", Main("import \"src/a.g\";\nimport \"src/b.g\";", "")),
         ], Expect.Any);
 
@@ -685,24 +940,24 @@ public static class MultiFileCorpus
         #region private free-function mangling across files
         yield return new("private/three-files-same-name",
         [
-            F("src/a.g", "private int func Shared() { return 1; }\npublic int func A() { return Shared(); }"),
-            F("src/b.g", "private int func Shared() { return 2; }\npublic int func B() { return Shared(); }"),
-            F("src/c.g", "private int func Shared() { return 3; }\npublic int func C() { return Shared(); }"),
+            F("src/a.g", "private int func Shared() { return 1; }\nint func A() { return Shared(); }"),
+            F("src/b.g", "private int func Shared() { return 2; }\nint func B() { return Shared(); }"),
+            F("src/c.g", "private int func Shared() { return 3; }\nint func C() { return Shared(); }"),
             F("src/main.g", Main("import \"src/a.g\";\nimport \"src/b.g\";\nimport \"src/c.g\";",
                                  "let int v = A() + B() + C();")),
         ], Expect.Accepted);
 
         yield return new("private/shadows-public-in-other-file",
         [
-            F("src/a.g", "public int func Helper() { return 1; }"),
-            F("src/b.g", "private int func Helper() { return 2; }\npublic int func B() { return Helper(); }"),
+            F("src/a.g", "int func Helper() { return 1; }"),
+            F("src/b.g", "private int func Helper() { return 2; }\nint func B() { return Helper(); }"),
             F("src/main.g", Main("import \"src/a.g\";\nimport \"src/b.g\";", "let int v = B();")),
         ], Expect.Any);
 
         yield return new("private/overloads-in-two-files",
         [
-            F("src/a.g", "private int func P(int n) { return n; }\nprivate int func P(bool b) { return 1; }\npublic int func A() { return P(1) + P(true); }"),
-            F("src/b.g", "private int func P(int n) { return n * 2; }\npublic int func B() { return P(2); }"),
+            F("src/a.g", "private int func P(int n) { return n; }\nprivate int func P(bool b) { return 1; }\nint func A() { return P(1) + P(true); }"),
+            F("src/b.g", "private int func P(int n) { return n * 2; }\nint func B() { return P(2); }"),
             F("src/main.g", Main("import \"src/a.g\";\nimport \"src/b.g\";", "let int v = A() + B();")),
         ], Expect.Accepted);
 
@@ -737,9 +992,9 @@ public static class MultiFileCorpus
         yield return new("gen/three-files-same-instantiation",
         [
             F("src/box.g", "class Box[T] { public T v; }"),
-            F("src/a.g", "import \"src/box.g\";\npublic int func A() { let Box[int] b = new Box[int](); return b.v; }"),
-            F("src/b.g", "import \"src/box.g\";\npublic int func B() { let Box[int] b = new Box[int](); return b.v; }"),
-            F("src/c.g", "import \"src/box.g\";\npublic int func C() { let Box[int] b = new Box[int](); return b.v; }"),
+            F("src/a.g", "import \"src/box.g\";\nint func A() { let Box[int] b = new Box[int](); return b.v; }"),
+            F("src/b.g", "import \"src/box.g\";\nint func B() { let Box[int] b = new Box[int](); return b.v; }"),
+            F("src/c.g", "import \"src/box.g\";\nint func C() { let Box[int] b = new Box[int](); return b.v; }"),
             F("src/main.g", Main("import \"src/a.g\";\nimport \"src/b.g\";\nimport \"src/c.g\";",
                                  "let int v = A() + B() + C();")),
         ], Expect.Accepted);
@@ -754,9 +1009,9 @@ public static class MultiFileCorpus
 
         yield return new("gen/generic-func-called-from-two-files",
         [
-            F("src/id.g", "public T func Id[T](T v) { return v; }"),
-            F("src/a.g", "import \"src/id.g\";\npublic int func A() { return Id(1); }"),
-            F("src/b.g", "import \"src/id.g\";\npublic int func B() { return Id(2); }"),
+            F("src/id.g", "T func Id[T](T v) { return v; }"),
+            F("src/a.g", "import \"src/id.g\";\nint func A() { return Id(1); }"),
+            F("src/b.g", "import \"src/id.g\";\nint func B() { return Id(2); }"),
             F("src/main.g", Main("import \"src/a.g\";\nimport \"src/b.g\";", "let int v = A() + B();")),
         ], Expect.Accepted);
 
@@ -769,8 +1024,8 @@ public static class MultiFileCorpus
 
         yield return new("gen/same-name-generic-both-instantiated",
         [
-            F("src/a.g", "class Holder[T] { public T v; }\npublic int func A() { let Holder[int] h = new Holder[int](); return h.v; }"),
-            F("src/b.g", "class Holder[T] { public T v; }\npublic int func B() { let Holder[int] h = new Holder[int](); return h.v; }"),
+            F("src/a.g", "class Holder[T] { public T v; }\nint func A() { let Holder[int] h = new Holder[int](); return h.v; }"),
+            F("src/b.g", "class Holder[T] { public T v; }\nint func B() { let Holder[int] h = new Holder[int](); return h.v; }"),
             F("src/main.g", Main("import \"src/a.g\";\nimport \"src/b.g\";", "let int v = A() + B();")),
         ], Expect.Rejected, Codes.DuplicateName);
 
@@ -794,13 +1049,13 @@ public static class MultiFileCorpus
         #region import path shapes
         yield return new("path/dot-slash",
         [
-            F("src/lib.g", "public int func Helper() { return 7; }"),
+            F("src/lib.g", "int func Helper() { return 7; }"),
             F("src/main.g", Main("import \"./src/lib.g\";", "let int v = Helper();")),
         ], Expect.Any);
 
         yield return new("path/redundant-segments",
         [
-            F("src/lib.g", "public int func Helper() { return 7; }"),
+            F("src/lib.g", "int func Helper() { return 7; }"),
             F("src/main.g", Main("import \"src/../src/lib.g\";", "let int v = Helper();")),
         ], Expect.Any);
 
@@ -809,13 +1064,13 @@ public static class MultiFileCorpus
             // On a case-sensitive filesystem this names a file that does not exist; on a
             // case-insensitive one it names src/lib.g. Either outcome is fine, but it must
             // not be silently treated as a *different* module from the one already loaded.
-            F("src/lib.g", "public int func Helper() { return 7; }"),
+            F("src/lib.g", "int func Helper() { return 7; }"),
             F("src/main.g", Main("import \"src/lib.g\";\nimport \"src/LIB.g\";", "let int v = Helper();")),
         ], Expect.Any);
 
         yield return new("path/no-extension",
         [
-            F("src/lib.g", "public int func Helper() { return 7; }"),
+            F("src/lib.g", "int func Helper() { return 7; }"),
             F("src/main.g", Main("import \"src/lib\";", "")),
         ], Expect.Rejected);
 
@@ -826,7 +1081,7 @@ public static class MultiFileCorpus
 
         yield return new("path/back-edge-to-entry",
         [
-            F("src/lib.g", "import \"src/main.g\";\npublic int func Helper() { return 7; }"),
+            F("src/lib.g", "import \"src/main.g\";\nint func Helper() { return 7; }"),
             F("src/main.g", Main("import \"src/lib.g\";", "let int v = Helper();")),
         ], Expect.Any);
 
@@ -835,14 +1090,14 @@ public static class MultiFileCorpus
         #region fan-out and depth
         yield return new("scale/wide-fan-out",
         [
-            F("src/m0.g", "public int func M0() { return 0; }"),
-            F("src/m1.g", "public int func M1() { return 1; }"),
-            F("src/m2.g", "public int func M2() { return 2; }"),
-            F("src/m3.g", "public int func M3() { return 3; }"),
-            F("src/m4.g", "public int func M4() { return 4; }"),
-            F("src/m5.g", "public int func M5() { return 5; }"),
-            F("src/m6.g", "public int func M6() { return 6; }"),
-            F("src/m7.g", "public int func M7() { return 7; }"),
+            F("src/m0.g", "int func M0() { return 0; }"),
+            F("src/m1.g", "int func M1() { return 1; }"),
+            F("src/m2.g", "int func M2() { return 2; }"),
+            F("src/m3.g", "int func M3() { return 3; }"),
+            F("src/m4.g", "int func M4() { return 4; }"),
+            F("src/m5.g", "int func M5() { return 5; }"),
+            F("src/m6.g", "int func M6() { return 6; }"),
+            F("src/m7.g", "int func M7() { return 7; }"),
             F("src/main.g", Main(
                 string.Join("\n", Enumerable.Range(0, 8).Select(i => $"import \"src/m{i}.g\";")),
                 "let int v = " + string.Join(" + ", Enumerable.Range(0, 8).Select(i => $"M{i}()")) + ";")),
@@ -850,9 +1105,9 @@ public static class MultiFileCorpus
 
         yield return new("scale/mutual-pair-with-shared-dep",
         [
-            F("src/dep.g", "public int func Dep() { return 1; }"),
-            F("src/a.g", "import \"src/b.g\";\nimport \"src/dep.g\";\npublic int func A() { return Dep(); }"),
-            F("src/b.g", "import \"src/a.g\";\nimport \"src/dep.g\";\npublic int func B() { return Dep(); }"),
+            F("src/dep.g", "int func Dep() { return 1; }"),
+            F("src/a.g", "import \"src/b.g\";\nimport \"src/dep.g\";\nint func A() { return Dep(); }"),
+            F("src/b.g", "import \"src/a.g\";\nimport \"src/dep.g\";\nint func B() { return Dep(); }"),
             F("src/main.g", Main("import \"src/a.g\";\nimport \"src/b.g\";", "let int v = A() + B();")),
         ], Expect.Accepted);
 

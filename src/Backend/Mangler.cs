@@ -102,6 +102,7 @@ internal static class Mangler
     {
         _genericInfo.Clear();
         _genericTemplates.Clear();
+        _genericArity.Clear();
         _genericFailed.Clear();
     }
 
@@ -162,12 +163,39 @@ internal static class Mangler
     [ThreadStatic] private static HashSet<string>? _genericTemplatesTls;
     private static HashSet<string> _genericTemplates => _genericTemplatesTls ??= [];
 
+    // How many type parameters each registered template takes, which is what lets a mangled
+    // instance name be split back into its base and arguments.
+    [ThreadStatic] private static Dictionary<string, int>? _genericArityTls;
+    private static Dictionary<string, int> _genericArity => _genericArityTls ??= [];
+
     /// <summary>
     /// Records that a generic template with this base name was declared.
     /// </summary>
-    public static void RegisterGenericTemplate(string baseName)
+    public static void RegisterGenericTemplate(string baseName, int arity = 1)
     {
         _genericTemplates.Add(baseName);
+        _genericArity[baseName] = arity;
+    }
+
+    /// <summary>
+    /// Splits a mangled instance name back into the template it instantiates and its arguments, for
+    /// a name that reached a pass already flattened.
+    /// </summary>
+    public static bool TrySplitInstance(string mangled, out string baseName, out string[] args)
+    {
+        baseName = ""; args = [];
+        for (int i = mangled.IndexOf('_'); i > 0; i = mangled.IndexOf('_', i + 1))
+        {
+            string candidate = mangled[..i];
+            if (!_genericArity.TryGetValue(candidate, out int arity)) continue;
+            string rest = mangled[(i + 1)..];
+            if (rest.Length == 0) continue;
+            if (arity == 1) { baseName = candidate; args = [rest]; return true; }
+            var parts = rest.Split('_');
+            if (parts.Length != arity) continue;
+            baseName = candidate; args = parts; return true;
+        }
+        return false;
     }
 
     /// <summary>
@@ -351,6 +379,24 @@ internal static class Mangler
     public static string ThreadEntry(string full)
     {
         return $"gata_{full}_main";
+    }
+
+    /// <summary>
+    /// Returns the C name of the static holding a process variable, given the process's fully
+    /// qualified name and the variable's written name.
+    /// </summary>
+    public static string ProcessVar(string procFull, string name)
+    {
+        return $"gata_{Sanitize(procFull)}_state_{Sanitize(name)}";
+    }
+
+    /// <summary>
+    /// Returns the C name of the generated function that assigns a process's variables their
+    /// initial values. External linkage: the launcher lives in its own translation unit.
+    /// </summary>
+    public static string ProcessStateInit(string procFull)
+    {
+        return $"gata_{Sanitize(procFull)}_state_init";
     }
 
     /// <summary>

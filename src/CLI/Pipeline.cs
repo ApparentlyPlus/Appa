@@ -65,6 +65,14 @@ internal static class Pipeline
     #region Build pipeline
 
     /// <summary>
+    /// How many times the front end may re-run to create generic instantiations discovered during
+    /// resolution. Each round can only add instantiations, and a program needing more than a couple
+    /// of levels is asking for an infinite family; the cap turns that into the resolver's diagnostic
+    /// rather than a hang.
+    /// </summary>
+    private const int MaxMonomorphizationRounds = 6;
+
+    /// <summary>
     /// Runs the full front-end and lowering pipeline over a parsed program set and returns the
     /// lowered module, its name sourcemap, and the scanned capability set.
     /// </summary>
@@ -72,16 +80,41 @@ internal static class Pipeline
         List<(string path, Program prog)> programs,
         Dictionary<string, HashSet<string>> visible, Mode mode, DiagnosticBag diag)
     {
-        Mangler.ResetDense();
-        Mangler.ResetGenericDisplay();
-        Mangler.ResetScopeDisplay();
-        var scopes = new ScopeBinder(diag).Bind(programs, visible);
-        var genericRequestFile = new Monomorphizer(diag).Process(programs);
-        var collected = new SymbolCollector(diag).Collect([.. programs.Select(t => (t.path, t.prog))]);
-        var module = new TypeResolver(collected.Sym, collected.HasInit,
-                                      collected.PreDefinedStructs, collected.OpaqueFieldClasses, visible,
-                                      genericRequestFile, releaseMode: mode == Mode.Release, diag)
-                         .Resolve([.. programs.Select(t => (t.prog, t.path))]);
+        var pristine = new List<(string path, Program prog)>(programs);
+        var seeds = new List<GenericSeed>();
+        var seeded = new HashSet<string>(StringComparer.Ordinal);
+        int mark = diag.All.Count;
+
+        IrModule module;
+        CollectionResult collected;
+        for (int round = 0; ; round++)
+        {
+            programs.Clear();
+            programs.AddRange(pristine);
+            diag.TruncateTo(mark);
+
+            Mangler.ResetDense();
+            Mangler.ResetGenericDisplay();
+            Mangler.ResetScopeDisplay();
+            new ScopeBinder(diag).Bind(programs, visible);
+            var genericRequestFile = new Monomorphizer(diag).Process(programs, seeds);
+            collected = new SymbolCollector(diag).Collect([.. programs.Select(t => (t.path, t.prog))]);
+            var seedScopes = seeds.ToDictionary(
+                s => s.Key,
+                s => new HashSet<string>(s.Scope, StringComparer.OrdinalIgnoreCase),
+                StringComparer.Ordinal);
+            var resolver = new TypeResolver(collected.Sym, collected.HasInit,
+                                            collected.PreDefinedStructs, collected.OpaqueFieldClasses, visible,
+                                            genericRequestFile, seedScopes, releaseMode: mode == Mode.Release, diag);
+            module = resolver.Resolve([.. programs.Select(t => (t.prog, t.path))]);
+
+            if (round >= MaxMonomorphizationRounds) break;
+            int before = seeds.Count;
+            foreach (var s in resolver.PendingInstantiations)
+                if (seeded.Add(s.Key)) seeds.Add(s);
+            if (seeds.Count == before) break;
+        }
+
         ValidateCNames(module, diag);
         if (diag.HasErrors)
             return (module, new Dictionary<string, string>(), new CapabilityScan(module));
@@ -271,10 +304,21 @@ internal static class Pipeline
         // Named with the realm, because two processes of one name in different realms are the case
         // this exists for, and without it the two describe identically and read as one declaration.
         foreach (var p in module.Processes)
+        {
+            string realm = p.StateInit?.Vis == Visibility.Kernel ? "kernel" : "userspace";
+            foreach (var v in p.State)
+                Claim(v.CName, $"process variable '{realm}.{p.Name}.{v.Name}'");
+            if (p.StateInit is { } si)
+            {
+                Claim(si.CName, $"the initialiser generated for '{realm}.{p.Name}'");
+                Claim($"{si.CName}_gate", $"the state gate generated for '{realm}.{p.Name}'");
+                Claim($"{si.CName}_enter", $"the state entry generated for '{realm}.{p.Name}'");
+            }
             foreach (var t in p.Threads)
                 if (t.EntryFunc is { } e)
                     Claim(e.CName,
                           $"thread '{(e.Vis == Visibility.Kernel ? "kernel" : "userspace")}.{p.Name}.{t.Name}'");
+        }
     }
 
     /// <summary>

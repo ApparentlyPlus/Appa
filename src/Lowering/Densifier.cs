@@ -73,6 +73,11 @@ internal sealed class Densifier(IrModule m)
         foreach (var e in m.Enums) _taken.Add(e.CName);
         foreach (var u in m.Unions) _taken.Add(u.CName);
         foreach (var n in m.NativeTypes) _taken.Add(n.CName);
+        foreach (var p in m.Processes)
+        {
+            if (p.StateInit is { } si) _taken.Add(si.CName);
+            foreach (var v in p.State) _taken.Add(v.CName);
+        }
 
         var fn = new Dictionary<string, string>(fnCapacity);
         var classTok = new Dictionary<string, string>(classCount);

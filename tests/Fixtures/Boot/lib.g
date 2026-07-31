@@ -59,7 +59,7 @@ union Maybe[V] { Found(V v), Missing }
 
 union Tree[V] { Leaf(V v), Fork(List[Tree[V]] kids) }
 
-public int func CountLeaves[V](Tree[V] t) {
+int func CountLeaves[V](Tree[V] t) {
     match (t) {
         case Leaf(v) { return 1; }
         case Fork(kids) {
@@ -70,16 +70,16 @@ public int func CountLeaves[V](Tree[V] t) {
     }
 }
 
-public Signal func MakeSignal(Census c, int id) { return Signal.One(new Tracked(c, id)); }
+Signal func MakeSignal(Census c, int id) { return Signal.One(new Tracked(c, id)); }
 
-public int func EnvelopeWeight(Envelope e) {
+int func EnvelopeWeight(Envelope e) {
     match (e) {
         case Wrap(s) { return SignalWeight(s); }
         case Sealed(code) { return code; }
     }
 }
 
-public int func SignalWeight(Signal s) {
+int func SignalWeight(Signal s) {
     match (s) {
         case Quiet { return 0; }
         case One(t) { return t.id; }
@@ -90,11 +90,15 @@ public int func SignalWeight(Signal s) {
 
 private int func Scale(int n) { return n * 2; }
 
-public int func LibScale(int n) { return Scale(n); }
+int func LibScale(int n) { return Scale(n); }
 
-public void func Bump(ref int slot) { slot = slot + 1; }
+void func Bump(ref int slot) { slot = slot + 1; }
 
-public throws T func Unwrap[T](T value, bool fail) {
+throws T func Unwrap[T](T value, bool fail) {
     if (fail) { throw; }
     return value;
 }
+
+T func Relay[T](T value) { return Passthrough(value); }
+
+private T func Passthrough[T](T value) { return value; }

@@ -7,6 +7,7 @@ internal sealed class TypeResolver(
     HashSet<string> opaqueFieldClasses,
     Dictionary<string, HashSet<string>> visible,
     Dictionary<string, string> genericRequestFile,
+    Dictionary<string, HashSet<string>> seedScopes,
     bool releaseMode,
     DiagnosticBag diag)
 {
@@ -143,8 +144,58 @@ internal sealed class TypeResolver(
     
     // Generic method templates on classes/modules, keyed by owner+name; mirrors _funcTemplates.
     private readonly Dictionary<MemberKey, (MethodDecl Decl, string File, Realm Realm)> _methodTemplates = [];
-    private readonly Queue<(FuncDecl Decl, string File, Realm Realm, Dictionary<string, TypeSpec> Binds, string Mangled)> _genericQueue = new();
-    private readonly Queue<(MethodDecl Decl, string Owner, string File, Realm Realm, Dictionary<string, TypeSpec> Binds, string Mangled)> _genericMethodQueue = new();
+    
+    // Generic type instantiations this pass needed but could not find, because they only became
+    // concrete while stamping a generic function or method. The pipeline seeds these into the
+    // Monomorphizer and runs again; see Pipeline.BuildModule.
+    private readonly List<GenericSeed> _pendingInstances = [];
+
+    /// <summary>
+    /// Instantiations discovered too late for the pass that creates generic types. Empty for any
+    /// program that does not name a generic type over a generic function's own type parameter.
+    /// </summary>
+    public IReadOnlyList<GenericSeed> PendingInstantiations => _pendingInstances;
+
+    /// <summary>
+    /// How deeply a type argument may nest before an instantiation stops being created on demand.
+    /// Hand-written code nests two or three deep; more than this is the signature of a family that
+    /// generates a new level every time the previous one is created.
+    /// </summary>
+    private const int MaxSeedDepth = 6;
+
+    /// <summary>
+    /// Nesting depth of an already-mangled instance name, counted by walking the registry the same
+    /// way <see cref="Mangler.TrySplitInstance"/> does.
+    /// </summary>
+    private static int SeedDepth(string mangled)
+    {
+        int depth = 1;
+        while (Mangler.TrySplitInstance(mangled, out _, out var args) && args.Length > 0)
+        {
+            depth++;
+            if (depth > MaxSeedDepth + 1) break;
+            mangled = args[0];
+        }
+        return depth;
+    }
+
+    /// <summary>
+    /// Nesting depth of a type spec.
+    /// </summary>
+    private static int SpecDepth(NamedSpec s)
+    {
+        int deepest = 0;
+        foreach (var a in s.Args)
+        {
+            int d = SpecDepth(a);
+            if (d > deepest) deepest = d;
+        }
+        return deepest + 1;
+    }
+
+    // RequestScope is the module scope in force where the type arguments were named.
+    private readonly Queue<(FuncDecl Decl, string File, Realm Realm, Dictionary<string, TypeSpec> Binds, string Mangled, HashSet<string> RequestScope)> _genericQueue = new();
+    private readonly Queue<(MethodDecl Decl, string Owner, string File, Realm Realm, Dictionary<string, TypeSpec> Binds, string Mangled, HashSet<string> RequestScope)> _genericMethodQueue = new();
     private readonly HashSet<string> _genericSeen = [];
     private int _labelSeq;
 
@@ -228,6 +279,44 @@ internal sealed class TypeResolver(
                 if (ReportWrongKind(Codes.UndefinedType, nm.Args.Length > 0 ? "a generic type" : "a type",
                                     nm.Name, ctx.File, Sp(nm, span))) return;
                 if (Mangler.GenericFailed(name)) return;
+                if (name.Contains(IrType.Error.MangledName, StringComparison.Ordinal))
+                {
+                    Mangler.MarkGenericFailed(name);
+                    return;
+                }
+                if (nm.Args.Length == 0 && Mangler.TrySplitInstance(name, out var splitBase, out var splitArgs))
+                {
+                    if (SeedDepth(name) <= MaxSeedDepth)
+                        _pendingInstances.Add(new GenericSeed(splitBase, splitArgs, Sp(nm, span), ctx.File)
+                            { Scope = [.. _scope] });
+                    diag.Error(Codes.UndefinedType, ctx.File, Sp(nm, span),
+                        $"'{Mangler.DisplayName(splitBase)}[{string.Join(", ", splitArgs.Select(Mangler.DisplayName))}]'" +
+                        " is never instantiated, so it cannot be used here",
+                        ["this instantiation is named over a generic function's own type parameter, " +
+                         "and could not be created",
+                         "name it once outside any generic function, or give the enclosing function a " +
+                         "concrete parameter type instead of a generic one"]);
+                    Mangler.MarkGenericFailed(name);
+                    return;
+                }
+
+                if (nm.Args.Length > 0 && Mangler.IsGenericTemplate(nm.Name))
+                {
+                    if (SpecDepth(nm) <= MaxSeedDepth)
+                        _pendingInstances.Add(new GenericSeed(
+                            nm.Name, [.. nm.Args.Select(a => a.Mangled)], Sp(nm, span), ctx.File)
+                            { Scope = [.. _scope] });
+                    string written = Written(nm);
+                    diag.Error(Codes.UndefinedType, ctx.File, Sp(nm, span),
+                        $"'{written}' is never instantiated, so it cannot be used here",
+                        [$"'{Mangler.DisplayName(nm.Name)}' is a generic type used over a generic function's " +
+                          "own type parameter, and this instantiation could not be created",
+                         $"name it once outside any generic function - 'let {written} _seed = ...;' - " +
+                          "or give the enclosing function a concrete parameter type instead of a generic one"]);
+                    Mangler.MarkGenericFailed(name);
+                    return;
+                }
+
                 var unknownHints = new List<string>();
                 AddInstantiationHint(unknownHints, ctx);
                 diag.Error(Codes.UndefinedType, ctx.File, Sp(nm, span), $"unknown type '{Written(nm)}'",
@@ -663,7 +752,7 @@ internal sealed class TypeResolver(
     /// </summary>
     private void CheckLValue(IrExpr target, ResolveCtx ctx)
     {
-        if (target is IrVar or IrFieldLoad or IrIndex or IrDeref) return;
+        if (target is IrVar or IrGlobal or IrFieldLoad or IrIndex or IrDeref) return;
         diag.Error(Codes.NotAnLvalue, ctx.File, target.Span,
             "assignment target must be a variable, field, or element");
     }
@@ -2001,12 +2090,10 @@ internal sealed class TypeResolver(
         ScopeStack Locals,
         bool InDefer = false,
         IrType? AssignType = null,
-        // The type the enclosing construct wants this expression to have, when there is one:
-        // a let with a declared type, or a return. Only consulted where a value is otherwise
-        // under-determined - naming a generic union's variant without its type arguments.
         IrType? Expected = null,
         bool CatchWrapped = false,
-        IrType? RetType = null)
+        IrType? RetType = null,
+        bool InProcessInit = false)
     {
         /// <summary>
         /// Returns a context with the current class updated.
@@ -2168,12 +2255,24 @@ internal sealed class TypeResolver(
             _ => null,
         };
         if (name == null) return _fileScope;
+        if (seedScopes.TryGetValue(name, out var seeded)) return InstanceScope(file, seeded);
         if (!genericRequestFile.TryGetValue(name, out var requester)) return _fileScope;
-        if (requester == file) return _fileScope;
-        if (!visible.TryGetValue(requester, out var requesterScope)) return _fileScope;
+        return InstanceScope(file, visible.GetValueOrDefault(requester, [requester]));
+    }
 
-        var widened = new HashSet<string>(_fileScope, StringComparer.OrdinalIgnoreCase);
-        widened.UnionWith(requesterScope);
+    /// <summary>
+    /// The module scope a stamped generic instance resolves under: the file it is emitted into, plus
+    /// whatever the file that named the type arguments could see.
+    /// </summary>
+    private HashSet<string> InstanceScope(string templateFile, HashSet<string> requestScope)
+    {
+        // Taken from the template's file rather than _fileScope: the drain runs after the main
+        // pass, where _fileScope still holds whichever file happened to be resolved last.
+        var baseScope = visible.GetValueOrDefault(templateFile, [templateFile]);
+        if (ReferenceEquals(baseScope, requestScope)) return baseScope;
+
+        var widened = new HashSet<string>(baseScope, StringComparer.OrdinalIgnoreCase);
+        widened.UnionWith(requestScope);
         return widened;
     }
 
@@ -2386,6 +2485,7 @@ internal sealed class TypeResolver(
                 if (PrimTypes.IsPrim(name)) return new IrPrimType(name);
                 if (sym.IsEnum(name)) return new IrEnumType(name);
                 if (sym.IsUnion(name)) return new IrUnionType(name);
+                if (Mangler.GenericFailed(name)) return IrType.Error;
                 return new IrClassRef(name);
             }
             default:
@@ -2617,12 +2717,105 @@ internal sealed class TypeResolver(
         };
     }
 
+    // Process variables, keyed by the qualified name the ScopeBinder rewrote every use to.
+    private readonly Dictionary<string, IrGlobal> _processState = [];
+
+    // The written names of the process being resolved, for the shadow warning
+    private readonly HashSet<string> _processStateNames = [];
+
+    // Process variables whose initialiser has not run yet, mapped to the name as written.
+    private readonly Dictionary<string, string> _processStatePending = [];
+
+    // The variable whose own initialiser is being resolved, so reading it can say so specifically.
+    private string? _processStateCurrent;
+
+    /// <summary>
+    /// Reports a read of a process variable whose initialiser has not run yet.
+    /// </summary>
+    private void ReportPendingProcessState(string qualified, ResolveCtx ctx, TextSpan span)
+    {
+        if (!_processStatePending.TryGetValue(qualified, out var written)) return;
+        bool itself = qualified == _processStateCurrent;
+        diag.Error(Codes.UseBeforeAssignment, ctx.File, span,
+            itself
+                ? $"process variable '{written}' is read by its own initialiser"
+                : $"process variable '{written}' is read before it is initialised",
+            itself
+                ? ["it holds nothing yet: the read happens as part of the store that gives it a value",
+                   "give it a value that does not depend on itself"]
+                : ["a process's variables are initialised in declaration order, so only the ones " +
+                   "declared above this line have a value yet",
+                   $"move the declaration of '{written}' above the one that reads it"]);
+    }
+
+    /// <summary>
+    /// Resolves a process's variables and builds the generated function that assigns them.
+    /// </summary>
+    private (List<IrProcessVar> State, IrFunction? Init) ResolveProcessState(
+        ProcessDecl pd, string procFull, ResolveCtx ctx, Visibility vis)
+    {
+        var state = new List<IrProcessVar>();
+        var stores = new List<IrStmt>();
+        var seen = new HashSet<string>();
+        var decls = new List<(ProcessVarDecl Pv, string Written, IrGlobal Slot)>();
+
+        foreach (var item in pd.Items)
+        {
+            if (item is not ProcessVarDecl pv) continue;
+
+            CheckType(pv.Type, ctx, pv.Span);
+            var type = ResolveType(pv.Type);
+            string display = Mangler.DisplayName(pv.Name);
+            string written = display[(display.LastIndexOf('.') + 1)..];
+            if (!seen.Add(pv.Name))
+            {
+                diag.Error(Codes.DuplicateName, ctx.File, pv.Span,
+                    $"process variable '{written}' is already declared in process '{pd.Name}'");
+                continue;
+            }
+
+            string cname = Mangler.ProcessVar(procFull, written);
+            var slot = new IrGlobal(cname, type);
+            state.Add(new IrProcessVar(written, cname, type));
+            _processState[pv.Name] = slot;
+            _processStateNames.Add(written);
+            _processStatePending[pv.Name] = written;
+            decls.Add((pv, written, slot));
+        }
+
+        foreach (var (pv, written, slot) in decls)
+        {
+            if (pv.Init == null)             // the parser already reported it
+            {
+                _processStatePending.Remove(pv.Name);
+                continue;
+            }
+
+            _processStateCurrent = pv.Name;
+            var initCtx = ctx with { InProcessInit = true };
+            var init = CheckRootThrowsValue(ResolveExpr(pv.Init, initCtx with { Expected = slot.T }),
+                                            slot.T, $"process variable '{written}'", initCtx, pv.Span);
+            _processStateCurrent = null;
+            _processStatePending.Remove(pv.Name);
+            stores.Add(new IrAssign(slot, AssignOp.Assign, init) { Span = pv.Span });
+        }
+
+        if (stores.Count == 0) return (state, null);
+
+        var body = new IrBlock(stores);
+        return (state, new IrFunction(
+            $"{procFull}__state_init", Mangler.ProcessStateInit(procFull), IrType.Void, [],
+            true, false, false, false, vis, null, body, null, []));
+    }
+
     /// <summary>
     /// Resolves a process declaration to its IR form, resolving each thread's entry function.
     /// </summary>
     private IrProcess ResolveProcess(ProcessDecl pd, ResolveCtx ctx, IrModule module)
     {
         var vis = VisOf(ctx.Realm);
+        string procFull = $"{ScopeBinder.NameOf(ctx.Realm)}_{pd.Name}";
+        var (state, stateInit) = ResolveProcessState(pd, procFull, ctx, vis);
 
         var threads = new List<IrThread>(pd.Threads.Length);
         var seenThreads = new HashSet<string>();
@@ -2640,6 +2833,7 @@ internal sealed class TypeResolver(
         }
         foreach (var item in pd.Items)
         {
+            if (item is ProcessVarDecl) continue;   // already resolved above
             if (item is FuncDecl { IsEntry: true } ef)
             {
                 diag.Error(Codes.EntryOutsideKernel, ctx.File, ef.Span,
@@ -2651,7 +2845,9 @@ internal sealed class TypeResolver(
             ResolveTop(item, ctx, module);
         }
 
-        return new IrProcess(pd.Name, pd.Mode, threads);
+        _processStateNames.Clear();
+        _processStatePending.Clear();
+        return new IrProcess(pd.Name, pd.Mode, threads) { State = state, StateInit = stateInit };
     }
 
     /// <summary>
@@ -2680,6 +2876,17 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
+    /// True when some argument's type cannot be bound to a type parameter: the Result of a throwing
+    /// call, or a type that is already an error.
+    /// </summary>
+    private static bool AnyUnbindableArg(List<IrExpr> args)
+    {
+        for (int i = 0; i < args.Count; i++)
+            if (args[i].Type is IrResultType || args[i].Type.IsError) return true;
+        return false;
+    }
+
+    /// <summary>
     /// Resolves a call to a generic free function by inferring type arguments from the supplied
     /// argument types, mangling the name, and queuing the instantiation for resolution after the
     /// main pass completes.
@@ -2696,6 +2903,8 @@ internal sealed class TypeResolver(
                 $"generic '{fd.Name}' expects {fd.Params.Length} argument(s), got {args.Count}");
             return new IrStaticCall(fallback, IrType.Void, args);
         }
+
+        if (AnyUnbindableArg(args)) return new IrStaticCall(fallback, IrType.Error, args);
 
         var binds = new Dictionary<string, TypeSpec>();
         for (int i = 0; i < fd.Params.Length; i++)
@@ -2714,7 +2923,7 @@ internal sealed class TypeResolver(
         string mangled = Mangler.GenericInstance(fd.Name, fd.GenericParams.Select(p => Monomorphizer.SanitizeTypeName(binds[p].ToSpecString())));
         _usedFuncTemplates.Add((t.File, fd.Name));
         if (_genericSeen.Add(mangled))
-            _genericQueue.Enqueue((fd, t.File, t.Realm, binds, mangled));
+            _genericQueue.Enqueue((fd, t.File, t.Realm, binds, mangled, _scope));
 
         var concreteParams = Monomorphizer.SubParams(fd.Params, binds);
 
@@ -2753,6 +2962,8 @@ internal sealed class TypeResolver(
             return FallbackCall();
         }
 
+        if (AnyUnbindableArg(args)) return FallbackCall();
+
         var binds = new Dictionary<string, TypeSpec>();
         for (int i = 0; i < md.Params.Length; i++)
             if (!Monomorphizer.UnifyParam(md.Params[i].Type, args[i].Type, md.GenericParams, binds))
@@ -2771,7 +2982,7 @@ internal sealed class TypeResolver(
         string seenKey = owner + "::" + mangled;
         _usedMethodTemplates.Add(new MemberKey(owner, md.Name));
         if (_genericSeen.Add(seenKey))
-            _genericMethodQueue.Enqueue((md, owner, t.File, t.Realm, binds, mangled));
+            _genericMethodQueue.Enqueue((md, owner, t.File, t.Realm, binds, mangled, _scope));
 
         var concreteParams = Monomorphizer.SubParams(md.Params, binds);
         string cname = Mangler.Method(owner, mangled, concreteParams, overloaded: false);
@@ -2804,7 +3015,7 @@ internal sealed class TypeResolver(
     {
         while (_genericQueue.Count > 0)
         {
-            var (fd, file, realm, binds, mangled) = _genericQueue.Dequeue();
+            var (fd, file, realm, binds, mangled, requestScope) = _genericQueue.Dequeue();
             var cMap = binds.ToDictionary(kv => kv.Key, kv => Monomorphizer.CTypeOf(kv.Value));
             var instRet = Monomorphizer.SubType(fd.ReturnType, binds);
             if (fd.Throws) sym.RegisterThrows(instRet);
@@ -2812,14 +3023,14 @@ internal sealed class TypeResolver(
                 instRet, mangled, [],
                 [..Monomorphizer.SubParams(fd.Params, binds)], fd.IsEntry, fd.Throws,
                 Monomorphizer.SubBody(fd.Body, binds, cMap), fd.Span);
-            _scope = visible.GetValueOrDefault(file, [file]);
+            _scope = InstanceScope(file, requestScope);
             var ctx = new ResolveCtx(file, realm, "", null, false, false, false, false, "", 0, new ScopeStack());
             module.FreeFunctions.Add(ResolveFreeFunc(inst, ctx));
         }
 
         while (_genericMethodQueue.Count > 0)
         {
-            var (md, owner, file, realm, binds, mangled) = _genericMethodQueue.Dequeue();
+            var (md, owner, file, realm, binds, mangled, requestScope) = _genericMethodQueue.Dequeue();
             var cMap = binds.ToDictionary(kv => kv.Key, kv => Monomorphizer.CTypeOf(kv.Value));
             var instMethodRet = Monomorphizer.SubType(md.ReturnType, binds);
             if (md.Throws) sym.RegisterThrows(instMethodRet);
@@ -2827,7 +3038,7 @@ internal sealed class TypeResolver(
                 instMethodRet, mangled, [],
                 [..Monomorphizer.SubParams(md.Params, binds)], md.IsEntry, md.Throws,
                 Monomorphizer.SubBody(md.Body, binds, cMap), md.Span);
-            _scope = visible.GetValueOrDefault(file, [file]);
+            _scope = InstanceScope(file, requestScope);
             bool isModule = sym.Modules.Contains(owner);
             var ctx = new ResolveCtx(file, realm, "", null, false, false, false, false, "", 0, new ScopeStack());
             var lib = realm == Realm.None;
@@ -2857,14 +3068,9 @@ internal sealed class TypeResolver(
         }
         var a = args[0];
 
-        // An unmanaged argument makes both calls vanish - retain to the value itself, release
-        // to a void cast that keeps the argument evaluated and silences an unused warning.
-        // That is what lets one generic body serve List[int] and List[String] alike.
         if (!IsManagedRef(a.Type))
             return isRetain ? a : new IrCast(IrType.Void, a);
 
-        // A union counts its live variant's payload through its own generated pair, not
-        // through the runtime intrinsic - which takes void* and would not accept an aggregate.
         string cname = a.Type is IrUnionType ut
             ? isRetain ? Mangler.UnionRetain(ut.Name) : Mangler.UnionRelease(ut.Name)
             : fsym.CName;
@@ -2929,8 +3135,6 @@ internal sealed class TypeResolver(
             switch (t)
             {
                 case IrArrayType a:
-                    // A fixed array compares element-wise, so a hazard in the element type is a
-                    // hazard in the field.
                     Inspect(a.Elem, label);
                     break;
 
@@ -3275,6 +3479,16 @@ internal sealed class TypeResolver(
             {
                 if (ctx.InDefer)
                     diag.Error(Codes.DeferTransfer, ctx.File, rs.Span, "a 'defer' body cannot 'return'");
+                if (ctx.InProcessInit)
+                {
+                    diag.Error(Codes.UninitialisedProcessVar, ctx.File, rs.Span,
+                        "a 'catch' handler on a process variable cannot 'return'",
+                        ["the only function to return from here is the one generated to initialise " +
+                         "this process, so this would leave this variable - and every one declared " +
+                         "below it - holding nothing",
+                         "end the handler with 'assign <value>;' instead"]);
+                    return new IrReturn(null);
+                }
                 if (rs.Value == null)
                 {
                     if (retType is not IrVoidType && retType is not IrResultType)
@@ -3726,6 +3940,11 @@ internal sealed class TypeResolver(
             diag.Warn(Codes.ShadowedVariable, ctx.File, ls.Span,
                 $"'{ls.Name}' shadows a variable of the same name from an enclosing scope",
                 ["rename this one if the outer variable was meant to stay reachable"]);
+        else if (_processStateNames.Contains(ls.Name))
+            diag.Warn(Codes.ShadowedVariable, ctx.File, ls.Span,
+                $"'{ls.Name}' shadows the process variable of the same name",
+                ["writes here change this local, not the state the other threads read",
+                 "rename this one if the process variable was meant to stay reachable"]);
         WarnManagedFixedArray(type, $"'{ls.Name}'", ctx, ls.Span);
         ctx.Locals.Declare(ls.Name, type);
         return new IrDeclVar(ls.Name, type, init);
@@ -3777,8 +3996,6 @@ internal sealed class TypeResolver(
                 var inner = ResolveExpr(ce.Value, ctx);
                 var to = ResolveType(ce.TargetType);
 
-                // as should be a static call to the destination class's as operator if it exists,
-                // otherwise a normal cast
                 if (!SameType(inner.Type, to) && ClassNameOf(to) is { } destCls
                     && FindAsOperator(destCls, inner.Type) is { } asOp)
                 {
@@ -3799,7 +4016,7 @@ internal sealed class TypeResolver(
                 }
 
                 if (opnd.Type.IsError) return Poison(pf.Span);
-                if (opnd is not (IrVar or IrFieldLoad or IrIndex or IrDeref))
+                if (opnd is not (IrVar or IrGlobal or IrFieldLoad or IrIndex or IrDeref))
                     diag.Error(Codes.NotAnLvalue, ctx.File, pf.Span,
                         $"'{pf.Op.Sym()}' needs a variable, field, or element to modify");
                 else if (opnd.Type is IrPtrType)
@@ -3834,7 +4051,7 @@ internal sealed class TypeResolver(
                     diag.Error(Codes.UnsafeRequired, ctx.File, ao.Span, "address-of '&' requires an 'unsafe' block");
                 var target = ResolveExpr(ao.Target, ctx);
                 if (target.Type.IsError) return Poison(ao.Span);
-                if (target is not (IrVar or IrFieldLoad or IrIndex or IrDeref or IrSelfExpr))
+                if (target is not (IrVar or IrGlobal or IrFieldLoad or IrIndex or IrDeref or IrSelfExpr))
                     diag.Error(Codes.NotAnLvalue, ctx.File, ao.Span,
                         "address-of '&' needs a variable, field, or element; this operand has no address",
                         ["bind the value to a local first, then take its address"]);
@@ -4236,6 +4453,11 @@ internal sealed class TypeResolver(
 
         var local = ctx.Locals.Lookup(name);
         if (local != null) return new IrVar(name, local, ctx.Locals.IsRef(name));
+        if (_processState.TryGetValue(name, out var slot))
+        {
+            ReportPendingProcessState(name, ctx, ie.Span);
+            return slot;
+        }
 
         if (ClassInScope(name)) return new IrVar(name, new IrClassRef(name));
 
@@ -4510,6 +4732,12 @@ internal sealed class TypeResolver(
             if (calleeLocal is IrFuncPtrType localFp)
                 return ResolveIndirectCallArgs(new IrVar(id.Name, localFp, ctx.Locals.IsRef(id.Name)), localFp, args, ctx, ce.Span, ce.Args);
 
+            if (_processState.TryGetValue(id.Name, out var calleeState) && calleeState.T is IrFuncPtrType stateFp)
+            {
+                ReportPendingProcessState(id.Name, ctx, ce.Span);
+                return ResolveIndirectCallArgs(calleeState, stateFp, args, ctx, ce.Span, ce.Args);
+            }
+
             if (TryResolveArcIntrinsic(id.Name, args, ctx, ce.Span) is { } arc) return arc;
 
             if (ResolveFuncTemplate(id.Name, ctx.File, out var collidingFiles) is { } tmpl)
@@ -4595,7 +4823,22 @@ internal sealed class TypeResolver(
                         Mangler.Method(ctx.CurClass, id.Name, [], false), null, ctx, ce);
                 }
             }
-
+            if (ctx.Locals.Lookup(id.Name) is { } shadowingLocal)
+            {
+                diag.Error(Codes.UndefinedMethod, ctx.File, ce.Span,
+                    $"'{id.Name}' is a '{Describe(shadowingLocal)}', which cannot be called",
+                    ["only a function, or a variable of function-pointer type, can be called",
+                     $"a callable variable is declared as 'let func(<params>) -> <ret> {id.Name} = ...;'"]);
+                return new IrStaticCall(Mangler.FreeFunc(id.Name, [], false, false, false), IrType.Error, args);
+            }
+            if (_processState.TryGetValue(id.Name, out var stateVar))
+            {
+                diag.Error(Codes.UndefinedMethod, ctx.File, ce.Span,
+                    $"process variable '{Mangler.DisplayName(id.Name).Split('.')[^1]}' is a " +
+                    $"'{Describe(stateVar.T)}', which cannot be called",
+                    ["only a function, or a variable of function-pointer type, can be called"]);
+                return new IrStaticCall(Mangler.FreeFunc(id.Name, [], false, false, false), IrType.Error, args);
+            }
             if (sym.LookupFreeFunc(id.Name) != null)
                 diag.Error(Codes.UndefinedMethod, ctx.File, ce.Span, $"'{id.Name}' is not in scope; import its module");
             else if (!ReportNotVisible("function", id.Name, ctx.File, ce.Span)

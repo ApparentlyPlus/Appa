@@ -296,7 +296,7 @@ public class MultiFileTests
                 body.AppendLine($"class C{i} {{ public int n; }}");
                 body.AppendLine($"enum E{i} {{ A{i}, B{i} }}");
                 body.AppendLine($"class Box{i}[T] {{ public T v; }}");
-                body.AppendLine($"public int func F{i}() {{");
+                body.AppendLine($"int func F{i}() {{");
                 body.AppendLine($"    let C{i} own = new C{i}(); own.n = {i};");
                 body.AppendLine($"    let E{i} e = E{i}.A{i};");
                 body.AppendLine($"    let Box{i}[C{i}] b = new Box{i}[C{i}]();");
@@ -356,7 +356,7 @@ public class MultiFileTests
         var files = shape.Split('-')[0] switch
         {
             "imported" => (("src/lib.g", widget), ("src/main.g", $"import \"src/lib.g\";\n{realm}\n")),
-            "own" => (("src/lib.g", "public int func Unused() { return 1; }"),
+            "own" => (("src/lib.g", "int func Unused() { return 1; }"),
                       ("src/main.g", $"{widget}\n{realm}\n")),
             _ => (("src/lib.g", widget), ("src/main.g", $"{realm}\n")),
         };
@@ -384,7 +384,7 @@ public class MultiFileTests
         [
             // Resolved first and file-local, so it must not answer for the name that lib.g exports.
             ("src/aaa.g", "private int func Helper() { return 0; }"),
-            ("src/lib.g", "public int func Helper() { return 1; }"),
+            ("src/lib.g", "int func Helper() { return 1; }"),
             ("src/main.g", "import \"src/aaa.g\";\nimport \"src/lib.g\";\n" +
                            $"realm userspace {{ {mark}int func Helper() {{ return 2; }} entry func Main() {{ }} }}\n"),
         ], Expect.Any);
