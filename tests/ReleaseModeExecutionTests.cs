@@ -122,7 +122,7 @@ public class ReleaseModeExecutionTests
     };
 
     [Fact]
-    public void ReleaseComputesWhatDebugComputes()
+    public void ReleaseMatchesDebug()
     {
         var gata = HostedRun.FindGataCheckout();
         var cc = HostedRun.FindCompilerAcceptingReleaseFlags();

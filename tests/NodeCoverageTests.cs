@@ -20,7 +20,7 @@ public class NodeCoverageTests
         "NodeCoverage's guards are [Conditional(\"DEBUG\")] and compile out of a Release build";
 
     [Fact]
-    public void InertNodesArePermitted()
+    public void InertNodesOk()
     {
         if (!GuardsActive) { Assert.Skip(NotInRelease); return; }
 
@@ -33,7 +33,7 @@ public class NodeCoverageTests
     }
 
     [Fact]
-    public void NodesWithChildrenAreRejected()
+    public void ChildNodesRejected()
     {
         if (!GuardsActive) { Assert.Skip(NotInRelease); return; }
 
@@ -47,7 +47,7 @@ public class NodeCoverageTests
     }
 
     [Fact]
-    public void RejectionExplainsTheConsequence()
+    public void RejectionExplains()
     {
         if (!GuardsActive) { Assert.Skip(NotInRelease); return; }
 

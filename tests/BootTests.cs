@@ -103,7 +103,7 @@ public class BootTests(BootFixture fixture)
     #endregion
 
     [Fact]
-    public async Task GatOSImageBootsAndProgramMarkersAppear()
+    public async Task ImageBoots()
     {
         if (!ToolchainProbe.HasGatOSToolchain())
         {
@@ -148,7 +148,7 @@ public class BootTests(BootFixture fixture)
     /// them to print the same thing.
     /// </summary>
     [Fact]
-    public async Task ReleaseImageBootsAndPrintsWhatDebugPrints()
+    public async Task ReleaseImageMatchesDebug()
     {
         if (!ToolchainProbe.HasGatOSToolchain())
         {

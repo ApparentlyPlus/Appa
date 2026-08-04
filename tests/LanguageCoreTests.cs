@@ -10,7 +10,7 @@ public class LanguageCoreTests
 {
     [Theory]
     [MemberData(nameof(GoodPrograms))]
-    public void GoodProgramTranspilesCleanly(string name, string src)
+    public void GoodProgramTranspiles(string name, string src)
     {
         var (diag, module) = SingleFileCompile.Check(src);
         Assert.False(diag.HasErrors, $"{name} should transpile with no errors but got: " +
@@ -273,7 +273,7 @@ public class LanguageCoreTests
 
     [Theory]
     [MemberData(nameof(BadPrograms))]
-    public void BadProgramFailsWithExpectedCode(string name, string expectedCode, string src)
+    public void BadProgramCode(string name, string expectedCode, string src)
     {
         var (diag, _) = SingleFileCompile.Check(src);
         Assert.True(diag.HasErrors, $"{name} expected {expectedCode} but produced no errors");
@@ -739,7 +739,7 @@ public class LanguageCoreTests
 
     [Theory]
     [MemberData(nameof(WarnPrograms))]
-    public void WarnProgramProducesExpectedCode(string name, string expectedCode, string src)
+    public void WarnProgramCode(string name, string expectedCode, string src)
     {
         var (diag, _) = SingleFileCompile.Check(src);
         var codes = diag.All.Select(d => d.Code).ToList();

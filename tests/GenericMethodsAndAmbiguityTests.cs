@@ -54,7 +54,7 @@ public class GenericMethodsAndAmbiguityTests
     #region Generic methods
 
     [Fact]
-    public void GenericModuleCompilesPerInstance()
+    public void ModulePerInstance()
     {
         AssertClean("""
             module Foo {
@@ -68,7 +68,7 @@ public class GenericMethodsAndAmbiguityTests
     }
 
     [Fact]
-    public void GenericStaticClassMethodCompiles()
+    public void StaticMethodCompiles()
     {
         AssertClean("""
             class Foo {
@@ -86,7 +86,7 @@ public class GenericMethodsAndAmbiguityTests
     /// static/module case.
     /// </summary>
     [Fact]
-    public void GenericInstanceMethodCompiles()
+    public void InstanceMethodCompiles()
     {
         var (diag, module) = SingleFileCompile.Check("""
             class Box {
@@ -114,7 +114,7 @@ public class GenericMethodsAndAmbiguityTests
     }
 
     [Fact]
-    public void GenericModuleCallsItsSibling()
+    public void ModuleCallsSibling()
     {
         AssertClean("""
             module Foo {
@@ -132,7 +132,7 @@ public class GenericMethodsAndAmbiguityTests
     #region AmbiguousCall (G069)
 
     [Fact]
-    public void FreeFuncVsSiblingIsAmbiguous()
+    public void FreeFuncVsSiblingAmbiguous()
     {
         AssertError(Codes.AmbiguousCall, """
             T func Min[T](T a, T b) { if (a < b) { return a; } return b; }
@@ -144,7 +144,7 @@ public class GenericMethodsAndAmbiguityTests
     }
 
     [Fact]
-    public void ModuleQualifierResolvesAmbiguity()
+    public void ModuleQualifierResolves()
     {
         AssertClean("""
             T func Min[T](T a, T b) { if (a < b) { return a; } return b; }
@@ -156,7 +156,7 @@ public class GenericMethodsAndAmbiguityTests
     }
 
     [Fact]
-    public void FileNameQualifierResolvesAmbiguity()
+    public void FileQualifierResolves()
     {
         AssertClean("""
             T func Min[T](T a, T b) { if (a < b) { return a; } return b; }
@@ -168,7 +168,7 @@ public class GenericMethodsAndAmbiguityTests
     }
 
     [Fact]
-    public void GenericInTwoFilesIsAmbiguous()
+    public void TwoFilesAmbiguous()
     {
         var (diag, _) = CheckMulti(
             ("a.g", "T func Pick[T](T a, T b) { return a; }"),
@@ -178,7 +178,7 @@ public class GenericMethodsAndAmbiguityTests
     }
 
     [Fact]
-    public void FileQualifierResolvesCollision()
+    public void FileQualifierBeatsCollision()
     {
         var (diag, _) = CheckMulti(
             ("a.g", "T func Pick[T](T a, T b) { return a; }"),
@@ -193,7 +193,7 @@ public class GenericMethodsAndAmbiguityTests
     #region Privacy/scope gating for generic templates
 
     [Fact]
-    public void PrivateGenericsDoNotClobber()
+    public void PrivateGenericsDistinct()
     {
         var (diag, module) = CheckMulti(
             ("a.g", """

@@ -37,7 +37,7 @@ public class CapabilityScanTests
     /// The control: a clock read on the path from the entry point is found.
     /// </summary>
     [Fact]
-    public void AClockReadFromTheEntryPointDeclaresTime() =>
+    public void EntryClockDeclaresTime() =>
         Assert.True(Scan("realm kernel { entry func Main() { let int64 t = _env_time_ns(); } }").Time);
 
     /// <summary>
@@ -47,7 +47,7 @@ public class CapabilityScanTests
     /// answered 0 instead of the uptime, booting cleanly the whole time.
     /// </summary>
     [Fact]
-    public void AClockReadInADestructorStillDeclaresTime() =>
+    public void DestructorClockDeclaresTime() =>
         Assert.True(Scan("""
             class Logger {
                 public int id;
@@ -62,7 +62,7 @@ public class CapabilityScanTests
     /// so this pins that the destructor is a real walk root, not a single-level special case.
     /// </summary>
     [Fact]
-    public void ADestructorReachesCapabilitiesThroughTheFunctionsItCalls() =>
+    public void DestructorReachesCallees() =>
         Assert.True(Scan("""
             int func ReadKey() { return _env_read(); }
             class Prompt {
@@ -78,7 +78,7 @@ public class CapabilityScanTests
     /// be passing these tests by turning everything on.
     /// </summary>
     [Fact]
-    public void AProgramUsingNeitherDeclaresNeither()
+    public void NeitherUsedNeitherDeclared()
     {
         var caps = Scan("""
             class Plain {
@@ -110,7 +110,7 @@ public class CapabilityScanTests
     /// Reference counts go atomic exactly when the program declares a process.
     /// </summary>
     [Fact]
-    public void RefCountsAreAtomicOnlyWhereAProcessExists()
+    public void AtomicOnlyWithProcess()
     {
         Assert.Contains("#define GATA_RC_ATOMIC 0",
             SharedHeaderFor("class C { public int v; func _init() { self.v = 1; } } " +
@@ -127,7 +127,7 @@ public class CapabilityScanTests
     /// The definition is guarded so a '-D' on the command line wins.
     /// </summary>
     [Fact]
-    public void TheCommandLineCanForceAtomicRefCounts()
+    public void CliForcesAtomic()
     {
         string header = SharedHeaderFor(
             "class C { public int v; func _init() { self.v = 1; } } " +
@@ -143,7 +143,7 @@ public class CapabilityScanTests
     /// And the toolchain does pass it whenever it resolves threads on, so the two halves meet.
     /// </summary>
     [Fact]
-    public void TheToolchainPassesTheAtomicDefineWithThreads()
+    public void ThreadsPassAtomicDefine()
     {
         var withThreads = Scan(
             "realm kernel { background process P { thread T { entry func Run() { } } } entry func Main() { } }");

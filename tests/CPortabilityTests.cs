@@ -51,7 +51,7 @@ public class CPortabilityTests
 
     [Theory]
     [MemberData(nameof(Matrix))]
-    public void EmittedCCompilesCleanUnderWerror(string cc, string opt, string std)
+    public void CompilesUnderWerror(string cc, string opt, string std)
     {
         var gata = HostedRun.FindGataCheckout();
         if (gata == null) return;

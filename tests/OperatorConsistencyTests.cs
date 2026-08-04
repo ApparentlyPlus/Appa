@@ -44,7 +44,7 @@ public class OperatorConsistencyTests
     /// identity.
     /// </summary>
     [Fact]
-    public void NotEqDerivesFromDeclaredEq()
+    public void NotEqDerivesFromEq()
     {
         var (diag, module) = SingleFileCompile.Check("""
             class Box {
@@ -66,7 +66,7 @@ public class OperatorConsistencyTests
     }
 
     [Fact]
-    public void EqDerivesFromDeclaredNotEq()
+    public void EqDerivesFromNotEq()
     {
         var (diag, module) = SingleFileCompile.Check("""
             class Box {
@@ -88,7 +88,7 @@ public class OperatorConsistencyTests
     }
 
     [Fact]
-    public void DeclaringBothUsesEachDirectly()
+    public void BothUsedDirectly()
     {
         var (diag, module) = SingleFileCompile.Check("""
             class Box {
@@ -111,7 +111,7 @@ public class OperatorConsistencyTests
     }
 
     [Fact]
-    public void NoDeclarationKeepsIdentity()
+    public void NoneKeepsIdentity()
     {
         var (diag, module) = SingleFileCompile.Check("""
             class Box { public int v; }
@@ -130,7 +130,7 @@ public class OperatorConsistencyTests
     }
 
     [Fact]
-    public void DerivedNotEqChecksArgumentType()
+    public void DerivedNotEqChecksArg()
     {
         AssertError(Codes.ArgTypeMismatch, """
             class Box {
@@ -157,7 +157,7 @@ public class OperatorConsistencyTests
     [InlineData(">")]
     [InlineData("<=")]
     [InlineData(">=")]
-    public void ComparisonNonBoolReturnIsRejected(string op)
+    public void NonBoolComparisonRejected(string op)
     {
         AssertError(Codes.TypeMismatch, $$"""
             class Box {
@@ -168,7 +168,7 @@ public class OperatorConsistencyTests
     }
 
     [Fact]
-    public void ComparisonReturnDefaultsToBool()
+    public void ComparisonDefaultsToBool()
     {
         AssertClean("""
             class Box {
@@ -191,7 +191,7 @@ public class OperatorConsistencyTests
     [InlineData("public operator func !() { return self.v == 0; }", "let bool r = !a;")]
     [InlineData("public operator Box func ~() { return new Box(); }", "let Box r = ~a;")]
     [InlineData("public operator Box func -() { return new Box(); }", "let Box r = -a;")]
-    public void UnaryOperatorOverloadDispatches(string decl, string use)
+    public void UnaryOverloadDispatches(string decl, string use)
     {
         var (diag, module) = SingleFileCompile.Check($$"""
             class Box {
@@ -250,7 +250,7 @@ public class OperatorConsistencyTests
     [InlineData("operator int func !() { return 1; }")]
     [InlineData("operator int func ++() { return 1; }")]
     [InlineData("operator int func --() { return 1; }")]
-    public void UnaryOverloadBadReturnIsRejected(string decl)
+    public void UnaryBadReturnRejected(string decl)
     {
         AssertError(Codes.TypeMismatch, $$"""
             class Box {
@@ -264,7 +264,7 @@ public class OperatorConsistencyTests
     [InlineData("operator func !(Box other) { return true; }")]
     [InlineData("operator Box func ~(Box other) { return other; }")]
     [InlineData("operator func ++(Box other) { }")]
-    public void UnaryOverloadWithParamIsRejected(string decl)
+    public void UnaryWithParamRejected(string decl)
     {
         AssertError(Codes.WrongArgCount, $$"""
             class Box {
@@ -275,7 +275,7 @@ public class OperatorConsistencyTests
     }
 
     [Fact]
-    public void UnaryWithoutOverloadIsRejected()
+    public void UnaryWithoutOverloadRejected()
     {
         AssertError(Codes.TypeMismatch, """
             class Box { public int v; }
@@ -294,7 +294,7 @@ public class OperatorConsistencyTests
     [InlineData("let Box c = a + b;")]
     [InlineData("let bool e = a == b;")]
     [InlineData("let bool n = a != b;")] // derived from the private '==' - equally private
-    public void PrivateOperatorIsRejectedOutside(string use)
+    public void PrivateOperatorRejectedOutside(string use)
     {
         AssertError(Codes.PrivateMember, $$"""
             class Box {
@@ -311,7 +311,7 @@ public class OperatorConsistencyTests
     }
 
     [Fact]
-    public void PrivateIndexIsRejectedOutside()
+    public void PrivateIndexRejectedOutside()
     {
         AssertError(Codes.PrivateMember, """
             class Box {
@@ -326,7 +326,7 @@ public class OperatorConsistencyTests
     }
 
     [Fact]
-    public void PrivateAsIsRejectedOutside()
+    public void PrivateAsRejectedOutside()
     {
         AssertError(Codes.PrivateMember, """
             class Wrapper {
@@ -356,7 +356,7 @@ public class OperatorConsistencyTests
     }
 
     [Fact]
-    public void StaticOnOperatorIsRejected()
+    public void StaticOperatorRejected()
     {
         AssertError(Codes.BadDeclHeader, """
             class Box {

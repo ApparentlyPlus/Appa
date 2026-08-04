@@ -9,7 +9,7 @@ using Appa;
 public class LexerTests
 {
     [Fact]
-    public void AlwaysEndsWithEof()
+    public void EndsWithEof()
     {
         var tokens = SingleFileCompile.Tokenize("let x = 1;");
         Assert.Equal(TK.EOF, tokens[^1].Kind);
@@ -74,7 +74,7 @@ public class LexerTests
     [InlineData("ref", nameof(TK.Ref))]
     [InlineData("debug", nameof(TK.Debug))]
     [InlineData("panic", nameof(TK.Panic))]
-    public void KeywordsMapToTheirTokenKind(string src, string expectedKind)
+    public void KeywordsMapToKinds(string src, string expectedKind)
     {
         var tokens = SingleFileCompile.Tokenize(src);
         Assert.Equal(Enum.Parse<TK>(expectedKind), tokens[0].Kind);
@@ -89,7 +89,7 @@ public class LexerTests
     [InlineData("sbyte")]
     [InlineData("usize")]
     [InlineData("uintptr")]
-    public void WidthExplicitPrimitivesLexAsTPrim(string spelling)
+    public void WidthPrimitivesLexAsTPrim(string spelling)
     {
         var tokens = SingleFileCompile.Tokenize(spelling);
         Assert.Equal(TK.TPrim, tokens[0].Kind);
@@ -99,7 +99,7 @@ public class LexerTests
     [Theory]
     [InlineData("true")]
     [InlineData("false")]
-    public void BoolLiteralsLexAsBoolLit(string spelling)
+    public void BoolLiterals(string spelling)
     {
         var tokens = SingleFileCompile.Tokenize(spelling);
         Assert.Equal(TK.BoolLit, tokens[0].Kind);
@@ -107,7 +107,7 @@ public class LexerTests
     }
 
     [Fact]
-    public void PlainIdentifierLexesAsIdent()
+    public void PlainIdent()
     {
         var tokens = SingleFileCompile.Tokenize("myVariable_1");
         Assert.Equal(TK.Ident, tokens[0].Kind);
@@ -136,7 +136,7 @@ public class LexerTests
     [InlineData("->", nameof(TK.Arrow), 2)]
     [InlineData("<<", nameof(TK.Shl), 2)]
     [InlineData(">>", nameof(TK.Shr), 2)]
-    public void MultiCharOperatorsLexAsOneToken(string src, string expectedKind, int length)
+    public void MultiCharOperators(string src, string expectedKind, int length)
     {
         var tokens = SingleFileCompile.Tokenize(src);
         Assert.Equal(Enum.Parse<TK>(expectedKind), tokens[0].Kind);
@@ -155,7 +155,7 @@ public class LexerTests
     [InlineData(":", nameof(TK.Colon))]
     [InlineData(".", nameof(TK.Dot))]
     [InlineData("=", nameof(TK.Eq))]
-    public void PunctuationLexesToItsOwnKind(string src, string expectedKind)
+    public void Punctuation(string src, string expectedKind)
     {
         var tokens = SingleFileCompile.Tokenize(src);
         Assert.Equal(Enum.Parse<TK>(expectedKind), tokens[0].Kind);
@@ -164,7 +164,7 @@ public class LexerTests
     [Theory]
     [InlineData("~")]
     [InlineData("?")]
-    public void UnmatchedSingleCharsLexAsPunct(string src)
+    public void UnmatchedSingleChars(string src)
     {
         var tokens = SingleFileCompile.Tokenize(src);
         Assert.Equal(TK.Punct, tokens[0].Kind);
@@ -178,7 +178,7 @@ public class LexerTests
     [InlineData("3.14", nameof(TK.FloatLit), "3.14")]
     [InlineData("1e9", nameof(TK.FloatLit), "1e9")]
     [InlineData("1.5e-3f", nameof(TK.FloatLit), "1.5e-3f")]
-    public void NumericLiteralsPreserveFullLexeme(string src, string expectedKind, string value)
+    public void NumericLexemePreserved(string src, string expectedKind, string value)
     {
         var tokens = SingleFileCompile.Tokenize(src);
         Assert.Equal(Enum.Parse<TK>(expectedKind), tokens[0].Kind);
@@ -186,7 +186,7 @@ public class LexerTests
     }
 
     [Fact]
-    public void StringLiteralLexesWithQuotes()
+    public void StringKeepsQuotes()
     {
         var tokens = SingleFileCompile.Tokenize("\"hello\"");
         Assert.Equal(TK.StrLit, tokens[0].Kind);
@@ -197,14 +197,14 @@ public class LexerTests
     [InlineData("\"a\\nb\"")]
     [InlineData("\"tab\\ttab\"")]
     [InlineData("\"quote\\\"quote\"")]
-    public void KnownStringEscapesAreAccepted(string src)
+    public void KnownEscapesOk(string src)
     {
         var tokens = SingleFileCompile.Tokenize(src);
         Assert.Equal(TK.StrLit, tokens[0].Kind);
     }
 
     [Fact]
-    public void UnrecognizedStringEscapeThrows()
+    public void BadEscapeThrows()
     {
         Assert.Throws<ParseException>(() => SingleFileCompile.Tokenize("\"bad\\qescape\""));
     }
@@ -216,7 +216,7 @@ public class LexerTests
     }
 
     [Fact]
-    public void CharLiteralDecodesToCodepoint()
+    public void CharDecodesToCodepoint()
     {
         var tokens = SingleFileCompile.Tokenize("'a'");
         Assert.Equal(TK.CharLit, tokens[0].Kind);
@@ -230,7 +230,7 @@ public class LexerTests
     }
 
     [Fact]
-    public void InterpolationSplitsIntoTokens()
+    public void InterpolationSplits()
     {
         var tokens = SingleFileCompile.Tokenize("$\"count={n}\"");
         Assert.Equal(TK.InterpStrStart, tokens[0].Kind);
@@ -246,7 +246,7 @@ public class LexerTests
     }
 
     [Fact]
-    public void DoubledBracesAreLiteral()
+    public void DoubledBracesLiteral()
     {
         var tokens = SingleFileCompile.Tokenize("$\"{{literal}}\"");
         Assert.Equal(TK.InterpStrStart, tokens[0].Kind);
@@ -261,7 +261,7 @@ public class LexerTests
     /// the lexer's.
     /// </summary>
     [Fact]
-    public void EscapeInLiteralSegmentStaysRaw()
+    public void LiteralSegmentEscapeRaw()
     {
         var tokens = SingleFileCompile.Tokenize("$\"line1\\nline2\"");
         Assert.Equal(TK.StrLit, tokens[1].Kind);
@@ -269,7 +269,7 @@ public class LexerTests
     }
 
     [Fact]
-    public void BadEscapeInInterpolationThrows()
+    public void BadInterpEscapeThrows()
     {
         Assert.Throws<ParseException>(() => SingleFileCompile.Tokenize("$\"bad\\qescape\""));
     }
@@ -280,7 +280,7 @@ public class LexerTests
     [InlineData("@extern", nameof(TK.AtExtern), "@extern")]
     [InlineData("@environment", nameof(TK.AtEnvironment), "@environment")]
     [InlineData("@keep", nameof(TK.AtKeep), "@keep")]
-    public void AnnotationsLexWithTheirArgument(string src, string expectedKind, string value)
+    public void AnnotationsCarryArgs(string src, string expectedKind, string value)
     {
         var tokens = SingleFileCompile.Tokenize(src);
         Assert.Equal(Enum.Parse<TK>(expectedKind), tokens[0].Kind);
@@ -298,7 +298,7 @@ public class LexerTests
     /// string or comment within the block do not affect the balance count.
     /// </summary>
     [Fact]
-    public void NativeBlockCapturesBodyVerbatim()
+    public void NativeBlockVerbatim()
     {
         var tokens = SingleFileCompile.Tokenize("native { int x = 1; /* { */ char c = '{'; }");
         Assert.Equal(TK.NativeContent, tokens[0].Kind);
@@ -310,7 +310,7 @@ public class LexerTests
     /// separated by the unit-separator sentinel.
     /// </summary>
     [Fact]
-    public void NativeTypeDeclPacksNameAndBody()
+    public void NativeTypeDeclPacked()
     {
         var tokens = SingleFileCompile.Tokenize("native type Foo { int x; }");
         Assert.Equal(TK.NativeTypeDecl, tokens[0].Kind);
@@ -321,7 +321,7 @@ public class LexerTests
     /// fields { ... } is captured verbatim as one Fields token, same shape as a native block.
     /// </summary>
     [Fact]
-    public void FieldsBlockCapturesBodyVerbatim()
+    public void FieldsBlockVerbatim()
     {
         var tokens = SingleFileCompile.Tokenize("fields { int x; }");
         Assert.Equal(TK.Fields, tokens[0].Kind);

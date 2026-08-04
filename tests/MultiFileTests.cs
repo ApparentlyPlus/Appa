@@ -118,7 +118,7 @@ public class MultiFileTests
     /// files that fail to parse all have to come back as diagnostics.
     /// </summary>
     [Fact]
-    public void NoProjectCrashesTheCompiler()
+    public void NoProjectCrashesCompiler()
     {
         var fails = new Failures();
         foreach (var c in MultiFileCorpus.All)
@@ -131,7 +131,7 @@ public class MultiFileTests
     }
 
     [Fact]
-    public void MultiFileExpectationsHold()
+    public void ExpectationsHold()
     {
         var fails = new Failures();
         foreach (var c in MultiFileCorpus.All)
@@ -140,7 +140,7 @@ public class MultiFileTests
 
             using var work = TempDir.Create("appa-multifile-");
             var r = Build(c, work);
-            if (r.Crash != null) continue; // owned by NoProjectCrashesTheCompiler
+            if (r.Crash != null) continue; // owned by NoProjectCrashesCompiler
 
             var errors = r.Diag!.All.Where(d => d.Severity == Severity.Error).ToList();
             var got = errors.Count == 0 ? "no errors" : string.Join("; ", errors.Select(e => $"{e.Code} {e.Message}"));
@@ -201,7 +201,7 @@ public class MultiFileTests
     /// across a realm boundary: each emits fine alone and fails together.
     /// </summary>
     [Fact]
-    public void EmittedUnitsCompileAndLink()
+    public void UnitsCompileAndLink()
     {
         var cc = FindCompiler();
         if (cc == null)
@@ -254,7 +254,7 @@ public class MultiFileTests
     /// a cyclic one gets only no-crash, since a call across it may not resolve.
     /// </summary>
     [Fact]
-    public void RandomImportGraphsBuildCleanly()
+    public void RandomImportGraphsBuild()
     {
         var fails = new Failures();
 
@@ -335,7 +335,7 @@ public class MultiFileTests
     [InlineData("own-file-marked", false)]
     [InlineData("not-imported-unmarked", false)]
     [InlineData("not-imported-marked", true)]
-    public void ShadowingAcrossFilesIsExplicit(string shape, bool rejected)
+    public void CrossFileShadowingExplicit(string shape, bool rejected)
     {
         string mark = shape.EndsWith("-marked", StringComparison.Ordinal) ? "@shadows " : "";
         string realm = $"realm userspace {{ {mark}class Widget {{ public int m; }} entry func Main() {{ }} }}";
@@ -365,7 +365,7 @@ public class MultiFileTests
     [Theory]
     [InlineData("unmarked", true)]
     [InlineData("marked", false)]
-    public void ShadowingSeesEveryDeclaringFile(string shape, bool rejected)
+    public void ShadowingSeesAllFiles(string shape, bool rejected)
     {
         string mark = shape == "marked" ? "@shadows " : "";
         var c = new MultiFileCase($"shadow/masked-{shape}",
@@ -389,7 +389,7 @@ public class MultiFileTests
     /// past rather than reported as the thing being displaced.
     /// </summary>
     [Fact]
-    public void PrivateInAnotherFileIsNotShadowed()
+    public void PrivateNotShadowed()
     {
         var c = new MultiFileCase("shadow/private-elsewhere",
         [

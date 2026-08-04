@@ -74,7 +74,7 @@ public class ArcLifetimeTests
         """;
 
     [Fact]
-    public void EveryFeaturePathBalancesItsCensus()
+    public void CensusBalances()
     {
         var gata = HostedRun.FindGataCheckout();
         var cc = HostedRun.FindCompiler();
@@ -131,7 +131,7 @@ public class ArcLifetimeTests
     /// Owned locals are released in LIFO order, the reverse of declaration.
     /// </summary>
     [Fact]
-    public void OwnedLocalsAreReleasedInReverseDeclarationOrder()
+    public void ReverseReleaseOrder()
     {
         var gata = HostedRun.FindGataCheckout();
         var cc = HostedRun.FindCompiler();
@@ -203,7 +203,7 @@ public class ArcLifetimeTests
     /// either way.
     /// </summary>
     [Fact]
-    public void IteratingAFixedArrayOfManagedElementsDoesNotReleaseThem()
+    public void FixedArrayIterationHoldsOn()
     {
         var gata = HostedRun.FindGataCheckout();
         var cc = HostedRun.FindCompiler();
@@ -249,7 +249,7 @@ public class ArcLifetimeTests
     /// A field's inline initialiser must actually reach the object.
     /// </summary>
     [Fact]
-    public void InlineFieldInitialisersReachTheObject()
+    public void InlineFieldInit()
     {
         var gata = HostedRun.FindGataCheckout();
         var cc = HostedRun.FindCompiler();

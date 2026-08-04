@@ -12,7 +12,7 @@ public class SanitizerCoverageTests
     /// --version silently disarmed every execution test on exactly those machines.
     /// </summary>
     [Fact]
-    public void TheHarnessPicksASanitizingCompilerWhenOneExists()
+    public void HarnessPicksSanitizer()
     {
         var chosen = HostedRun.FindCompiler();
         if (chosen == null) { Assert.Skip("no host C compiler"); return; }
@@ -39,7 +39,7 @@ public class SanitizerCoverageTests
     /// of green Gata programs would reveal.
     /// </summary>
     [Fact]
-    public void TheSanitizerActuallyReportsAUseAfterFree()
+    public void SanitizerReportsUseAfterFree()
     {
         var cc = HostedRun.FindCompiler();
         if (cc == null || !HostedRun.SupportsSanitizers(cc)) { Assert.Skip("no sanitizing compiler"); return; }

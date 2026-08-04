@@ -63,7 +63,7 @@ public class UnionEqualityTests
     private static readonly int[] Classes = [0, 1, 2, 3, 4, 5, 6, 7, 8, 5];
 
     [Fact]
-    public void EqualityMatrixIsExact()
+    public void EqualityMatrix()
     {
         var (gata, cc) = Env();
         if (gata == null || cc == null) return;
@@ -84,7 +84,7 @@ public class UnionEqualityTests
     /// surfacing only as a container lookup that never finds anything.
     /// </summary>
     [Fact]
-    public void ClassPayloadUsesItsOwnEquality()
+    public void ClassPayloadUsesOwnEquality()
     {
         var (gata, cc) = Env();
         if (gata == null || cc == null) return;
@@ -162,7 +162,7 @@ public class UnionEqualityTests
     /// does with a sum type and exactly what did not compile before.
     /// </summary>
     [Fact]
-    public void UnionsWorkInEqualityBasedListOps()
+    public void UnionsWorkInListOps()
     {
         var (gata, cc) = Env();
         if (gata == null || cc == null) return;
@@ -202,7 +202,7 @@ public class UnionEqualityTests
     /// generated function receives a copy of a union that owns a reference.
     /// </summary>
     [Fact]
-    public void ComparingKeepsOwnershipIntact()
+    public void ComparingKeepsOwnership()
     {
         var (gata, cc) = Env();
         if (gata == null || cc == null) return;
@@ -250,7 +250,7 @@ public class UnionEqualityTests
     /// warning on the pinned gcc 7, fatal on anything newer.
     /// </summary>
     [Fact]
-    public void EqualityBodyIsConfinedToItsRealm()
+    public void EqualityBodyStaysInRealm()
     {
         var (diag, module) = SingleFileCompile.Check("""
             realm kernel { entry func Main() { } }

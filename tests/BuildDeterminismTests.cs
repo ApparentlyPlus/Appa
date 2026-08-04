@@ -110,7 +110,7 @@ public class BuildDeterminismTests
     }
 
     [Fact]
-    public void TwoProcessesEmitByteIdenticalC()
+    public void ByteIdenticalOutput()
     {
         var gata = HostedRun.FindGataCheckout();
         if (gata == null) { Assert.Skip("no Gata checkout"); return; }

@@ -171,7 +171,7 @@ public class HostedEndToEndTests
         "qual=46 qt=9\n";
 
     [Fact]
-    public void StdlibProgramCompilesAndRuns()
+    public void StdlibProgramRuns()
     {
         var gata = FindGataCheckout();
         if (gata == null) { Assert.Skip("no sibling Gata checkout found; skipping hosted end-to-end"); return; }

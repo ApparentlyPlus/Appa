@@ -117,7 +117,7 @@ public class ManagedUnionTests
         """;
 
     [Fact]
-    public void DestructionOrderIsExact()
+    public void DestructionOrder()
     {
         var (gata, cc) = Environment();
         if (gata == null || cc == null) return;
@@ -206,7 +206,7 @@ public class ManagedUnionTests
         """;
 
     [Fact]
-    public void ControlFlowPathsReleaseOnce()
+    public void PathsReleaseOnce()
     {
         var (gata, cc) = Environment();
         if (gata == null || cc == null) return;
@@ -286,7 +286,7 @@ public class ManagedUnionTests
     /// Monomorphizer picks the field's type and the Emitter, passes later, must classify it.
     /// </summary>
     [Fact]
-    public void GenericOverManagedUnionReleases()
+    public void GenericReleases()
     {
         var (gata, cc) = Environment();
         if (gata == null || cc == null) return;
@@ -321,7 +321,7 @@ public class ManagedUnionTests
     /// or link and leave one file's unions uncounted.
     /// </summary>
     [Fact]
-    public void ManagedUnionCrossesFileBoundaries()
+    public void CrossesFiles()
     {
         var (gata, cc) = Environment();
         if (gata == null || cc == null) return;
@@ -367,7 +367,7 @@ public class ManagedUnionTests
     /// assertions are on values and destruction. Also pins how the instance is chosen.
     /// </summary>
     [Fact]
-    public void GenericUnionInstancesStaySeparate()
+    public void InstancesStaySeparate()
     {
         var (gata, cc) = Environment();
         if (gata == null || cc == null) return;
@@ -525,7 +525,7 @@ public class ManagedUnionTests
     /// ('List[Node[T]]' inside 'Node[T]'), and inference from a stamped union. Both failed once.
     /// </summary>
     [Fact]
-    public void RecursiveGenericUnionIsWalkable()
+    public void RecursiveUnionWalkable()
     {
         var (gata, cc) = Environment();
         if (gata == null || cc == null) return;
@@ -592,7 +592,7 @@ public class ManagedUnionTests
     /// which misses a leaked pointer still sitting in a dead stack slot.
     /// </summary>
     [Fact]
-    public void LeakDetectionIsArmed()
+    public void LeakDetectionArmed()
     {
         var (gata, cc) = Environment();
         if (gata == null || cc == null) return;
@@ -637,7 +637,7 @@ public class ManagedUnionTests
     /// stdlib tests that store primitives leave the idiom untested.
     /// </summary>
     [Fact]
-    public void SingleProbeLookupsOwnCorrectly()
+    public void SingleProbeOwnership()
     {
         var (gata, cc) = Environment();
         if (gata == null || cc == null) return;

@@ -78,7 +78,7 @@ public class NullEqualityAndInterpTests
         """;
 
     [Fact]
-    public void EqNullBypassesDeclaredOperator()
+    public void EqNullBypassesOperator()
     {
         var module = CheckClean(BoxWithEq + """
             realm kernel { entry func Main() {
@@ -91,7 +91,7 @@ public class NullEqualityAndInterpTests
     }
 
     [Fact]
-    public void NeNullBypassesDeclaredOperator()
+    public void NeNullBypassesOperator()
     {
         var module = CheckClean(BoxWithEq + """
             realm kernel { entry func Main() {
@@ -104,7 +104,7 @@ public class NullEqualityAndInterpTests
     }
 
     [Fact]
-    public void NullOnLeftIsIdentity()
+    public void NullOnLeft()
     {
         var module = CheckClean(BoxWithEq + """
             realm kernel { entry func Main() {
@@ -117,7 +117,7 @@ public class NullEqualityAndInterpTests
     }
 
     [Fact]
-    public void ValueEqualityStillDispatches()
+    public void ValueEqualityDispatches()
     {
         var module = CheckClean(BoxWithEq + """
             realm kernel { entry func Main() {
@@ -131,7 +131,7 @@ public class NullEqualityAndInterpTests
     }
 
     [Fact]
-    public void IntAgainstNullIsRejected()
+    public void IntVsNullRejected()
     {
         var (diag, _) = SingleFileCompile.Check(
             "realm kernel { entry func Main() { let int n = 5; if (n == null) { } } }");
@@ -139,7 +139,7 @@ public class NullEqualityAndInterpTests
     }
 
     [Fact]
-    public void PlainClassNullCheckStillClean()
+    public void PlainNullCheckOk()
     {
         CheckClean("""
             class Plain { int v; }
@@ -174,7 +174,7 @@ public class NullEqualityAndInterpTests
         """;
 
     [Fact]
-    public void ThreePartInterpUsesStringBuilder()
+    public void ThreePartUsesBuilder()
     {
         var module = CheckClean(InterpStubs + """
             realm kernel { entry func Main() {
@@ -187,7 +187,7 @@ public class NullEqualityAndInterpTests
     }
 
     [Fact]
-    public void TwoPartInterpKeepsConcat()
+    public void TwoPartKeepsConcat()
     {
         var module = CheckClean(InterpStubs + """
             realm kernel { entry func Main() {
@@ -200,7 +200,7 @@ public class NullEqualityAndInterpTests
     }
 
     [Fact]
-    public void NoBuilderBindingFallsBackToConcat()
+    public void NoBuilderFallsBack()
     {
         var module = CheckClean("""
             @builtin(String)

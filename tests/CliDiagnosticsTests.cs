@@ -34,7 +34,7 @@ public class CliDiagnosticsTests
     [Theory]
     [InlineData("--entry src/main.g", "--entry was given without --env")]
     [InlineData("--env env.g", "--env was given without --entry")]
-    public void HalfOfTheLooseFilePairNamesTheMissingHalf(string flag, string expected)
+    public void HalfLoosePairNamesMissing(string flag, string expected)
     {
         using var work = Project(gconf: null);
         Assert.Contains(expected, Run($"check {flag}", work.Path));
@@ -45,7 +45,7 @@ public class CliDiagnosticsTests
     /// to pass --env and --entry here would be telling them to do what they did.
     /// </summary>
     [Fact]
-    public void BothLooseFileFlagsWithoutPureTranspileSaysWhatIsMissing()
+    public void LooseFlagsNeedTranspile()
     {
         using var work = Project(gconf: null);
         string got = Run("build --env env.g --entry src/main.g", work.Path);
@@ -58,7 +58,7 @@ public class CliDiagnosticsTests
     /// project name came back as "cannot read &lt;name&gt;: Could not find file".
     /// </summary>
     [Fact]
-    public void AMissingProjectPathIsReportedAsThePathGiven()
+    public void MissingPathEchoed()
     {
         using var work = Project(gconf: null);
         string got = Run("check no-such-project", work.Path);
@@ -70,7 +70,7 @@ public class CliDiagnosticsTests
     /// With no flags and no project, the original advice is still the right advice.
     /// </summary>
     [Fact]
-    public void NoProjectAndNoFlagsStillPointsAtInit()
+    public void NoArgsPointsAtInit()
     {
         using var work = Project(gconf: null);
         Assert.Contains("run 'appa init'", Run("check", work.Path));
@@ -85,7 +85,7 @@ public class CliDiagnosticsTests
     [InlineData("<notappa></notappa>", "must have an <appa> root")]
     [InlineData("<appa><TargetBackend>Windows</TargetBackend></appa>", "is not a valid <TargetBackend>")]
     [InlineData("<appa><BuildMode>1</BuildMode></appa>", "is not a valid <BuildMode>")]
-    public void AMalformedManifestSaysWhatIsWrongWithIt(string gconf, string expected)
+    public void MalformedManifestExplained(string gconf, string expected)
     {
         using var work = Project(gconf);
         Assert.Contains(expected, Run("check .", work.Path));
@@ -96,7 +96,7 @@ public class CliDiagnosticsTests
     /// nothing on screen connecting the failure to the flag that caused it.
     /// </summary>
     [Fact]
-    public void WerrorSaysWhyABuildWithNoErrorsFailed()
+    public void WerrorExplainsFailure()
     {
         string? gata = HostedRun.FindGataCheckout();
         if (gata == null) return;
@@ -118,7 +118,7 @@ public class CliDiagnosticsTests
     /// for that spelling; the template it was generated alongside was not.
     /// </summary>
     [Fact]
-    public void AFreshlyInitialisedProjectChecksCleanly()
+    public void FreshProjectChecksClean()
     {
         string? gata = HostedRun.FindGataCheckout();
         if (gata == null) return;
@@ -136,7 +136,7 @@ public class CliDiagnosticsTests
     /// rejecting everything would pass.
     /// </summary>
     [Fact]
-    public void AWellFormedProjectChecks()
+    public void WellFormedProjectChecks()
     {
         string? gata = HostedRun.FindGataCheckout();
         if (gata == null) return;
@@ -220,7 +220,7 @@ public class CliDiagnosticsTests
     /// go to. It used to print itself straight to the console, so it had neither.
     /// </summary>
     [Fact]
-    public void AReferenceCycleIsReportedWithACodeAndALocation()
+    public void CycleHasCodeAndLocation()
     {
         string? gata = HostedRun.FindGataCheckout();
         if (gata == null) return;
@@ -241,7 +241,7 @@ public class CliDiagnosticsTests
     /// went through the diagnostic bag and so was never counted.
     /// </summary>
     [Fact]
-    public void WerrorPromotesTheReferenceCycleWarning()
+    public void WerrorPromotesCycle()
     {
         string? gata = HostedRun.FindGataCheckout();
         if (gata == null) return;
@@ -269,7 +269,7 @@ public class CliDiagnosticsTests
     [InlineData(CycleAtRoot, "'Left', 'Right'")]
     [InlineData(CycleInRealm, "'userspace.Left', 'userspace.Right'")]
     [InlineData(CycleInProcess, "'userspace.P.Left', 'userspace.P.Right'")]
-    public void AReferenceCycleIsReportedAtEveryScopeItCanBeDeclaredIn(string source, string names)
+    public void CycleReportedInEveryScope(string source, string names)
     {
         string? gata = HostedRun.FindGataCheckout();
         if (gata == null) return;
@@ -291,7 +291,7 @@ public class CliDiagnosticsTests
     [Theory]
     [InlineData(CycleInRealm)]
     [InlineData(CycleInProcess)]
-    public void WerrorPromotesAScopedReferenceCycle(string source)
+    public void WerrorPromotesScopedCycle(string source)
     {
         string? gata = HostedRun.FindGataCheckout();
         if (gata == null) return;
@@ -310,7 +310,7 @@ public class CliDiagnosticsTests
     /// is the only end they can cut.
     /// </summary>
     [Fact]
-    public void ACycleThroughALibraryGenericIsReportedInTheAuthorsFile()
+    public void LibraryGenericCycleBlamesAuthor()
     {
         string? gata = HostedRun.FindGataCheckout();
         if (gata == null) return;
@@ -355,7 +355,7 @@ public class CliDiagnosticsTests
     [Theory]
     [InlineData("class Solo { public int n; func _init() { } }", "")]
     [InlineData("", "class Solo { public int n; func _init() { } }")]
-    public void ScopedClassesWithoutACycleStaySilent(string atRoot, string inRealm)
+    public void NoCycleStaysSilent(string atRoot, string inRealm)
     {
         string? gata = HostedRun.FindGataCheckout();
         if (gata == null) return;
@@ -422,7 +422,7 @@ public class CliDiagnosticsTests
     [InlineData("release(retain(a));")]
     [InlineData("try { release(a); } catch { }")]
     [InlineData("unsafe { let Item q = retain(a); } release(a);")]
-    public void ManualRefCountingOnAClassReferenceOutsideUnsafeIsRejected(string body)
+    public void ManualRefcountOutsideUnsafeRejected(string body)
     {
         string? gata = HostedRun.FindGataCheckout();
         if (gata == null) return;
@@ -437,7 +437,7 @@ public class CliDiagnosticsTests
     [Theory]
     [InlineData("unsafe { let Item b = retain(a); release(b); }")]
     [InlineData("unsafe { if (a.v == 1) { release(retain(a)); } }")]
-    public void ManualRefCountingInsideUnsafeIsAccepted(string body)
+    public void ManualRefcountInsideUnsafeOk(string body)
     {
         string? gata = HostedRun.FindGataCheckout();
         if (gata == null) return;
@@ -455,7 +455,7 @@ public class CliDiagnosticsTests
     [Theory]
     [InlineData("Map[String, int]", "StringMap[int]")]
     [InlineData("Set[String]", "StringSet")]
-    public void AStringKeyedContainerSuggestsItsSibling(string written, string suggested)
+    public void StringKeySuggestsSibling(string written, string suggested)
     {
         string? gata = HostedRun.FindGataCheckout();
         if (gata == null) return;
@@ -521,7 +521,7 @@ public class CliDiagnosticsTests
     /// Warnings inside libgata are the library's business, not the author's.
     /// </summary>
     [Fact]
-    public void WarningsInsideLibgataAreNotReportedAgainstTheAuthor()
+    public void LibgataWarningsNotBlamed()
     {
         string? gata = HostedRun.FindGataCheckout();
         if (gata == null) return;
@@ -538,7 +538,7 @@ public class CliDiagnosticsTests
     /// And they no longer gate --werror.
     /// </summary>
     [Fact]
-    public void WerrorIgnoresWarningsInsideLibgata()
+    public void WerrorIgnoresLibgata()
     {
         string? gata = HostedRun.FindGataCheckout();
         if (gata == null) return;

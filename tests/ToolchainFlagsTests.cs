@@ -20,7 +20,7 @@ public class ToolchainFlagsTests
     [InlineData("-fno-signed-zeros")]
     [InlineData("-freciprocal-math")]
     [InlineData("-Ofast")]
-    public void NoTranslationUnitGivesUpIeeeSemantics(string forbidden)
+    public void IeeeSemanticsKept(string forbidden)
     {
         foreach (var rel in (string[])["kernel/kmain.c", "ulibc/string.c",
                                        Toolchain.GeneratedUserTu, .. GatosFlags.InterruptPath])
@@ -28,14 +28,14 @@ public class ToolchainFlagsTests
     }
 
     [Fact]
-    public void GeneratedUserspaceIsRecognisedAsUserspace()
+    public void UserspaceRecognised()
     {
         Assert.True(Toolchain.IsUserspace(Toolchain.GeneratedUserTu));
         Assert.DoesNotContain("-flto", Flags(Toolchain.GeneratedUserTu));
     }
 
     [Fact]
-    public void KernelCodeIsLinkTimeOptimisedExceptOnMac()
+    public void KernelLtoExceptMac()
     {
         Assert.Contains("-flto", Flags("kernel/kmain.c"));
         Assert.DoesNotContain("-flto", Flags("kernel/kmain.c", isMac: true));

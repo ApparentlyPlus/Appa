@@ -17,7 +17,7 @@ public class LexerDiagnosticsTests
     }
 
     [Fact]
-    public void UnterminatedBlockCommentIsAnError()
+    public void UnterminatedBlockComment()
     {
         var ex = Lex("let x = 1; /* never closed");
         Assert.Equal(Codes.UnterminatedLiteral, ex.Code);
@@ -28,13 +28,13 @@ public class LexerDiagnosticsTests
     [InlineData("/**/let")]
     [InlineData("/* x */let")]
     [InlineData("/* * / ** */let")]
-    public void ClosedBlockCommentLexesCleanly(string src)
+    public void ClosedBlockCommentOk(string src)
     {
         Assert.Equal(TK.Let, SingleFileCompile.Tokenize(src)[0].Kind);
     }
 
     [Fact]
-    public void BareHexPrefixIsAnError()
+    public void BareHexPrefix()
     {
         var ex = Lex("let x = 0x;");
         Assert.Equal(Codes.BadNumber, ex.Code);
@@ -45,13 +45,13 @@ public class LexerDiagnosticsTests
     [InlineData("0xFFg")]
     [InlineData("1.5fx")]
     [InlineData("42e")]
-    public void IdentifierGluedToNumberIsAnError(string src)
+    public void IdentGluedToNumber(string src)
     {
         Assert.Equal(Codes.BadNumber, Lex(src).Code);
     }
 
     [Fact]
-    public void DotAfterIntegerIsNotTheNumber()
+    public void DotAfterInteger()
     {
         var tokens = SingleFileCompile.Tokenize("42.ToString");
         Assert.Equal(TK.IntLit, tokens[0].Kind);
@@ -64,13 +64,13 @@ public class LexerDiagnosticsTests
     [InlineData("@intrinsic()")]
     [InlineData("@intrinsic(alloc")]
     [InlineData("@preamble")]
-    public void MalformedAnnotationArgIsAnError(string src)
+    public void MalformedAnnotationArg(string src)
     {
         Assert.Equal(Codes.BadAnnotation, Lex(src).Code);
     }
 
     [Fact]
-    public void UnknownAnnotationHasItsOwnCode()
+    public void UnknownAnnotationCode()
     {
         Assert.Equal(Codes.BadAnnotation, Lex("@bogus").Code);
     }
@@ -83,7 +83,7 @@ public class LexerDiagnosticsTests
     [InlineData("$\"never closed")]
     [InlineData("$\"open {x\"")]
     [InlineData("native { int x;")]
-    public void UnterminatedLiteralsCarryACode(string src)
+    public void UnterminatedLiteralCode(string src)
     {
         Assert.Equal(Codes.UnterminatedLiteral, Lex(src).Code);
     }
@@ -92,13 +92,13 @@ public class LexerDiagnosticsTests
     [InlineData("\"bad\\qescape\"")]
     [InlineData("'\\q'")]
     [InlineData("$\"bad\\qescape\"")]
-    public void BadEscapesCarryTheirCode(string src)
+    public void BadEscapeCode(string src)
     {
         Assert.Equal(Codes.BadEscape, Lex(src).Code);
     }
 
     [Fact]
-    public void SegmentSpanPointsAtItsSegment()
+    public void SegmentSpanIsExact()
     {
         var tokens = SingleFileCompile.Tokenize("$\"ab{n}\"");
         Assert.Equal(TK.StrLit, tokens[1].Kind);

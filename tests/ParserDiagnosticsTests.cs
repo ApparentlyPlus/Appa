@@ -20,7 +20,7 @@ public class ParserDiagnosticsTests
     [InlineData("func F() { for (let int i = 0; i < 5; i = i + 1) { } }")]
     [InlineData("func F() { for (let int i = 0; i < 5; i += 1) { } }")]
     [InlineData("func F() { for (let int i = 10; i > 0; i >>= 1) { } }")]
-    public void AssignmentInForStepParses(string src)
+    public void ForStepAssignParses(string src)
     {
         var func = Assert.IsType<FuncDecl>(SingleFileCompile.Parse(src).Items[0]);
         var forStmt = Assert.IsType<ForStmt>(((BlockBody)func.Body).Block.Stmts[0]);
@@ -28,7 +28,7 @@ public class ParserDiagnosticsTests
     }
 
     [Fact]
-    public void LetInForStepIsRejected()
+    public void LetInForStepRejected()
     {
         var ex = Parse("func F() { for (let int i = 0; i < 5; let int j = 0) { } }");
         Assert.Contains("cannot declare a variable in the for-loop step", ex.Message);
@@ -38,7 +38,7 @@ public class ParserDiagnosticsTests
     [InlineData("func F() { let int x = 1; if (x = 3) { } }")]
     [InlineData("func F() { let int x = 1; while (x = 3) { } }")]
     [InlineData("func F() { for (let int i = 0; i = 5; i++) { } }")]
-    public void AssignInConditionSuggestsEquality(string src)
+    public void AssignInConditionHints(string src)
     {
         var ex = Parse(src);
         Assert.Equal(Codes.AssignInExpr, ex.Code);
@@ -51,13 +51,13 @@ public class ParserDiagnosticsTests
     [InlineData("func F() { G(1, 2; }", "expected ')'")]
     [InlineData("func F(int x", "expected ')'")]
     [InlineData("class C int x; }", "expected '{'")]
-    public void ExpectedTokenMessagesAreReadable(string src, string expected)
+    public void ExpectedTokenReadable(string src, string expected)
     {
         Assert.Contains(expected, Parse(src).Message);
     }
 
     [Fact]
-    public void EofReadsAsEndOfFile()
+    public void EofReadsAsText()
     {
         Assert.Contains("end of file", Parse("func F() {").Message);
     }
@@ -73,7 +73,7 @@ public class ParserDiagnosticsTests
     [InlineData("realm kernel { public int func F() { return 1; } entry func Main() { } }")]
     [InlineData("realm kernel { entry func Main() { } background process P { " +
                 "public int func F() { return 1; } thread T { entry func R() { } } } }")]
-    public void PublicOnAFreeFunctionIsRejected(string src)
+    public void PublicFreeFuncRejected(string src)
     {
         var ex = Parse(src);
         Assert.Equal(Codes.BadDeclHeader, ex.Code);
@@ -89,13 +89,13 @@ public class ParserDiagnosticsTests
     [InlineData("private int func F() { return 1; }")]
     [InlineData("class C { public int v; public int func F() { return self.v; } }")]
     [InlineData("module M { public static int func F() { return 1; } }")]
-    public void TheSpellingsThatStillMeanSomethingAreAccepted(string src)
+    public void ValidSpellingsAccepted(string src)
     {
         SingleFileCompile.Parse(src);   // throws ParseException on failure
     }
 
     [Fact]
-    public void ProcessColonWithoutModeIsRejected()
+    public void ProcessColonNeedsMode()
     {
         var ex = Parse("realm userspace { process App : sideways { } }");
         Assert.Equal(Codes.BadDeclHeader, ex.Code);
@@ -103,7 +103,7 @@ public class ParserDiagnosticsTests
     }
 
     [Fact]
-    public void DuplicateProcessModeIsRejected()
+    public void DuplicateProcessModeRejected()
     {
         var ex = Parse("realm userspace { foreground process App : background { } }");
         Assert.Equal(Codes.BadDeclHeader, ex.Code);
@@ -116,7 +116,7 @@ public class ParserDiagnosticsTests
     /// mode is a real semantic choice (TTY/keyboard focus, scheduling visibility).
     /// </summary>
     [Fact]
-    public void ProcessWithoutModeIsRejected()
+    public void ProcessNeedsMode()
     {
         var ex = Parse("realm userspace { process App { thread T { entry func Run() { } } } }");
         Assert.Equal(Codes.MissingProcessMode, ex.Code);
@@ -142,7 +142,7 @@ public class ParserDiagnosticsTests
     [InlineData("enum Color { Red, Green, }")]
     [InlineData("union U { A, B, }")]
     [InlineData("union U { A(int x,) }")]
-    public void TrailingCommasCarryTheirCode(string src)
+    public void TrailingCommaCode(string src)
     {
         Assert.Equal(Codes.TrailingComma, Parse(src).Code);
     }
@@ -163,7 +163,7 @@ public class ParserDiagnosticsTests
     [InlineData("class A { class B { } }")]
     [InlineData("class A { realm kernel { } }")]
     [InlineData("realm userspace { foreground process P { thread T { thread U { entry func R() { } } } } }")]
-    public void NestingViolationsCarryTheirCode(string src)
+    public void NestingViolationCode(string src)
     {
         Assert.Equal(Codes.InvalidNesting, Parse(src).Code);
     }
@@ -171,7 +171,7 @@ public class ParserDiagnosticsTests
     [Theory]
     [InlineData("kernel { entry func Main() { } }")]
     [InlineData("realm kernel { entry func Main() { } } kernel { }")]
-    public void BareKernelAsksForTheRealmKeyword(string src)
+    public void BareKernelNeedsRealm(string src)
     {
         var ex = Parse(src);
         Assert.Equal(Codes.MissingRealmKeyword, ex.Code);
@@ -182,7 +182,7 @@ public class ParserDiagnosticsTests
     [InlineData("realm potato { }")]
     [InlineData("realm { }")]
     [InlineData("realm user { }")]
-    public void UnknownRealmNamesAreRejected(string src)
+    public void UnknownRealmRejected(string src)
     {
         Assert.Equal(Codes.UnknownRealm, Parse(src).Code);
     }
@@ -192,7 +192,7 @@ public class ParserDiagnosticsTests
     /// rejected - this is the first place Suggest is wired into a realm diagnostic.
     /// </summary>
     [Fact]
-    public void ANearMissRealmNameSuggestsTheRealOne()
+    public void NearMissRealmSuggests()
     {
         var ex = Parse("realm userspac { }");
         Assert.Equal(Codes.UnknownRealm, ex.Code);
@@ -210,13 +210,13 @@ public class ParserDiagnosticsTests
     [InlineData("class C { int user; int process; int thread; }")]
     [InlineData("void func F(int user, int process, int thread) { }")]
     [InlineData("class C { public void func user() { } }")]
-    public void ContextualKeywordsParseAsIdentifiers(string src)
+    public void ContextualKeywordsAreIdents(string src)
     {
         SingleFileCompile.Parse(src);
     }
 
     [Fact]
-    public void RejectionPointsAtTheAnnotation()
+    public void PointsAtAnnotation()
     {
         var ex = Parse("@keep\nenum Color { Red }");
         Assert.Equal(Codes.BadAnnotation, ex.Code);
@@ -224,7 +224,7 @@ public class ParserDiagnosticsTests
     }
 
     [Fact]
-    public void TrailingReturnNamesTheFunction()
+    public void TrailingReturnNamesFunc()
     {
         var ex = Parse("func Foo() -> int { return 1; }");
         Assert.Equal(Codes.BadDeclHeader, ex.Code);
@@ -238,7 +238,7 @@ public class ParserDiagnosticsTests
     /// produce.
     /// </summary>
     [Fact]
-    public void TrailingReturnOnMethodNames()
+    public void TrailingReturnOnMethod()
     {
         var ex = Parse("class C { func Foo() -> int { return 1; } }");
         Assert.Equal(Codes.BadDeclHeader, ex.Code);
@@ -247,7 +247,7 @@ public class ParserDiagnosticsTests
     }
 
     [Fact]
-    public void TrailingReturnOnOperatorNames()
+    public void TrailingReturnOnOperator()
     {
         var ex = Parse("class C { operator func +(C other) -> C { return self; } }");
         Assert.Equal(Codes.BadDeclHeader, ex.Code);
@@ -256,7 +256,7 @@ public class ParserDiagnosticsTests
     }
 
     [Fact]
-    public void LeadingReturnTypeOnOperatorParses()
+    public void LeadingReturnOnOperator()
     {
         var prog = SingleFileCompile.Parse("class C { operator C func +(C other) { return self; } }");
         var cls = Assert.IsType<ClassDecl>(prog.Items[0]);
@@ -266,7 +266,7 @@ public class ParserDiagnosticsTests
     }
 
     [Fact]
-    public void TrailingReturnOnExternNames()
+    public void TrailingReturnOnExtern()
     {
         var ex = Parse("@extern func F() -> int;");
         Assert.Equal(Codes.BadDeclHeader, ex.Code);
@@ -275,7 +275,7 @@ public class ParserDiagnosticsTests
     }
 
     [Fact]
-    public void LeadingReturnTypeOnExternParses()
+    public void LeadingReturnOnExtern()
     {
         var prog = SingleFileCompile.Parse("@extern int func F();");
         var ext = Assert.IsType<ExternFuncDecl>(prog.Items[0]);
@@ -288,7 +288,7 @@ public class ParserDiagnosticsTests
     /// declaration keyword.
     /// </summary>
     [Fact]
-    public void FuncPtrOperatorReturnParses()
+    public void FuncPtrOperatorReturn()
     {
         var prog = SingleFileCompile.Parse("class C { operator func(int) -> int func +(C other) { return null; } }");
         var cls = Assert.IsType<ClassDecl>(prog.Items[0]);
@@ -298,7 +298,7 @@ public class ParserDiagnosticsTests
     }
 
     [Fact]
-    public void AssignmentInForInitStillParses()
+    public void ForInitAssignParses()
     {
         var prog = SingleFileCompile.Parse("func F() { let int i = 0; for (i = 0; i < 5; i++) { } }");
         Assert.IsType<FuncDecl>(prog.Items[0]);
@@ -307,7 +307,7 @@ public class ParserDiagnosticsTests
     [Theory]
     [InlineData("func F() { for (let int i = 0; i < 5; i++) { } }")]
     [InlineData("func F() { for (let int i = 5; i > 0; i--) { } }")]
-    public void PostfixStepStillParses(string src)
+    public void PostfixStepParses(string src)
     {
         Assert.IsType<FuncDecl>(SingleFileCompile.Parse(src).Items[0]);
     }
@@ -321,7 +321,7 @@ public class ParserDiagnosticsTests
     [Theory]
     [InlineData("func F() { for (v in xs) { } }")]
     [InlineData("func F() { for (let v in xs) { } }")]
-    public void ParenthesisedForInNamesTheRealForm(string src)
+    public void ParenForInHints(string src)
     {
         var ex = Parse(src);
         Assert.Contains("without parentheses", ex.Message);
@@ -337,6 +337,6 @@ public class ParserDiagnosticsTests
     [InlineData("func F() { for (let int i = 0; i < 2; i = i + 1) { } }")]
     [InlineData("func F() { for (i = 0; i < 2; i = i + 1) { } }")]
     [InlineData("func F() { for (;;) { } }")]
-    public void TheLoopFormsThatAreSpelledRightStillParse(string src) =>
+    public void ValidLoopFormsParse(string src) =>
         Assert.NotEmpty(SingleFileCompile.Parse(src).Items);
 }

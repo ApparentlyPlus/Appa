@@ -42,7 +42,7 @@ public class FinalSweepTests
     /// was reported unused - a warning on correct code, at the exact spot the handler exists for.
     /// </summary>
     [Fact]
-    public void UseInsideCatchHandlerCounts()
+    public void CatchHandlerUseCounts()
     {
         AssertNoDiagnostic(Codes.UnusedVariable, _throwing + """
             realm kernel { entry func Main() {
@@ -58,7 +58,7 @@ public class FinalSweepTests
     /// the code after the loop is reachable and must not be reported dead.
     /// </summary>
     [Fact]
-    public void BreakInsideCatchHandlerExitsTheLoop()
+    public void CatchBreakExitsLoop()
     {
         AssertNoDiagnostic(Codes.UnreachableCode, _throwing + """
             realm kernel { entry func Main() {
@@ -74,7 +74,7 @@ public class FinalSweepTests
     #region One mistake, one message
 
     [Fact]
-    public void NewOnUnionSaysHowToBuildOne()
+    public void NewOnUnionHints()
     {
         var d = AssertOne(Codes.NewOnNonClass,
             "union U { A(int n), B } realm kernel { entry func Main() { let U u = new U(); } }");
@@ -85,7 +85,7 @@ public class FinalSweepTests
     }
 
     [Fact]
-    public void NewOnEnumSaysHowToNameOne()
+    public void NewOnEnumHints()
     {
         var d = AssertOne(Codes.NewOnNonClass,
             "enum E { X } realm kernel { entry func Main() { let E e = new E(); } }");
@@ -98,7 +98,7 @@ public class FinalSweepTests
     /// exist and said so again. The Monomorphizer's reason is the only one worth printing.
     /// </summary>
     [Fact]
-    public void RejectedInstantiationIsReportedOnce()
+    public void BadInstantiationOnce()
     {
         AssertOne(Codes.WrongArgCount, """
             class Box[T] { public T v; }
@@ -115,7 +115,7 @@ public class FinalSweepTests
     /// nothing naming the instantiation the author actually wrote.
     /// </summary>
     [Fact]
-    public void BadTypeArgumentNamesTheInstantiation()
+    public void BadTypeArgNamesInstantiation()
     {
         var d = AssertOne(Codes.UndefinedType, """
             union Opt[T] { Some(T v), None }
@@ -133,7 +133,7 @@ public class FinalSweepTests
     /// compiled only when something else happened to name 'U[int]' as a type.
     /// </summary>
     [Fact]
-    public void ExplicitInstantiationRequestsItsOwnStamp()
+    public void ExplicitStamp()
     {
         AssertClean("""
             union U[T] { A(T v), B }
@@ -146,7 +146,7 @@ public class FinalSweepTests
     /// other. It used to be rejected as "not a union".
     /// </summary>
     [Fact]
-    public void StaticCallOnStampedGenericResolves()
+    public void StaticCallOnStampedResolves()
     {
         AssertClean("""
             class Box[T] { public T v; public static int func Zero() { return 0; } }
@@ -163,14 +163,14 @@ public class FinalSweepTests
     [InlineData("realm kernel { union U[T] { A(T v), B }\n entry func Main() { let U[int] u = kernel.U[int].A(1); } }")]
     [InlineData("class Box[T] { public T v; public static int func Z() { return 0; } }\n" +
                 "realm kernel { entry func Main() { let int z = ::Box[int].Z(); } }")]
-    public void QualifiedExplicitInstantiationResolves(string src) => AssertClean(src);
+    public void QualifiedInstantiationResolves(string src) => AssertClean(src);
 
     /// <summary>
     /// The scoped generic base kept its unqualified name through substitution, so a template
     /// declared inside a realm matched no registered template.
     /// </summary>
     [Fact]
-    public void ScopedGenericUnionResolvesByExplicitInstantiation()
+    public void ScopedUnionResolvesExplicitly()
     {
         AssertClean("realm kernel { union U[T] { A(T v), B }\n" +
                     " entry func Main() { let U[int] u = U[int].B(); } }");
@@ -180,7 +180,7 @@ public class FinalSweepTests
     /// Reaching sideways stays rejected: the qualifier is a disambiguator, not a visibility rule.
     /// </summary>
     [Fact]
-    public void QualifiedInstantiationStillObeysTheScopeRules()
+    public void QualifiedObeysScopeRules()
     {
         var (diag, _) = Check("realm kernel { union U[T] { A(T v), B } entry func Main() { } }\n" +
                               "realm userspace { entry func Go() { let int n = kernel.U[int].A(1) == null ? 1 : 0; } }");
@@ -197,7 +197,7 @@ public class FinalSweepTests
     /// every call site of the other half - reported at the declaration, where it is fixable.
     /// </summary>
     [Fact]
-    public void PartialRelationalSetWarns()
+    public void PartialRelationalWarns()
     {
         var d = AssertOne(Codes.PartialOperatorSet, """
             class V { public int n; public operator bool func <(V o) { return self.n < o.n; } }
@@ -208,7 +208,7 @@ public class FinalSweepTests
     }
 
     [Fact]
-    public void CompleteRelationalSetIsSilent()
+    public void CompleteRelationalSilent()
     {
         AssertNoDiagnostic(Codes.PartialOperatorSet, """
             class V { public int n;
@@ -222,7 +222,7 @@ public class FinalSweepTests
     /// Declaring neither is fine - the warning is about an incomplete family, not a missing one.
     /// </summary>
     [Fact]
-    public void NoRelationalOperatorsIsSilent()
+    public void NoRelationalSilent()
     {
         AssertNoDiagnostic(Codes.PartialOperatorSet,
             "class V { public int n; } realm kernel { entry func Main() { } }");
@@ -239,7 +239,7 @@ public class FinalSweepTests
     [Theory]
     [InlineData("realm kernel { entry func Main() { } foreground process P { } }")]
     [InlineData("realm kernel { entry func Main() { } }\nrealm userspace { background process P { } }")]
-    public void ProcessWithoutThreadsIsRejected(string src)
+    public void ProcessNeedsThread(string src)
     {
         var prog = SingleFileCompile.Parse(src);
         var sources = new SourceSet();
@@ -250,7 +250,7 @@ public class FinalSweepTests
     }
 
     [Fact]
-    public void ProcessWithAThreadIsAccepted()
+    public void ProcessWithThreadOk()
     {
         const string src = "realm kernel { entry func Main() { } " +
                            "foreground process P { thread T { entry func Run() { } } } }";
@@ -266,7 +266,7 @@ public class FinalSweepTests
     /// A build-wide diagnostic belongs to no file, and rendered as a bare ": error[...]" header.
     /// </summary>
     [Fact]
-    public void BuildWideDiagnosticsCarryALocationMarker()
+    public void BuildWideHasLocation()
     {
         const string src = "int func F() { return 1; }";
         var prog = SingleFileCompile.Parse(src);
@@ -289,7 +289,7 @@ public class FinalSweepTests
     /// build would fail with nothing printed to explain it.
     /// </summary>
     [Fact]
-    public void TruncateRestoresTheCounters()
+    public void TruncateRestoresCounters()
     {
         var sources = new SourceSet();
         sources.Add("f.g", "x");
@@ -316,7 +316,7 @@ public class FinalSweepTests
     /// The rule deciding whether a file is the author's or the standard library's.
     /// </summary>
     [Fact]
-    public void LibraryPathsAreRecognisedWithoutCatchingSiblingDirectories()
+    public void LibraryPathsNotSiblings()
     {
         using var root = TempDir.Create("appa-libpred-");
         string lib = Path.Combine(root.Path, "libgata");

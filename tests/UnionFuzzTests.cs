@@ -651,7 +651,7 @@ public class UnionFuzzTests
     /// never equal - the last catching a payload read from the wrong arm.
     /// </summary>
     [Fact]
-    public void UnionsObeyTheEqualityLaws()
+    public void UnionsObeyEqualityLaws()
     {
         var gata = HostedRun.FindGataCheckout();
         if (gata == null) { Assert.Skip("no sibling Gata checkout found"); return; }

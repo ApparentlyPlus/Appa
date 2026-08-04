@@ -36,13 +36,13 @@ public class SemanticDiagnosticsTests
     [InlineData("realm kernel { entry func Main() { 5++; } }")]
     [InlineData("int func F() { return 1; } realm kernel { entry func Main() { F()++; } }")]
     [InlineData("realm kernel { entry func Main() { (1 + 2)--; } }")]
-    public void PostfixOnNonLvalueIsRejected(string src)
+    public void PostfixOnNonLvalue(string src)
     {
         AssertError(Codes.NotAnLvalue, src);
     }
 
     [Fact]
-    public void PostfixOnNonNumericIsRejected()
+    public void PostfixOnNonNumeric()
     {
         AssertError(Codes.TypeMismatch,
             "realm kernel { entry func Main() { let bool b = true; b++; } }");
@@ -58,7 +58,7 @@ public class SemanticDiagnosticsTests
     }
 
     [Fact]
-    public void PostfixOnLvaluesStillChecks()
+    public void PostfixOnLvalueChecks()
     {
         AssertClean("""
         class C { int n; public void func Bump() { self.n++; } }
@@ -75,32 +75,32 @@ public class SemanticDiagnosticsTests
     #region Let-type inference
 
     [Fact]
-    public void LetWithoutTypeOrInitIsRejected()
+    public void LetWithoutTypeOrInit()
     {
         AssertError(Codes.CannotInfer, "realm kernel { entry func Main() { let x; } }");
     }
 
     [Fact]
-    public void LetFromNullIsRejected()
+    public void LetFromNull()
     {
         AssertError(Codes.CannotInfer, "realm kernel { entry func Main() { let x = null; } }");
     }
 
     [Fact]
-    public void LetFromVoidCallIsRejected()
+    public void LetFromVoidCall()
     {
         AssertError(Codes.CannotInfer,
             "void func V() { } realm kernel { entry func Main() { let x = V(); } }");
     }
 
     [Fact]
-    public void TypedLetWithoutInitStillChecks()
+    public void TypedLetWithoutInit()
     {
         AssertClean("realm kernel { entry func Main() { let int x; x = 5; if (x == 5) { } } }");
     }
 
     [Fact]
-    public void TypedLetFromNullStillChecks()
+    public void TypedLetFromNull()
     {
         AssertClean("class Box { int v; } realm kernel { entry func Main() { let Box b = null; if (b == null) { } } }");
     }
@@ -120,7 +120,7 @@ public class SemanticDiagnosticsTests
     [InlineData("v = 1.5;", "let double x = c.v;")]
     [InlineData("v = true;", "let bool x = c.v;")]
     [InlineData("v = 'x';", "let char x = c.v;")]
-    public void FieldInfersFromItsLiteral(string field, string use)
+    public void FieldInfersFromLiteral(string field, string use)
     {
         AssertClean($$"""
             class C { public {{field}} }
@@ -138,7 +138,7 @@ public class SemanticDiagnosticsTests
     }
 
     [Fact]
-    public void InferredFieldWorksInsideItsClass()
+    public void InferredFieldInClass()
     {
         AssertClean("""
             class Counter {
@@ -163,13 +163,13 @@ public class SemanticDiagnosticsTests
     [InlineData("realm kernel { entry func Main() { let int x = 1; switch (x) { case 1, 2, 1 { } } } }")]
     [InlineData("realm kernel { entry func Main() { let int x = 1; switch (x) { case 'a' { } case 97 { } } } }")]
     [InlineData("enum E { A, B } realm kernel { entry func Main() { let E e = E.A; switch (e) { case E.A { } case E.A { } default { } } } }")]
-    public void DuplicateSwitchLabelIsRejected(string src)
+    public void DuplicateSwitchLabel(string src)
     {
         AssertError(Codes.DuplicateName, src);
     }
 
     [Fact]
-    public void DistinctSwitchLabelsStillCheck()
+    public void DistinctSwitchLabels()
     {
         AssertClean("realm kernel { entry func Main() { let int x = 1; switch (x) { case 1, 2 { } case 3 { } default { } } } }");
     }
@@ -188,21 +188,21 @@ public class SemanticDiagnosticsTests
     }
 
     [Fact]
-    public void NonConstEnumValueIsStillRejected()
+    public void NonConstEnumValueAgain()
     {
         AssertError(Codes.TypeMismatch,
             "enum E { A = \"str\" } realm kernel { entry func Main() { } }");
     }
 
     [Fact]
-    public void DuplicateEnumMemberIsRejected()
+    public void DuplicateEnumMember()
     {
         AssertError(Codes.DuplicateName,
             "enum E { A, B, A } realm kernel { entry func Main() { } }");
     }
 
     [Fact]
-    public void DuplicateUnionVariantIsRejected()
+    public void DuplicateUnionVariant()
     {
         AssertError(Codes.DuplicateName,
             "union U { A(int x), B, A } realm kernel { entry func Main() { } }");
@@ -214,7 +214,7 @@ public class SemanticDiagnosticsTests
     /// unions. The count is asserted, since good wording is little use buried.
     /// </summary>
     [Fact]
-    public void VariantWithoutCallGivesOneError()
+    public void VariantWithoutCallOnce()
     {
         var (diag, _) = SingleFileCompile.Check(
             "union U { A(int x), Nil } realm kernel { entry func Main() { let U q = U.Nil; } }");
@@ -249,7 +249,7 @@ public class SemanticDiagnosticsTests
     }
 
     [Fact]
-    public void UnknownVariantNamesTheUnion()
+    public void UnknownVariantNamesUnion()
     {
         var (diag, _) = SingleFileCompile.Check(
             "union U { A(int x), Nil } realm kernel { entry func Main() { let U q = U.Zzz; } }");
@@ -272,14 +272,14 @@ public class SemanticDiagnosticsTests
     }
 
     [Fact]
-    public void BreakableLoopStillNeedsReturn()
+    public void BreakableLoopNeedsReturn()
     {
         AssertError(Codes.MissingReturn,
             "int func F() { while (true) { break; } } realm kernel { entry func Main() { let int x = F(); } }");
     }
 
     [Fact]
-    public void BreakDoesNotEscapeTheOuterLoop()
+    public void BreakStaysInLoop()
     {
         AssertClean("""
         int func F() { while (true) { while (true) { break; } } }
@@ -292,7 +292,7 @@ public class SemanticDiagnosticsTests
     #region Match diagnostics
 
     [Fact]
-    public void UnknownVariantPointsAtTheCase()
+    public void UnknownVariantPointsAtCase()
     {
         var src = """
         union U { A, B }
@@ -311,7 +311,7 @@ public class SemanticDiagnosticsTests
     #region For-step assignment
 
     [Fact]
-    public void ForStepAssignmentEmitsInline()
+    public void ForStepAssignInline()
     {
         var files = SingleFileCompile.Emit("""
         @preamble(kernel)
@@ -329,7 +329,7 @@ public class SemanticDiagnosticsTests
     [Theory]
     [InlineData("realm kernel { entry func Main() { for (let int i = 0; i < 5; i = \"x\") { } } }")]
     [InlineData("realm kernel { entry func Main() { for (let int i = 0; i < 5; i &= 1.5) { } } }")]
-    public void ForStepAssignmentIsTypeChecked(string src)
+    public void ForStepAssignTypeChecked(string src)
     {
         AssertError(Codes.TypeMismatch, src);
     }
@@ -380,7 +380,7 @@ public class SemanticDiagnosticsTests
     [InlineData("enum E { A = x + 1 } realm kernel { entry func Main() { } }")]
     [InlineData("enum E { A = B + 1, B } realm kernel { entry func Main() { } }")]
     [InlineData("enum E { A = 1 / 0 } realm kernel { entry func Main() { } }")]
-    public void NonConstEnumValueIsRejected(string src)
+    public void NonConstEnumValue(string src)
     {
         AssertError(Codes.TypeMismatch, src);
     }
@@ -400,7 +400,7 @@ public class SemanticDiagnosticsTests
     [Theory]
     [InlineData("let Vec c = a + 5;")]
     [InlineData("let Vec c = a + true;")]
-    public void OperatorOperandTypeIsChecked(string stmt)
+    public void OperandTypeChecked(string stmt)
     {
         AssertError(Codes.ArgTypeMismatch, VecDecl + $$"""
         realm kernel { entry func Main() {
@@ -411,7 +411,7 @@ public class SemanticDiagnosticsTests
     }
 
     [Fact]
-    public void CompoundOperandTypeIsChecked()
+    public void CompoundOperandChecked()
     {
         AssertError(Codes.ArgTypeMismatch, VecDecl + """
         realm kernel { entry func Main() {
@@ -422,7 +422,7 @@ public class SemanticDiagnosticsTests
     }
 
     [Fact]
-    public void MatchingOperandStillChecks()
+    public void MatchingOperandChecks()
     {
         AssertClean(VecDecl + """
         realm kernel { entry func Main() {
@@ -443,7 +443,7 @@ public class SemanticDiagnosticsTests
     [InlineData("class C { int v; operator C func +(C a, C b) { return a; } } realm kernel { entry func Main() { } }")]
     [InlineData("class C { int v; operator int func [](int i, int j) { return 0; } } realm kernel { entry func Main() { let C c = new C(); let int x = c[0]; } }")]
     [InlineData("class C { int v; operator func []=(int i) { } } realm kernel { entry func Main() { let C c = new C(); c[0] = 1; } }")]
-    public void OperatorArityIsEnforced(string src)
+    public void OperatorArity(string src)
     {
         AssertError(Codes.WrongArgCount, src);
     }
@@ -458,7 +458,7 @@ public class SemanticDiagnosticsTests
     /// message states the problem outright, the hint is a distinct, optional line.
     /// </summary>
     [Fact]
-    public void MethodSuggestionIsAHint()
+    public void MethodSuggestionHint()
     {
         var (diag, _) = SingleFileCompile.Check("""
             class Console { public static void func Home() { } }
@@ -470,7 +470,7 @@ public class SemanticDiagnosticsTests
     }
 
     [Fact]
-    public void NoCloseCandidateGivesNoHint()
+    public void NoCandidateNoHint()
     {
         var (diag, _) = SingleFileCompile.Check("""
             class Console { public static void func Home() { } }
@@ -490,7 +490,7 @@ public class SemanticDiagnosticsTests
     /// mangled name nobody wrote - instead of the line saying what to do.
     /// </summary>
     [Fact]
-    public void IndexedFieldMissingSelfNamesTheFix()
+    public void IndexedFieldNamesTheFix()
     {
         var (diag, _) = SingleFileCompile.Check("""
             class Pt { public int x; func _init() { } }
@@ -510,7 +510,7 @@ public class SemanticDiagnosticsTests
     /// rather than as a generic type nobody declared.
     /// </summary>
     [Fact]
-    public void IndexedUnknownNameIsUndefined()
+    public void IndexedUnknownUndefined()
     {
         var (diag, _) = SingleFileCompile.Check("""
             class Pt { public int x; func _init() { } }
@@ -530,7 +530,7 @@ public class SemanticDiagnosticsTests
     /// wherever the brackets could go either way.
     /// </summary>
     [Fact]
-    public void ShadowingLocalNeedsAnIndexReading()
+    public void ShadowingLocalNeedsIndex()
     {
         AssertClean("""
             union Opt[V] { Some(V v), None }
@@ -556,7 +556,7 @@ public class SemanticDiagnosticsTests
     [InlineData("class Box[T] { public T v; func _init() { } } " +
                 "realm kernel { entry func Main() { let Box[int] b = new Box[int](); let int n = Box[int].Nope(); } }",
                 "'Box[int]' has no method 'Nope'")]
-    public void TypeRefErrorsNameWhatWasWritten(string src, string expected)
+    public void TypeRefNamesWhatWasWritten(string src, string expected)
     {
         var (diag, _) = SingleFileCompile.Check(src);
         Assert.Contains(diag.All, d => d.Message.Contains(expected));
@@ -580,7 +580,7 @@ public class SemanticDiagnosticsTests
     /// decided it silently, rejecting the program for a mismatch it does not have.
     /// </summary>
     [Fact]
-    public void ExpectationDoesNotDecideAnArgument()
+    public void ExpectationDoesNotDecideArg()
     {
         var (diag, _) = SingleFileCompile.Check(OptDecl + """
             realm kernel { entry func Main() { let Opt[bool] s = Wrap(Take(Opt.None())); } }
@@ -594,7 +594,7 @@ public class SemanticDiagnosticsTests
     /// Naming the instantiation at the argument settles it, in that same position.
     /// </summary>
     [Fact]
-    public void ExplicitInstantiationSettlesAnArg()
+    public void ExplicitInstantiationSettlesArg()
     {
         AssertClean(OptDecl + """
             realm kernel { entry func Main() { let Opt[bool] s = Wrap(Take(Opt[int].None())); } }
@@ -605,7 +605,7 @@ public class SemanticDiagnosticsTests
     /// The expectation still reaches the position it belongs to: a let and a return.
     /// </summary>
     [Fact]
-    public void ExpectationDecidesItsOwnPosition()
+    public void ExpectationDecidesOwnPosition()
     {
         AssertClean(OptDecl + """
             realm kernel { entry func Main() { let Opt[int] a = Opt.None(); let int n = Take(a); } }
@@ -632,7 +632,7 @@ public class SemanticDiagnosticsTests
     [InlineData("unsafe { retain(&x); }")]
     [InlineData("unsafe { retain(&x); retain(&x); }")]
     [InlineData("if (x == 1) { unsafe { retain(&x); } }")]
-    public void DiscardingRetainsResultIsRejected(string body)
+    public void DiscardingRetainRejected(string body)
     {
         AssertError(Codes.DiscardedRetain,
             $$"""
@@ -650,7 +650,7 @@ public class SemanticDiagnosticsTests
     [InlineData("unsafe { let int* kept = retain(&x); *kept = 2; }")]
     [InlineData("unsafe { release(&x); }")]
     [InlineData("unsafe { release(retain(&x)); }")]
-    public void KeepingTheReferenceStaysLegal(string body)
+    public void KeepingReferenceLegal(string body)
     {
         AssertClean(
             $$"""
@@ -666,7 +666,7 @@ public class SemanticDiagnosticsTests
     [InlineData("let int* kept = retain(&x);", "retain")]
     [InlineData("release(&x);", "release")]
     [InlineData("if (x == 1) { release(&x); }", "release")]
-    public void ManualRefCountingOutsideUnsafeIsRejected(string body, string named)
+    public void ManualRefcountOutsideUnsafe(string body, string named)
     {
         var (diag, _) = SingleFileCompile.Check(
             $$"""
@@ -694,7 +694,7 @@ public class SemanticDiagnosticsTests
     /// A throwing call nested inside a generic call.
     /// </summary>
     [Fact]
-    public void AThrowingCallInsideAGenericCallDoesNotCascade()
+    public void ThrowInGenericCallNoCascade()
     {
         var (diag, _) = SingleFileCompile.Check(
             CrossPrelude + "realm kernel { entry func Main() { let int a = Echo(Risky(1)); } }");
@@ -708,7 +708,7 @@ public class SemanticDiagnosticsTests
     /// The same on the generic-method path, which infers type arguments separately.
     /// </summary>
     [Fact]
-    public void AThrowingCallInsideAGenericMethodCallDoesNotCascade()
+    public void ThrowInGenericMethodNoCascade()
     {
         var (diag, _) = SingleFileCompile.Check(
             CrossPrelude + "realm kernel { entry func Main() { let Util u = new Util(); " +
@@ -723,7 +723,7 @@ public class SemanticDiagnosticsTests
     /// one description that is definitely wrong: the author is looking at the declaration.
     /// </summary>
     [Fact]
-    public void CallingANonCallableLocalNamesItsType()
+    public void NonCallableLocalNamesType()
     {
         var (diag, _) = SingleFileCompile.Check(
             CrossPrelude + "realm kernel { entry func Main() { let Cell c = new Cell(); let int n = c(); } }");
@@ -733,7 +733,7 @@ public class SemanticDiagnosticsTests
 
     /// <summary>And the same for a process variable, which resolves through a different table.</summary>
     [Fact]
-    public void CallingANonCallableProcessVariableNamesItsType()
+    public void NonCallableProcessVarNamesType()
     {
         var (diag, _) = SingleFileCompile.Check("""
             realm kernel {

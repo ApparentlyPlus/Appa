@@ -32,7 +32,7 @@ public class ScopeTreeTests
     }
 
     [Fact]
-    public void SiblingRealmsAreDistinctScopes()
+    public void SiblingRealmsDistinct()
     {
         var t = new ScopeTree();
         var k = t.Intern(ScopeId.Root, "kernel", Realm.Kernel);
@@ -46,7 +46,7 @@ public class ScopeTreeTests
     /// different types.
     /// </summary>
     [Fact]
-    public void SameProcessNameAcrossRealmsIsDistinct()
+    public void SameProcessNameDistinct()
     {
         var t = new ScopeTree();
         var kp = t.Intern(t.Intern(ScopeId.Root, "kernel", Realm.Kernel), "P", Realm.None);
@@ -61,7 +61,7 @@ public class ScopeTreeTests
     /// into the wrong translation unit.
     /// </summary>
     [Fact]
-    public void ProcessInheritsItsRealm()
+    public void ProcessInheritsRealm()
     {
         var t = new ScopeTree();
         var kernel = t.Intern(ScopeId.Root, "kernel", Realm.Kernel);
@@ -75,7 +75,7 @@ public class ScopeTreeTests
     /// one by hand and collide with a generated one.
     /// </summary>
     [Fact]
-    public void QualifiedNamesCannotBeTypedAsIdentifiers()
+    public void QualifiedNamesNotIdents()
     {
         var t = new ScopeTree();
         var proc = t.Intern(t.Intern(ScopeId.Root, "userspace", Realm.User), "App", Realm.None);
@@ -86,7 +86,7 @@ public class ScopeTreeTests
     }
 
     [Fact]
-    public void DisplayNameIsReadableAndFullyQualified()
+    public void DisplayNameFullyQualified()
     {
         var t = new ScopeTree();
         var proc = t.Intern(t.Intern(ScopeId.Root, "kernel", Realm.Kernel), "P1", Realm.None);
@@ -98,7 +98,7 @@ public class ScopeTreeTests
     /// Lookup walks outward and stops at the innermost hit. Shadowing is silent by design.
     /// </summary>
     [Fact]
-    public void ResolveWalksOutwardAndInnermostWins()
+    public void ResolveInnermostWins()
     {
         var t = new ScopeTree();
         var index = new ScopeIndex(t);
@@ -142,7 +142,7 @@ public class ScopeTreeTests
     }
 
     [Fact]
-    public void BinderRecordsRealmScopedDeclarations()
+    public void BinderRecordsScoped()
     {
         var r = Bind("""
             class Global { int n; }
@@ -169,7 +169,7 @@ public class ScopeTreeTests
     /// An 'entry func' is deliberately excluded: it is named by the runtime, not by Gata code.
     /// </summary>
     [Fact]
-    public void BinderIsInertWithoutScopedDeclarations()
+    public void BinderInertWithoutScopes()
     {
         var r = Bind("class Global { int n; } realm kernel { entry func Main() { } }");
         var kernel = r.Tree.Intern(ScopeId.Root, "kernel", Realm.Kernel);
@@ -179,7 +179,7 @@ public class ScopeTreeTests
     }
 
     [Fact]
-    public void ScopeOfNamesTheDeclaringScope()
+    public void ScopeOfNamesDeclaring()
     {
         var t = new ScopeTree();
         var index = new ScopeIndex(t);

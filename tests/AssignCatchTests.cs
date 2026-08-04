@@ -36,11 +36,11 @@ public class AssignCatchTests
     [InlineData("let [2]int a = [0,0]; a[1] = R(-1) catch { assign 6; }; let int y = a[1];")]
     [InlineData("let int x = 0; while (true) { x = R(-1) catch { break; }; } let int y = x;")]
     [InlineData("let int x = 0; for (let int i = 0; i < 2; i = i + 1) { x = R(-1) catch { continue; }; }")]
-    public void HandlerOnAnAssignmentIsAccepted(string body) =>
+    public void AssignHandlerOk(string body) =>
         AssertClean(Throwing + $"realm kernel {{ entry func Main() {{ {body} }} }}");
 
     [Fact]
-    public void HandlerOnAFieldAssignmentIsAccepted() =>
+    public void FieldAssignHandlerOk() =>
         AssertClean(Throwing + """
             realm kernel {
                 class C { public int n; }
@@ -53,7 +53,7 @@ public class AssignCatchTests
     /// second is what the book offers as the way to keep the value in the enclosing scope.
     /// </summary>
     [Fact]
-    public void UnhandledThrowingCallMayBeAssigned()
+    public void UnhandledMayAssign()
     {
         AssertClean(Throwing + "throws int func F() { let int x = 0; x = R(-1); return x; }\n" +
                     "realm kernel { entry func Main() { } }");
@@ -71,7 +71,7 @@ public class AssignCatchTests
     /// meanings and neither is obvious. Rejected with the form named, exactly once.
     /// </summary>
     [Fact]
-    public void CompoundAssignmentIsRejectedOnce()
+    public void CompoundRejectedOnce()
     {
         var d = AssertOne(Codes.ThrowsOutsideTry, Throwing +
             "realm kernel { entry func Main() { let int x = 0; x += R(-1) catch { assign 1; }; } }");
@@ -79,7 +79,7 @@ public class AssignCatchTests
     }
 
     [Fact]
-    public void HandlerStillRejectedInsideALargerExpression()
+    public void RejectedInLargerExpr()
     {
         AssertOne(Codes.ThrowsOutsideTry, Throwing +
             "void func T(int a) { } realm kernel { entry func Main() { T(R(-1) catch { assign 1; }); } }");
@@ -90,7 +90,7 @@ public class AssignCatchTests
     /// not supplied the value it was attached to.
     /// </summary>
     [Fact]
-    public void HandlerOnAnAssignmentMustSupplyAValue()
+    public void HandlerNeedsValue()
     {
         AssertOne(Codes.CatchHandlerNoAssign, Throwing +
             "realm kernel { entry func Main() { let int x = 0; x = R(-1) catch { if (true) { assign 1; } }; } }");
@@ -101,7 +101,7 @@ public class AssignCatchTests
     /// Target and call agree here, so the only mistake is the 'assign' itself.
     /// </summary>
     [Fact]
-    public void AssignedValueIsTypeChecked()
+    public void AssignedValueTypeChecked()
     {
         var d = AssertOne(Codes.TypeMismatch, "import String;\nthrows String func RS() { throw; }\n" +
             "realm kernel { entry func Main() { let String s = \"\"; s = RS() catch { assign 1; }; } }");
@@ -113,7 +113,7 @@ public class AssignCatchTests
     /// surface as a Result type mismatch somewhere downstream.
     /// </summary>
     [Fact]
-    public void UnhandledCallResultIsCheckedAgainstTheTarget()
+    public void UnhandledResultChecked()
     {
         var (diag, _) = SingleFileCompile.Check("import String;\nthrows String func RS() { throw; }\n" +
             "throws void func F() { let int x = 0; x = RS(); }\nrealm kernel { entry func Main() { } }");
@@ -132,7 +132,7 @@ public class AssignCatchTests
     /// the old value before storing would free the value being stored.
     /// </summary>
     [Fact]
-    public void AssignmentHandlersKeepRefcountsExact()
+    public void RefcountsExact()
     {
         var (gata, cc) = Environment();
         if (gata == null || cc == null) return;
@@ -180,7 +180,7 @@ public class AssignCatchTests
     /// effect in it must not run twice - the value arm and the handler arm both store to it.
     /// </summary>
     [Fact]
-    public void AssignmentTargetIsEvaluatedExactlyOnce()
+    public void TargetEvaluatedOnce()
     {
         var (gata, cc) = Environment();
         if (gata == null || cc == null) return;

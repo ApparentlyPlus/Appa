@@ -107,7 +107,7 @@ public class CrossFileExecutionTests
     }
 
     [Fact]
-    public void CrossFileFeaturePathsBalanceAndCompute()
+    public void CrossFilePathsCompute()
     {
         var gata = HostedRun.FindGataCheckout();
         var cc = HostedRun.FindCompiler();

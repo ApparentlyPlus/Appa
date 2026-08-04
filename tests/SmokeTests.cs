@@ -8,7 +8,7 @@ using Appa;
 public class SmokeTests
 {
     [Fact]
-    public void EmptySourceTokenizesToEof()
+    public void EmptySourceIsEof()
     {
         var tokens = SingleFileCompile.Tokenize("");
         Assert.Single(tokens);

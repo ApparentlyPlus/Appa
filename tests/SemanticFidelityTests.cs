@@ -36,7 +36,7 @@ public class SemanticFidelityTests
     /// printed a different character. Verbatim emission made the literal a C source construct.
     /// </summary>
     [Fact]
-    public void TrigraphSequencesSurviveEmission()
+    public void TrigraphsSurvive()
     {
         var (gata, cc) = Environment();
         if (gata == null || cc == null) return;
@@ -66,7 +66,7 @@ public class SemanticFidelityTests
     [InlineData("errno")]
     [InlineData("stdin")]
     [InlineData("NAN")]
-    public void LocalsMayBeNamedAfterStandardMacros(string name)
+    public void LocalsMayShadowMacros(string name)
     {
         var (gata, cc) = Environment();
         if (gata == null || cc == null) return;
@@ -94,7 +94,7 @@ public class SemanticFidelityTests
     /// differed per optimisation level, which is what an unrepresentable negation buys.
     /// </summary>
     [Fact]
-    public void MostNegativeIntegersRoundTrip()
+    public void MostNegativeRoundTrips()
     {
         var (gata, cc) = Environment();
         if (gata == null || cc == null) return;
@@ -122,7 +122,7 @@ public class SemanticFidelityTests
     /// read as a sign. 'byte' and 'ushort' were right only because they widen into int losslessly.
     /// </summary>
     [Fact]
-    public void UnsignedValuesFormatAsUnsigned()
+    public void UnsignedFormatsUnsigned()
     {
         var (gata, cc) = Environment();
         if (gata == null || cc == null) return;
@@ -157,7 +157,7 @@ public class SemanticFidelityTests
     [InlineData("let char c = 300;", "char")]
     [InlineData("let uint u = -1;", "uint")]
     [InlineData("let sbyte v = -129;", "sbyte")]
-    public void OutOfRangeLiteralIsRejected(string decl, string type)
+    public void OutOfRangeLiteral(string decl, string type)
     {
         var d = AssertOne(Codes.TypeMismatch, $"realm kernel {{ entry func Main() {{ {decl} }} }}");
         Assert.Contains("does not fit", d.Message);
@@ -175,11 +175,11 @@ public class SemanticFidelityTests
     [InlineData("let sbyte v = -128; let sbyte w = v;")]
     [InlineData("let uint u = 4294967295; let uint w = u;")]
     [InlineData("let int64 n = -9223372036854775808; let int64 m = n;")]
-    public void BoundaryLiteralsAreAccepted(string body) =>
+    public void BoundaryLiteralsOk(string body) =>
         AssertClean($"realm kernel {{ entry func Main() {{ {body} }} }}");
 
     [Fact]
-    public void MostNegativeIntLiteralRunsCorrectly()
+    public void MostNegativeLiteralRuns()
     {
         var (gata, cc) = Environment();
         if (gata == null || cc == null) return;
@@ -205,7 +205,7 @@ public class SemanticFidelityTests
     [Theory]
     [InlineData("enum E { A = 99999999999 }")]
     [InlineData("enum E { A = 2147483647, B }")]
-    public void OutOfRangeEnumValueIsRejected(string decl)
+    public void OutOfRangeEnumValue(string decl)
     {
         var d = AssertOne(Codes.TypeMismatch, $"realm kernel {{ {decl} entry func Main() {{ }} }}");
         Assert.Contains("does not fit in 'int'", d.Message);
@@ -215,7 +215,7 @@ public class SemanticFidelityTests
     [InlineData("enum E { A = 2147483647 }")]
     [InlineData("enum E { A = -2147483648 }")]
     [InlineData("enum E { A, B, C }")]
-    public void InRangeEnumValuesAreAccepted(string decl) =>
+    public void InRangeEnumValuesOk(string decl) =>
         AssertClean($"realm kernel {{ {decl} entry func Main() {{ }} }}");
 
     #endregion
@@ -238,7 +238,7 @@ public class SemanticFidelityTests
     }
 
     [Fact]
-    public void UnmanagedFixedArrayIsSilent() =>
+    public void UnmanagedFixedArraySilent() =>
         Assert.DoesNotContain(SingleFileCompile.Check(
             "realm kernel { entry func Main() { let [4]int nums = [1,2,3,4]; let int f = nums[0]; } }")
             .Diag.All, d => d.Code == Codes.ManagedFixedArray);
@@ -254,13 +254,13 @@ public class SemanticFidelityTests
     [Theory]
     [InlineData("realm kernel { throws entry func Main() { } }")]
     [InlineData("realm kernel { entry throws func Main() { } }")]
-    public void ThrowsOnAnEntryIsRejectedInEitherOrder(string src) =>
+    public void ThrowsOnEntryRejected(string src) =>
         AssertOne(Codes.BadEntrySignature, src);
 
     [Theory]
     [InlineData("throws entry func R() { }")]
     [InlineData("entry throws func R() { }")]
-    public void ThrowsOnAThreadEntryIsRejectedInEitherOrder(string entry)
+    public void ThrowsOnThreadEntryRejected(string entry)
     {
         var d = AssertOne(Codes.BadEntrySignature,
             "realm kernel { entry func Main() { } }\n" +
@@ -278,7 +278,7 @@ public class SemanticFidelityTests
     /// truncated and hid it.
     /// </summary>
     [Fact]
-    public void SubIntArithmeticKeepsItsDeclaredWidth()
+    public void SubIntKeepsWidth()
     {
         var (gata, cc) = Environment();
         if (gata == null || cc == null) return;
@@ -314,7 +314,7 @@ public class SemanticFidelityTests
     /// and none of its operand conversion. These are the same values the expanded 'a = a op b' gives.
     /// </summary>
     [Fact]
-    public void CompoundAssignmentComputesAtTheTargetsType()
+    public void CompoundComputesAtTarget()
     {
         var (gata, cc) = Environment();
         if (gata == null || cc == null) return;
@@ -342,7 +342,7 @@ public class SemanticFidelityTests
     /// passed the check that would have reported the narrowing. 5000000000 printed as 705032704.
     /// </summary>
     [Fact]
-    public void WideSignedValuesSurviveInterpolation()
+    public void WideSignedInterpolates()
     {
         var (gata, cc) = Environment();
         if (gata == null || cc == null) return;
@@ -370,7 +370,7 @@ public class SemanticFidelityTests
     /// because 'bool' is in the integer family and fell into the numeric formatter first.
     /// </summary>
     [Fact]
-    public void BoolFormatsTheSameWayInterpolatedAndCast()
+    public void BoolFormatsConsistently()
     {
         var (gata, cc) = Environment();
         if (gata == null || cc == null) return;
@@ -408,7 +408,7 @@ public class SemanticFidelityTests
     [InlineData(false, "let int a = -10;  let uint b = 3;    let int r = a * b;")]
     [InlineData(false, "let int a = -10;  let uint b = 3;    let bool r = a == b;")]
     [InlineData(false, "let int a = -10;  let uint b = 3;    let int r = a >> b;")]
-    public void MixedSignednessIsRejectedOnlyWhereItChangesTheAnswer(bool rejected, string body)
+    public void MixedSignednessRejectedWhenItMatters(bool rejected, string body)
     {
         string src = $"realm kernel {{ entry func Main() {{ {body} }} }}";
         var (diag, _) = SingleFileCompile.Check(src);
@@ -429,7 +429,7 @@ public class SemanticFidelityTests
     [InlineData(Codes.BadShiftCount,  "let byte b = 1; b <<= 9;")]
     [InlineData(Codes.BadShiftCount,  "let int c = 1; c <<= 64;")]
     [InlineData(Codes.BadShiftCount,  "let int c = 1; c >>= -1;")]
-    public void CompoundAssignmentGetsTheOperatorChecks(string code, string body) =>
+    public void CompoundGetsOperatorChecks(string code, string body) =>
         AssertOne(code, $"realm kernel {{ entry func Main() {{ {body} }} }}");
 
     /// <summary>
@@ -443,7 +443,7 @@ public class SemanticFidelityTests
     [InlineData(false, "let char a = 'a'; let char b = 'b'; let char r = a - b;")]
     [InlineData(false, "let int n = 5; let char r = ('0' + n) as char;")]
     [InlineData(false, "let char a = 'a'; let int r = a as int + 1;")]
-    public void AddingTwoCharsWarnsThatItIsNotConcatenation(bool warned, string body)
+    public void CharAdditionWarns(bool warned, string body)
     {
         var (diag, _) = SingleFileCompile.Check($"realm kernel {{ entry func Main() {{ {body} }} }}");
         var hits = diag.All.Where(d => d.Code == Codes.CharArithmetic).ToList();
@@ -462,7 +462,7 @@ public class SemanticFidelityTests
     [InlineData("Algorithms.Sort[int](xs);")]
     [InlineData("let int m = Max[int](1, 2);")]
     [InlineData("Take[int64, bool](xs);")]
-    public void ExplicitTypeArgumentsOnACallAreNamed(string body)
+    public void ExplicitTypeArgsNamed(string body)
     {
         var d = AssertOne(Codes.ExplicitTypeArgs,
             $"realm kernel {{ entry func Main() {{ {body} }} }}");
@@ -477,7 +477,7 @@ public class SemanticFidelityTests
     [InlineData("let [2]int a = [1, 2]; let int i = 0; let int v = a[i];")]
     [InlineData("let List[int] xs = new List[int]();")]
     [InlineData("let Maybe[int] m = Maybe[int].Found(7);")]
-    public void NeighbouringBracketFormsStillParse(string body) =>
+    public void BracketFormsParse(string body) =>
         AssertClean("union Maybe[T] { Found(T v), Missing }\n" +
                     "class List[T] { public func _init() { } }\n" +
                     $"realm kernel {{ entry func Main() {{ {body} }} }}");
@@ -506,7 +506,7 @@ public class SemanticFidelityTests
     [InlineData("let byte b; let byte c = b;")]
     [InlineData("let double d; let double e = d * 2.0;")]
     [InlineData("let int x; let int y; y = x; x = 1;")]
-    public void ReadingAnUnassignedLocalIsRejected(string body) =>
+    public void UnassignedLocalRejected(string body) =>
         AssertOne(Codes.UseBeforeAssignment,
             DefiniteAssignmentPrelude + $"realm kernel {{ entry func Main() {{ {body} }} }}");
 
@@ -529,7 +529,7 @@ public class SemanticFidelityTests
     [InlineData("let int n; defer { let int u = Use(n); } n = 3;")]
     [InlineData("let String s; let bool u = s == null;")]
     [InlineData("let int p; native { } let int u = Use(p);")]
-    public void ConservativeCasesStaySilent(string body) =>
+    public void ConservativeCasesSilent(string body) =>
         AssertClean(DefiniteAssignmentPrelude + $"realm kernel {{ entry func Main() {{ {body} }} }}");
 
     #endregion
@@ -541,7 +541,7 @@ public class SemanticFidelityTests
     /// but the loop analysis only looked for one on a declaration or an expression statement. 
     /// </summary>
     [Fact]
-    public void ABreakInAnAssignmentHandlerExitsItsLoop()
+    public void HandlerBreakExitsLoop()
     {
         var (gata, cc) = Environment();
         if (gata == null || cc == null) return;
@@ -584,7 +584,7 @@ public class SemanticFidelityTests
     /// function does have a path that falls out without returning, and that must still be reported.
     /// </summary>
     [Fact]
-    public void AFunctionLeavingThroughAnAssignmentHandlerStillNeedsAReturn() =>
+    public void HandlerExitStillNeedsReturn() =>
         AssertOne(Codes.MissingReturn, """
             throws int func R(int n) { if (n < 0) { throw; } return n; }
             int func NoReturn() {
@@ -600,7 +600,7 @@ public class SemanticFidelityTests
     /// whole-body native form instead of leaving the author to guess.
     /// </summary>
     [Fact]
-    public void MissingReturnNamesTheNativeBlockItCannotSeeInto()
+    public void MissingReturnNamesNativeBlock()
     {
         var d = AssertOne(Codes.MissingReturn, """
             int func NativeRet() { native { return 42; } }

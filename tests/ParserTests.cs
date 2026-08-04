@@ -9,7 +9,7 @@ using Appa;
 public class ParserTests
 {
     [Fact]
-    public void BareImportIsNotAPath()
+    public void BareImportNotPath()
     {
         var prog = SingleFileCompile.Parse("import Collections;");
         var import = Assert.IsType<ImportDecl>(prog.Items[0]);
@@ -18,7 +18,7 @@ public class ParserTests
     }
 
     [Fact]
-    public void QuotedImportIsAPath()
+    public void QuotedImportIsPath()
     {
         var prog = SingleFileCompile.Parse("import \"shared/util.g\";");
         var import = Assert.IsType<ImportDecl>(prog.Items[0]);
@@ -27,14 +27,14 @@ public class ParserTests
     }
 
     [Fact]
-    public void EnvironmentParsesAsAMarker()
+    public void EnvironmentIsMarker()
     {
         var prog = SingleFileCompile.Parse("@environment");
         Assert.IsType<EnvironmentDecl>(prog.Items[0]);
     }
 
     [Fact]
-    public void FreeFuncCapturesItsSignature()
+    public void FreeFuncSignature()
     {
         var prog = SingleFileCompile.Parse("int func Add(int a, int b) { return a + b; }");
         var func = Assert.IsType<FuncDecl>(prog.Items[0]);
@@ -54,7 +54,7 @@ public class ParserTests
     }
 
     [Fact]
-    public void GenericFuncCollectsItsParams()
+    public void GenericFuncParams()
     {
         var prog = SingleFileCompile.Parse("func Identity[T](T x) { return x; }");
         var func = Assert.IsType<FuncDecl>(prog.Items[0]);
@@ -62,7 +62,7 @@ public class ParserTests
     }
 
     [Fact]
-    public void ClassDeclCollectsNameAndMembers()
+    public void ClassDeclMembers()
     {
         var prog = SingleFileCompile.Parse("class Point { int X; int Y; }");
         var cls = Assert.IsType<ClassDecl>(prog.Items[0]);
@@ -81,7 +81,7 @@ public class ParserTests
     }
 
     [Fact]
-    public void KernelBlockGroupsItsItems()
+    public void KernelBlockGroups()
     {
         var prog = SingleFileCompile.Parse("realm kernel { entry func Main() { } }");
         var ctx = Assert.IsType<ContextDecl>(prog.Items[0]);
@@ -91,7 +91,7 @@ public class ParserTests
     }
 
     [Fact]
-    public void UserBlockParsesItsTopology()
+    public void UserBlockTopology()
     {
         var prog = SingleFileCompile.Parse("""
             realm userspace {
@@ -113,7 +113,7 @@ public class ParserTests
     }
 
     [Fact]
-    public void IfElseCarriesBothBranches()
+    public void IfElseBranches()
     {
         var prog = SingleFileCompile.Parse("func F() { if (true) { } else { } }");
         var func = (FuncDecl)prog.Items[0];
@@ -123,7 +123,7 @@ public class ParserTests
     }
 
     [Fact]
-    public void CStyleForLoopParsesInitCondStep()
+    public void CStyleForParts()
     {
         var prog = SingleFileCompile.Parse("func F() { for (let int i = 0; i < 10; i++) { } }");
         var func = (FuncDecl)prog.Items[0];
@@ -135,7 +135,7 @@ public class ParserTests
     }
 
     [Fact]
-    public void ForInLoopBindsLoopVariable()
+    public void ForInBindsVariable()
     {
         var prog = SingleFileCompile.Parse("func F() { for x in items { } }");
         var func = (FuncDecl)prog.Items[0];
@@ -145,7 +145,7 @@ public class ParserTests
     }
 
     [Fact]
-    public void LetStmtWithTypeAndInitializer()
+    public void LetWithTypeAndInit()
     {
         var prog = SingleFileCompile.Parse("func F() { let int x = 5; }");
         var func = (FuncDecl)prog.Items[0];
@@ -157,7 +157,7 @@ public class ParserTests
     }
 
     [Fact]
-    public void BinExprCapturesItsOperands()
+    public void BinExprOperands()
     {
         var prog = SingleFileCompile.Parse("func F() { let int x = 1 + 2; }");
         var func = (FuncDecl)prog.Items[0];
@@ -169,7 +169,7 @@ public class ParserTests
     }
 
     [Fact]
-    public void TryCatchCarriesBothBlocks()
+    public void TryCatchBlocks()
     {
         var prog = SingleFileCompile.Parse("func F() { try { } catch { } }");
         var func = (FuncDecl)prog.Items[0];
@@ -178,7 +178,7 @@ public class ParserTests
     }
 
     [Fact]
-    public void DeferStmtWrapsAction()
+    public void DeferWrapsAction()
     {
         var prog = SingleFileCompile.Parse("func F() { defer Close(); }");
         var func = (FuncDecl)prog.Items[0];
@@ -216,7 +216,7 @@ public class ParserTests
     [InlineData("class List[T] { T v; }", "List_T", "List")]
     [InlineData("class Map[K, V] { K k; V v; }", "Map_K_V", "Map")]
     [InlineData("class Plain { int n; }", "Plain", "Plain")]
-    public void GenericClassCarriesItsBaseName(string src, string name, string baseName)
+    public void GenericClassBaseName(string src, string name, string baseName)
     {
         var cd = Assert.IsType<ClassDecl>(SingleFileCompile.Parse(src).Items[0]);
         Assert.Equal(name, cd.Name);
@@ -226,7 +226,7 @@ public class ParserTests
     [Theory]
     [InlineData("union Maybe[V] { Found(V v), Missing }", "Maybe_V", "Maybe")]
     [InlineData("union Flat { A, B }", "Flat", "Flat")]
-    public void GenericUnionCarriesItsBaseName(string src, string name, string baseName)
+    public void GenericUnionBaseName(string src, string name, string baseName)
     {
         var ud = Assert.IsType<UnionDecl>(SingleFileCompile.Parse(src).Items[0]);
         Assert.Equal(name, ud.Name);
@@ -238,7 +238,7 @@ public class ParserTests
     /// they call the same composer, not because two independent concatenations happen to match.
     /// </summary>
     [Fact]
-    public void GenericNamesComposeThroughTheMangler()
+    public void ManglerComposesNames()
     {
         var cd = Assert.IsType<ClassDecl>(SingleFileCompile.Parse("class Map[K, V] { K k; V v; }").Items[0]);
         Assert.Equal(Mangler.GenericInstance(cd.BaseName, cd.GenericParams), cd.Name);
@@ -249,7 +249,7 @@ public class ParserTests
     /// never parsed back. Nesting must compose the same way at every depth.
     /// </summary>
     [Fact]
-    public void NestedGenericRefsMangleStructurally()
+    public void NestedRefsMangle()
     {
         var inner = new NamedSpec("List", [new NamedSpec("int")], TextSpan.None);
         var outer = new NamedSpec("Box", [inner], TextSpan.None);
@@ -263,7 +263,7 @@ public class ParserTests
     /// never has to recover it from the mangled form.
     /// </summary>
     [Fact]
-    public void GenericDeclUsesItsBaseName()
+    public void GenericDeclBaseName()
     {
         var prog = SingleFileCompile.Parse("class List[T] { T v; }");
         var use = Assert.Single(prog.GenericUses.Where(u => u.Base == "List"));

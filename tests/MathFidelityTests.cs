@@ -88,7 +88,7 @@ public class MathFidelityTests
         "0x" + BitConverter.DoubleToUInt64Bits(d).ToString("X16", CultureInfo.InvariantCulture) + "ULL";
 
     [Fact]
-    public void MathMatchesLibmWithinDocumentedTolerance()
+    public void MatchesLibm()
     {
         var gata = HostedRun.FindGataCheckout();
         if (gata == null) return;

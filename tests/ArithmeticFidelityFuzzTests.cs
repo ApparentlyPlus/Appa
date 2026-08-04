@@ -185,7 +185,7 @@ public class ArithmeticFidelityFuzzTests
     /// is what the promotion and signedness defects were.
     /// </summary>
     [Fact]
-    public void GeneratedArithmeticMatchesItsDeclaredTypes()
+    public void ArithmeticMatchesTypes()
     {
         string? gata = HostedRun.FindGataCheckout();
         if (gata == null || HostedRun.FindCompiler() == null) return;

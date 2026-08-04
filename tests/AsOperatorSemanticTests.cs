@@ -27,7 +27,7 @@ public class AsOperatorSemanticTests
     #region Good programs
 
     [Fact]
-    public void PrimitiveToClassConversionIsClean()
+    public void PrimitiveToClass()
     {
         AssertClean("""
             class Wrapper {
@@ -46,7 +46,7 @@ public class AsOperatorSemanticTests
     /// destination is what says whether it knows how to be built from a given source type.
     /// </summary>
     [Fact]
-    public void ClassToClassConversionIsClean()
+    public void ClassToClass()
     {
         AssertClean("""
             class Centimeters { public int v; func _init(int v) { self.v = v; } }
@@ -68,7 +68,7 @@ public class AsOperatorSemanticTests
     /// return type is never meaningfully anything else.
     /// </summary>
     [Fact]
-    public void ReturnTypeDefaultsToOwnerClass()
+    public void ReturnDefaultsToOwner()
     {
         AssertClean("""
             class Wrapper {
@@ -82,7 +82,7 @@ public class AsOperatorSemanticTests
     }
 
     [Fact]
-    public void OverloadsSelectByParamType()
+    public void OverloadsSelectByParam()
     {
         AssertClean("""
             class Box { public int v; }
@@ -106,7 +106,7 @@ public class AsOperatorSemanticTests
     /// can never fire - it's dead code, not an error.
     /// </summary>
     [Fact]
-    public void SelfConversionIsLegalButUnused()
+    public void SelfConversionUnused()
     {
         AssertClean("""
             class Box {
@@ -126,7 +126,7 @@ public class AsOperatorSemanticTests
     /// Box exist.
     /// </summary>
     [Fact]
-    public void GenericAsOperatorMonomorphizes()
+    public void GenericMonomorphizes()
     {
         AssertClean("""
             class Box[T] {
@@ -140,7 +140,7 @@ public class AsOperatorSemanticTests
     }
 
     [Fact]
-    public void ClassSourceUsesDestinationAs()
+    public void SourceUsesDestinationAs()
     {
         AssertClean("""
             class Box { public int v; }
@@ -156,7 +156,7 @@ public class AsOperatorSemanticTests
     }
 
     [Fact]
-    public void ConversionNeverFiresImplicitly()
+    public void NeverImplicit()
     {
         AssertError(Codes.TypeMismatch, """
             class Wrapper {
@@ -179,7 +179,7 @@ public class AsOperatorSemanticTests
     /// via 'as', only how another type converts IN to it.
     /// </summary>
     [Fact]
-    public void AsWithNoParamsIsRejected()
+    public void NoParamsRejected()
     {
         AssertError(Codes.WrongArgCount, """
             class Box {
@@ -190,7 +190,7 @@ public class AsOperatorSemanticTests
     }
 
     [Fact]
-    public void AsWithTwoParamsIsRejected()
+    public void TwoParamsRejected()
     {
         AssertError(Codes.WrongArgCount, """
             class Box {
@@ -201,7 +201,7 @@ public class AsOperatorSemanticTests
     }
 
     [Fact]
-    public void DuplicateAsOverloadIsRejected()
+    public void DuplicateOverloadRejected()
     {
         AssertError(Codes.DuplicateName, """
             class Wrapper {
@@ -213,7 +213,7 @@ public class AsOperatorSemanticTests
     }
 
     [Fact]
-    public void DuplicateOperatorIsRejected()
+    public void DuplicateOperatorRejected()
     {
         AssertError(Codes.DuplicateName, """
             class Box {
@@ -230,7 +230,7 @@ public class AsOperatorSemanticTests
     /// dispatch finds this operator purely by the destination class's name.
     /// </summary>
     [Fact]
-    public void WrongExplicitReturnTypeIsRejected()
+    public void WrongReturnRejected()
     {
         AssertError(Codes.TypeMismatch, """
             class Wrapper {
@@ -241,7 +241,7 @@ public class AsOperatorSemanticTests
     }
 
     [Fact]
-    public void CastWithNoAsOperatorIsRejected()
+    public void CastWithoutAsRejected()
     {
         AssertError(Codes.InvalidCast, """
             class Box { int v; }
@@ -254,7 +254,7 @@ public class AsOperatorSemanticTests
     }
 
     [Fact]
-    public void AsForUnrelatedSourceDoesNotApply()
+    public void UnrelatedSourceIgnored()
     {
         AssertError(Codes.InvalidCast, """
             class Box { int v; }
@@ -271,7 +271,7 @@ public class AsOperatorSemanticTests
     }
 
     [Fact]
-    public void PrimitiveWithNoAsIsRejected()
+    public void PrimitiveWithoutAsRejected()
     {
         AssertError(Codes.InvalidCast, """
             class Wrapper { int v; }
@@ -287,7 +287,7 @@ public class AsOperatorSemanticTests
     /// declared, so this fails identically whether or not the class declares anything.
     /// </summary>
     [Fact]
-    public void ClassToPrimitiveIsRejected()
+    public void ClassToPrimitiveRejected()
     {
         AssertError(Codes.InvalidCast, """
             class Box { int v; func _init(int v) { self.v = v; } }
@@ -299,7 +299,7 @@ public class AsOperatorSemanticTests
     }
 
     [Fact]
-    public void ClassToPrimitiveHasAHint()
+    public void ClassToPrimitiveHint()
     {
         var (diag, _) = SingleFileCompile.Check("""
             class Box { int v; func _init(int v) { self.v = v; } }
@@ -344,7 +344,7 @@ public class AsOperatorSemanticTests
     /// the raw C-style reinterpret cast that built-in numeric/pointer casts still use.
     /// </summary>
     [Fact]
-    public void AsCastResolvesToOperatorCall()
+    public void CastResolvesToCall()
     {
         var (diag, module) = SingleFileCompile.Check("""
             class Wrapper {
@@ -366,7 +366,7 @@ public class AsOperatorSemanticTests
     /// uses - and the cast at each use site calls the one matching its own source type.
     /// </summary>
     [Fact]
-    public void OverloadedAsGetDistinctCNames()
+    public void OverloadsGetDistinctNames()
     {
         var (diag, module) = SingleFileCompile.Check("""
             class Wrapper {
@@ -393,7 +393,7 @@ public class AsOperatorSemanticTests
     }
 
     [Fact]
-    public void AsOperatorSignatureOmitsSelf()
+    public void SignatureOmitsSelf()
     {
         var (diag, module) = SingleFileCompile.Check("""
             class Wrapper {

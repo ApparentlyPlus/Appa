@@ -24,7 +24,7 @@ public class ScopeQualifierTests
     [InlineData("kernel.Step()")]
     [InlineData("::Step()")]
     [InlineData("Step()")]
-    public void EveryEnclosingScopeIsNameable(string call)
+    public void EnclosingScopesNameable(string call)
     {
         Assert.Empty(Errors($$"""
             int func Step() { return 1; }
@@ -65,7 +65,7 @@ public class ScopeQualifierTests
     [InlineData("class Holder { public ::Cargo held; }")]
     [InlineData("::Cargo func Make(::Cargo c) { return c; }")]
     [InlineData("void func Take(Box[::Cargo] b) { let int n = b.v.root; }")]
-    public void QualifiersWorkInEveryTypeSlot(string decl)
+    public void QualifiersInEveryTypeSlot(string decl)
     {
         Assert.Empty(Errors($$"""
             class Box[T] { public T v; }
@@ -83,7 +83,7 @@ public class ScopeQualifierTests
     /// make that split, which is why the parser hands over every dotted segment at once.
     /// </summary>
     [Fact]
-    public void ScopeThenNameThenMemberSplitsCorrectly()
+    public void ScopeNameMemberSplits()
     {
         Assert.Empty(Errors("""
             module Algo { public static int func Min(int a, int b) { return a; } }
@@ -103,7 +103,7 @@ public class ScopeQualifierTests
     /// written somewhere else entirely.
     /// </summary>
     [Fact]
-    public void AQualifierReachesASplitRealm()
+    public void ReachesSplitRealm()
     {
         Assert.Empty(Errors("""
             realm userspace { int func Step() { return 2; } }
@@ -132,7 +132,7 @@ public class ScopeQualifierTests
                 "foreground process B { thread T { entry func R() { let kernel.A.Cfg c; } } } entry func Main() { } }")]
     [InlineData("realm kernel { int func Step() { return 1; } entry func Main() { } } " +
                 "int func Outer() { return kernel.Step(); }")]
-    public void SiblingAndInwardScopesAreRejected(string src)
+    public void SiblingAndInwardRejected(string src)
     {
         var errors = Errors(src);
         Assert.Contains(errors, e => e.StartsWith(Codes.ScopeNotEnclosing, StringComparison.Ordinal));
@@ -143,7 +143,7 @@ public class ScopeQualifierTests
     /// this code is not inside reads as a reach sideways rather than as a misspelling.
     /// </summary>
     [Fact]
-    public void ARealmWithoutABlockStillReadsAsASibling()
+    public void BlocklessRealmIsSibling()
     {
         var errors = Errors("realm kernel { entry func Main() { let userspace.X c; } }");
         Assert.Contains(errors, e => e.Contains("'userspace' does not enclose", StringComparison.Ordinal));
@@ -162,7 +162,7 @@ public class ScopeQualifierTests
     [InlineData("realm kernel { int func Step() { return 1; } entry func Main() { let int z = ::Step(); } }")]
     [InlineData("realm kernel { foreground process P { int func Step() { return 1; } " +
                 "thread T { entry func R() { } } } entry func Main() { let int z = kernel.Step(); } }")]
-    public void ANameTheScopeDoesNotDeclareIsRejected(string src)
+    public void UndeclaredNameRejected(string src)
     {
         Assert.Contains(Errors(src), e => e.StartsWith(Codes.UnknownInScope, StringComparison.Ordinal));
     }
@@ -171,7 +171,7 @@ public class ScopeQualifierTests
     /// A process is a scope, not a value, so naming one where a declaration belongs says so.
     /// </summary>
     [Fact]
-    public void AProcessIsNotAName()
+    public void ProcessIsNotAName()
     {
         var errors = Errors("realm kernel { foreground process P { thread T { entry func R() { } } } " +
                             "entry func Main() { let int z = kernel.P(); } }");
@@ -193,7 +193,7 @@ public class ScopeQualifierTests
     [InlineData("realm kernel { entry func Main() { let int z = kernel.Q.Nope(); } }")]
     [InlineData("realm kernel { class Cfg { public int a; } entry func Main() { } } " +
                 "realm userspace { void func F() { let kernel.Cfg c = new kernel.Cfg(); } }")]
-    public void OneRejectedQualifierIsOneError(string src)
+    public void BadQualifierReportsOnce(string src)
     {
         Assert.Single(Errors(src));
     }
@@ -207,7 +207,7 @@ public class ScopeQualifierTests
     /// the displacement is deliberate, and that is a separate statement from reaching past it.
     /// </summary>
     [Fact]
-    public void AQualifierDoesNotExcuseShadows()
+    public void QualifierDoesNotExcuseShadow()
     {
         Assert.Contains(Errors("int func Step() { return 1; } realm kernel { int func Step() { return 2; } " +
                                "entry func Main() { let int z = ::Step(); } }"),
@@ -219,7 +219,7 @@ public class ScopeQualifierTests
     /// too - it names a scope, and a local is in none.
     /// </summary>
     [Fact]
-    public void AQualifierReachesPastALocalOfTheSameName()
+    public void QualifierReachesPastLocal()
     {
         Assert.Empty(Errors("""
             int func Step() { return 1; }
@@ -238,7 +238,7 @@ public class ScopeQualifierTests
     [InlineData("class userspace { public int a; } realm kernel { entry func Main() { } }")]
     [InlineData("realm kernel { entry func Main() { let int userspace = 1; } }")]
     [InlineData("realm kernel { entry func Main() { let int z = kernel; } }")]
-    public void ARealmNameIsNotAnIdentifier(string src)
+    public void RealmNameIsNotIdent(string src)
     {
         Assert.Contains(Errors(src), e => e.StartsWith(Codes.Syntax, StringComparison.Ordinal));
     }
@@ -248,7 +248,7 @@ public class ScopeQualifierTests
     /// reader would write anyway - and says so instead of reporting a missing ':'.
     /// </summary>
     [Fact]
-    public void TightTernaryColonSaysWhatIsWrong()
+    public void TightTernaryColonExplained()
     {
         Assert.Contains(Errors("int func Step() { return 1; } realm kernel { @shadows int func Step() { return 2; } " +
                                "entry func Main() { let int z = true?1:::Step(); } }"),
@@ -266,7 +266,7 @@ public class ScopeQualifierTests
     [InlineData("realm ::kernel { entry func Main() { } }")]
     [InlineData("realm kernel { entry func Main() { let int z = kernel.P.Q.R.S.T.U(); } }")]
     [InlineData("realm kernel { entry func Main() { let Box[kernel.] b; } }")]
-    public void MalformedQualifiersAreReportedNotThrown(string src)
+    public void MalformedQualifierReported(string src)
     {
         Assert.NotEmpty(Errors(src));
     }

@@ -10,7 +10,7 @@ using Appa;
 public class AsOperatorParserTests
 {
     [Fact]
-    public void AsParsesWithParamAndReturn()
+    public void ParsesParamAndReturn()
     {
         var prog = SingleFileCompile.Parse("""
             class Wrapper {
@@ -27,7 +27,7 @@ public class AsOperatorParserTests
     }
 
     [Fact]
-    public void AsAcceptsClassParam()
+    public void AcceptsClassParam()
     {
         var prog = SingleFileCompile.Parse("""
             class Box { int v; }
@@ -43,7 +43,7 @@ public class AsOperatorParserTests
     }
 
     [Fact]
-    public void AsReturnTypeIsOptional()
+    public void ReturnTypeOptional()
     {
         var prog = SingleFileCompile.Parse("""
             class Wrapper {
@@ -58,7 +58,7 @@ public class AsOperatorParserTests
     }
 
     [Fact]
-    public void MultipleAsOperatorsStaySeparate()
+    public void MultipleStaySeparate()
     {
         var prog = SingleFileCompile.Parse("""
             class Wrapper {
@@ -75,7 +75,7 @@ public class AsOperatorParserTests
     }
 
     [Fact]
-    public void AsLexesAsAKeyword()
+    public void LexesAsKeyword()
     {
         var prog = SingleFileCompile.Parse("""
             class Wrapper {

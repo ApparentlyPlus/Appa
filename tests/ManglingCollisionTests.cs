@@ -152,7 +152,7 @@ public class ManglingCollisionTests
                 "entry func Main() { let A a = new A(); let _g1 g = new _g1(); let int q = a.n + g.n; } }", true)]
     [InlineData("enum _g2 { X } realm kernel { class A { public int n; } " +
                 "entry func Main() { let A a = new A(); let _g2 e = _g2.X; } }", true)]
-    public void GeneratedNamesAreNotQuietlyTakenOver(string body, bool accepted)
+    public void GeneratedNamesNotHijacked(string body, bool accepted)
     {
         var cc = FindCompiler();
         if (cc == null) { Assert.Skip("no host C compiler found"); return; }
@@ -183,7 +183,7 @@ public class ManglingCollisionTests
     }
 
     [Fact]
-    public void AcceptedProgramsNeverCollideInC()
+    public void NoCollisionsInC()
     {
         var cc = FindCompiler();
         if (cc == null) { Assert.Skip("no host C compiler found; skipping mangling-collision sweep"); return; }

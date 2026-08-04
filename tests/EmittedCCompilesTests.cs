@@ -60,7 +60,7 @@ public class EmittedCCompilesTests
     }
 
     [Fact]
-    public void CleanCorpusEmitsCompilableC()
+    public void CorpusCompiles()
     {
         var cc = FindCompiler();
         if (cc == null)

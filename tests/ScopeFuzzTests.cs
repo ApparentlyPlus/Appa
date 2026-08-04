@@ -195,7 +195,7 @@ public class ScopeFuzzTests
     }
 
     [Fact]
-    public void ScopedProgramsCompileAndLink()
+    public void ScopedProgramsLink()
     {
         var cc = FindCompiler();
         using var work = TempDir.Create("appa-scopefuzz-");
@@ -301,7 +301,7 @@ public class ScopeFuzzTests
     /// the positive half pass on a rule that never fires.
     /// </summary>
     [Fact]
-    public void UnmarkedShadowingIsRejected()
+    public void UnmarkedShadowingRejected()
     {
         var failures = new List<string>();
         var cov = new Coverage();

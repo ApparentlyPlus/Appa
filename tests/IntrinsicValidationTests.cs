@@ -56,7 +56,7 @@ public class IntrinsicValidationTests
     /// reader to a file that is fine.
     /// </summary>
     [Fact]
-    public void NoArcBindingsAtAllBlamesTheBuild()
+    public void NoArcBindingsBlamesBuild()
     {
         var d = Assert.Single(ValidateOf("""
             class Box { int v; }
@@ -74,7 +74,7 @@ public class IntrinsicValidationTests
     /// so - that is the case the reader cannot fix from their own file.
     /// </summary>
     [Fact]
-    public void PartialArcBindingsBlameTheLibrary()
+    public void PartialArcBlamesLibrary()
     {
         var d = Assert.Single(ValidateOf("""
             @intrinsic(alloc) @extern void* func alloc(usize n);
@@ -93,7 +93,7 @@ public class IntrinsicValidationTests
     /// test suite.
     /// </summary>
     [Fact]
-    public void ProgramWithNoManagedClassIsClean()
+    public void NoManagedClassOk()
     {
         Assert.Empty(ValidateOf("""
             realm kernel { entry func Main() {
@@ -104,7 +104,7 @@ public class IntrinsicValidationTests
     }
 
     [Fact]
-    public void ModuleOnlyProgramIsClean()
+    public void ModuleOnlyOk()
     {
         Assert.Empty(ValidateOf("""
             module M { public static int func Twice(int x) { return x * 2; } }
@@ -113,7 +113,7 @@ public class IntrinsicValidationTests
     }
 
     [Fact]
-    public void EnumOnlyProgramIsClean()
+    public void EnumOnlyOk()
     {
         Assert.Empty(ValidateOf("""
             enum Status { Pending, Active, Done }
@@ -127,7 +127,7 @@ public class IntrinsicValidationTests
     /// points at what to add rather than restating the whole contract as missing.
     /// </summary>
     [Fact]
-    public void PartialArcNamesMissingRolesOnly()
+    public void PartialArcNamesMissingRoles()
     {
         var d = Assert.Single(ValidateOf("""
             @intrinsic(obj_header)
@@ -152,7 +152,7 @@ public class IntrinsicValidationTests
     }
 
     [Fact]
-    public void FullyBoundArcContractIsClean()
+    public void FullyBoundArcOk()
     {
         Assert.Empty(ValidateOf("""
             @intrinsic(obj_header)

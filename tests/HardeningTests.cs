@@ -27,28 +27,28 @@ public class HardeningTests
     #region Entry signatures
 
     [Fact]
-    public void EntryFuncWithParamsIsRejected()
+    public void EntryParamsRejected()
     {
         AssertError(Codes.BadEntrySignature,
             "realm kernel { entry func Main(int x) { } }");
     }
 
     [Fact]
-    public void EntryFuncWithReturnTypeIsRejected()
+    public void EntryReturnRejected()
     {
         AssertError(Codes.BadEntrySignature,
             "realm kernel { entry int func Main() { return 1; } }");
     }
 
     [Fact]
-    public void EntryFuncWithThrowsIsRejected()
+    public void EntryThrowsRejected()
     {
         AssertError(Codes.BadEntrySignature,
             "realm kernel { entry throws func Main() { } }");
     }
 
     [Fact]
-    public void ThreadEntryWithParamsIsRejected()
+    public void ThreadEntryParamsRejected()
     {
         AssertError(Codes.BadEntrySignature, """
             realm kernel { entry func Main() { } }
@@ -57,7 +57,7 @@ public class HardeningTests
     }
 
     [Fact]
-    public void PlainEntrySignaturesAreClean()
+    public void PlainEntryOk()
     {
         AssertClean("""
             realm kernel { entry func Main() { } }
@@ -70,7 +70,7 @@ public class HardeningTests
     #region Realm structure
 
     [Fact]
-    public void UserEntryInGatOSIsRejected()
+    public void UserEntryInGatOSRejected()
     {
         var prog = SingleFileCompile.Parse("""
             realm kernel { entry func Main() { } }
@@ -82,7 +82,7 @@ public class HardeningTests
     }
 
     [Fact]
-    public void UserEntryInHostedIsAccepted()
+    public void UserEntryInHostedOk()
     {
         var prog = SingleFileCompile.Parse("realm userspace { entry func UMain() { } }");
         var diag = new DiagnosticBag(new SourceSet());
@@ -101,13 +101,13 @@ public class HardeningTests
     [Theory]
     [InlineData("throws int* func F() { throw; } realm kernel { entry func Main() { try { unsafe { let int* p = F(); } } catch { } } }")]
     [InlineData("throws [4]int func F() { throw; } realm kernel { entry func Main() { try { let [4]int a = F(); } catch { } } }")]
-    public void ThrowsPointerReturnIsRejected(string src)
+    public void ThrowsPointerReturnRejected(string src)
     {
         AssertError(Codes.BadThrowsReturnType, src);
     }
 
     [Fact]
-    public void ThrowsPointerMethodIsRejected()
+    public void ThrowsPointerMethodRejected()
     {
         AssertError(Codes.BadThrowsReturnType, """
             class Box { public throws int* func Get() { throw; } }
@@ -116,7 +116,7 @@ public class HardeningTests
     }
 
     [Fact]
-    public void ThrowsEnumReturnEmitsItsTypedef()
+    public void ThrowsEnumEmitsTypedef()
     {
         var output = SingleFileCompile.Emit("""
             enum Color { Red, Green }
@@ -133,7 +133,7 @@ public class HardeningTests
     #region throws initializer type checking
 
     [Fact]
-    public void ThrowsInitTypeMismatchIsRejected()
+    public void ThrowsInitMismatchRejected()
     {
         AssertError(Codes.TypeMismatch, """
             class Box { int v; }
@@ -145,7 +145,7 @@ public class HardeningTests
     [Theory]
     [InlineData("throws int func F() { return 1; } realm kernel { entry func Main() { try { let int x = F(); } catch { } } }")]
     [InlineData("throws int func F() { return 1; } realm kernel { entry func Main() { try { let int64 x = F(); } catch { } } }")]
-    public void ThrowsInitMatchingTypeIsClean(string src)
+    public void ThrowsInitMatchOk(string src)
     {
         AssertClean(src);
     }
@@ -160,7 +160,7 @@ public class HardeningTests
     /// 'Pair[T, T]' never unified. Structural unification fixes it.
     /// </summary>
     [Fact]
-    public void GenericFuncInfersFromMultiParam()
+    public void InfersFromMultiParam()
     {
         AssertClean("""
             class Pair[A, B] {
@@ -177,7 +177,7 @@ public class HardeningTests
     }
 
     [Fact]
-    public void ConflictingBindingIsRejected()
+    public void ConflictingBindingRejected()
     {
         AssertError(Codes.ArgTypeMismatch, """
             class Pair[A, B] {
@@ -202,13 +202,13 @@ public class HardeningTests
     [InlineData("realm kernel { entry func Main() { while (true) { defer { break; } } } }")]
     [InlineData("realm kernel { entry func Main() { while (true) { defer { continue; } } } }")]
     [InlineData("realm kernel { entry func Main() { defer { defer { let x = 1; } } } }")]
-    public void DeferControlTransferHasItsOwnCode(string src)
+    public void DeferControlTransferCode(string src)
     {
         AssertError(Codes.DeferTransfer, src);
     }
 
     [Fact]
-    public void ModuleFieldUsesModuleFieldCode()
+    public void ModuleFieldCode()
     {
         AssertError(Codes.ModuleField,
             "module M { int x; } realm kernel { entry func Main() { } }");
@@ -218,7 +218,7 @@ public class HardeningTests
     [InlineData("class C { public private func F() { } } realm kernel { entry func Main() { } }")]
     [InlineData("class C { public public func F() { } } realm kernel { entry func Main() { } }")]
     [InlineData("class C { static static func F() { } } realm kernel { entry func Main() { } }")]
-    public void ConflictingModifiersAreRejected(string src)
+    public void ConflictingModifiersRejected(string src)
     {
         AssertError(Codes.ConflictingModifiers, src);
     }
@@ -226,7 +226,7 @@ public class HardeningTests
     [Theory]
     [InlineData("class C { throws func _init() { } } realm kernel { entry func Main() { } }")]
     [InlineData("class C { throws func _deinit() { } } realm kernel { entry func Main() { } }")]
-    public void ThrowsOnLifecycleMethodIsRejected(string src)
+    public void ThrowsOnLifecycleRejected(string src)
     {
         AssertError(Codes.LifecycleThrows, src);
     }
@@ -236,7 +236,7 @@ public class HardeningTests
     #region Single-source-of-truth consistency
 
     [Fact]
-    public void EveryPrimitiveLexesAsAKeyword()
+    public void PrimitivesLexAsKeywords()
     {
         foreach (var name in SymbolTable.Primitives)
         {
@@ -248,7 +248,7 @@ public class HardeningTests
     }
 
     [Fact]
-    public void OperatorSuffixesAreDistinct()
+    public void OperatorSuffixesDistinct()
     {
         string[] ops = ["+", "-", "*", "/", "==", "!=", "<", ">", "<=", ">=",
                         "&", "|", "^", "<<", ">>", "[]", "[]=", "!", "~", "++", "--"];
@@ -266,7 +266,7 @@ public class HardeningTests
     #region String concatenation floor
 
     [Fact]
-    public void StringConcatNeedsAnOperator()
+    public void ConcatNeedsOperator()
     {
         AssertError(Codes.MissingIntrinsic,
             """realm kernel { entry func Main() { let s = "a" + "b"; } }""");

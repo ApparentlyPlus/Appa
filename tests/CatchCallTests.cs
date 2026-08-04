@@ -36,7 +36,7 @@ public class CatchCallTests
     #region Accepted forms
 
     [Fact]
-    public void HandlerSatisfiesTheThrowsRule()
+    public void SatisfiesThrowsRule()
     {
         AssertClean(Throwing +
             "realm kernel { entry func Main() { let int a = P(1) catch { assign 0; }; } }");
@@ -47,7 +47,7 @@ public class CatchCallTests
     /// in the same scope can still see it. Inside a try block this variable would be unreachable.
     /// </summary>
     [Fact]
-    public void DeclarationStaysInTheOuterScope()
+    public void DeclStaysOuter()
     {
         AssertClean(Throwing +
             """
@@ -64,7 +64,7 @@ public class CatchCallTests
     /// throws function, `throw` propagates the failure onward.
     /// </summary>
     [Fact]
-    public void HandlerMayGiveUpByThrowing()
+    public void MayGiveUpByThrowing()
     {
         AssertClean(Throwing +
             """
@@ -77,7 +77,7 @@ public class CatchCallTests
     }
 
     [Fact]
-    public void HandlerMayGiveUpByReturning()
+    public void MayGiveUpByReturning()
     {
         AssertClean(Throwing +
             """
@@ -90,7 +90,7 @@ public class CatchCallTests
     }
 
     [Fact]
-    public void HandlerAssigningEveryPathIsClean()
+    public void EveryPathAssigns()
     {
         AssertClean(Throwing +
             """
@@ -117,14 +117,14 @@ public class CatchCallTests
     }
 
     [Fact]
-    public void StatementPositionNeedsNoAssign()
+    public void StatementNeedsNoAssign()
     {
         AssertClean(Throwing +
             "realm kernel { entry func Main() { P(-1) catch { let int logged = 1; }; } }");
     }
 
     [Fact]
-    public void AssignWidensToTheDeclaredType()
+    public void AssignWidens()
     {
         AssertClean(Throwing +
             "realm kernel { entry func Main() { let int64 a = P(1) catch { assign 0; }; } }");
@@ -135,14 +135,14 @@ public class CatchCallTests
     #region Rejected forms
 
     [Fact]
-    public void HandlerFallingThroughIsRejected()
+    public void FallthroughRejected()
     {
         AssertError(Codes.CatchHandlerNoAssign, Throwing +
             "realm kernel { entry func Main() { let int a = P(1) catch { let int z = 0; }; } }");
     }
 
     [Fact]
-    public void HandlerMissingAPathIsRejected()
+    public void MissingPathRejected()
     {
         AssertError(Codes.CatchHandlerNoAssign, Throwing +
             """
@@ -153,21 +153,21 @@ public class CatchCallTests
     }
 
     [Fact]
-    public void AssignOutsideAnyHandlerIsRejected()
+    public void AssignOutsideRejected()
     {
         AssertError(Codes.AssignOutsideCatch,
             "realm kernel { entry func Main() { assign 5; } }");
     }
 
     [Fact]
-    public void AssignAsAStatementIsRejected()
+    public void AssignAsStatementRejected()
     {
         AssertError(Codes.AssignOutsideCatch, Throwing +
             "realm kernel { entry func Main() { P(1) catch { assign 3; }; } }");
     }
 
     [Fact]
-    public void CatchOnNonThrowingCallIsRejected()
+    public void NonThrowingCallRejected()
     {
         AssertError(Codes.ThrowsOutsideTry,
             """
@@ -177,21 +177,21 @@ public class CatchCallTests
     }
 
     [Fact]
-    public void CatchOnNonCallIsRejected()
+    public void NonCallRejected()
     {
         AssertError(Codes.Syntax,
             "realm kernel { entry func Main() { let int a = 5 catch { assign 0; }; } }");
     }
 
     [Fact]
-    public void AssignOfWrongTypeIsRejected()
+    public void WrongTypeAssignRejected()
     {
         AssertError(Codes.TypeMismatch, Throwing +
             "realm kernel { entry func Main() { let int a = P(1) catch { assign \"nope\"; }; } }");
     }
 
     [Fact]
-    public void CatchDoesNotCoverArguments()
+    public void ArgumentsNotCovered()
     {
         AssertError(Codes.ThrowsOutsideTry, Throwing +
             """
@@ -206,7 +206,7 @@ public class CatchCallTests
     /// by design - so this position needs its own guard.
     /// </summary>
     [Fact]
-    public void CatchInFieldInitializerIsRejected()
+    public void FieldInitRejected()
     {
         AssertError(Codes.ThrowsOutsideTry, Throwing +
             "class B { public int v = P(1) catch { assign 0; }; }\n" +
@@ -216,7 +216,7 @@ public class CatchCallTests
     [Theory]
     [InlineData("class B { int v; func _init(int x) { self.v = x; } }\nrealm kernel { entry func Main() { let B b = new B(P(1) catch { assign 0; }); } }")]
     [InlineData("class L { public void func Add(int x) { } }\nrealm kernel { entry func Main() { let L l = new L { P(1) catch { assign 0; } }; } }")]
-    public void NestedCatchIsRejected(string body)
+    public void NestedCatchRejected(string body)
     {
         AssertError(Codes.ThrowsOutsideTry, Throwing + body);
     }
@@ -226,7 +226,7 @@ public class CatchCallTests
     /// not count as leaving. Without this the analysis would accept a handler that falls through.
     /// </summary>
     [Fact]
-    public void BreakInHandlerLoopIsNotLeaving()
+    public void BreakStaysInHandlerLoop()
     {
         AssertError(Codes.CatchHandlerNoAssign, Throwing +
             "realm kernel { entry func Main() { let int v = P(1) catch { while (true) { break; } }; } }");
@@ -242,7 +242,7 @@ public class CatchCallTests
     [InlineData("unsafe { let int v = P(1) catch { assign 9; }; }")]
     [InlineData("{ let int v = P(1) catch { assign 9; }; }")]
     [InlineData("try { let int v = P(1) catch { assign 9; }; } catch { }")]
-    public void CatchWorksInEveryPosition(string body)
+    public void WorksEverywhere(string body)
     {
         AssertClean(Throwing + "realm kernel { entry func Main() { " + body + " } }");
     }
@@ -253,7 +253,7 @@ public class CatchCallTests
     /// parameter inside survives unreplaced, failing as "unknown type 'T'".
     /// </summary>
     [Fact]
-    public void TypeParamsSubstituteInHandler()
+    public void TypeParamsSubstitute()
     {
         AssertClean(Throwing +
             """
@@ -266,7 +266,7 @@ public class CatchCallTests
     }
 
     [Fact]
-    public void TypeParamsSubstituteInMethodHandler()
+    public void TypeParamsSubstituteInMethod()
     {
         AssertClean(Throwing +
             """
@@ -283,7 +283,7 @@ public class CatchCallTests
     }
 
     [Fact]
-    public void CatchWorksInMemberBodies()
+    public void WorksInMembers()
     {
         AssertClean(Throwing +
             """
@@ -322,7 +322,7 @@ public class CatchCallTests
     /// declaration inside its own scope, which is what this construct exists to avoid.
     /// </summary>
     [Fact]
-    public void LowersToDeclarationThenBranch()
+    public void LowersToDeclThenBranch()
     {
         var body = LoweredMain(Throwing +
             "realm kernel { entry func Main() { let int a = P(1) catch { assign 0; }; let int b = a; } }");
@@ -348,7 +348,7 @@ public class CatchCallTests
     }
 
     [Fact]
-    public void AssignStoresIntoTheDeclaration()
+    public void AssignStoresIntoDecl()
     {
         var body = LoweredMain(Throwing +
             "realm kernel { entry func Main() { let int a = P(1) catch { assign 9; }; } }");
@@ -365,7 +365,7 @@ public class CatchCallTests
     /// variable is already an owner by then, and releasing null is a no-op in the runtime.
     /// </summary>
     [Fact]
-    public void ManagedTargetHasNoInitializer()
+    public void ManagedTargetUninitialized()
     {
         var body = LoweredMain(
             """
@@ -385,7 +385,7 @@ public class CatchCallTests
     /// release it. The failure arm must not: the Result's value was never set on that path.
     /// </summary>
     [Fact]
-    public void DiscardedResultReleasesOnSuccess()
+    public void DiscardedResultReleases()
     {
         var body = LoweredMain(
             """

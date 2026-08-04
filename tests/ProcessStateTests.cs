@@ -78,7 +78,7 @@ public class ProcessStateTests
     [InlineData("let int n;")]
     [InlineData("let Cell c;")]
     [InlineData("let int a = 1; let int b;")]
-    public void ProcessVariableWithoutAnInitialiserIsRejected(string body)
+    public void VarNeedsInitialiser(string body)
     {
         AssertError(Codes.UninitialisedProcessVar, InProcess(body, ArcStub));
     }
@@ -87,7 +87,7 @@ public class ProcessStateTests
     [InlineData("let int n = 0;")]
     [InlineData("let Cell c = new Cell();")]
     [InlineData("let int a = 1; let int b = a + 1;")]
-    public void ProcessVariableWithAnInitialiserIsAccepted(string body)
+    public void VarWithInitialiserOk(string body)
     {
         AssertClean(InProcess(body, ArcStub));
     }
@@ -97,7 +97,7 @@ public class ProcessStateTests
     #region The initialiser is checked like any other
 
     [Fact]
-    public void InitialiserTypeIsChecked()
+    public void InitialiserTypeChecked()
     {
         AssertError(Codes.TypeMismatch, InProcess("""let int n = "text";"""));
     }
@@ -107,14 +107,14 @@ public class ProcessStateTests
     /// generated code with nowhere to propagate to.
     /// </summary>
     [Fact]
-    public void ThrowingInitialiserIsRejected()
+    public void ThrowingInitialiserRejected()
     {
         AssertError(Codes.ThrowsOutsideTry,
             InProcess("let int n = F();", "throws int func F() { return 1; }"));
     }
 
     [Fact]
-    public void DuplicateProcessVariableIsRejected()
+    public void DuplicateVarRejected()
     {
         AssertError(Codes.DuplicateName, InProcess("let int n = 1; let int n = 2;"));
     }
@@ -133,7 +133,7 @@ public class ProcessStateTests
     [InlineData("realm kernel { let int n = 1; entry func Main() { } }")]
     [InlineData("module M { let int n = 1; } realm kernel { entry func Main() { } }")]
     [InlineData("class C { let int n = 1; } realm kernel { entry func Main() { } }")]
-    public void AVariableOutsideAProcessIsRejected(string src)
+    public void VarOutsideProcessRejected(string src)
     {
         AssertError(Codes.Syntax, src);
     }
@@ -143,7 +143,7 @@ public class ProcessStateTests
     /// message already. Pinned here so the two answers stay distinguishable.
     /// </summary>
     [Fact]
-    public void StaticFieldIsStillRejectedSeparately()
+    public void StaticFieldStillRejected()
     {
         AssertError(Codes.BadDeclHeader,
             "class C { static int n; public int v; func _init() { self.v = 1; } } " +
@@ -159,7 +159,7 @@ public class ProcessStateTests
     /// rule that already governs a process's types and functions, so it reports the same way.
     /// </summary>
     [Fact]
-    public void ProcessVariableIsNotVisibleOutsideItsProcess()
+    public void VarNotVisibleOutside()
     {
         AssertError(Codes.ScopedNameNotVisible, """
             realm kernel {
@@ -174,7 +174,7 @@ public class ProcessStateTests
     /// process is not one of those from outside it.
     /// </summary>
     [Fact]
-    public void QualifierCannotReachIntoAProcess()
+    public void QualifierCannotReachIn()
     {
         AssertError(Codes.ScopeNotEnclosing, """
             realm kernel {
@@ -189,7 +189,7 @@ public class ProcessStateTests
     /// have collided in C had the name not carried the process.
     /// </summary>
     [Fact]
-    public void TwoProcessesMayDeclareTheSameName()
+    public void SameNameInTwoProcesses()
     {
         AssertClean("""
             realm kernel {
@@ -205,7 +205,7 @@ public class ProcessStateTests
     /// what makes it state rather than a variable that happens to live longer.
     /// </summary>
     [Fact]
-    public void ThreadsAndProcessFunctionsBothSeeIt()
+    public void ThreadsAndFuncsSeeIt()
     {
         AssertClean("""
             realm kernel {
@@ -229,7 +229,7 @@ public class ProcessStateTests
     /// thread reads and writes its own copy while believing it shares one.
     /// </summary>
     [Fact]
-    public void LocalShadowingProcessVariableWarns()
+    public void LocalShadowWarns()
     {
         var (diag, _) = Check("""
             realm kernel {
@@ -249,7 +249,7 @@ public class ProcessStateTests
     /// And the warning is about shadowing specifically, so an unrelated local does not draw it.
     /// </summary>
     [Fact]
-    public void UnrelatedLocalDoesNotWarn()
+    public void UnrelatedLocalSilent()
     {
         var (diag, _) = Check("""
             realm kernel {
@@ -276,7 +276,7 @@ public class ProcessStateTests
     [InlineData("let Cell c = c;")]                          // itself, managed: stays null forever
     [InlineData("let int a = b; let int b = 1;")]            // one declared below
     [InlineData("let int a = b; let int b = a;")]            // mutually
-    public void InitialiserReadingAnUninitialisedVariableIsRejected(string body)
+    public void ReadingUninitialisedRejected(string body)
     {
         AssertError(Codes.UseBeforeAssignment, InProcess(body, ArcStub));
     }
@@ -285,7 +285,7 @@ public class ProcessStateTests
     /// The legal counterpart: reading one declared above is exactly what the ordering guarantees.
     /// </summary>
     [Fact]
-    public void InitialiserMayReadOneDeclaredAbove()
+    public void MayReadDeclaredAbove()
     {
         AssertClean(InProcess("let int a = 2; let int b = a * 3;", ArcStub));
     }
@@ -296,7 +296,7 @@ public class ProcessStateTests
     /// author can plainly see two lines below and offers nothing to do about it.
     /// </summary>
     [Fact]
-    public void TheDiagnosticNamesTheVariableAsWritten()
+    public void DiagnosticNamesVarAsWritten()
     {
         var (diag, _) = Check(InProcess("let int a = b; let int b = 1;", ArcStub));
         var d = Assert.Single(diag.All, x => x.Code == Codes.UseBeforeAssignment);
@@ -305,7 +305,7 @@ public class ProcessStateTests
     }
 
     [Fact]
-    public void ReadingItselfSaysSo()
+    public void SelfReadReported()
     {
         var (diag, _) = Check(InProcess("let int a = a + 1;", ArcStub));
         var d = Assert.Single(diag.All, x => x.Code == Codes.UseBeforeAssignment);
@@ -321,13 +321,13 @@ public class ProcessStateTests
     /// the same rule a local declaration gets.
     /// </summary>
     [Fact]
-    public void CatchHandlerWithoutAnAssignIsRejected()
+    public void HandlerNeedsAssign()
     {
         AssertError(Codes.CatchHandlerNoAssign, InProcess("let int a = Boom(1) catch { };", Throwing));
     }
 
     [Fact]
-    public void CatchHandlerWithAnAssignIsAccepted()
+    public void HandlerWithAssignOk()
     {
         AssertClean(InProcess("let int a = Boom(1) catch { assign 7; };", Throwing));
     }
@@ -340,7 +340,7 @@ public class ProcessStateTests
     [InlineData("let int a = Boom(1) catch { return; }; let int b = 2;")]
     [InlineData("let int a = Boom(1) catch { return 5; };")]
     [InlineData("let int a = Boom(1) catch { if (1 > 0) { return; } assign 2; };")]
-    public void CatchHandlerCannotReturn(string body)
+    public void HandlerCannotReturn(string body)
     {
         AssertError(Codes.UninitialisedProcessVar, InProcess(body, Throwing));
     }
@@ -350,7 +350,7 @@ public class ProcessStateTests
     /// it would also report a mismatch against a function the author never wrote.
     /// </summary>
     [Fact]
-    public void ReturningAValueFromAHandlerReportsOnlyTheRealMistake()
+    public void HandlerReturnReportsOnce()
     {
         var (_, errors) = Check(InProcess("let int a = Boom(1) catch { return 5; };", Throwing));
         Assert.Equal([Codes.UninitialisedProcessVar], errors);
@@ -363,7 +363,7 @@ public class ProcessStateTests
     [Theory]
     [InlineData("let int a = Boom(1) catch { break; };")]
     [InlineData("let int a = Boom(1) catch { continue; };")]
-    public void CatchHandlerCannotBreakOrContinue(string body)
+    public void HandlerCannotBreak(string body)
     {
         AssertError(Codes.BreakOutsideLoop, InProcess(body, Throwing));
     }
@@ -373,7 +373,7 @@ public class ProcessStateTests
     /// there is nowhere to propagate to.
     /// </summary>
     [Fact]
-    public void CatchHandlerCannotThrow()
+    public void HandlerCannotThrow()
     {
         AssertError(Codes.ThrowsOutsideTry, InProcess("let int a = Boom(1) catch { throw; };", Throwing));
     }
@@ -389,7 +389,7 @@ public class ProcessStateTests
     /// into a local first worked fine.
     /// </summary>
     [Fact]
-    public void AFunctionPointerInProcessStateIsCallable()
+    public void FuncPtrIsCallable()
     {
         AssertClean($$"""
             int func Twice(int x) { return x * 2; }
@@ -408,7 +408,7 @@ public class ProcessStateTests
     /// A local of the same name still shadows it, as it does for every other read.
     /// </summary>
     [Fact]
-    public void ALocalFunctionPointerStillShadowsTheProcessOne()
+    public void LocalFuncPtrShadows()
     {
         var (diag, _) = Check($$"""
             int func Twice(int x) { return x * 2; }
@@ -434,7 +434,7 @@ public class ProcessStateTests
     /// rather than a fault at boot.
     /// </summary>
     [Fact]
-    public void CallingAFunctionPointerBeforeItIsInitialisedIsRejected()
+    public void CallBeforeInitRejected()
     {
         AssertError(Codes.UseBeforeAssignment, """
             int func Twice(int x) { return x * 2; }
@@ -459,7 +459,7 @@ public class ProcessStateTests
     /// per variable, an initialiser, and a gate every thread passes through before its own body.
     /// </summary>
     [Fact]
-    public void LoweringEmitsStaticsAndAGatedInitialiser()
+    public void LoweringEmitsGatedInit()
     {
         var (diag, module) = SingleFileCompile.Check("""
             realm kernel {
@@ -485,7 +485,7 @@ public class ProcessStateTests
     /// A process with no variables gains nothing - no gate, no initialiser, no per-thread call.
     /// </summary>
     [Fact]
-    public void ProcessWithoutStateGetsNoInitialiser()
+    public void NoStateNoInitialiser()
     {
         var (diag, module) = SingleFileCompile.Check("""
             realm kernel {

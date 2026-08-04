@@ -117,7 +117,7 @@ public class MemoryEngineTests
     /// Debug first: the operations have to be right before the optimiser is asked about them.
     /// </summary>
     [Fact]
-    public void TheMemoryEngineMatchesAByteWiseReference()
+    public void MatchesByteWiseReference()
     {
         var gata = HostedRun.FindGataCheckout();
         var cc = HostedRun.FindCompiler();
@@ -135,7 +135,7 @@ public class MemoryEngineTests
     /// shipped image and nothing else.
     /// </summary>
     [Fact]
-    public void TheMemoryEngineMatchesUnderStrictAliasingAtO3()
+    public void MatchesUnderStrictAliasing()
     {
         var gata = HostedRun.FindGataCheckout();
         var cc = HostedRun.FindCompilerAcceptingReleaseFlags();

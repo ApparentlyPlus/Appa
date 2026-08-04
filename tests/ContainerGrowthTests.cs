@@ -61,7 +61,7 @@ public class ContainerGrowthTests
         """;
 
     [Fact]
-    public void OverwritingAnExistingKeyNeverResizes()
+    public void OverwriteNeverResizes()
     {
         var gata = HostedRun.FindGataCheckout();
         var cc = HostedRun.FindCompiler();

@@ -58,7 +58,7 @@ public class PipelineTests
     [InlineData("G041", "class C { @keep int func F() { return 1; } } realm kernel { entry func Main() { } }")]
     [InlineData("G041", "@preamble(user) int func Foo() { return 1; } realm kernel { entry func Main() { } }")]
     [InlineData("G043", "realm kernel { entry func Main() {} } realm userspace { foreground process App { background thread Worker { entry func Run() {} } } }")]
-    public void ProducesExpectedErrorCode(string expectedCode, string src)
+    public void ErrorCode(string expectedCode, string src)
     {
         var (diag, _) = SingleFileCompile.Check(src);
         Assert.True(diag.HasErrors, $"expected {expectedCode} but source produced no errors");
@@ -70,7 +70,7 @@ public class PipelineTests
     [InlineData("G024", "int func F() { return 1; let int x = 2; } realm kernel { entry func Main() { let int y = F(); } }")]
     [InlineData("G025", "realm kernel { entry func Main() { if (true) { } } }")]
     [InlineData("G026", "void func F() { return; } realm kernel { entry func Main() { F(); } }")]
-    public void ProducesExpectedWarningCode(string expectedCode, string src)
+    public void WarningCode(string expectedCode, string src)
     {
         var (diag, _) = SingleFileCompile.Check(src);
         Assert.False(diag.HasErrors);
@@ -81,7 +81,7 @@ public class PipelineTests
     [InlineData("G002", "module M { }")]
     [InlineData("G057", "realm kernel { entry func Main() { } } realm kernel { entry func Main2() { } }")]
     [InlineData("G059", "realm kernel { entry func A() { } entry func B() { } }")]
-    public void StructureGivesExpectedCode(string expectedCode, string src)
+    public void StructureCode(string expectedCode, string src)
     {
         var prog = SingleFileCompile.Parse(src);
         var programs = new List<(string path, Appa.Program prog)> { ("<test>", prog) };
@@ -98,7 +98,7 @@ public class PipelineTests
     [InlineData("G057", "realm userspace { entry func A() { } } realm userspace { entry func B() { } }")]
     [InlineData("G058", "realm userspace { func f() { } }")]
     [InlineData("G059", "realm userspace { entry func A() { } entry func B() { } }")]
-    public void StructureGivesExpectedHostedCode(string expectedCode, string src)
+    public void HostedStructureCode(string expectedCode, string src)
     {
         var prog = SingleFileCompile.Parse(src);
         var programs = new List<(string path, Appa.Program prog)> { ("<test>", prog) };
@@ -110,7 +110,7 @@ public class PipelineTests
     }
 
     [Fact]
-    public void StructureAcceptsWellFormedHosted()
+    public void WellFormedHostedOk()
     {
         const string src = "realm userspace { entry func Main() { } }";
         var prog = SingleFileCompile.Parse(src);
@@ -183,7 +183,7 @@ public class PipelineTests
           if (sum >= 0) { } else { }
         } }
         """)]
-    public void GoodPathProgramsHaveNoErrors(string src)
+    public void GoodPathHasNoErrors(string src)
     {
         var (diag, module) = SingleFileCompile.Check(src);
         Assert.False(diag.HasErrors);
@@ -191,7 +191,7 @@ public class PipelineTests
     }
 
     [Fact]
-    public void OverloadDispatchesOnDeclaration()
+    public void OverloadDispatches()
     {
         var (diag, module) = SingleFileCompile.Check("""
             class Vec {

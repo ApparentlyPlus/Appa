@@ -62,7 +62,7 @@ public class SymbolReachabilityExecutionTests
     };
 
     [Fact]
-    public void SharedNamesReachTheSymbolTheProgramNamed()
+    public void SharedNamesResolveCorrectly()
     {
         var gata = HostedRun.FindGataCheckout();
         var cc = HostedRun.FindCompiler();

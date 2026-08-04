@@ -66,7 +66,7 @@ public partial class BookSamplesTests
     /// declared paragraphs earlier, and demanding they resolve would pin the test to the prose.
     /// </summary>
     [Fact]
-    public void EverySampleIsStillValidGata()
+    public void SamplesAreValid()
     {
         var book = FindBook();
         if (book == null) { Assert.Skip("no sibling Gata checkout found; skipping book samples"); return; }
@@ -155,7 +155,7 @@ public partial class BookSamplesTests
     [InlineData(@"(?<![\w.])user\s*\{", "the userspace realm is written 'realm userspace { }'")]
     [InlineData(@"(?<![\w.])(public|private|static)\s+(class|module|enum|union)\b",
                 "a top-level type takes no visibility modifier")]
-    public void NoSampleUsesRetiredSyntax(string pattern, string why)
+    public void NoRetiredSyntax(string pattern, string why)
     {
         var book = FindBook();
         if (book == null) { Assert.Skip("no sibling Gata checkout found"); return; }

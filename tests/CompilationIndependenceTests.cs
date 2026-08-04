@@ -78,7 +78,7 @@ public class CompilationIndependenceTests
     ];
 
     [Fact]
-    public void DiagnosticsDoNotDependOnWhatWasCompiledBefore()
+    public void DiagnosticsAreIndependent()
     {
         var mismatches = new List<string>();
         foreach (var (aName, aSrc) in Diagnosing)
@@ -106,7 +106,7 @@ public class CompilationIndependenceTests
     /// name what the author wrote.
     /// </summary>
     [Fact]
-    public void AnEarlierBuildsDisplayNamesDoNotReachThisBuildsMessages()
+    public void NoDisplayNameLeak()
     {
         Emit("registers-a-generic-display-name", Find(Programs, "registers-a-generic-display-name"));
         string d = Diagnose(Find(Diagnosing, "name-that-looks-mangled"));
@@ -132,7 +132,7 @@ public class CompilationIndependenceTests
     }
 
     [Fact]
-    public void CompilingSomethingElseFirstChangesNothing()
+    public void PriorBuildChangesNothing()
     {
         var mismatches = new List<string>();
         foreach (var (aName, aSrc) in Programs)

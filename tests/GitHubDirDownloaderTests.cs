@@ -36,7 +36,7 @@ public class GitHubDirDownloaderTests
         new(HttpStatusCode.OK) { Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json") };
 
     [Fact]
-    public async Task DownloadsRequestedDirsFromOneTreeFetch()
+    public async Task DownloadsFromOneTreeFetch()
     {
         var handler = new FakeGitHubHandler();
         handler.On(u => u.Contains("/git/trees/"), _ => Json("""
@@ -69,7 +69,7 @@ public class GitHubDirDownloaderTests
     }
 
     [Fact]
-    public async Task FallsBackToContentsApiWhenTreeIsTruncated()
+    public async Task FallsBackWhenTruncated()
     {
         var handler = new FakeGitHubHandler();
         handler.On(u => u.Contains("/git/trees/"), _ => Json("""{"truncated": true, "tree": []}"""));
@@ -93,7 +93,7 @@ public class GitHubDirDownloaderTests
     }
 
     [Fact]
-    public async Task RefetchesGitLfsPointersFromMediaCdn()
+    public async Task RefetchesLfsPointers()
     {
         var handler = new FakeGitHubHandler();
         handler.On(u => u.Contains("/git/trees/"), _ => Json("""
@@ -150,7 +150,7 @@ public class GitHubDirDownloaderTests
     /// exactly how that happens, and it is indistinguishable from a healthy install at the time.
     /// </summary>
     [Fact]
-    public async Task APrefixThatMatchesNothingIsAnError()
+    public async Task UnmatchedPrefixErrors()
     {
         var handler = new FakeGitHubHandler();
         handler.On(u => u.Contains("/git/trees/"), _ => Json("""
@@ -173,7 +173,7 @@ public class GitHubDirDownloaderTests
     /// what makes pruning a file dropped upstream possible at all.
     /// </summary>
     [Fact]
-    public async Task ReportsWhatItWrotePerPrefix()
+    public async Task ReportsWritesPerPrefix()
     {
         var handler = new FakeGitHubHandler();
         handler.On(u => u.Contains("/git/trees/"), _ => Json("""

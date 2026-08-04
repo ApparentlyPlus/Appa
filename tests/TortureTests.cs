@@ -127,7 +127,7 @@ public partial class TortureTests
     /// always a compiler bug, never a property of the input.
     /// </summary>
     [Fact]
-    public void NoCorpusCaseCrashesTheCompiler()
+    public void NoCorpusCaseCrashes()
     {
         var fails = new Failures();
         foreach (var c in TortureCorpus.All)
@@ -148,7 +148,7 @@ public partial class TortureTests
     /// the end of the file renders a caret under nothing.
     /// </summary>
     [Fact]
-    public void AllDiagnosticsAreWellFormed()
+    public void DiagnosticsWellFormed()
     {
         var known = new HashSet<string>(typeof(Codes).GetFields()
             .Where(f => f.IsLiteral && f.FieldType == typeof(string))
@@ -158,7 +158,7 @@ public partial class TortureTests
         foreach (var c in TortureCorpus.All)
         {
             var (diag, _, crash) = TryCheck(c.Source);
-            if (crash != null) continue; // owned by NoCorpusCaseCrashesTheCompiler
+            if (crash != null) continue; // owned by NoCorpusCaseCrashes
 
             foreach (var d in diag!.All)
             {
@@ -196,7 +196,7 @@ public partial class TortureTests
     /// annotation does not belong.
     /// </summary>
     [Fact]
-    public void KeepIsAcceptedWhereItIsConsumed()
+    public void KeepAcceptedWhenConsumed()
     {
         foreach (string decl in (string[])
                  ["@keep class A { public int n; }",
@@ -222,7 +222,7 @@ public partial class TortureTests
     [InlineData("realm kernel { class A { public int n; } entry func Main() { } } " +
                 "void func Use() { let A a = new A(); let int m = a.n + 1; }",
                 Codes.ScopedNameNotVisible)]
-    public void OneMistakeReportsItsCauseOnce(string src, string code)
+    public void OneMistakeOneCause(string src, string code)
     {
         var (diag, _, crash) = TryCheck(src);
         Assert.Null(crash);
@@ -269,7 +269,7 @@ public partial class TortureTests
     /// decide whether a declaration is legal, so asymmetry is a bug in the rule, not the input.
     /// </summary>
     [Fact]
-    public void ProcessBodyRulesAreRealmSymmetric()
+    public void ProcessRulesRealmSymmetric()
     {
         var byName = TortureCorpus.All.ToDictionary(c => c.Name);
         var fails = new Failures();
@@ -289,7 +289,7 @@ public partial class TortureTests
 
             var (kDiag, _, kCrash) = TryCheck(c.Source);
             var (uDiag, _, uCrash) = TryCheck(twin.Source);
-            if (kCrash != null || uCrash != null) continue; // owned by NoCorpusCaseCrashesTheCompiler
+            if (kCrash != null || uCrash != null) continue; // owned by NoCorpusCaseCrashes
 
             var kCodes = Codes(kDiag!);
             var uCodes = Codes(uDiag!);
@@ -319,7 +319,7 @@ public partial class TortureTests
             if (c.Expect == Expect.Any) continue;
 
             var (diag, _, crash) = TryCheck(c.Source);
-            if (crash != null) continue; // owned by NoCorpusCaseCrashesTheCompiler
+            if (crash != null) continue; // owned by NoCorpusCaseCrashes
 
             var errors = diag!.All.Where(d => d.Severity == Severity.Error).ToList();
             var got = errors.Count == 0 ? "no errors" : string.Join("; ", errors.Select(e => $"{e.Code} {e.Message}"));
@@ -345,7 +345,7 @@ public partial class TortureTests
     /// bodies (a constraint violation gcc rejects).
     /// </summary>
     [Fact]
-    public void EmittedCIsStructurallyValid()
+    public void EmittedCIsValid()
     {
         var fails = new Failures();
         foreach (var c in TortureCorpus.All)
@@ -353,7 +353,7 @@ public partial class TortureTests
             var (diag, module, crash) = TryCheck(c.Source);
             if (crash != null || diag!.HasErrors || module == null) continue;
             var (files, emitCrash) = TryEmit(module, diag);
-            if (emitCrash != null) continue; // owned by NoCorpusCaseCrashesTheCompiler
+            if (emitCrash != null) continue; // owned by NoCorpusCaseCrashes
 
             foreach (var f in files!)
             {
@@ -375,7 +375,7 @@ public partial class TortureTests
     /// shared.h; a kernel preamble puts the real emitted code under the same assertions.
     /// </summary>
     [Fact]
-    public void EmittedCIsValidWithARealm()
+    public void EmittedCValidWithRealm()
     {
         const string realm = "@preamble(kernel) native { }\n";
         var fails = new Failures();
@@ -409,7 +409,7 @@ public partial class TortureTests
     /// asserted beyond "did not throw".
     /// </summary>
     [Fact]
-    public void RandomTokenSoupNeverCrashes()
+    public void TokenSoupNeverCrashes()
     {
         string[] atoms =
         [
@@ -487,7 +487,7 @@ public partial class TortureTests
     /// program mid-token is the cheapest way to reach parser states no complete input produces.
     /// </summary>
     [Fact]
-    public void EveryPrefixFailsCleanly()
+    public void PrefixesFailCleanly()
     {
         var fails = new Failures();
         for (int cut = 0; cut <= Kitchen.Length; cut++)
@@ -509,7 +509,7 @@ public partial class TortureTests
     /// misbehave when the shape they probe is one token short.
     /// </summary>
     [Fact]
-    public void SingleTokenDeletionsNeverCrash()
+    public void TokenDeletionsNeverCrash()
     {
         var fails = new Failures();
         var toks = SingleFileCompile.Tokenize(Kitchen);

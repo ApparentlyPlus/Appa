@@ -54,7 +54,7 @@ public class WarningDiagnosticsTests
     #region G070 shadowed variable
 
     [Fact]
-    public void ShadowingAnOuterLocalWarns()
+    public void OuterLocalShadowWarns()
     {
         var d = AssertWarns(Codes.ShadowedVariable,
             "realm kernel { entry func Main() { let x = 1; { let x = 2; let y = x; } let z = x; } }");
@@ -66,7 +66,7 @@ public class WarningDiagnosticsTests
     /// the *same* scope stays a hard error, not a warning.
     /// </summary>
     [Fact]
-    public void SiblingScopesAreNotShadowing()
+    public void SiblingScopesSilent()
     {
         AssertNoWarn(Codes.ShadowedVariable,
             "realm kernel { entry func Main() { { let x = 1; let a = x; } { let x = 2; let b = x; } } }");
@@ -115,7 +115,7 @@ public class WarningDiagnosticsTests
     [InlineData("realm kernel { entry func Main() { let a = 1; a + 1; } }")]
     [InlineData("realm kernel { entry func Main() { let a = 1; a; } }")]
     [InlineData("realm kernel { entry func Main() { let a = 1; let b = 2; a == b; } }")]
-    public void PureExpressionStatementWarns(string src)
+    public void PureExprStatementWarns(string src)
     {
         AssertWarns(Codes.NoEffect, src);
     }
@@ -129,14 +129,14 @@ public class WarningDiagnosticsTests
     }
 
     [Fact]
-    public void DiscardedCallResultDoesNotWarn()
+    public void DiscardedCallSilent()
     {
         AssertNoWarn(Codes.NoEffect,
             "int func F() { return 1; } realm kernel { entry func Main() { F(); } }");
     }
 
     [Fact]
-    public void MutatingStatementsDoNotWarn()
+    public void MutatingStatementsSilent()
     {
         AssertNoWarn(Codes.NoEffect,
             "realm kernel { entry func Main() { let a = 1; a = 2; a++; let b = a; } }");
@@ -159,7 +159,7 @@ public class WarningDiagnosticsTests
     }
 
     [Fact]
-    public void InfiniteLoopFormsDoNotWarn()
+    public void InfiniteLoopFormsSilent()
     {
         AssertNoWarn(Codes.ConstantCondition,
             "realm kernel { entry func Main() { while (true) { break; } } }");
@@ -168,7 +168,7 @@ public class WarningDiagnosticsTests
     }
 
     [Fact]
-    public void SelfComparisonWarnsInLoopsToo()
+    public void SelfComparisonWarnsInLoops()
     {
         AssertWarns(Codes.SelfComparison,
             "realm kernel { entry func Main() { let a = 1; if (a == a) { let b = 1; let c = b; } } }");
@@ -183,7 +183,7 @@ public class WarningDiagnosticsTests
     #region G074 redundant cast
 
     [Fact]
-    public void SameTypeCastOnAValueWarns()
+    public void SameTypeCastWarns()
     {
         AssertWarns(Codes.RedundantCast,
             "realm kernel { entry func Main() { let int a = 1; let b = (a as int); } }");
@@ -194,14 +194,14 @@ public class WarningDiagnosticsTests
     /// which is deliberate in bit-manipulation code. libgata relies on this exemption.
     /// </summary>
     [Fact]
-    public void SameTypeCastOnALiteralIsExempt()
+    public void SameTypeCastOnLiteralExempt()
     {
         AssertNoWarn(Codes.RedundantCast,
             "realm kernel { entry func Main() { let a = (0x00100000 as int); let b = a; } }");
     }
 
     [Fact]
-    public void WideningCastDoesNotWarn()
+    public void WideningCastSilent()
     {
         AssertNoWarn(Codes.RedundantCast,
             "realm kernel { entry func Main() { let int a = 1; let b = (a as int64); } }");
@@ -214,7 +214,7 @@ public class WarningDiagnosticsTests
     [Theory]
     [InlineData("realm kernel { entry func Main() { let a = 1; let b = a / 0; } }")]
     [InlineData("realm kernel { entry func Main() { let a = 1; let b = a % 0; } }")]
-    public void DivisionByLiteralZeroIsAnError(string src)
+    public void DivisionByZeroErrors(string src)
     {
         AssertError(Codes.DivisionByZero, src);
     }
@@ -224,7 +224,7 @@ public class WarningDiagnosticsTests
     /// be judged here. Neither is reported.
     /// </summary>
     [Fact]
-    public void FloatAndVariableDivisorsAreSilent()
+    public void FloatDivisorsSilent()
     {
         AssertNoWarn(Codes.DivisionByZero,
             "realm kernel { entry func Main() { let double a = 1.0; let b = a / 0.0; } }");
@@ -246,7 +246,7 @@ public class WarningDiagnosticsTests
     }
 
     [Fact]
-    public void UnderscoreOptsOutOfUnusedWarnings()
+    public void UnderscoreOptsOut()
     {
         AssertNoWarn(Codes.UnusedParameter,
             "int func F(int a, int _b) { return a; } " +
@@ -276,7 +276,7 @@ public class WarningDiagnosticsTests
     #region G077 unreachable default arm
 
     [Fact]
-    public void DefaultOnAFullyCoveredMatchWarns()
+    public void RedundantDefaultWarns()
     {
         var d = AssertWarns(Codes.UnreachableCase,
             "union U { A(int x), B(int y) } " +
@@ -305,7 +305,7 @@ public class WarningDiagnosticsTests
     [Theory]
     [InlineData("realm kernel { entry func Main() { let int a = 1; let b = a << 32; } }")]
     [InlineData("realm kernel { entry func Main() { let int a = 1; let b = a >> 99; } }")]
-    public void OutOfRangeShiftCountIsAnError(string src)
+    public void OutOfRangeShiftErrors(string src)
     {
         AssertError(Codes.BadShiftCount, src);
     }
@@ -330,7 +330,7 @@ public class WarningDiagnosticsTests
     #region G080 string that looks interpolated
 
     [Fact]
-    public void PlainStringNamingAVariableWarns()
+    public void PlainStringWithVarNameWarns()
     {
         var d = AssertWarns(Codes.MissingInterpolation,
             "realm kernel { entry func Main() { let count = 1; let s = \"n={count}\"; let t = s; } }");
@@ -338,7 +338,7 @@ public class WarningDiagnosticsTests
     }
 
     [Fact]
-    public void NonInterpolationBracesAreSilent()
+    public void NonInterpBracesSilent()
     {
         AssertNoWarn(Codes.MissingInterpolation,
             "realm kernel { entry func Main() { let s = \"{notAVariable}\"; let t = s; } }");
@@ -376,7 +376,7 @@ public class WarningDiagnosticsTests
     /// The caret has to land under what it points at when the line is indented with tabs.
     /// </summary>
     [Fact]
-    public void TheCaretRowRepeatsTheSourceLinesTabs()
+    public void CaretRowRepeatsTabs()
     {
         var bag = new DiagnosticBag(new SourceSet());
         bag.Sources.Add("t.g", "\t\tlet int x = wrong;\n");
@@ -402,7 +402,7 @@ public class WarningDiagnosticsTests
         System.Text.RegularExpressions.Regex.Replace(s, "\\[[0-9;]*m", "");
 
     [Fact]
-    public void MultipleHintsEachGetTheirOwnLine()
+    public void MultipleHintsOwnLines()
     {
         var bag = new DiagnosticBag(new SourceSet());
         var sources = bag.Sources;
@@ -442,7 +442,7 @@ public class WarningDiagnosticsTests
     [Theory]
     [InlineData("private")]
     [InlineData("")]
-    public void InstancesAreCalledByTheirOwnName(string vis)
+    public void InstancesUseOwnName(string vis)
     {
         var (diag, module) = SingleFileCompile.Check(
             $"{vis} T func G[T](T a) {{ return a; }} " +
@@ -464,7 +464,7 @@ public class WarningDiagnosticsTests
     /// no-effect statement - this shape appears throughout libgata's containers.
     /// </summary>
     [Fact]
-    public void UnmanagedReleaseIsNotNoEffect()
+    public void UnmanagedReleaseHasEffect()
     {
         AssertNoWarn(Codes.NoEffect,
             "realm kernel { entry func Main() { unsafe { let int x = 1; release(x); } } }");
@@ -496,7 +496,7 @@ public class WarningDiagnosticsTests
     /// warning suggests, so it has to actually silence it.
     /// </summary>
     [Fact]
-    public void ClassPayloadWithEqualityIsSilent()
+    public void ClassPayloadWithEqualitySilent()
     {
         AssertNoWarn(Codes.IdentityPayloadComparison,
             ValuedClass + "union U { V(Valued v), K(int n) } " +
@@ -509,7 +509,7 @@ public class WarningDiagnosticsTests
     /// fire inside List.g - where nothing the author writes can silence it.
     /// </summary>
     [Fact]
-    public void GenericPayloadIsSilent()
+    public void GenericPayloadSilent()
     {
         AssertNoWarn(Codes.IdentityPayloadComparison,
             "class Crate[T] { public T item; } union U { K(Crate[int] c), N(int n) } " +
@@ -533,7 +533,7 @@ public class WarningDiagnosticsTests
     }
 
     [Fact]
-    public void UnionWithNoClassPayloadIsSilent()
+    public void NoClassPayloadSilent()
     {
         AssertNoWarn(Codes.IdentityPayloadComparison,
             "union U { A(int n), B([2]int a), C } " +
@@ -545,7 +545,7 @@ public class WarningDiagnosticsTests
     /// behaves exactly as before and must stay silent.
     /// </summary>
     [Fact]
-    public void UncomparedUnionIsSilent()
+    public void UncomparedUnionSilent()
     {
         AssertNoWarn(Codes.IdentityPayloadComparison,
             PlainClass + "union U { P(Plain p), K(int n) } " +
@@ -564,7 +564,7 @@ public class WarningDiagnosticsTests
     }
 
     [Fact]
-    public void IntegerPayloadIsSilent()
+    public void IntegerPayloadSilent()
     {
         AssertNoWarn(Codes.ImprecisePayloadComparison,
             "union U { A(int n), B(int64 m), C } " +
@@ -577,7 +577,7 @@ public class WarningDiagnosticsTests
     /// outer union and send the author to the wrong declaration.
     /// </summary>
     [Fact]
-    public void NestedHazardsNameTheirOwner()
+    public void NestedHazardsNameOwner()
     {
         var w = AssertWarns(Codes.IdentityPayloadComparison,
             PlainClass + "union Inner { P(Plain p), K(int n) } union Outer { W(Inner i), J(int n) } " +
@@ -592,7 +592,7 @@ public class WarningDiagnosticsTests
     /// variants of a nested union. The walk must terminate rather than recurse forever.
     /// </summary>
     [Fact]
-    public void HazardWalkTerminatesOnSharing()
+    public void HazardWalkTerminates()
     {
         var w = AssertWarns(Codes.IdentityPayloadComparison,
             PlainClass + "union Leaf { P(Plain p), K(int n) } " +
@@ -607,7 +607,7 @@ public class WarningDiagnosticsTests
     /// '!=' generates the same comparison, so it must warn identically.
     /// </summary>
     [Fact]
-    public void NotEqualsWarnsAsEqualsDoes()
+    public void NotEqualsWarnsToo()
     {
         AssertWarns(Codes.IdentityPayloadComparison,
             PlainClass + "union U { P(Plain p), K(int n) } " +
@@ -635,7 +635,7 @@ public class WarningDiagnosticsTests
     }
 
     [Fact]
-    public void TwoUnionsAreNotSelfComparison()
+    public void TwoUnionsNotSelfComparison()
     {
         AssertNoWarn(Codes.SelfComparison,
             SmallUnion + "realm kernel { entry func Main() { let U u = U.B(); let U v = U.A(1); if (u == v) { } } }");

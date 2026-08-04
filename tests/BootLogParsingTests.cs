@@ -11,7 +11,7 @@ public class BootLogParsingTests
     /// kernel runs - and the kernel's first line continues that same line.
     /// </summary>
     [Fact]
-    public void AFirstMarkerGluedToGrubsLineIsStillRead()
+    public void GluedFirstMarkerRead()
     {
         string glued = string.Join("\n",
             "Booting from DVD/CD...",
@@ -28,7 +28,7 @@ public class BootLogParsingTests
     /// spellings of one - which is the entire premise of comparing the images.
     /// </summary>
     [Fact]
-    public void TheCleanAndGluedCapturesReadTheSame()
+    public void CleanAndGluedMatch()
     {
         string clean = string.Join("\n", "  Booting `GatOS'", "", "R:box 1", "drop 1", "R:done");
         string glued = string.Join("\n", "  Booting `GatOSR:box 1", "drop 1", "R:done");
@@ -47,7 +47,7 @@ public class BootLogParsingTests
     [InlineData("Reached kernel idle loop")]
     [InlineData("dropped 3 packets")]
     [InlineData("Welcome to GRUB!")]
-    public void ConsoleTextIsNotMistakenForAMarker(string line)
+    public void ConsoleTextNotMarker(string line)
     {
         Assert.Empty(BootTests.ProgramLines(line));
     }
@@ -57,7 +57,7 @@ public class BootLogParsingTests
     /// or goes missing changes the sequence, glue or no glue.
     /// </summary>
     [Fact]
-    public void AMissingOrReorderedDropStillDiffers()
+    public void ReorderedDropDiffers()
     {
         var reference = BootTests.ProgramLines("R:box 1\ndrop 1\ndrop 2\nR:done");
 

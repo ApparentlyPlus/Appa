@@ -61,7 +61,7 @@ public class ScopeHardeningTests
     [InlineData("realm kernel { foreground process A { class C { public int a; } } " +
                 "foreground process B { class C { public int b; } } entry func Main() { } }")]
     [InlineData("realm kernel { foreground process P { } entry func Main() { } } realm userspace { foreground process P { } }")]
-    public void OneMeaningRuleAcceptsDistinctScopes(string src)
+    public void DistinctScopesOk(string src)
     {
         Assert.Empty(Errors(src));
     }
@@ -80,7 +80,7 @@ public class ScopeHardeningTests
     [InlineData("int func F(int Cfg) { return Cfg; } entry func Main() { let int z = F(1); }")]
     [InlineData("entry func Main() { for (let int Cfg = 0; Cfg < 3; Cfg++) { let int q = Cfg; } }")]
     [InlineData("entry func Main() { { let int Cfg = 5; let int q = Cfg; } }")]
-    public void LocalBindingBeatsScopedTypeName(string body)
+    public void LocalBeatsScopedType(string body)
     {
         Assert.Empty(Errors($"realm kernel {{ class Cfg {{ public int a; }} {body} }}"));
     }
@@ -90,7 +90,7 @@ public class ScopeHardeningTests
     /// is declared, and again once the block that declared it closes.
     /// </summary>
     [Fact]
-    public void ScopedTypeSurvivesOutsideTheBinding()
+    public void ScopedTypeSurvivesBinding()
     {
         Assert.Empty(Errors("""
             realm kernel {
@@ -131,7 +131,7 @@ public class ScopeHardeningTests
     /// name either, which is how the leak first showed itself.
     /// </summary>
     [Fact]
-    public void DuplicateProcessDoesNotCollideWithRoot()
+    public void DuplicateProcessVsRoot()
     {
         var errors = Errors("class A { public int r; } realm kernel { foreground process P { } " +
                             "foreground process P { class A { public int y; } } entry func Main() { } }");
@@ -154,7 +154,7 @@ public class ScopeHardeningTests
     [InlineData("native type H { int a; } native type H { int b; }", "kernel.H")]
     [InlineData("int func D() { return 1; } int func D() { return 2; }", "kernel.D")]
     [InlineData("private int func D() { return 1; } private int func D() { return 2; }", "kernel.D")]
-    public void ScopedDuplicatesReadReadably(string decls, string expected)
+    public void ScopedDuplicatesReadWell(string decls, string expected)
     {
         var errors = Errors($"realm kernel {{ {decls} entry func Main() {{ }} }}");
         Assert.Contains(errors, e => e.Contains($"'{expected}'", StringComparison.Ordinal));
@@ -166,7 +166,7 @@ public class ScopeHardeningTests
     /// leak one. Annotation names in prose look nothing like a qualified name and must survive.
     /// </summary>
     [Fact]
-    public void TheBagRewritesQualifiedNamesAndLeavesAnnotations()
+    public void BagRewritesQualifiedNames()
     {
         var sources = new SourceSet();
         sources.Add("<test>", "");
@@ -187,7 +187,7 @@ public class ScopeHardeningTests
     /// 'Box@kernel_int' out of the message.
     /// </summary>
     [Fact]
-    public void UnstampedScopedInstantiationReadsBack()
+    public void UnstampedInstantiationReadsBack()
     {
         Mangler.ResetScopeDisplay();
         Mangler.ResetGenericDisplay();
@@ -233,7 +233,7 @@ public class ScopeHardeningTests
     /// declarations a scoped one can displace, so this shadowed silently.
     /// </summary>
     [Fact]
-    public void ScopedDeclarationShadowsAnExtern()
+    public void ScopedDeclShadowsExtern()
     {
         Assert.Contains(Errors("@extern int func puts(int s); realm kernel { int func puts(int s) { return 0; } " +
                                "entry func Main() { } }"),
@@ -252,7 +252,7 @@ public class ScopeHardeningTests
     /// the rule the ScopeBinder had already settled the other way for shadowing.
     /// </summary>
     [Fact]
-    public void AnEntryFuncDoesNotOwnItsName()
+    public void EntryFuncOwnsNoName()
     {
         Assert.Empty(Errors("int func Main() { return 7; } realm kernel { entry func Main() { let int z = Main(); } }"));
         Assert.Empty(Errors("int func Run() { return 1; } realm kernel { entry func Main() { } } " +
@@ -268,7 +268,7 @@ public class ScopeHardeningTests
     [InlineData("realm kernel { entry func Main() { } void func F() { let func() -> void f = Main; } }", Codes.CallToEntry)]
     [InlineData("realm kernel { entry func Main() { } entry func Main() { } }", Codes.DuplicateName)]
     [InlineData("realm kernel { entry func Main() { } entry func Other() { } }", Codes.DuplicateName)]
-    public void AnEntryFuncIsStillUnreachableAndStillUnique(string src, string code)
+    public void EntryFuncUnreachableAndUnique(string src, string code)
     {
         Assert.Contains(Errors(src), e => e.StartsWith(code, StringComparison.Ordinal));
     }
@@ -277,7 +277,7 @@ public class ScopeHardeningTests
     /// Rejecting a value use must not then invent a type for it.
     /// </summary>
     [Fact]
-    public void RejectingAnEntryAsAValueReportsOnce()
+    public void EntryAsValueReportsOnce()
     {
         Assert.Single(Errors("realm kernel { entry func Main() { } void func F() { let func() -> void f = Main; } }"));
     }
@@ -299,7 +299,7 @@ public class ScopeHardeningTests
     [InlineData("private enum E { A }")]
     [InlineData("public union U { A(int n) }")]
     [InlineData("private native type N { int a; }")]
-    public void AModifierOnATopLevelTypeIsNamed(string decl)
+    public void TopLevelModifierNamed(string decl)
     {
         var errors = Errors($"{decl} realm kernel {{ entry func Main() {{ }} }}");
         Assert.Contains(errors, e => e.Contains("has no meaning on", StringComparison.Ordinal));

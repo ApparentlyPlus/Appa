@@ -6,7 +6,7 @@ namespace Appa.Tests;
 public class FileSplitEquivalenceTests
 {
     [Fact]
-    public void OneFileAndSeveralComputeTheSameThing()
+    public void SplitMatchesSingle()
     {
         var gata = HostedRun.FindGataCheckout();
         var cc = HostedRun.FindCompiler();

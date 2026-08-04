@@ -22,7 +22,7 @@ public class InstallerTests
     /// role. Files the download did write must survive untouched.
     /// </summary>
     [Fact]
-    public void StaleModulesAreRemovedAndCurrentOnesKept()
+    public void StaleModulesPruned()
     {
         using var root = TempDir.Create("appa-prune-");
         string dir = root.Combine("libgata");
@@ -43,7 +43,7 @@ public class InstallerTests
     /// rather than swept up by a sync of the standard library.
     /// </summary>
     [Fact]
-    public void NonGataFilesAreLeftAlone()
+    public void NonGataFilesKept()
     {
         using var root = TempDir.Create("appa-prune-");
         string dir = root.Combine("libgata");
@@ -62,7 +62,7 @@ public class InstallerTests
     /// first install creates it after this would run.
     /// </summary>
     [Fact]
-    public void PruningHandlesNestingAndAMissingDirectory()
+    public void PruneHandlesNesting()
     {
         using var root = TempDir.Create("appa-prune-");
         string dir = root.Combine("libgata");
@@ -82,7 +82,7 @@ public class InstallerTests
     /// really is the upstream state.
     /// </summary>
     [Fact]
-    public void AnEmptyWrittenSetRemovesEveryModule()
+    public void EmptySetRemovesAll()
     {
         using var root = TempDir.Create("appa-prune-");
         string dir = root.Combine("libgata");
@@ -104,7 +104,7 @@ public class InstallerTests
     [InlineData(typeof(TaskCanceledException), "network")]
     [InlineData(typeof(UnauthorizedAccessException), "permissions")]
     [InlineData(typeof(System.IO.InvalidDataException), "corrupt")]
-    public void ExpectedSetupFailuresAreRecognisedAndAdvised(Type exceptionType, string expectedHint)
+    public void SetupFailuresAdvised(Type exceptionType, string expectedHint)
     {
         var ex = (Exception)Activator.CreateInstance(exceptionType)!;
         Assert.True(Installer.IsExpectedSetupFailure(ex), $"{exceptionType.Name} should not reach the internal-error net");
@@ -116,7 +116,7 @@ public class InstallerTests
     /// A rate-limited fetch is the one case with a specific remedy rather than "try again".
     /// </summary>
     [Fact]
-    public void RateLimitFailurePointsAtGithubToken()
+    public void RateLimitPointsAtToken()
     {
         var ex = new InvalidOperationException("GitHub API rate limit exhausted; reset is 42 minutes away");
         Assert.True(Installer.IsExpectedSetupFailure(ex));
@@ -128,7 +128,7 @@ public class InstallerTests
     /// dressed up as an install problem.
     /// </summary>
     [Fact]
-    public void AnUnexpectedFailureIsNotTreatedAsAnInstallProblem() =>
+    public void UnexpectedFailureNotInstall() =>
         Assert.False(Installer.IsExpectedSetupFailure(new NullReferenceException()));
 
     /// <summary>
@@ -138,7 +138,7 @@ public class InstallerTests
     /// the installed one.
     /// </summary>
     [Fact]
-    public void TemplateExtractionFlattensGithubsWrapperFolder()
+    public void ExtractFlattensWrapper()
     {
         using var root = TempDir.Create("appa-tmpl-");
         string staging = root.Combine("make");
@@ -169,7 +169,7 @@ public class InstallerTests
     /// as already being the root rather than having a level stripped off it.
     /// </summary>
     [Fact]
-    public void TemplateExtractionAcceptsAnUnwrappedArchive()
+    public void ExtractAcceptsUnwrapped()
     {
         using var root = TempDir.Create("appa-tmpl-");
         string staging = root.Combine("make");

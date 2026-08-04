@@ -197,7 +197,7 @@ public class GrammarFuzzTests
     }
 
     [Fact]
-    public void GeneratedProgramsCompileToValidC()
+    public void FuzzedProgramsCompile()
     {
         var cc = FindCompiler();
         using var work = TempDir.Create("appa-gfuzz-");
