@@ -48,16 +48,13 @@ static class Urls
 
 static class AppaVersion
 {
-    public const string Current = "1.9.0";
+    public const string Current = "2.0.0";
 }
 
 #endregion
 
 #region Filesystem Paths
 
-// All appa-managed state lives under the per-user local app data directory, not
-// temp - temp is reserved for ephemeral build scratch space (see BuildGatOSImage),
-// which is always cleaned up after use and must never hold persistent installs.
 static class AppaPaths
 {
     private static string GetUserHomeUnix(string username)
@@ -145,7 +142,6 @@ static class AppaPaths
 
 #region Console Output
 
-// ANSI color codes for console output.
 static class C
 {
     public const string NC = "\x1b[0m";
@@ -158,9 +154,6 @@ static class C
     public const string DIM = "\x1b[2m";
 }
 
-// A quiet table for build-pipeline output: an indented fact per line, with its
-// elapsed time (if any) starting at a fixed column. Compiler diagnostics are the
-// deliberate exception: they stay flush left, gcc/rustc-style.
 static class Out
 {
     const string Indent = "  ";
