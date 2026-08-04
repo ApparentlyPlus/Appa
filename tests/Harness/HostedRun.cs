@@ -31,30 +31,66 @@ internal static class HostedRun
         }
         return null;
     }
+    
+    // The compiler for sanitizer builds, probed once
+    private static readonly Lazy<string?> _compiler = new(ProbeCompiler, LazyThreadSafetyMode.ExecutionAndPublication);
 
     /// <summary>
     /// Locates a usable host C compiler, or null.
     /// </summary>
-    public static string? FindCompiler()
+    public static string? FindCompiler() => _compiler.Value;
+
+    private static string? ProbeCompiler()
     {
+        var usable = ((string[])["cc", "gcc", "clang"]).Where(CanRun).ToList();
+        return usable.FirstOrDefault(SupportsSanitizers) ?? usable.FirstOrDefault();
+    }
+
+    // The compiler for release-flag builds, probed once
+    private static readonly Lazy<string?> _releaseCompiler =
+        new(ProbeReleaseCompiler, LazyThreadSafetyMode.ExecutionAndPublication);
+
+    /// <summary>
+    /// Locates a compiler that accepts the flag set a Release build really uses, or null.
+    /// </summary>
+    public static string? FindCompilerAcceptingReleaseFlags() => _releaseCompiler.Value;
+
+    private static string? ProbeReleaseCompiler()
+    {
+        string flags = string.Join(" ", GatosFlags.For(Mode.Release));
         foreach (var exe in (string[])["cc", "gcc", "clang"])
         {
+            if (!CanRun(exe)) continue;
             try
             {
-                using var p = Process.Start(new ProcessStartInfo(exe, "--version")
-                { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false });
-                if (p == null) continue;
-                p.WaitForExit(5000);
-                if (p.ExitCode == 0) return exe;
+                using var probe = TempDir.Create("appa-relflags-probe-");
+                File.WriteAllText(probe.Combine("p.c"), "int main(void){return 0;}");
+                var (code, _) = Run(exe, $"{flags} -o probe p.c", probe.Path);
+                if (code == 0) return exe;
             }
-            catch { /* not on PATH; try the next one */ }
+            catch { /* try the next one */ }
         }
         return null;
     }
 
-    // Whether the host compiler can actually link a sanitized binary. Probed once: the answer
-    // cannot change during a run, and the probe costs a compiler invocation.
-    private static bool? _sanitizerProbe;
+    /// <summary>
+    /// Returns true if the named compiler is on PATH and answers --version.
+    /// </summary>
+    public static bool CanRun(string exe)
+    {
+        try
+        {
+            using var p = Process.Start(new ProcessStartInfo(exe, "--version")
+            { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false });
+            if (p == null) return false;
+            p.WaitForExit(5000);
+            return p.ExitCode == 0;
+        }
+        catch { return false; /* not on PATH */ }
+    }
+
+    // Whether a given compiler can actually link a sanitized binary
+    private static readonly Dictionary<string, bool> _sanitizerProbe = [];
 
     private const string SanitizerFlags = "-fsanitize=address,undefined -fno-omit-frame-pointer";
 
@@ -65,16 +101,21 @@ internal static class HostedRun
     /// </summary>
     public static bool SupportsSanitizers(string cc)
     {
-        if (_sanitizerProbe is { } known) return known;
-        try
+        lock (_sanitizerProbe)
         {
-            using var probe = TempDir.Create("appa-asan-probe-");
-            File.WriteAllText(probe.Combine("p.c"), "int main(void){return 0;}");
-            var (code, _) = Run(cc, $"{SanitizerFlags} -o probe p.c", probe.Path);
-            _sanitizerProbe = code == 0;
+            if (_sanitizerProbe.TryGetValue(cc, out bool known)) return known;
+            bool answer;
+            try
+            {
+                using var probe = TempDir.Create("appa-asan-probe-");
+                File.WriteAllText(probe.Combine("p.c"), "int main(void){return 0;}");
+                var (code, _) = Run(cc, $"{SanitizerFlags} -o probe p.c", probe.Path);
+                answer = code == 0;
+            }
+            catch { answer = false; }
+            _sanitizerProbe[cc] = answer;
+            return answer;
         }
-        catch { _sanitizerProbe = false; }
-        return _sanitizerProbe.Value;
     }
 
     /// <summary>
@@ -82,7 +123,13 @@ internal static class HostedRun
     /// the real libgata, then compiles and runs it. Goes through the appa CLI so manifests and
     /// imports are covered, and compiles with -Werror.
     /// </summary>
-    public static Result BuildAndRun(IReadOnlyDictionary<string, string> files, string gata, string cc)
+    public static Result BuildAndRun(IReadOnlyDictionary<string, string> files, string gata, string cc) =>
+        BuildAndRun(files, gata, cc, release: false);
+
+    /// <summary>
+    /// The same cycle in the build mode the caller asks for.
+    /// </summary>
+    public static Result BuildAndRun(IReadOnlyDictionary<string, string> files, string gata, string cc, bool release)
     {
         using var work = TempDir.Create("appa-managed-union-");
         Directory.CreateDirectory(work.Combine("src"));
@@ -98,9 +145,9 @@ internal static class HostedRun
             <appa>
                 <ProjectName>host</ProjectName>
                 <TargetBackend>Hosted</TargetBackend>
-                <BuildMode>Debug</BuildMode>
+                <BuildMode>{{MODE}}</BuildMode>
             </appa>
-            """);
+            """.Replace("{{MODE}}", release ? "Release" : "Debug"));
 
         var appaDll = Path.Combine(AppContext.BaseDirectory, "Appa.dll");
         var (buildCode, buildOut) = Run("dotnet",
@@ -112,18 +159,16 @@ internal static class HostedRun
             $"expected transpilation/program.c, got: " +
             $"{string.Join(", ", Directory.GetFiles(outDir).Select(Path.GetFileName))}");
 
-        bool sanitized = SupportsSanitizers(cc);
+        bool sanitized = !release && SupportsSanitizers(cc);
         string exe = work.Combine("prog");
         string warnings = "-Wall -Wextra -Werror -Wno-unused-parameter -Wno-unused-function " +
                           "-Wno-unused-variable -Wno-missing-field-initializers";
+
+        string opt = release ? string.Join(" ", GatosFlags.For(Mode.Release)) : "";
         var (ccCode, ccOut) = Run(cc,
-            $"-std=c11 -I. {warnings} {(sanitized ? SanitizerFlags + " -g" : "")} -o \"{exe}\" program.c -lm",
+            $"-std=c11 -I. {warnings} {opt} {(sanitized ? SanitizerFlags + " -g" : "")} -o \"{exe}\" program.c -lm",
             outDir);
         Assert.True(ccCode == 0, $"{cc} rejected the emitted C:\n{ccOut}");
-
-        // Leak detection is off: LSan misses a leaked pointer still in a dead stack slot, and
-        // when it fires it kills the process unflushed, replacing the transcript with a dump.
-        // Leaks are caught by announcing destructors; ASan/UBSan stay for use-after-free and UB.
         var env = new Dictionary<string, string> { ["ASAN_OPTIONS"] = "detect_leaks=0" };
         var (runCode, runOut) = Run(exe, "", work.Path, env);
         return new Result(runOut.Replace("\r\n", "\n"), runCode, sanitized);
@@ -166,13 +211,14 @@ internal static class HostedRun
         if (env != null)
             foreach (var (k, v) in env) psi.Environment[k] = v;
         using var p = Process.Start(psi)!;
-        // Both pipes are drained concurrently. Reading one to completion and then the other deadlocks
-        // as soon as the child fills the pipe it is not being read from - a compiler emitting more than
-        // a pipe buffer of warnings blocks writing them, so it never exits, so the first read never
-        // returns. It takes a large generated program to reach, which is why it stayed hidden.
         var stdout = p.StandardOutput.ReadToEndAsync();
         var stderr = p.StandardError.ReadToEndAsync();
-        p.WaitForExit(180_000);
+        if (!p.WaitForExit(180_000))
+        {
+            try { p.Kill(entireProcessTree: true); } catch { /* already gone */ }
+            return (-1, $"'{exe} {args}' did not finish within 180s and was killed\n" +
+                        stdout.GetAwaiter().GetResult() + stderr.GetAwaiter().GetResult());
+        }
         return (p.ExitCode, stdout.GetAwaiter().GetResult() + stderr.GetAwaiter().GetResult());
     }
 }

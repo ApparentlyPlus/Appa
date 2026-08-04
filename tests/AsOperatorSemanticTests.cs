@@ -357,9 +357,6 @@ public class AsOperatorSemanticTests
             """);
         Assert.False(diag.HasErrors);
         Assert.NotNull(module);
-
-        // IrStaticCall proves this went through operator dispatch; the alternative (IrCast)
-        // is what a bare numeric/pointer cast produces and would mean the operator never fired.
         Assert.IsType<IrStaticCall>(DeclInit(EntryBody(module!), "w"));
     }
 
@@ -384,18 +381,11 @@ public class AsOperatorSemanticTests
             """);
         Assert.False(diag.HasErrors);
         Assert.NotNull(module);
-
-        // The symbol table's CNames (pre-densification, what codegen would emit without a
-        // Release-mode dense pass) are already distinct and parameter-type-suffixed.
         var overloads = module!.Symbols.OperatorOverloads("Wrapper", "as");
         Assert.Equal(2, overloads.Count);
         Assert.NotEqual(overloads[0].CName, overloads[1].CName);
         Assert.StartsWith("gata_Wrapper_op", overloads[0].CName);
         Assert.StartsWith("gata_Wrapper_op", overloads[1].CName);
-
-        // The IR call sites (post-densification - Densifier rewrites IrStaticCall.CName but
-        // never touches the symbol table) still resolve to two distinct functions, proving the
-        // two overloads didn't collapse into one at the call site either.
         var body = EntryBody(module);
         var intCall = Assert.IsType<IrStaticCall>(DeclInit(body, "a"));
         var boolCall = Assert.IsType<IrStaticCall>(DeclInit(body, "b"));

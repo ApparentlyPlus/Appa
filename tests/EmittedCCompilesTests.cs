@@ -12,7 +12,8 @@ public class EmittedCCompilesTests
     /// <summary>
     /// A stand-in environment. Corpus cases import no libgata and so declare no realm, leaving
     /// Layout.Compose nothing but shared.h to emit. This supplies the libc headers, the shared.h
-    /// include, and the two ARC roles Ownership resolves silently.
+    /// include, the two ARC roles Ownership resolves silently, and the floor functions 'debug' and
+    /// 'panic' lower to.
     /// </summary>
     private const string StubEnvironment = """
         @preamble(kernel) native {
@@ -23,6 +24,8 @@ public class EmittedCCompilesTests
         typedef struct gata_String gata_String;
         static void* gata_MISSING_retain(void* p) { return p; }
         static void gata_MISSING_release(void* p) { (void)p; }
+        static void _env_dbg(const char* m) { (void)m; }
+        static void _env_panic(const char* m) { (void)m; }
         }
 
         """;
@@ -83,9 +86,6 @@ public class EmittedCCompilesTests
             foreach (var unit in files.Where(f => f.Name.EndsWith(".c", StringComparison.Ordinal)))
             {
                 compiled++;
-                // A real compile: -Wreturn-type needs the CFG gcc builds only while generating
-                // code, so -fsyntax-only never sees a function falling off its end. Just that one
-                // warning is promoted, keeping this pinned to "broken", not C style.
                 var psi = new ProcessStartInfo(cc,
                     $"-c -std=c11 -Werror=return-type -I. -o {(OperatingSystem.IsWindows() ? "NUL" : "/dev/null")} {unit.Name}")
                 { WorkingDirectory = dir, RedirectStandardError = true, UseShellExecute = false };
@@ -137,7 +137,7 @@ public class EmittedCCompilesTests
         }
         catch
         {
-            return null; // TortureTests.NoCorpusCaseCrashesTheCompiler owns crashes
+            return null;
         }
     }
 }

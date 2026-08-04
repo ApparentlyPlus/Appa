@@ -79,7 +79,7 @@ internal static class Toolchain
         var d = new List<string>();
         if (r.Mem) d.Add("-DGATA_CAP_MEM");
         if (r.Input) d.Add("-DGATA_CAP_INPUT");
-        if (r.Threads) d.Add("-DGATA_CAP_THREADS");
+        if (r.Threads) { d.Add("-DGATA_CAP_THREADS"); d.Add("-DGATA_RC_ATOMIC=1"); }
         if (r.Time) d.Add("-DGATA_CAP_TIME");
         d.Add(m.Output == Output.Serial ? "-DGATA_OUTPUT_SERIAL" : "-DGATA_CAP_FRAMEBUFFER");
         d.Add(m.Keyboard switch

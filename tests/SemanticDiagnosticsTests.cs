@@ -323,8 +323,6 @@ public class SemanticDiagnosticsTests
         } }
         """);
         Assert.NotEmpty(files);
-        // The step belongs in the 'for' header, not as a statement at the end of the body. Matched
-        // loosely on purpose: the operator result also carries a cast pinning it to its Gata type.
         Assert.Contains(files, f => f.Content.Contains("i = ((int32_t)(i + 1)))"));
     }
 
@@ -486,10 +484,6 @@ public class SemanticDiagnosticsTests
 
     #region 'Name[x]' read as an index rather than a type reference
 
-    // 'Maybe[int].Found(7)' and 'arr[i].field' are the same tokens, so the parser keeps both
-    // readings and the resolver picks one. These pin the choice, because getting it wrong is
-    // invisible on working code and only shows up on the diagnostics for broken code.
-
     /// <summary>
     /// A field indexed without 'self.' still gets the diagnostic that names the fix. 'items[i].x'
     /// also parses as a type reference, and reading it that way reports "'items_i' is a type" - a
@@ -498,8 +492,6 @@ public class SemanticDiagnosticsTests
     [Fact]
     public void IndexedFieldMissingSelfNamesTheFix()
     {
-        // The trailing '.x' is what makes this ambiguous: without it the brackets can only be an
-        // index, and the type reading is never attempted.
         var (diag, _) = SingleFileCompile.Check("""
             class Pt { public int x; func _init() { } }
             class Holder {
@@ -561,8 +553,6 @@ public class SemanticDiagnosticsTests
                 "unknown generic type 'Nope'")]
     [InlineData("union U { A(int v), B } realm kernel { entry func Main() { let U x = U[int].A(1); } }",
                 "'U' is not generic")]
-    // A stamped generic class is an ordinary class, so the reason the call fails is the missing
-    // method - not that the type is not a union, which was true and beside the point.
     [InlineData("class Box[T] { public T v; func _init() { } } " +
                 "realm kernel { entry func Main() { let Box[int] b = new Box[int](); let int n = Box[int].Nope(); } }",
                 "'Box[int]' has no method 'Nope'")]
@@ -577,9 +567,6 @@ public class SemanticDiagnosticsTests
     #endregion
 
     #region Expected-type inference for generic union variants
-
-    // A payload-free variant says nothing about the type argument, so the instantiation comes
-    // from the enclosing binding. That expectation must not outlive the position it came from.
 
     private const string OptDecl = """
         union Opt[V] { Some(V v), None }
@@ -629,8 +616,6 @@ public class SemanticDiagnosticsTests
 
     #region Discarded retain
 
-    // Enough of the runtime for the retain role to be bound; the rule is about the call shape,
-    // so it needs nothing else from libgata.
     private const string RetainStub = """
         @intrinsic(retain)
         void* func retain(void* p) native { return p; }
@@ -674,6 +659,25 @@ public class SemanticDiagnosticsTests
             """);
     }
 
+    /// <summary>
+    /// Manual reference counting is unsafe-only, and this is what says so.
+    /// </summary>
+    [Theory]
+    [InlineData("let int* kept = retain(&x);", "retain")]
+    [InlineData("release(&x);", "release")]
+    [InlineData("if (x == 1) { release(&x); }", "release")]
+    public void ManualRefCountingOutsideUnsafeIsRejected(string body, string named)
+    {
+        var (diag, _) = SingleFileCompile.Check(
+            $$"""
+            {{RetainStub}}
+            realm kernel { entry func Main() { let int x = 1; {{body}} } }
+            """);
+        Assert.Contains(diag.All, d => d.Severity == Severity.Error
+                                       && d.Code == Codes.UnsafeRequired
+                                       && d.Message.Contains($"'{named}'", StringComparison.Ordinal));
+    }
+
     #endregion
 
     #region One error per mistake
@@ -687,10 +691,7 @@ public class SemanticDiagnosticsTests
         """;
 
     /// <summary>
-    /// A throwing call nested inside a generic call. The Result of a throwing call is a generated
-    /// type, so inferring a type argument from it stamped 'Echo_Result_int' and then reported three
-    /// further errors against names the author never wrote - including "unknown type 'Result_int'".
-    /// Only the two errors describing the actual mistake should survive.
+    /// A throwing call nested inside a generic call.
     /// </summary>
     [Fact]
     public void AThrowingCallInsideAGenericCallDoesNotCascade()
@@ -703,7 +704,9 @@ public class SemanticDiagnosticsTests
         Assert.Equal(2, errors.Count);
     }
 
-    /// <summary>The same on the generic-method path, which infers type arguments separately.</summary>
+    /// <summary>
+    /// The same on the generic-method path, which infers type arguments separately.
+    /// </summary>
     [Fact]
     public void AThrowingCallInsideAGenericMethodCallDoesNotCascade()
     {

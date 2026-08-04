@@ -18,6 +18,7 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
     private readonly HashSet<string> _declaredFuncSigs = [];
     private readonly HashSet<(string File, string Sig)>  _declaredPrivateFuncSigs  = [];
     private readonly HashSet<string> _externFuncs = [];
+    private readonly Dictionary<string, string> _externShapes = [];
     private readonly HashSet<string> _preDefinedStructs = [];
     private readonly HashSet<string> _opaqueFieldClasses = [];
 
@@ -317,7 +318,25 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
             _externFuncs.Add(ed.Name);
         }
         var sig = new MethodSig(ed.ReturnType, [.. ed.Params], true, false, false, [], IsExtern: true);
+
+        string shape = ExternShape(ed);
+        if (_externShapes.TryGetValue(ed.Name, out var first) && first != shape)
+            diag.Error(Codes.DuplicateName, file, ed.Span,
+                $"'{Mangler.DisplayName(ed.Name)}' is already declared '@extern' with a different signature",
+                [$"the other declaration reads '{first}'",
+                 "an '@extern' names one C symbol, so every declaration of it has to describe the same function"]);
+        _externShapes.TryAdd(ed.Name, shape);
         _sym.RegisterFreeFunc(ed.Name, sig, file);
         BindIntrinsics(ed.Annotations, ed.Name, file, ed.Span, allowShadows: true);
+    }
+
+    /// <summary>
+    /// Renders an extern declaration's signature as text, for comparing one declaration of a name
+    /// against another.
+    /// </summary>
+    private static string ExternShape(ExternFuncDecl ed)
+    {
+        var ps = string.Join(", ", ed.Params.Select(p => (p.IsRef ? "ref " : "") + p.Type.ToSpecString()));
+        return $"{ed.ReturnType?.ToSpecString() ?? "void"} func {ed.Name}({ps})";
     }
 }

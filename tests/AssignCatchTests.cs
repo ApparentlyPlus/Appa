@@ -32,10 +32,8 @@ public class AssignCatchTests
     #region Accepted forms
 
     [Theory]
-    // a handler on an assignment to a local, a field, and an array element
     [InlineData("let int x = 0; x = R(-1) catch { assign 42; }; let int y = x;")]
     [InlineData("let [2]int a = [0,0]; a[1] = R(-1) catch { assign 6; }; let int y = a[1];")]
-    // the handler may leave through any of the exits, exactly as on a declaration
     [InlineData("let int x = 0; while (true) { x = R(-1) catch { break; }; } let int y = x;")]
     [InlineData("let int x = 0; for (let int i = 0; i < 2; i = i + 1) { x = R(-1) catch { continue; }; }")]
     public void HandlerOnAnAssignmentIsAccepted(string body) =>

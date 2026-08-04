@@ -107,9 +107,6 @@ public class GenericMethodsAndAmbiguityTests
         Assert.False(diag.HasErrors, "expected no errors but got: " +
             string.Join("; ", diag.All.Where(d => d.Severity == Severity.Error).Select(d => $"{d.Code} {d.Message}")));
         Assert.NotNull(module);
-        // Two distinct instantiations (Combine[int], Combine[String]) should each be a
-        // real class method with self, not free functions - confirming the drain path
-        // attaches generic instance-method instantiations to the owning IrClass.
         var box = module!.Classes.Single(c => c.Name == "Box");
         Assert.Equal(2, box.Methods.Count(m => m.Name.StartsWith("Combine_")));
         Assert.All(box.Methods.Where(m => m.Name.StartsWith("Combine_")),

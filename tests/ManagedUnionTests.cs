@@ -184,8 +184,6 @@ public class ManagedUnionTests
         }
         """;
 
-    // 'untaken' never appears: a ternary constructs only the arm it evaluates, so the arm not
-    // taken must never be built and therefore never dropped.
     private const string ControlFlowExpected = """
         throws-ok
         held=1
@@ -707,10 +705,6 @@ public class ManagedUnionTests
             """, gata, cc);
 
         HostedRun.AssertClean(r);
-
-        // sum is 0..19 = 190; hits is 20 of every 30 over 200 iterations. 43 built, 42 alive:
-        // slot's original is the one TryGet released before overwriting - 44 would mean the
-        // release was skipped, 41 that the caller's live value was freed.
         Assert.Equal("sum=190 hits=140 find=truefalsetrue or=10,-1 during=42\nlive=0\n", r.Output);
     }
 

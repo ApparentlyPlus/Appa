@@ -53,8 +53,6 @@ public partial class BookSamplesTests
     private static IEnumerable<string> Contexts(string sample) =>
     [
         sample,
-        // Newlines throughout: a sample's trailing '//' comment would otherwise swallow the
-        // closing braces of whatever it is wrapped in.
         $"realm kernel {{\nentry func Main() {{\n{sample}\n}}\n}}",
         $"realm kernel {{\n{sample}\nentry func Main() {{ }}\n}}",
         $"class _Wrap {{\n{sample}\n}}",
@@ -80,10 +78,6 @@ public partial class BookSamplesTests
         foreach (var (line, sample) in samples)
         {
             if (Parses(sample, out _)) continue;
-
-            // A sample often shows a declaration and then how to use it, which is two snippets
-            // rather than one file. Blank lines are how the book separates them, so each part is
-            // judged on its own before the sample is called stale.
             var parts = Split(sample);
             if (parts.Count > 1 && parts.All(p => Parses(p, out _))) continue;
 

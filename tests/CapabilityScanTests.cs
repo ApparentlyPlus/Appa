@@ -93,4 +93,67 @@ public class CapabilityScanTests
         // Constructing one still needs the heap.
         Assert.True(caps.Mem);
     }
+
+    #region Reference-counting mode
+
+    /// <summary>
+    /// Emits the source and returns shared.h.
+    /// </summary>
+    private static string SharedHeaderFor(string src)
+    {
+        var files = SingleFileCompile.Emit(Floor + src);
+        Assert.NotEmpty(files);
+        return files.Single(f => f.Name == "shared.h").Content;
+    }
+
+    /// <summary>
+    /// Reference counts go atomic exactly when the program declares a process.
+    /// </summary>
+    [Fact]
+    public void RefCountsAreAtomicOnlyWhereAProcessExists()
+    {
+        Assert.Contains("#define GATA_RC_ATOMIC 0",
+            SharedHeaderFor("class C { public int v; func _init() { self.v = 1; } } " +
+                            "realm kernel { entry func Main() { let C c = new C(); } }"));
+
+        Assert.Contains("#define GATA_RC_ATOMIC 1",
+            SharedHeaderFor("class C { public int v; func _init() { self.v = 1; } } " +
+                            "realm kernel { " +
+                            "  background process P { thread T { entry func Run() { let C c = new C(); } } } " +
+                            "  entry func Main() { let C c = new C(); } }"));
+    }
+
+    /// <summary>
+    /// The definition is guarded so a '-D' on the command line wins.
+    /// </summary>
+    [Fact]
+    public void TheCommandLineCanForceAtomicRefCounts()
+    {
+        string header = SharedHeaderFor(
+            "class C { public int v; func _init() { self.v = 1; } } " +
+            "realm kernel { entry func Main() { let C c = new C(); } }");
+
+        int guard = header.IndexOf("#ifndef GATA_RC_ATOMIC", StringComparison.Ordinal);
+        int define = header.IndexOf("#define GATA_RC_ATOMIC", StringComparison.Ordinal);
+        Assert.True(guard >= 0 && define > guard,
+            $"the definition must sit inside '#ifndef', or -D cannot win:\n{header[..Math.Min(600, header.Length)]}");
+    }
+
+    /// <summary>
+    /// And the toolchain does pass it whenever it resolves threads on, so the two halves meet.
+    /// </summary>
+    [Fact]
+    public void TheToolchainPassesTheAtomicDefineWithThreads()
+    {
+        var withThreads = Scan(
+            "realm kernel { background process P { thread T { entry func Run() { } } } entry func Main() { } }");
+        var manifest = new Manifest(".", "t", Target.GatOS, Mode.Debug, Output.Serial,
+                                    Keyboard.Default, CapabilityDiscovery.On);
+
+        var defines = Toolchain.CapabilityDefines(withThreads, manifest);
+        Assert.Contains("-DGATA_CAP_THREADS", defines);
+        Assert.Contains("-DGATA_RC_ATOMIC=1", defines);
+    }
+
+    #endregion
 }

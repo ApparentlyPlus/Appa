@@ -64,9 +64,7 @@ public class ParserDiagnosticsTests
 
     /// <summary>
     /// 'public' on a free function changes nothing - a free function is already visible to every
-    /// importer - so it is rejected the way 'public class C' already was. Accepting it was worse
-    /// than redundant: it let a file mark some free functions 'public' and not others, which reads
-    /// as if the bare ones were restricted.
+    /// importer - so it is rejected the way 'public class C' already was.
     /// </summary>
     [Theory]
     [InlineData("public int func F() { return 1; }")]
@@ -123,8 +121,6 @@ public class ParserDiagnosticsTests
         var ex = Parse("realm userspace { process App { thread T { entry func Run() { } } } }");
         Assert.Equal(Codes.MissingProcessMode, ex.Code);
         Assert.Contains("missing a foreground/background mode", ex.Message);
-        // The suggested spellings are hints, rendered on their own "= help:" lines, not
-        // crammed into the message text.
         var hint = Assert.Single(ex.Hints);
         Assert.Contains("foreground process App", hint);
         Assert.Contains("background process App", hint);
@@ -216,7 +212,7 @@ public class ParserDiagnosticsTests
     [InlineData("class C { public void func user() { } }")]
     public void ContextualKeywordsParseAsIdentifiers(string src)
     {
-        SingleFileCompile.Parse(src); // must not throw
+        SingleFileCompile.Parse(src);
     }
 
     [Fact]

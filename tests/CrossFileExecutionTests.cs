@@ -2,10 +2,6 @@ namespace Appa.Tests;
 
 /// <summary>
 /// The value and lifetime oracles again, with every declaration in a different file from its use.
-///
-/// Same oracles as the single-file drills, but with every declaration in a different file from the
-/// code using it. That puts the Monomorphizer's cross-file splicing, private-name mangling and
-/// cross-file union/operator emission under an execution check rather than a "does it compile" one.
 /// </summary>
 public class CrossFileExecutionTests
 {
@@ -22,8 +18,6 @@ public class CrossFileExecutionTests
             }
             """,
 
-        // A generic template in a file that has never heard of Tracked: the instantiation is spliced
-        // into this file and must still resolve the type argument from the requesting file.
         ["box.g"] = """
             class Box[T] { public T v; func _init(T x) { self.v = x; } public T func Get() { return self.v; } }
             T func Echo[T](T x) { return x; }
@@ -31,7 +25,6 @@ public class CrossFileExecutionTests
             int func BoxScale(int n) { return Scale(n); }
             """,
 
-        // A managed union whose payload type lives in a third file.
         ["payload.g"] = """
             import "src/census.g";
             union Payload { None, One(Tracked t), Two(Tracked a, Tracked b) }
@@ -40,8 +33,6 @@ public class CrossFileExecutionTests
             }
             """,
 
-        // An operator overload across the boundary, plus a same-named private function that must
-        // not collide with box.g's.
         ["adder.g"] = """
             import "src/census.g";
             class Adder { public Tracked t; func _init(Tracked t) { self.t = t; }
@@ -109,7 +100,6 @@ public class CrossFileExecutionTests
             sb.AppendLine($"            Console.PrintLine($\"{Paths[p].Name} made={{c{p}.made}} dropped={{c{p}.dropped}} acc={{acc{p}}}\");");
             sb.AppendLine("        }");
         }
-        // Three same-named private functions, one per file: a collision would make these equal.
         sb.AppendLine("        Console.PrintLine($\"scale {MainScale(1)} {BoxScale(1)} {AdderScale(1)}\");");
         sb.AppendLine("    }");
         sb.AppendLine("}");
@@ -127,13 +117,12 @@ public class CrossFileExecutionTests
 
         var bad = new List<string>();
         var seen = new HashSet<string>();
-        // Expected accumulated values, computed here rather than read off a previous run.
         var expected = new Dictionary<string, int>
         {
             ["xgeneric"] = 15, ["xgenericfn"] = 15, ["xnested"] = 15,
             ["xunion1"] = 15, ["xunion2"] = 36, ["xunionreasg"] = 0, ["xunionbox"] = 15,
             ["xoperator"] = 21,
-            ["xcatch"] = 0 + -1 + 1 + 2 + -1 + 4 + 5,   // i=0 throws, 1,2 ok, 3 throws, 4,5 ok
+            ["xcatch"] = 0 + -1 + 1 + 2 + -1 + 4 + 5,
             ["xtry"] = -1 + 1 + 2 + -1 + 4 + 5,
             ["xlist"] = 0 + 1 + 2 + (1 + 2 + 3) + (2 + 3 + 4) + (3 + 4 + 5) + (4 + 5 + 6) + (5 + 6 + 7),
             ["xdefer"] = 15,

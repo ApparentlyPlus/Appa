@@ -6,24 +6,9 @@ using System.Text;
 
 /// <summary>
 /// Execution-differential fuzzer over integer arithmetic.
-///
-/// Every other fuzzer in this suite asks "does it compile". This one asks "does it compute the right
-/// answer", which is a different question and catches a different class: a program that builds
-/// cleanly, links, runs, and silently prints something else. Nothing that stops at gcc sees those,
-/// and neither does running the same binary at several optimisation levels - the two worst defects
-/// this found gave the same wrong answer at every level and under both compilers.
-///
-/// The oracle is a reference evaluator rather than self-consistency. Expressions are built bottom-up
-/// while the exact value of each subtree is tracked under Gata's declared rules - an arithmetic or
-/// bitwise result has the type of its higher-ranked operand, ties going to the left, and both
-/// operands convert into that type first. A subtree is only combined when the operation is free of C
-/// undefined behaviour, so the reference value is unambiguous and any disagreement is a real defect
-/// rather than a licence C took.
 /// </summary>
 public class ArithmeticFidelityFuzzTests
 {
-    // One program holding many expressions, rather than one program each: the build dominates the
-    // cost, so this buys roughly two orders of magnitude more coverage for the same wall clock.
     private const int Expressions = 400;
     private const int Seed = 20260730;
 
@@ -54,7 +39,9 @@ public class ArithmeticFidelityFuzzTests
 
     private static Prim Result(Prim a, Prim b) => a.Rank >= b.Rank ? a : b;
 
-    /// <summary>C truncates division toward zero; BigInteger.Divide already does.</summary>
+    /// <summary>
+    /// C truncates division toward zero; BigInteger.Divide already does.
+    /// </summary>
     private static BigInteger CDiv(BigInteger a, BigInteger b) => BigInteger.Divide(a, b);
 
     private sealed record Node(string Text, Prim Type, BigInteger Value);
@@ -92,9 +79,6 @@ public class ArithmeticFidelityFuzzTests
             bool shift = op is "<<" or ">>";
             var t = shift ? l.Type : Result(l.Type, r.Type);
 
-            // G095 rejects a signed operand mixed with an unsigned one for the operators whose answer
-            // depends on which signedness wins, unless the unsigned side widens into a strictly larger
-            // signed type and so keeps every value it had.
             if (op is "/" or "%" && l.Type.Signed != r.Type.Signed)
             {
                 var signed = l.Type.Signed ? l.Type : r.Type;
@@ -102,8 +86,6 @@ public class ArithmeticFidelityFuzzTests
                 if (t.Signed == false || uns.Rank >= signed.Rank) continue;
             }
 
-            // Both operands convert into the result type before the operator runs. Computing in
-            // unbounded integers and reducing afterwards is only equivalent for the modular operators.
             var lv = Wrap(l.Value, t);
             var rv = shift ? r.Value : Wrap(r.Value, t);
             BigInteger v;
@@ -116,8 +98,6 @@ public class ArithmeticFidelityFuzzTests
                     v = op == "/" ? CDiv(lv, rv) : lv - CDiv(lv, rv) * rv;
                     break;
                 case "<<" or ">>":
-                    // The count must be in [0, width of the left operand), and a negative left operand
-                    // is undefined for '<<' and implementation-defined for '>>'.
                     if (rv < 0 || rv >= t.Bits || lv < 0) continue;
                     v = op == "<<" ? lv << (int)rv : lv >> (int)rv;
                     break;
@@ -125,14 +105,11 @@ public class ArithmeticFidelityFuzzTests
                 case "-": v = lv - rv; break;
                 case "*": v = lv * rv; break;
                 default:
-                    // Bitwise on a negative operand is well defined in two's complement, but keeping to
-                    // non-negative values means nothing here hinges on that.
                     if (lv < 0 || rv < 0) continue;
                     v = op == "&" ? lv & rv : op == "|" ? lv | rv : lv ^ rv;
                     break;
             }
 
-            // Signed overflow at C's own computation width is undefined, not modular.
             if (t.Signed && t.Bits >= 32 && !Fits(v, t)) continue;
             return new Node($"({l.Text} {op} {r.Text})", t, Wrap(v, t));
         }
@@ -165,10 +142,6 @@ public class ArithmeticFidelityFuzzTests
         var r = Build(rng, depth - 1, rng.NextDouble() < 0.4 ? null : l.Type);
         if (Binary(rng, l, r) is { } e) return e;
 
-        // Two extreme operands can leave no operator defined - int64's most negative value overflows
-        // under '+', '-' and '*', is rejected by the shift and bitwise guards for being negative, and
-        // may be blocked from '/' and '%' by G095. Retrying against 1 always works: multiplying by it
-        // cannot leave the range, so the fallback needs no search of its own.
         var one = One(l.Type);
         return Binary(rng, l, one)
                ?? new Node($"({l.Text} * {one.Text})", l.Type, l.Value);
@@ -240,14 +213,9 @@ public class ArithmeticFidelityFuzzTests
         foreach (var (cc, opt) in Configs())
         {
             string exe = Path.Combine(outDir, $"prog_{cc}{opt.Replace("-", "")}");
-            // -w: this asks whether the answer is right, not whether the C is tidy. Generated constant
-            // arithmetic trips -Woverflow and -Wtype-limits by the thousand, and those are conclusions
-            // the reference evaluator already reached deliberately.
             var (ccCode, ccOut) = HostedRun.Run(cc, $"-std=c11 {opt} -w -I. -o \"{exe}\" program.c -lm", outDir);
             if (ccCode != 0)
             {
-                // A compiler that is present but cannot link here is skipped rather than failing the
-                // run; a compiler that rejects the emitted C is a defect.
                 Assert.DoesNotContain("error:", ccOut);
                 continue;
             }
@@ -263,9 +231,6 @@ public class ArithmeticFidelityFuzzTests
     /// </summary>
     private static IEnumerable<(string Cc, string Opt)> Configs()
     {
-        // -O0 and -O2 under one compiler catch a level-dependent answer; a second compiler catches one
-        // that both levels of the first agree on. -Os added nothing either defect this found could not
-        // be seen without, and each configuration costs a compile of the whole program.
         if (OnPath("gcc")) { yield return ("gcc", "-O0"); yield return ("gcc", "-O2"); }
         if (OnPath("clang")) yield return ("clang", "-O2");
     }

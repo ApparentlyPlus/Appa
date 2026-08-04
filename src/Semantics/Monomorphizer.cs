@@ -5,10 +5,6 @@ namespace Appa;
 /// see: one written over a generic function's or method's own type parameter, which only becomes
 /// concrete when that function is stamped, in a later pass.
 /// </summary>
-/// <remarks>
-/// Args are the mangled spellings of the type arguments - the same form <see cref="GenericUse"/>
-/// carries - so seeding one reproduces exactly the request an ordinary syntactic use would have made.
-/// </remarks>
 internal readonly record struct GenericSeed(string Base, string[] Args, TextSpan Span, string File)
 {
     /// <summary>The mangled instance name, which is what makes a seed comparable to another.</summary>
@@ -219,10 +215,10 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
 
     /// <summary>
     /// Every declaration in a program, descending into realm and process bodies. The single walk
-    /// shared by template collection, owner lookup and the splice, so a declaration form one of
-    /// them can see is never one another silently cannot.
+    /// shared by template collection, owner lookup, the splice and the reference-cycle report, so a
+    /// declaration form one of them can see is never one another silently cannot.
     /// </summary>
-    private static IEnumerable<TopLevel> EachDecl(IEnumerable<TopLevel> items)
+    internal static IEnumerable<TopLevel> EachDecl(IEnumerable<TopLevel> items)
     {
         foreach (var item in items)
         {
@@ -261,10 +257,6 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
                 if (declName == null) continue;
 
                 string baseName = declName;
-
-                // 'C[T, T]' names one parameter twice, so the second argument is unreachable and
-                // the mangled name collides with the single-parameter form. Silently accepted
-                // before, for classes and unions alike.
                 var seenParams = new HashSet<string>(genericParams!.Length);
                 foreach (var gp in genericParams!)
                     if (!seenParams.Add(gp))

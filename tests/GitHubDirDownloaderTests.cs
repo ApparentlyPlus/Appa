@@ -64,9 +64,7 @@ public class GitHubDirDownloaderTests
         Assert.Equal("gatos-env-content", await File.ReadAllTextAsync(Path.Combine(envsDir, "env.GatOS.g")));
         Assert.Equal("hosted-env-content", await File.ReadAllTextAsync(Path.Combine(envsDir, "env.hosted.g")));
         Assert.Equal("string-content", await File.ReadAllTextAsync(Path.Combine(libgataDir, "String.g")));
-        // The unrelated editors/ tree entries must not be pulled in.
         Assert.False(Directory.Exists(root.Combine("editors")));
-        // One tree fetch shared across both requested directories, not one per directory.
         Assert.Single(handler.RequestedUrls, u => u.Contains("/git/trees/"));
     }
 
@@ -101,7 +99,6 @@ public class GitHubDirDownloaderTests
         handler.On(u => u.Contains("/git/trees/"), _ => Json("""
             {"truncated": false, "tree": [{"path": "envs/big.bin", "type": "blob"}]}
             """));
-        // Must land in the 128-140 byte range the downloader treats as "possibly an LFS pointer".
         const string pointer = "version https://git-lfs.github.com/spec/v1\noid sha256:0000000000000000000000000000000000000000000000000000000000000000\nsize 123\n";
         handler.On(u => u.Contains("raw.githubusercontent.com"), _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(pointer) });
         handler.On(u => u.Contains("media.githubusercontent.com"), _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("real-binary-content") });
@@ -128,7 +125,6 @@ public class GitHubDirDownloaderTests
             GitHubDirDownloader.DownloadDirectoriesAsync("Owner", "Repo", "main",
                 new Dictionary<string, string> { ["envs/"] = dest }, client));
         Assert.Contains("not found", ex.Message, StringComparison.OrdinalIgnoreCase);
-        // A failed fetch leaves nothing half-written behind.
         Assert.False(Directory.Exists(dest));
     }
 

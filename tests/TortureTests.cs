@@ -86,9 +86,6 @@ public partial class TortureTests
             var visible = new Dictionary<string, HashSet<string>> { [path] = [path] };
             var (module, _, _) = Pipeline.BuildModule(programs, visible, Mode.Debug, diag);
 
-            // ValidateEnvironment and ValidateFloor are skipped: both require a real
-            // @environment file with floor binds, which a single-file corpus case has
-            // no way to supply, so they would fire on every case and mask everything else.
             Pipeline.ValidateIntrinsics(module, diag);
             Pipeline.ValidateStructure(programs, null, diag);
             return (diag, module, null);
@@ -170,26 +167,18 @@ public partial class TortureTests
                 if (string.IsNullOrWhiteSpace(d.Message)) fails.Add($"{where}: empty message");
                 else if (d.Message.Contains('\n')) fails.Add($"{where}: multi-line message -- '{d.Message}'");
 
-                // 'Config@kernel$P' is an internal spelling and must never reach a user; the
-                // readable form is 'kernel.P.Config'. Matching the shape rather than a bare '@'
-                // keeps legitimate '@intrinsic(alloc)' mentions from tripping this.
                 foreach (string text in new[] { d.Message }.Concat(d.Hints))
                 {
                     if (ScopeQualifiedName().IsMatch(text))
                         fails.Add($"{where}: raw scope-qualified name leaked into user-facing text -- '{text}'");
                     if (RawInternalName(text) is { } raw)
                         fails.Add($"{where}: raw internal name '{raw}' leaked into user-facing text -- '{text}'");
-
-                    // The poison type stands in for "already reported"; naming it means a second
-                    // diagnostic was written about a type the resolver invented.
                     if (text.Contains(IrType.Error.ToCType(), StringComparison.Ordinal))
                         fails.Add($"{where}: the poison type reached user-facing text -- '{text}'");
                     if (text.Contains(NamedSpec.Poison, StringComparison.Ordinal))
                         fails.Add($"{where}: the poison type name reached user-facing text -- '{text}'");
                 }
 
-                // TextSpan.None is the deliberate "this diagnostic is about the build,
-                // not a place in a file" marker, and an empty file has nothing to point at.
                 if (d.Loc.Span == TextSpan.None || c.Source.Length == 0) continue;
                 if (d.Loc.Span.Start < 0 || d.Loc.Span.Start > c.Source.Length)
                     fails.Add($"{where}: span start {d.Loc.Span.Start} outside [0,{c.Source.Length}] -- '{d.Message}'");
@@ -433,12 +422,10 @@ public partial class TortureTests
             "{", "}", "(", ")", "[", "]", ";", ",", ".", ":", "=", "==", "->", "+", "-", "*", "/",
             "%", "&", "|", "^", "!", "~", "<", ">", "?", "++", "--", "&&", "||", "<<", ">>",
             "1", "0x10", "\"s\"", "'c'", "$\"{x}\"", "@keep", "@extern", "@environment", "@shadows",
-            // Scope qualifiers, in pieces: the soup writes '::' beside ':', a realm name where a
-            // value belongs, and dotted runs that end nowhere.
             "::", "kernel.", "userspace.", "kernel.P.", "::Main", "kernel.x",
         ];
 
-        var rng = new Random(20260727); // fixed seed: a failure is always reproducible
+        var rng = new Random(20260727);
         var fails = new Failures();
         var sb = new StringBuilder();
         for (int i = 0; i < 4000; i++)

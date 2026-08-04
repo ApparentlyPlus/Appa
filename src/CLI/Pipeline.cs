@@ -469,10 +469,25 @@ internal static class Pipeline
     }
 
     /// <summary>
+    /// Whether a path lies inside the standard library - code the author cannot edit. A null
+    /// libgataDir treats every file as theirs.
+    /// </summary>
+    public static Func<string, bool> LibraryPredicate(string? libgataDir)
+    {
+        string? libRoot = libgataDir == null
+            ? null
+            : Path.TrimEndingDirectorySeparator(Path.GetFullPath(libgataDir)) + Path.DirectorySeparatorChar;
+        return path => libRoot != null &&
+                       Path.GetFullPath(path).StartsWith(libRoot, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// Warns about reference cycles among managed classes that will not be freed by ARC. Uses
     /// Tarjan's SCC algorithm on the field-type graph.
     /// </summary>
-    public static void WarnReferenceCycles(IrModule module)
+    public static void WarnReferenceCycles(IrModule module, DiagnosticBag diag,
+                                           List<(string path, Program prog)> programs,
+                                           string? libgataDir = null)
     {
         var managed = module.Classes.Where(c => !c.IsModule).Select(c => c.Name).ToHashSet();
         var edges = new Dictionary<string, List<string>>();
@@ -515,10 +530,49 @@ internal static class Pipeline
         foreach (var v in edges.Keys)
             if (!index.ContainsKey(v)) Strong(v);
 
+        if (cycles.Count == 0) return;
+
+        var IsLibrary = LibraryPredicate(libgataDir);
+
+        // Where each class was written
+        var declared = new Dictionary<string, (string File, TextSpan Span)>(StringComparer.Ordinal);
+        foreach (var (path, prog) in programs)
+            foreach (var cd in Monomorphizer.EachDecl(prog.Items).OfType<ClassDecl>())
+                declared.TryAdd(cd.Name, (path, cd.Span));
+
         foreach (var comp in cycles)
-            Log.Warn($"Reference cycle among class(es) {{{string.Join(", ", comp.OrderBy(x => x).Select(Mangler.DisplayName))}}} " +
-                     "will not be freed by reference counting (potential leak). " +
-                     "Break it with a raw pointer field inside 'unsafe', or restructure ownership.");
+        {
+            var shown = comp.OrderBy(x => x, StringComparer.Ordinal).Select(Mangler.DisplayName).ToList();
+            string names = string.Join(", ", shown.Select(n => $"'{n}'"));
+
+            var (file, span) = Locate(comp);
+            diag.Warn(Codes.ReferenceCycle, file ?? "<program>", span,
+                comp.Count == 1
+                    ? $"{names} holds a reference to itself, which reference counting never frees"
+                    : $"{names} form a reference cycle, which reference counting never frees",
+                ["each object in the cycle keeps the next one's count above zero, so none of them " +
+                 "reaches zero and none is destroyed - the memory is unreachable and never returned",
+                 "break it by making one of the fields a raw pointer inside 'unsafe', which counts " +
+                 "nothing, or by restructuring so ownership runs one way"]);
+        }
+
+        (string? File, TextSpan Span) Where(string cls)
+        {
+            if (declared.TryGetValue(cls, out var d)) return d;
+            return Mangler.TryGetGenericInstance(cls, out string baseName, out _) &&
+                   declared.TryGetValue(baseName, out var b) ? b : (null, TextSpan.None);
+        }
+
+        // Which member of the cycle to point at
+        (string? File, TextSpan Span) Locate(List<string> comp)
+        {
+            var sites = comp.OrderBy(x => x, StringComparer.Ordinal)
+                            .Select(Where)
+                            .Where(w => w.File != null)
+                            .ToList();
+            if (sites.Count == 0) return (null, TextSpan.None);
+            return sites.FirstOrDefault(w => !IsLibrary(w.File!), sites[0]);
+        }
     }
 
     /// <summary>
@@ -547,13 +601,7 @@ internal static class Pipeline
         var sw = Stopwatch.StartNew();
         var byFile = diag.All.ToLookup(d => d.Loc.File, StringComparer.OrdinalIgnoreCase);
 
-        // The trailing separator matters: without it a sibling directory whose name merely
-        // starts with the library's - 'libgata-extra' next to 'libgata' - reads as library code.
-        string? libRoot = libgataDir == null
-            ? null
-            : Path.TrimEndingDirectorySeparator(Path.GetFullPath(libgataDir)) + Path.DirectorySeparatorChar;
-        bool IsLibrary(string path) =>
-            libRoot != null && Path.GetFullPath(path).StartsWith(libRoot, StringComparison.OrdinalIgnoreCase);
+        var IsLibrary = LibraryPredicate(libgataDir);
 
         bool Failing(string path)
         {
@@ -563,7 +611,7 @@ internal static class Pipeline
                 if (d.Severity == Severity.Error) err = true;
                 else if (d.Severity == Severity.Warning) warn = true;
             }
-            return err || (warnAsError && warn);
+            return err || (warnAsError && warn && !IsLibrary(path));
         }
 
         // Pick the file to report from before walking, preferring the author's own.
@@ -583,8 +631,9 @@ internal static class Pipeline
         {
             i++;
             List<Diagnostic> warnings = [];
-            foreach (var d in byFile[path])
-                if (d.Severity == Severity.Warning) warnings.Add(d);
+            if (!IsLibrary(path))
+                foreach (var d in byFile[path])
+                    if (d.Severity == Severity.Warning) warnings.Add(d);
 
             if (tty) Out.Redraw($"  {C.DIM}⠿ Checking [{i}/{attempted.Count}] {Path.GetFileName(path)}{C.NC}");
             if (warnings.Count > 0)
@@ -594,8 +643,20 @@ internal static class Pipeline
             }
         }
 
-        var orphan = diag.All.Where(d => d.Severity == Severity.Error && !known.Contains(d.Loc.File)).ToList();
-        if (orphan.Count > 0) Fail(orphan);
+        // Report diagnostics that do not belong to any of the files in the build
+        var orphan = diag.All.Where(d => !known.Contains(d.Loc.File)).ToList();
+        var orphanErrors = orphan.Where(d => d.Severity == Severity.Error).ToList();
+        var orphanWarnings = orphan.Where(d => d.Severity == Severity.Warning).ToList();
+
+        if (orphanErrors.Count > 0 || (warnAsError && orphanWarnings.Count > 0))
+            Fail([.. orphanErrors, .. orphanWarnings]);
+
+        // Fail exits, so this runs only when the build is allowed to continue
+        if (orphanWarnings.Count > 0)
+        {
+            if (tty) Out.ClearRedraw();
+            foreach (var w in orphanWarnings) Console.WriteLine(diag.Render(w));
+        }
 
         if (tty) Out.ClearRedraw();
         Spin.Done($"Checked {attempted.Count} file{(attempted.Count == 1 ? "" : "s")}", sw.Elapsed);
@@ -614,7 +675,6 @@ internal static class Pipeline
     #endregion
 }
 
-// Collects every `_env_*` floor bind referenced anywhere in the lowered IR.
 sealed class EnvProbe(SymbolTable sym) : IrRewriter
 {
     public readonly HashSet<string> Refs = [];

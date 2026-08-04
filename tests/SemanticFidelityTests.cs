@@ -275,9 +275,7 @@ public class SemanticFidelityTests
     /// <summary>
     /// C's integer promotions widen anything below 'int' before the operator runs, so a sub-'int'
     /// result came back unpromoted only when it was stored straight into a narrow variable - the store
-    /// truncated and hid it. Used in place the same expression gave C's answer, so 'byte 200 + 200'
-    /// read 400 in an interpolation and 144 through a variable. Both are pinned here: the point is
-    /// that they agree.
+    /// truncated and hid it.
     /// </summary>
     [Fact]
     public void SubIntArithmeticKeepsItsDeclaredWidth()
@@ -396,20 +394,16 @@ public class SemanticFidelityTests
     /// silent where it cannot. Both halves matter: rejecting everything would pass a one-sided test.
     /// </summary>
     [Theory]
-    // The operand converting cannot represent its own range in the type it converts to.
     [InlineData(true,  "let int a = -10;  let uint b = 3;    let int r = a / b;")]
     [InlineData(true,  "let int a = -10;  let uint b = 3;    let int r = a % b;")]
     [InlineData(true,  "let int a = -10;  let uint b = 3;    let bool r = a < b;")]
     [InlineData(true,  "let int a = -10;  let uint b = 3;    let bool r = a >= b;")]
     [InlineData(true,  "let sbyte a = -1; let ushort b = 3;  let bool r = b > a;")]
     [InlineData(true,  "let int64 a = -1; let uint64 b = 3;  let int64 r = a / b;")]
-    // An unsigned operand widening into a strictly larger signed type loses nothing.
     [InlineData(false, "let int64 a = -10; let uint b = 3;   let int64 r = a / b;")]
     [InlineData(false, "let short a = -10; let byte b = 3;   let bool r = a < b;")]
-    // A non-negative constant is representable in either domain.
     [InlineData(false, "let uint hx = 7;  let bool r = hx >= 0x40862E42;")]
     [InlineData(false, "let uint hx = 7;  let uint r = hx / 4;")]
-    // The operators whose answer is the same bit pattern either way stay silent.
     [InlineData(false, "let int a = -10;  let uint b = 3;    let int r = a + b;")]
     [InlineData(false, "let int a = -10;  let uint b = 3;    let int r = a * b;")]
     [InlineData(false, "let int a = -10;  let uint b = 3;    let bool r = a == b;")]
@@ -462,8 +456,7 @@ public class SemanticFidelityTests
     /// <summary>
     /// A function is not a generic type, so 'Sort[int](xs)' is not a call with type arguments - the
     /// brackets read as an index, which then failed on the type keyword with "expected an expression,
-    /// found 'int'". The rule the reader needed was never stated. Only a type keyword triggers it: a
-    /// bare identifier has to keep reading as an index, since 'handlers[i](arg)' is a real call.
+    /// found 'int'". The rule the reader needed was never stated.
     /// </summary>
     [Theory]
     [InlineData("Algorithms.Sort[int](xs);")]
@@ -512,7 +505,6 @@ public class SemanticFidelityTests
     [InlineData("let int x; let int i = 0; while (i < x) { i = i + 1; }")]
     [InlineData("let byte b; let byte c = b;")]
     [InlineData("let double d; let double e = d * 2.0;")]
-    // The store happens, but after the read.
     [InlineData("let int x; let int y; y = x; x = 1;")]
     public void ReadingAnUnassignedLocalIsRejected(string body) =>
         AssertOne(Codes.UseBeforeAssignment,
@@ -521,8 +513,7 @@ public class SemanticFidelityTests
     /// <summary>
     /// The half that matters more. The analysis is deliberately one-sided - a branch counts as
     /// assigning if any arm does, a loop counts before its body is walked, an address taken counts -
-    /// so it reports only reads no store on any path could have preceded. Everything here has to
-    /// stay silent, including the conditional cases a stricter analysis would reject.
+    /// so it reports only reads no store on any path could have preceded.
     /// </summary>
     [Theory]
     [InlineData("let int a; a = 1; let int u = Use(a);")]
@@ -536,9 +527,7 @@ public class SemanticFidelityTests
     [InlineData("let int k; { k = 8; } let int u = Use(k);")]
     [InlineData("let int m; for (let int j = 0; j < 2; j = j + 1) { m = j; } let int u = Use(m);")]
     [InlineData("let int n; defer { let int u = Use(n); } n = 3;")]
-    // A managed local is emitted as NULL, so nothing about reading one is undefined.
     [InlineData("let String s; let bool u = s == null;")]
-    // Raw C can store into anything by name.
     [InlineData("let int p; native { } let int u = Use(p);")]
     public void ConservativeCasesStaySilent(string body) =>
         AssertClean(DefiniteAssignmentPrelude + $"realm kernel {{ entry func Main() {{ {body} }} }}");
@@ -549,10 +538,7 @@ public class SemanticFidelityTests
 
     /// <summary>
     /// A catch handler can sit at the root of an assignment since assignment-position 'catch' landed,
-    /// but the loop analysis only looked for one on a declaration or an expression statement. A 'break'
-    /// there was invisible: code after the loop was reported unreachable although it ran, and a
-    /// function missing a return on that path was accepted. Neither is caught downstream - the GatOS
-    /// build passes no warning flags, so the missing return is silent on the real target.
+    /// but the loop analysis only looked for one on a declaration or an expression statement. 
     /// </summary>
     [Fact]
     public void ABreakInAnAssignmentHandlerExitsItsLoop()
@@ -575,8 +561,6 @@ public class SemanticFidelityTests
             realm userspace { entry func Main() { Console.PrintLine($"{Count()}"); } }
             """;
 
-        // Checked without the standard library, which Check does not load, so the analysis under test
-        // is reached without Console turning into unresolved-name noise.
         var (diag, _) = SingleFileCompile.Check("""
             throws int func R(int n) { if (n < 0) { throw; } return n; }
             int func Count() {

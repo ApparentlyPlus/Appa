@@ -4,24 +4,15 @@ using System.Globalization;
 
 /// <summary>
 /// Differential oracle for libgata's Math module against the host's libm.
-///
-/// Math.g is a hand-translation of fdlibm - a third of the standard library by line count, and
-/// almost entirely bit manipulation, which is where transcription slips hide and where nothing
-/// else in this suite looks. "It compiles" says nothing about it, and a hand-picked expected
-/// value only catches an error someone already suspected. So the reference is the platform's own
-/// libm, fed bit-identical inputs and compared on raw bit patterns, which keeps float formatting
-/// out of the comparison entirely.
-///
-/// The tolerance is per-function rather than global. fdlibm targets under an ulp for the
-/// transcendentals and a stricter bound is not meaningful, but sqrt is required by IEEE 754 to
-/// be correctly rounded, so for that one anything other than bit-equality is a defect.
 /// </summary>
 public class MathFidelityTests
 {
-    /// <summary>Gata name, C name, and the largest ulp difference from libm that is not a defect.</summary>
+    /// <summary>
+    /// Gata name, C name, and the largest ulp difference from libm that is not a defect.
+    /// </summary>
     private static readonly (string Gata, string C, long Tolerance)[] Unary =
     [
-        ("Sqrt",  "sqrt",  0),      // IEEE 754 requires correct rounding
+        ("Sqrt",  "sqrt",  0),
         ("Abs",   "fabs",  0),
         ("Floor", "floor", 0),
         ("Ceil",  "ceil",  0),
@@ -40,8 +31,6 @@ public class MathFidelityTests
         ("Asinh", "asinh", 1),
         ("Acosh", "acosh", 1),
         ("Atanh", "atanh", 1),
-        // Sin/Cos/Tan need argument reduction for huge inputs, where fdlibm's reduction is
-        // less precise than glibc's. A handful of ulp there is inherent to the port, not a slip.
         ("Sin",   "sin",   16),
         ("Cos",   "cos",   16),
         ("Tan",   "tan",   16),
@@ -52,7 +41,7 @@ public class MathFidelityTests
         ("CopySign", "copysign", 0),
         ("Mod",      "fmod",     0),
         ("Atan2",    "atan2",    1),
-        ("Pow",      "pow",      8),   // hi/lo splitting degrades near the overflow boundary
+        ("Pow",      "pow",      8),
     ];
 
     /// <summary>
@@ -66,20 +55,18 @@ public class MathFidelityTests
         {
             0.0, -0.0, 1.0, -1.0, 2.0, -2.0, 0.5, -0.5, 3.0, -3.0, 10.0,
             double.PositiveInfinity, double.NegativeInfinity, double.NaN,
-            double.Epsilon, -double.Epsilon,                 // smallest subnormal
-            2.2250738585072014e-308, 2.2250738585072011e-308, // smallest normal / largest subnormal
+            double.Epsilon, -double.Epsilon,
+            2.2250738585072014e-308, 2.2250738585072011e-308,
             double.MaxValue, double.MinValue,
             Math.PI, Math.PI / 2, Math.PI / 4, 2 * Math.PI, -Math.PI, Math.E, Math.Log(2),
-            709.782712893384, 709.7827128933841,             // exp/cosh overflow boundary
+            709.782712893384, 709.7827128933841,
             -745.1332191019411, -745.1332191019412,
             0.9999999999999999, 1.0000000000000002, 0.41421356237309503,
             1e-300, 1e300, 1e-30, 1e30, 1e-10, 0.3, -0.3, 2.5, -2.5, 1.5,
-            1e7, 1e9, 1e15, 1e16, 1e22,                      // argument-reduction ladder
+            1e7, 1e9, 1e15, 1e16, 1e22,
             Math.Pow(2, 52), Math.Pow(2, 53), Math.Pow(2, 63),
         };
 
-        // Both neighbours of every binade boundary, where rounding decisions are hardest and
-        // where sqrt's rounding step was systematically wrong.
         for (int e = 1; e < 2047; e += 37)
         {
             long b = (long)e << 52;
@@ -112,7 +99,6 @@ public class MathFidelityTests
         var pairs = new List<(double A, double B)>();
         var rng = new Random(7);
         for (int i = 0; i < 150; i++) pairs.Add((xs[rng.Next(xs.Length)], xs[rng.Next(xs.Length)]));
-        // pow's special-case table is the densest in the file, so cover it exhaustively.
         foreach (var a in (double[])[0.0, -0.0, 1.0, -1.0, 2.0, -2.0, 0.5,
                                      double.PositiveInfinity, double.NegativeInfinity, double.NaN])
             foreach (var b in (double[])[0.0, -0.0, 1.0, -1.0, 2.0, 3.0, -3.0, 0.5,
@@ -120,8 +106,6 @@ public class MathFidelityTests
                                          double.NaN, 1e300, Math.Pow(2, 53)])
                 pairs.Add((a, b));
 
-        // Both programs emit "tag hi lo" lines, the result split into two halves because Gata
-        // has no unsigned 64-bit formatting and a decimal double would defeat the point.
         var g = new System.Text.StringBuilder();
         var c = new System.Text.StringBuilder();
         g.AppendLine("import Math;");

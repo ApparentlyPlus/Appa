@@ -42,6 +42,18 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
+    /// Looks up a free function, preferring a registration this file can actually see.
+    /// </summary>
+    private Symbol? LookupFreeFuncVisible(string name)
+    {
+        var f = sym.LookupFreeFunc(name);
+        if (f == null || _scope.Contains(f.Module)) return f;
+        foreach (var c in sym.FuncDeclarations(name))
+            if (c.Sig is not { IsEntry: true } && _scope.Contains(c.Module)) return c;
+        return f;
+    }
+
+    /// <summary>
     /// Picks the generic free-function template a bare call resolves to: an own-file private
     /// template always wins, otherwise the first in-scope public one.
     /// </summary>
@@ -85,7 +97,7 @@ internal sealed class TypeResolver(
                 Mangler.PrivateFreeFunc(Mangler.FileToken(ctx.File), name, [], false), null, ctx, ce);
         }
 
-        var fsym = sym.LookupFreeFunc(name);
+        var fsym = LookupFreeFuncVisible(name);
         if (fsym != null && Path.GetFileNameWithoutExtension(fsym.Module) == ns && _scope.Contains(fsym.Module))
         {
             return BuildCall(sym.FuncOverloads(name), fsym, args, name,
@@ -416,8 +428,8 @@ internal sealed class TypeResolver(
         {
             int? cost = MatchCost(c.Sig!, args);
             if (cost == null) continue;
-            if (cost < bestCost) { bestCost = cost.Value; best = c; tie = false; }
-            else if (cost == bestCost) tie = true;
+            if (best == null || cost < bestCost) { bestCost = cost.Value; best = c; tie = false; }
+            else if (cost == bestCost && c.CName != best.CName) tie = true;
         }
         if (best == null)
         {
@@ -684,7 +696,7 @@ internal sealed class TypeResolver(
     private void RejectDiscardedRetain(Expr src, ResolveCtx ctx)
     {
         if (src is not CallExpr { Callee: IdentExpr id }) return;
-        var fsym = sym.LookupFreeFunc(id.Name);
+        var fsym = LookupFreeFuncVisible(id.Name);
         if (fsym == null || !FuncInScope(fsym)) return;
         if (fsym.CName != sym.IntrinsicOrNull(Roles.Retain)) return;
 
@@ -882,12 +894,21 @@ internal sealed class TypeResolver(
     /// The same hint for a named stamped instance, for declaration kinds a ResolveCtx does not
     /// carry. A union is not a class, so its fields resolve with no CurClass to read.
     /// </summary>
-    private static void AddInstantiationHint(List<string> hints, string? instance)
+    private void AddInstantiationHint(List<string> hints, string? instance)
     {
         if (string.IsNullOrEmpty(instance)) return;
-        if (!Mangler.TryGetGenericInstance(instance, out _, out _)) return;
+        if (!Mangler.TryGetGenericInstance(instance, out string baseName, out var args)) return;
         hints.Add($"this comes from the instantiation '{Mangler.DisplayName(instance)}'; " +
                   $"the type arguments have to satisfy what the generic's body does with them");
+
+        if (!args.Contains("String", StringComparer.Ordinal)) return;
+        string sibling = "String" + baseName;
+        if (!Mangler.IsGenericTemplate(sibling) && !sym.IsClass(sibling)) return;
+
+        var rest = args.Where(a => a != "String").Select(Mangler.DisplayName).ToList();
+        string spelled = rest.Count > 0 ? $"{sibling}[{string.Join(", ", rest)}]" : sibling;
+        hints.Add($"for a 'String' key, use '{spelled}' - it hashes the text rather than the " +
+                  $"reference, which is what '{Mangler.DisplayName(baseName)}' cannot do");
     }
 
     /// <summary>
@@ -3054,7 +3075,7 @@ internal sealed class TypeResolver(
     /// </summary>
     private IrExpr? TryResolveArcIntrinsic(string name, List<IrExpr> args, ResolveCtx ctx, TextSpan span)
     {
-        var fsym = sym.LookupFreeFunc(name);
+        var fsym = LookupFreeFuncVisible(name);
         if (fsym == null || !FuncInScope(fsym)) return null;
         bool isRetain = fsym.CName == sym.IntrinsicOrNull(Roles.Retain);
         bool isRelease = fsym.CName == sym.IntrinsicOrNull(Roles.Release);
@@ -4461,7 +4482,7 @@ internal sealed class TypeResolver(
 
         if (ClassInScope(name)) return new IrVar(name, new IrClassRef(name));
 
-        var fsym = sym.LookupFreeFunc(name);
+        var fsym = LookupFreeFuncVisible(name);
         if (fsym != null && FuncInScope(fsym))
         {
             if (sym.IsOverloadedFunc(name))
@@ -4752,7 +4773,7 @@ internal sealed class TypeResolver(
                 // Peek at the lower precedence candidates a bare call would otherwise reach, so a
                 // generic template can't silently shadow something equally plausible.
                 var otherPf = sym.LookupPrivateFunc(ctx.File, id.Name);
-                var otherFsym = sym.LookupFreeFunc(id.Name);
+                var otherFsym = LookupFreeFuncVisible(id.Name);
                 bool otherFsymInScope = FuncInScope(otherFsym);
                 bool hasMethodCandidate = !string.IsNullOrEmpty(ctx.CurClass) &&
                     (sym.LookupMethod(ctx.CurClass, id.Name) != null || _methodTemplates.ContainsKey(new MemberKey(ctx.CurClass, id.Name)));
@@ -4779,7 +4800,7 @@ internal sealed class TypeResolver(
                     Mangler.PrivateFreeFunc(Mangler.FileToken(ctx.File), id.Name, [], false), null, ctx, ce);
             }
 
-            var fsym = sym.LookupFreeFunc(id.Name);
+            var fsym = LookupFreeFuncVisible(id.Name);
             if (fsym != null && FuncInScope(fsym))
             {
                 if (fsym.Sig?.IsEntry == true)

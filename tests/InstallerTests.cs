@@ -109,7 +109,6 @@ public class InstallerTests
         var ex = (Exception)Activator.CreateInstance(exceptionType)!;
         Assert.True(Installer.IsExpectedSetupFailure(ex), $"{exceptionType.Name} should not reach the internal-error net");
         Assert.Contains(expectedHint, Installer.SetupFailureHint(ex));
-        // Whatever went wrong, the install is half-written and re-running is the recovery.
         Assert.Contains("appa setup", Installer.SetupFailureHint(ex));
     }
 
@@ -160,9 +159,7 @@ public class InstallerTests
 
         Assert.Equal("kernel", File.ReadAllText(Path.Combine(dest, "src", "kernel", "main.c")));
         Assert.Equal("link", File.ReadAllText(Path.Combine(dest, "targets", "linker.ld")));
-        // The wrapper folder is flattened away rather than kept as a level.
         Assert.False(Directory.Exists(Path.Combine(dest, "GatOS-appa-template")));
-        // Only directories are taken, and the previous install is replaced whole.
         Assert.False(File.Exists(Path.Combine(dest, "README.md")));
         Assert.False(File.Exists(Path.Combine(dest, "stale.txt")));
     }

@@ -2,12 +2,6 @@ namespace Appa.Tests;
 
 /// <summary>
 /// Reference-counting lifetimes across every feature that can own an object.
-///
-/// The value differential checks that a program computes the right number. It cannot see a leak or
-/// an over-release, because both produce the right number right up until they don't. This counts
-/// constructions against destructions instead: every path allocates tracked objects, and the census
-/// must balance exactly. Deterministic, unlike LeakSanitizer, which routinely misses a leaked
-/// pointer still sitting in a dead stack slot.
 /// </summary>
 public class ArcLifetimeTests
 {
@@ -38,7 +32,9 @@ public class ArcLifetimeTests
         }
         """;
 
-    /// <summary>Each path allocates, uses and drops Tracked objects through one language feature.</summary>
+    /// <summary>
+    /// Each path allocates, uses and drops Tracked objects through one language feature.
+    /// </summary>
     private static readonly (string Name, string Body)[] Paths =
     [
         ("plain",        "let Tracked t = new Tracked(c, i); return t.v;"),
@@ -96,8 +92,6 @@ public class ArcLifetimeTests
         sb.AppendLine("    entry func Main() {");
         for (int p = 0; p < Paths.Length; p++)
         {
-            // A fresh census per path, driven over several inputs so both arms of every branch and
-            // both the throwing and returning paths are taken.
             sb.AppendLine($"        {{");
             sb.AppendLine($"            let Census c{p} = new Census();");
             sb.AppendLine($"            let int acc{p} = 0;");
@@ -121,7 +115,6 @@ public class ArcLifetimeTests
             seen.Add(name);
             int made = int.Parse(parts[1]["made=".Length..]);
             int dropped = int.Parse(parts[2]["dropped=".Length..]);
-            // The census object itself outlives the count, so every Tracked must be gone.
             if (made != dropped) bad.Add($"[{name}] made {made}, dropped {dropped} — {(made > dropped ? "LEAK" : "OVER-RELEASE")}");
             if (made == 0) bad.Add($"[{name}] allocated nothing; the path did not run");
         }
@@ -132,5 +125,173 @@ public class ArcLifetimeTests
 
         HostedRun.AssertClean(r);
         Assert.True(bad.Count == 0, $"{bad.Count} unbalanced paths:\n" + string.Join("\n", bad));
+    }
+
+    /// <summary>
+    /// Owned locals are released in LIFO order, the reverse of declaration.
+    /// </summary>
+    [Fact]
+    public void OwnedLocalsAreReleasedInReverseDeclarationOrder()
+    {
+        var gata = HostedRun.FindGataCheckout();
+        var cc = HostedRun.FindCompiler();
+        if (gata == null || cc == null) { Assert.Skip("no checkout/compiler"); return; }
+
+        var r = HostedRun.BuildAndRun("""
+            import Console;
+            import String;
+
+            class Node {
+                public int v;
+                func _init(int v) { self.v = v; }
+                func _deinit() { Console.PrintLine($"drop {self.v}"); }
+            }
+
+            void func Straight() {
+                let Node a = new Node(1);
+                let Node b = new Node(2);
+                let Node c = new Node(3);
+                Console.PrintLine("straight-end");
+            }
+
+            void func Nested() {
+                let Node a = new Node(4);
+                {
+                    let Node b = new Node(5);
+                    let Node c = new Node(6);
+                    Console.PrintLine("inner-end");
+                }
+                Console.PrintLine("outer-end");
+            }
+
+            void func EarlyReturn() {
+                let Node a = new Node(7);
+                let Node b = new Node(8);
+                Console.PrintLine("before-return");
+                return;
+            }
+
+            void func Loop() {
+                for (let int i = 0; i < 2; i++) {
+                    let Node a = new Node(10 + i * 2);
+                    let Node b = new Node(11 + i * 2);
+                    Console.PrintLine($"iter {i}");
+                }
+            }
+
+            realm userspace {
+                entry func Main() { Straight(); Nested(); EarlyReturn(); Loop(); }
+            }
+            """, gata, cc);
+
+        HostedRun.AssertClean(r);
+        var lines = r.Output.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
+
+        Assert.Equal(
+        [
+            "straight-end", "drop 3", "drop 2", "drop 1",
+            "inner-end", "drop 6", "drop 5", "outer-end", "drop 4",
+            "before-return", "drop 8", "drop 7",
+            "iter 0", "drop 11", "drop 10",
+            "iter 1", "drop 13", "drop 12",
+        ], lines);
+    }
+
+    /// <summary>
+    /// 'for x in' over a fixed array of managed elements must retain the element into the loop
+    /// variable, because the loop variable is an owned local and its scope-exit release will run
+    /// either way.
+    /// </summary>
+    [Fact]
+    public void IteratingAFixedArrayOfManagedElementsDoesNotReleaseThem()
+    {
+        var gata = HostedRun.FindGataCheckout();
+        var cc = HostedRun.FindCompiler();
+        if (gata == null || cc == null) { Assert.Skip("no checkout/compiler"); return; }
+
+        var r = HostedRun.BuildAndRun("""
+            import Console;
+            import String;
+
+            class Item {
+                public int v;
+                func _init(int v) { self.v = v; }
+                func _deinit() { Console.PrintLine($"drop {self.v}"); }
+            }
+
+            realm userspace {
+                entry func Main() {
+                    let [3]Item xs = default([3]Item);
+                    xs[0] = new Item(1);
+                    xs[1] = new Item(2);
+                    xs[2] = new Item(3);
+
+                    // Two passes. One pass alone would not tell a premature free from a correct
+                    // run: the read that faults is the one after the element was dropped.
+                    for x in xs { Console.PrintLine($"a{x.v}"); }
+                    for x in xs { Console.PrintLine($"b{x.v}"); }
+
+                    // And the values must survive being iterated, not merely be readable.
+                    let int total = 0;
+                    for x in xs { total = total + x.v; }
+                    Console.PrintLine($"total={total}");
+                }
+            }
+            """, gata, cc);
+
+        HostedRun.AssertClean(r);
+        var lines = r.Output.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
+        Assert.DoesNotContain(lines, l => l.StartsWith("drop ", StringComparison.Ordinal));
+        Assert.Equal(["a1", "a2", "a3", "b1", "b2", "b3", "total=6"], lines);
+    }
+
+    /// <summary>
+    /// A field's inline initialiser must actually reach the object.
+    /// </summary>
+    [Fact]
+    public void InlineFieldInitialisersReachTheObject()
+    {
+        var gata = HostedRun.FindGataCheckout();
+        var cc = HostedRun.FindCompiler();
+        if (gata == null || cc == null) { Assert.Skip("no checkout/compiler"); return; }
+
+        var r = HostedRun.BuildAndRun("""
+            import Console;
+            import String;
+
+            class Config {
+                public n = 7;
+                public flag = true;
+                public ch = 'z';
+                public d = 1.5;
+                public int unset;
+                func _init() { }
+            }
+
+            class Mixed {
+                public kept = 3;
+                public int fromCtor;
+                public overwritten = 1;
+                func _init(int m) { self.fromCtor = m; self.overwritten = 2; }
+            }
+
+            realm userspace {
+                entry func Main() {
+                    let Config c = new Config();
+                    Console.PrintLine($"n={c.n} flag={c.flag} ch={c.ch} d={c.d} unset={c.unset}");
+                    let Mixed m = new Mixed(9);
+                    Console.PrintLine($"kept={m.kept} fromCtor={m.fromCtor} overwritten={m.overwritten}");
+                }
+            }
+            """, gata, cc);
+
+        HostedRun.AssertClean(r);
+        var lines = r.Output.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
+
+        Assert.Equal(
+        [
+            "n=7 flag=true ch=z d=1.5 unset=0",
+            "kept=3 fromCtor=9 overwritten=2",
+        ], lines);
     }
 }

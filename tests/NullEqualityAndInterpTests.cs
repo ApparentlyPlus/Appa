@@ -154,9 +154,6 @@ public class NullEqualityAndInterpTests
 
     #region Interpolation lowering
 
-    // The minimal stdlib surface interpolation needs: a @builtin(String) with '+' for the
-    // concat fallback, the stringify_int role for {int} parts, and a @builtin(StringBuilder)
-    // with the Put/ToString pair the builder lowering resolves.
     private const string InterpStubs = """
         @builtin(String)
         class String {

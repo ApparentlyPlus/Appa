@@ -129,6 +129,7 @@ internal static class Codes
     public const string UseBeforeAssignment        = "G098";
     public const string DiscardedRetain            = "G099";
     public const string UninitialisedProcessVar    = "G100";
+    public const string ReferenceCycle             = "G101";
 }
 
 internal static class Suggest
@@ -419,13 +420,16 @@ internal sealed class DiagnosticBag(SourceSet sources)
             .Append(C.BLUE)
             .Append('|')
             .Append(C.NC)
-            .Append(' ')
-            .Append(' ', col - 1)
-            .Append(color)
+            .Append(' ');
+
+        // Padding fix for tabs in the source line
+        for (int i = 0; i < col - 1; i++)
+            sb.Append(i < tspn.Length && tspn[i] == '\t' ? '\t' : ' ');
+        sb.Append(color)
             .Append('^', caretLen)
             .Append(C.NC);
 
-        // Render each hint as a rustc-style "= help: ..." line under a blank gutter row.
+        // Render each hint as a rustc-style "= help: ..." line under a blank gutter row
         if (d.Hints.Length > 0)
         {
             sb.AppendLine()

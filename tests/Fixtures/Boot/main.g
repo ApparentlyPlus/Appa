@@ -54,12 +54,20 @@ int func Depth() { return 1; }
 // displacement is confined to the scope that declared it.
 int func Deep() { return Depth(); }
 
+// A free function sharing its name with the realm's 'entry func'. The entry sits in the same
+// overload bucket without ever being a call target, and counting that bucket raw once gave this
+// call a C name the definition never carried - so the definition was dropped and the call went
+// nowhere. Reached here both ways it can be reached, on real hardware.
+int func Main(int n) { return n + 1; }
+
 realm kernel {
     @shadows int func Depth() { return 2; }
 
     entry func Main() {
         debug "M:start";
         Console.PrintLine($"depth={Depth()} root={Deep()}");
+        let func(int) -> int mainptr = Main;
+        Console.PrintLine($"mainshare={Main(41)} {mainptr(1)}");
         debug "M:shadowing";
 
         // arithmetic + explicit narrowing

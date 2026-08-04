@@ -74,6 +74,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// </summary>
     public EmitOutput Build()
     {
+        EmitRefCountMode();
         EmitForwardTypedefs();
         EmitEnums();
         EmitAggregateTypes();
@@ -116,6 +117,27 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             _uPre.ToString(), _uTypes.ToString(), _uFwd.ToString(), _uFunc.ToString(),
             module.Processes, module.HasKernelRealm, module.HasUserRealm, userEntryCName);
     }
+
+    #region Reference-counting mode
+
+    /// <summary>
+    /// Tells the runtime whether its reference counts have to be atomic, by defining
+    /// GATA_RC_ATOMIC in the shared header when this program contains any concurrency.
+    /// </summary>
+    private void EmitRefCountMode()
+    {
+        bool concurrent = module.Processes.Count > 0;
+        _sharedH.Lines(
+            concurrent
+                ? "// This program declares processes, so reference counts must be atomic."
+                : "// No process is declared, so no two contexts can hold one reference.",
+            "#ifndef GATA_RC_ATOMIC",
+            $"#define GATA_RC_ATOMIC {(concurrent ? 1 : 0)}",
+            "#endif",
+            "");
+    }
+
+    #endregion
 
     #region Forward typedefs
 
@@ -854,15 +876,15 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         using (w.Block($"{prefix}{AllocatorSig(cls)} {{"))
         {
             w.Line($"{cls.CName}* _o = ({cls.CName}*){Intrinsic(Roles.Alloc)}(sizeof({cls.CName}));");
-            w.Line($"if (_o) *_o = ({cls.CName}){{0}};");
-            w.Line($"if (_o) {Intrinsic(Roles.ObjInit)}(_o, {dtorArg});");
+            w.Line($"*_o = ({cls.CName}){{0}};");
+            w.Line($"{Intrinsic(Roles.ObjInit)}(_o, {dtorArg});");
             foreach (var f in cls.Fields)
                 if (cls.FieldInits.TryGetValue(f.Name, out var init))
-                    w.Line($"if (_o) _o->{f.Name} = {EmitExpr(init)};");
+                    w.Line($"_o->{f.Name} = {EmitExpr(init)};");
             if (cls.HasInit)
             {
                 var args = string.Join(", ", new[] { "_o" }.Concat((InitOf(cls)?.Params ?? []).Select(p => Mangler.Local(p.Name))));
-                w.Line($"if (_o) {InitOf(cls)!.CName}({args});");
+                w.Line($"{InitOf(cls)!.CName}({args});");
             }
             w.Line("return _o;");
         }

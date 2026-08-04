@@ -4,11 +4,6 @@ using Appa;
 
 /// <summary>
 /// Process-scoped variables: the one storage in Gata that outlives a scope.
-///
-/// The rules being pinned here are mostly about what a process variable is *not* - it is not a
-/// global, not a field, and not something a later assignment can be trusted to have filled in.
-/// Most of these cases would have compiled to something before the feature existed, so each one is
-/// paired with the legal form it is meant to be distinguished from.
 /// </summary>
 public class ProcessStateTests
 {
@@ -30,7 +25,9 @@ public class ProcessStateTests
         class Cell { public int v; func _init() { self.v = 0; } }
         """;
 
-    /// <summary>A throwing function, for the initialiser positions that need one.</summary>
+    /// <summary>
+    /// A throwing function, for the initialiser positions that need one.\
+    /// </summary>
     private const string Throwing =
         "throws int func Boom(int x) { if (x < 0) { throw; } return x; }\n";
 
@@ -55,7 +52,9 @@ public class ProcessStateTests
                                       .Select(d => $"{d.Code} {d.Message}")));
     }
 
-    /// <summary>Wraps a process body in the smallest program that can hold one.</summary>
+    /// <summary>
+    /// Wraps a process body in the smallest program that can hold one.
+    /// </summary>
     private static string InProcess(string body, string prelude = "") =>
         $$"""
         {{prelude}}
@@ -270,9 +269,7 @@ public class ProcessStateTests
 
     /// <summary>
     /// The variables are filled in declaration order by one generated function, so an initialiser
-    /// can only read the ones above it. Reading any other lands on the slot's zero - a silent wrong
-    /// answer for an int and a null dereference for a class - which is why this is an error and not
-    /// the "reads as zero" a C static would give you.
+    /// can only read the ones above it. 
     /// </summary>
     [Theory]
     [InlineData("let int a = a + 1;")]                       // itself
@@ -321,9 +318,7 @@ public class ProcessStateTests
 
     /// <summary>
     /// A throwing initialiser is legal only with a handler that supplies a value on every path -
-    /// the same rule a local declaration gets. It is checked here through the same helper, because
-    /// the hand-rolled version this replaced omitted the check entirely and left the variable at
-    /// zero on the throwing path with no diagnostic at all.
+    /// the same rule a local declaration gets.
     /// </summary>
     [Fact]
     public void CatchHandlerWithoutAnAssignIsRejected()
@@ -339,9 +334,7 @@ public class ProcessStateTests
 
     /// <summary>
     /// 'return' satisfies "leaves the handler" for a local, where it returns from a function the
-    /// author wrote. Here the only function to leave is the generated initialiser, so returning
-    /// abandons this variable and every one below it while the gate still publishes the state as
-    /// ready - the exact outcome the mandatory-initialiser rule exists to prevent.
+    /// author wrote.
     /// </summary>
     [Theory]
     [InlineData("let int a = Boom(1) catch { return; }; let int b = 2;")]
@@ -411,7 +404,9 @@ public class ProcessStateTests
             """);
     }
 
-    /// <summary>A local of the same name still shadows it, as it does for every other read.</summary>
+    /// <summary>
+    /// A local of the same name still shadows it, as it does for every other read.
+    /// </summary>
     [Fact]
     public void ALocalFunctionPointerStillShadowsTheProcessOne()
     {
@@ -483,9 +478,6 @@ public class ProcessStateTests
         var v = Assert.Single(proc.State);
         Assert.Equal("n", v.Name);
         Assert.NotNull(proc.StateInit);
-
-        // Both threads must be gated, not just the first: whichever the scheduler picks runs the
-        // initialiser, and the other waits for it.
         Assert.Equal(2, proc.Threads.Count);
     }
 

@@ -70,10 +70,6 @@ public class GrammarFuzzTests
         private readonly Random _r = new(seed);
         private int _depth;
         private int _names;
-
-        // 'defer' bodies may not defer again or transfer control, so the generator has to
-        // know when it is building one. Producing a program the compiler rightly rejects
-        // would make every such rejection look like a compiler bug.
         private bool _inDefer;
 
         private string Pick(params string[] xs) => xs[_r.Next(xs.Length)];
@@ -224,7 +220,6 @@ public class GrammarFuzzTests
                 try { prog = SingleFileCompile.Parse(src); }
                 catch (ParseException ex)
                 {
-                    // The generator only builds valid syntax, so this is a parser bug.
                     failures.Add($"[seed {seed}] parse failed: {ex.Message}\n{src}");
                     continue;
                 }
@@ -265,9 +260,6 @@ public class GrammarFuzzTests
 
             foreach (var unit in files.Where(f => f.Name.EndsWith(".c", StringComparison.Ordinal)))
             {
-                // A real compile, not -fsyntax-only: -Wreturn-type needs the control-flow graph
-                // gcc only builds while generating code, so a syntax-only run never reports a
-                // function that can fall off its end - which is how one shipped.
                 string devNull = OperatingSystem.IsWindows() ? "NUL" : "/dev/null";
                 var psi = new ProcessStartInfo(cc,
                     $"-c -std=c11 -Werror=return-type -I. -o {devNull} {unit.Name}")

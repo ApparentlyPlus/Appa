@@ -20,13 +20,6 @@ public class BootTests(BootFixture fixture)
     /// Backstop for the whole 'appa build --run' process, which cross-compiles the kernel, builds an
     /// ISO with grub-mkrescue and xorriso, and only then boots it.
     /// </summary>
-    /// <remarks>
-    /// Generous on purpose. This is a "something hung" guard, not a performance assertion: QEMU is
-    /// already bounded by BootTimeout, so the only thing a tight budget here can do is fail the
-    /// build on a slow or loaded machine. It was BootTimeout + 15s, which covered the boot but not
-    /// the build in front of it, and killed the run mid-compile on a cold rebuild - reported as the
-    /// image never reaching its idle loop, which is the one thing that had not gone wrong.
-    /// </remarks>
     private static readonly TimeSpan ProcessTimeout = TimeSpan.FromMinutes(10);
 
     #region Expectations
@@ -57,7 +50,6 @@ public class BootTests(BootFixture fixture)
         "M:unsafe",             // pointer round trip
         "M:kernel-thread",      // a kernel process reusing the userspace realm's process and thread names
         "M:done",               // ran to the end of the entry function
-        // Concurrency (conc.g). These come from threads, so they land after the idle loop.
         "M:sync-basics-ok",     // uncontended AtomicInt and SpinLock semantics, including TryLock
         "M:kconc-setup",        // the shared object was published to the kernel-side slot
         "M:kconc-joined",       // all four kernel workers finished
@@ -98,26 +90,12 @@ public class BootTests(BootFixture fixture)
         "grade=5 read=7 zeros=0 neg=-5 flip=9",
         "keywords=3 scaled=10 deref=42 crate=4 relay=6",
         "recursed=20100 strchurn=3835",
-        // Managed unions. 'ulive'/'uchurnlive' are load-bearing: the live population once every
-        // owner is out of scope, so anything but 0 means a release did not run. 'umade' against
-        // the weights pins the other direction - a double release changes a weight.
         "uweights=22 umade=7 ulive=0 uchurn=400 uchurnlive=0",
-        // Structural equality. 125 is bits 1+4+8+16+32+64 - the two comparisons that must be
-        // false are exactly the bits left clear, so an equality answering true for everything
-        // reads 255. 'ueqlive=0' pins that the inline-built operands were released.
         "ueq=125 ueqlive=0",
-        // Generic unions. 107 = 6 (Found) - 1 (Missing) + 2 (a counted payload's id) + 100
-        // (equality within one instantiation); the cross-instantiation comparison adds nothing.
-        // 'leaves=3' walks a recursive Tree[int] through a generic function inferring from it.
         "gsum=107 leaves=3",
-        // Three declarations of one name, each meaning its own. 'root=1' is the load-bearing half:
-        // a function written outside the realm still sees the outer Depth, so a scope's displacement
-        // does not leak past the scope that declared it.
         "depth=2 root=1",
+        "mainshare=42 2",
         "REGRESSION_OK",
-        // The innermost of the four Depths is what a bare call means; the qualifiers then name the
-        // other three explicitly, from inside the scope that displaced them. 'q=431' is the proof
-        // that a qualifier is a compile-time choice of symbol, not a runtime lookup.
         "udepth=4 q=431",
         "pi*2=6 load=3",
     ];
@@ -133,59 +111,16 @@ public class BootTests(BootFixture fixture)
             return;
         }
 
-        string fixturesDir = Path.Combine(AppContext.BaseDirectory, "Fixtures");
-        string appaDll = Path.Combine(AppContext.BaseDirectory, "Appa.dll");
-
-        using var work = TempDir.Create("appa-boot-");
-        Directory.CreateDirectory(Path.Combine(work.Path, "src"));
-        foreach (var g in Directory.GetFiles(Path.Combine(fixturesDir, "Boot"), "*.g"))
-            File.Copy(g, Path.Combine(work.Path, "src", Path.GetFileName(g)));
-        File.Copy(Path.Combine(fixture.EnvsDir!, "env.GatOS.g"), Path.Combine(work.Path, "env.g"));
-        File.WriteAllText(Path.Combine(work.Path, "boot.gconf"), """
-            <appa>
-                <ProjectName>boot</ProjectName>
-                <TargetBackend>GatOS</TargetBackend>
-                <BuildMode>Debug</BuildMode>
-                <OutputType>Serial</OutputType>
-            </appa>
-            """);
-
-        // No --stdlib: this exercises the real, installed GatOS toolchain end to end, so it
-        // discovers libgata the same way a real 'appa build' does.
-        var psi = new ProcessStartInfo("dotnet",
-            $"\"{appaDll}\" build --run --headless --timeout={(int)BootTimeout.TotalSeconds}s")
-        {
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            WorkingDirectory = work.Path,
-        };
-        // Read both streams concurrently before waiting: draining one to completion first
-        // deadlocks if the process fills the other's OS pipe buffer.
-        var ct = TestContext.Current.CancellationToken;
-        using var proc = Process.Start(psi)!;
-        var outTask = proc.StandardOutput.ReadToEndAsync(ct);
-        var errTask = proc.StandardError.ReadToEndAsync(ct);
-        using var cts = new CancellationTokenSource(ProcessTimeout);
-        try { await proc.WaitForExitAsync(cts.Token); }
-        catch (OperationCanceledException) { try { proc.Kill(entireProcessTree: true); } catch { } }
-
-        string log = await outTask + await errTask;
-        string userLog = ReadIfPresent(Path.Combine(work.Path, "artifacts", "user-debug.log"));
+        var (log, userLog) = await BuildAndBoot("Boot", "Debug");
 
         Assert.Contains("Reached kernel idle loop", log);
 
-        // A thread cannot print, so conc.g's reporters check their own invariants and announce
-        // a verdict. This runs before the marker check because both failures look the same
-        // there - a reporter that never ran and one that ran and disagreed each leave the
-        // '-ok' marker missing. Checked first, the verdict names which check failed.
+        // A thread cannot print a marker without the kernel's _env_dbg having been bound to the userspace one
         foreach (var channel in (string[])[log, userLog])
             Assert.True(!channel.Contains("-BAD"),
                 "a section reported a failed check (look for the '-BAD' marker)" + Logs(log, userLog));
 
-        // What separates "the ISO booted" from "every construct actually executed": a section
-        // that faults, is skipped, or is optimised away leaves its marker missing, and checking
-        // only the final answers would not notice.
+        // What separates "the ISO booted" from "every construct actually executed"
         AssertMarkers(KernelMarkers, "[DEBUG] ", log, "COM1/stdio", log, userLog);
         AssertMarkers(UserMarkers, "[USER DEBUG] ", userLog, "COM3/user-debug.log", log, userLog);
 
@@ -196,23 +131,139 @@ public class BootTests(BootFixture fixture)
     }
 
     /// <summary>
+    /// The lines a Release image has to print. Nothing here is a 'debug' marker: Release rejects
+    /// both 'debug' and 'panic', which is why the main fixture cannot be reused and why the kernel
+    /// had never been compiled at the optimisation level a shipped image uses.
+    /// </summary>
+    private static readonly string[] ReleaseOutput =
+    [
+        "R:box 1", "R:pair 5", "R:one 4", "R:vec 7 false true",
+        "R:churn 499 4 46", "R:throws 1 -9 20",
+        "R:nums -2147483647 4294967295 -715827882 -1",
+        "R:defer", "R:str abccc 5", "R:done",
+    ];
+
+    /// <summary>
+    /// Builds the same source twice - Debug and Release - into two ISOs, boots both, and requires
+    /// them to print the same thing.
+    /// </summary>
+    [Fact]
+    public async Task ReleaseImageBootsAndPrintsWhatDebugPrints()
+    {
+        if (!ToolchainProbe.HasGatOSToolchain())
+        {
+            Assert.Skip("GatOS toolchain/QEMU not installed (run 'appa setup'); skipping release boot regression");
+            return;
+        }
+
+        var (debugLog, _) = await BuildAndBoot("BootRelease", "Debug");
+        Assert.Contains("Reached kernel idle loop", debugLog);
+
+        var (releaseLog, _) = await BuildAndBoot("BootRelease", "Release");
+        Assert.Contains("Reached kernel idle loop", releaseLog);
+
+        foreach (var expected in ReleaseOutput)
+            Assert.True(releaseLog.Contains(expected),
+                $"the release image booted but never printed '{expected}'\n\n--- release ---\n{releaseLog}");
+
+        var d = ProgramLines(debugLog);
+        var r = ProgramLines(releaseLog);
+        Assert.True(d.Count > 0, "the debug image printed none of the fixture's lines");
+        if (d.SequenceEqual(r)) return;
+
+        var diff = new List<string>();
+        for (int i = 0; i < Math.Max(d.Count, r.Count); i++)
+        {
+            string a = i < d.Count ? d[i] : "<none>";
+            string b = i < r.Count ? r[i] : "<none>";
+            if (a != b) diff.Add($"  line {i + 1}: debug '{a}' vs release '{b}'");
+        }
+        Assert.Fail($"the release image computed something the debug image did not:\n" +
+                    string.Join("\n", diff.Take(20)));
+    }
+
+    /// <summary>
+    /// The fixture's own output lines, in order. Everything the kernel and GRUB print around them
+    /// is dropped, so the comparison is of the program rather than of the boot.
+    /// </summary>
+    internal static List<string> ProgramLines(string log)
+    {
+        var lines = new List<string>();
+        foreach (var raw in log.Split('\n'))
+        {
+            string l = raw.Trim();
+            int at = MarkerStart(l);
+            if (at >= 0) lines.Add(l[at..]);
+        }
+        return lines;
+    }
+
+    /// <summary>
+    /// Where this line's fixture marker begins, or -1. What follows the prefix is checked as well
+    /// as the prefix itself: every marker is 'R:' plus a lowercase name or 'drop ' plus a count, so
+    /// unrelated console text that merely contains the letters - 'ERROR: ...' ends in 'R:'.
+    /// </summary>
+    private static int MarkerStart(string line)
+    {
+        for (int i = 0; i < line.Length; i++)
+        {
+            if (line[i] == 'R' && i + 2 < line.Length && line[i + 1] == ':' && char.IsAsciiLetterLower(line[i + 2]))
+                return i;
+            if (line[i] == 'd' && i + 5 < line.Length &&
+                line.AsSpan(i, 5).SequenceEqual("drop ") && char.IsAsciiDigit(line[i + 5]))
+                return i;
+        }
+        return -1;
+    }
+
+    /// <summary>
+    /// Writes the named fixture into a temporary project, builds a GatOS ISO in the given mode and
+    /// boots it headless, returning COM1/stdio and the userspace capture.
+    /// </summary>
+    private async Task<(string Log, string UserLog)> BuildAndBoot(string fixtureName, string buildMode)
+    {
+        string fixturesDir = Path.Combine(AppContext.BaseDirectory, "Fixtures");
+        string appaDll = Path.Combine(AppContext.BaseDirectory, "Appa.dll");
+
+        using var work = TempDir.Create("appa-boot-");
+        Directory.CreateDirectory(Path.Combine(work.Path, "src"));
+        foreach (var g in Directory.GetFiles(Path.Combine(fixturesDir, fixtureName), "*.g"))
+            File.Copy(g, Path.Combine(work.Path, "src", Path.GetFileName(g)));
+        File.Copy(Path.Combine(fixture.EnvsDir!, "env.GatOS.g"), Path.Combine(work.Path, "env.g"));
+        File.WriteAllText(Path.Combine(work.Path, "boot.gconf"), $"""
+            <appa>
+                <ProjectName>boot</ProjectName>
+                <TargetBackend>GatOS</TargetBackend>
+                <BuildMode>{buildMode}</BuildMode>
+                <OutputType>Serial</OutputType>
+            </appa>
+            """);
+
+        // No --stdlib
+        var psi = new ProcessStartInfo("dotnet",
+            $"\"{appaDll}\" build --run --headless --timeout={(int)BootTimeout.TotalSeconds}s")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            WorkingDirectory = work.Path,
+        };
+        var ct = TestContext.Current.CancellationToken;
+        using var proc = Process.Start(psi)!;
+        var outTask = proc.StandardOutput.ReadToEndAsync(ct);
+        var errTask = proc.StandardError.ReadToEndAsync(ct);
+        using var cts = new CancellationTokenSource(ProcessTimeout);
+        try { await proc.WaitForExitAsync(cts.Token); }
+        catch (OperationCanceledException) { try { proc.Kill(entireProcessTree: true); } catch { } }
+
+        return (await outTask + await errTask,
+                ReadIfPresent(Path.Combine(work.Path, "artifacts", "user-debug.log")));
+    }
+
+    /// <summary>
     /// Asserts every marker reached the channel it belongs on, and that the channel is the one
     /// this realm writes to.
     /// </summary>
-    /// <remarks>
-    /// The prefix is checked once for the channel rather than against each marker. It used to be
-    /// required immediately before every marker, which stopped holding once two userspace threads
-    /// could emit at the same time: the environment's userspace _env_dbg wrote the prefix, the
-    /// message and the newline as three separate syscalls, so a thread switch between any two
-    /// interleaved the lines and produced "[USER DEBUG] [USER DEBUG] M:a\nM:b". Both markers
-    /// arrived, on the right channel, but neither sat next to a prefix.
-    ///
-    /// env.GatOS.g now assembles the line and writes it once, which removes the cause - but the
-    /// boot fixture downloads its environment rather than reading the one in this checkout, so
-    /// that fix only takes effect for this test once envs/ is republished. Checking the prefix
-    /// per channel still proves routing (a kernel marker appearing here would fail), without
-    /// pinning the test to how many writes the environment happens to use.
-    /// </remarks>
     private static void AssertMarkers(
         string[] markers, string prefix, string channel, string channelName, string log, string userLog)
     {

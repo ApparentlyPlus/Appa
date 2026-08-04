@@ -276,7 +276,7 @@ internal sealed class SymbolTable
         }
         foreach (var (name, list) in _funcs)
         {
-            bool ov = list.Count > 1;
+            bool ov = FuncOverloads(name).Count > 1;
             var span = CollectionsMarshal.AsSpan(list);
             for (int i = 0; i < span.Length; i++)
             {
@@ -494,13 +494,27 @@ internal sealed class SymbolTable
     }
 
     /// <summary>
+    /// Every registration of the named free function, one per declaring file, before any collapsing of overloads.
+    /// </summary>
+    public IReadOnlyList<Symbol> FuncDeclarations(string name)
+    {
+        return _funcs.TryGetValue(name, out var l) ? l : [];
+    }
+
+    /// <summary>
     /// Returns all overloads of the named free function.
     /// </summary>
     public IReadOnlyList<Symbol> FuncOverloads(string name)
     {
         if (!_funcs.TryGetValue(name, out var l)) return [];
         var callable = l.Where(s => s.Sig is not { IsEntry: true }).ToList();
-        return callable.Count > 0 ? callable : l;
+        if (callable.Count == 0) callable = [.. l];
+        if (callable.Count > 1)
+        {
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            callable = [.. callable.Where(s => s.CName.Length == 0 || seen.Add(s.CName))];
+        }
+        return callable;
     }
 
     /// <summary>

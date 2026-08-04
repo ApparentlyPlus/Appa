@@ -3,9 +3,7 @@ namespace Appa.Tests;
 using Appa;
 
 /// <summary>
-/// Regression coverage for the final robustness sweep. Each case is one defect found by probing
-/// rather than by a failing test: a warning that fired on correct code, a cascade that reported one
-/// mistake several times, or a form the grammar accepted in one position and not the mirror one.
+/// Regression coverage for the final robustness sweep. 
 /// </summary>
 public class FinalSweepTests
 {
@@ -82,8 +80,6 @@ public class FinalSweepTests
             "union U { A(int n), B } realm kernel { entry func Main() { let U u = new U(); } }");
         Assert.Contains("union", d.Message);
         Assert.Contains(d.Hints, h => h.Contains("Variant"));
-        // The old failure path handed back the class type, producing "cannot assign 'U' to 'u' of
-        // type 'U'" on top - a second error whose message contradicted itself.
         AssertNoDiagnostic(Codes.TypeMismatch,
             "union U { A(int n), B } realm kernel { entry func Main() { let U u = new U(); } }");
     }
@@ -310,6 +306,37 @@ public class FinalSweepTests
         Assert.Equal(1, diag.ErrorCount);
         Assert.Equal(0, diag.WarningCount);
         Assert.True(diag.HasErrors);
+    }
+
+    #endregion
+
+    #region What counts as library code
+
+    /// <summary>
+    /// The rule deciding whether a file is the author's or the standard library's.
+    /// </summary>
+    [Fact]
+    public void LibraryPathsAreRecognisedWithoutCatchingSiblingDirectories()
+    {
+        using var root = TempDir.Create("appa-libpred-");
+        string lib = Path.Combine(root.Path, "libgata");
+        string sibling = Path.Combine(root.Path, "libgata-extra");
+        Directory.CreateDirectory(lib);
+        Directory.CreateDirectory(sibling);
+
+        var isLibrary = Pipeline.LibraryPredicate(lib);
+
+        Assert.True(isLibrary(Path.Combine(lib, "List.g")));
+        Assert.True(isLibrary(Path.Combine(lib, "sub", "Deep.g")));
+
+        Assert.False(isLibrary(Path.Combine(sibling, "Mine.g")));
+        Assert.False(isLibrary(Path.Combine(root.Path, "main.g")));
+
+        var withSlash = Pipeline.LibraryPredicate(lib + Path.DirectorySeparatorChar);
+        Assert.True(withSlash(Path.Combine(lib, "List.g")));
+        Assert.False(withSlash(Path.Combine(sibling, "Mine.g")));
+
+        Assert.False(Pipeline.LibraryPredicate(null)(Path.Combine(lib, "List.g")));
     }
 
     #endregion

@@ -22,9 +22,6 @@ public class LanguageCoreTests
     {
         var data = new TheoryData<string, string>
         {
-            // A process body holds declarations its threads share and nothing outside can see.
-            // This is what gives a lock a home: the process is the address space, so the scope and
-            // the sharing boundary are the same thing.
             { "process_scoped_declarations", """
             realm kernel { entry func Main() { } }
             realm userspace {
@@ -458,9 +455,6 @@ public class LanguageCoreTests
             class C { @keep int func F() { return 1; } }
             realm kernel { entry func Main() { } }
             """ },
-            // 'thread' and 'process' are contextual keywords, so this is no longer a syntax error -
-            // they parse as perfectly ordinary identifiers, and the only thing wrong is that
-            // nobody declared them.
             { "contextual_keywords_are_idents", "G005", """
             realm kernel { entry func Main() {
               let int x = thread + process;
@@ -562,8 +556,6 @@ public class LanguageCoreTests
             module M { private int func helper() { return 1; } }
             realm kernel { entry func Main() { let int z = M.helper(); } }
             """ },
-            // A process's entry points are its threads, and every 'entry func' mangles to one
-            // fixed C symbol, so a second one here would be a duplicate definition.
             { "process_entry_func", "G068", """
             realm userspace { foreground process App { entry func Oops() { } } }
             """ },

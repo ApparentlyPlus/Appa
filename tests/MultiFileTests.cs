@@ -38,12 +38,12 @@ public class MultiFileTests
                 Directory.CreateDirectory(Path.GetDirectoryName(full)!);
                 File.WriteAllText(full, content);
             }
-            if (!hasEnv) File.WriteAllText(Path.Combine(work, "env.g"), MultiFileCorpus.DefaultEnv);
+            if (!hasEnv)
+                File.WriteAllText(Path.Combine(work, "env.g"),
+                    c.Target == Target.GatOS ? MultiFileCorpus.GatOSEnv : MultiFileCorpus.DefaultEnv);
 
             var envPath = Path.Combine(work, "env.g");
             var entryPath = Path.Combine(work, "src", "main.g");
-            // libgata is deliberately absent: these cases test the project's own import graph,
-            // and a missing library module is itself one of the cases.
             var stdlib = Path.Combine(work, "no-libgata");
 
             var inputs = new List<string> { envPath, entryPath };
@@ -53,7 +53,7 @@ public class MultiFileTests
 
             Pipeline.ValidateEnvironment(programs, diag);
             Pipeline.ValidateIntrinsics(module, diag);
-            Pipeline.ValidateStructure(programs, Target.Hosted, diag);
+            Pipeline.ValidateStructure(programs, c.Target, diag);
 
             if (diag.HasErrors) return new BuildResult(diag, module, null, null);
             var files = Layout.Compose(new Emitter(module, diag).Build(), module.Symbols);
@@ -177,9 +177,8 @@ public class MultiFileTests
 
             foreach (var d in r.Diag!.All)
             {
-                if (d.Loc.Span == TextSpan.None) continue; // build-level, not file-level
+                if (d.Loc.Span == TextSpan.None) continue;
                 if (string.IsNullOrEmpty(d.Loc.File)) continue;
-                // Names the compiler uses for things with no file of their own.
                 if (d.Loc.File is "<runtime>" or "<environment>") continue;
 
                 if (!File.Exists(d.Loc.File))
@@ -228,8 +227,6 @@ public class MultiFileTests
                                .Select(f => f.Name).ToList();
             if (units.Count == 0) continue;
 
-            // A user realm emits a generated main(); a kernel realm does not, so those link
-            // as a relocatable object instead of a program.
             bool hasMain = r.Files.Any(f => f.Content.Contains("int main(void)", StringComparison.Ordinal));
             string mode = hasMain ? "" : "-r -nostdlib ";
             var args = $"-std=c11 -I. {mode}-o linked.out {string.Join(" ", units)}";
@@ -265,9 +262,6 @@ public class MultiFileTests
         {
             var rng = new Random(seed);
             int n = 2 + rng.Next(7);
-
-            // edges[i] lists the files file i imports. Restricting targets to j > i for the
-            // acyclic half guarantees a topological order exists.
             bool acyclic = seed % 2 == 0;
             var edges = new List<int>[n];
             for (int i = 0; i < n; i++)
@@ -284,14 +278,8 @@ public class MultiFileTests
             var files = new List<(string, string)>();
             for (int i = 0; i < n; i++)
             {
-                // Each file declares a class, an enum and a generic, then uses its own types and
-                // its imports' - including its generic over another file's class, the shape that
-                // has to widen the stamped instance's scope to the requesting file.
                 var body = new StringBuilder();
                 foreach (var t in edges[i]) body.AppendLine($"import \"src/f{t}.g\";");
-                // Every file imports the one shared generic, declared in a file of its own.
-                // Instantiating it over a locally declared class is the case where the stamped
-                // instance lands in shared.g, which cannot see C{i} without the widening.
                 body.AppendLine("import \"src/shared.g\";");
                 body.AppendLine($"class C{i} {{ public int n; }}");
                 body.AppendLine($"enum E{i} {{ A{i}, B{i} }}");

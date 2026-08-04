@@ -252,8 +252,6 @@ public class UnionEqualityTests
     [Fact]
     public void EqualityBodyIsConfinedToItsRealm()
     {
-        // Emitted sections rather than composed files: which translation units a build produces
-        // depends on the environment's preamble blocks, and this has nothing to do with those.
         var (diag, module) = SingleFileCompile.Check("""
             realm kernel { entry func Main() { } }
 
@@ -282,18 +280,12 @@ public class UnionEqualityTests
 
         Assert.False(diag.HasErrors, string.Join("; ", diag.All.Select(d => d.Message)));
         var o = new Emitter(module!, diag).Build();
-
-        // Derived rather than spelled out: a realm-scoped type's C name carries a scope token, and
-        // hardcoding the hash here would make this test a puzzle rather than a check.
         string ty = Mangler.Union("Tagged@userspace");
         string eq = Mangler.UnionEq("Tagged@userspace");
         string body = $"{eq}({ty} _a, {ty} _b) {{";
 
         Assert.Contains(body, o.UserFuncs);
         Assert.DoesNotContain(body, o.KernelFuncs);
-
-        // The prototype stays shared: declaring a function no unit defines is legal C, and
-        // dropping it per-realm would mean threading realm knowledge into the header too.
         Assert.Contains(eq, o.SharedHeader);
     }
 

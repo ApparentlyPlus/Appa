@@ -61,14 +61,8 @@ public class HostedEndToEndTests
         import Math;
 
         int func Twice(int n) { return n * 2; }
-
-        // Displaced inside the realm below, so '::Cfg' and '::Widen' only reach these if a
-        // qualifier picks the symbol rather than the name.
         class Cfg { public int w; func _init() { self.w = 9; } }
         int func Widen(Cfg c) { return c.w; }
-
-        // Reads the file-scope Twice from outside the realm, so the displacement below is confined
-        // to the scope that declared it rather than changing what this file's own code means.
         int func OuterTwice(int n) { return Twice(n); }
 
         union Note { Blank, Titled(String t), Numbered(int v) }
@@ -90,11 +84,7 @@ public class HostedEndToEndTests
 
         realm userspace {
             @shadows int func Twice(int n) { return n * 3; }
-
-            // Declared beside a local of the same name below, so the rule that a local owns its
-            // name against a scoped declaration is proved by a value rather than by a type check.
             @shadows class Cfg { public int a; }
-
             @shadows int func Widen(Cfg c) { return c.a; }
 
             entry func Main() {
@@ -110,9 +100,6 @@ public class HostedEndToEndTests
                 let Counter c = new Counter();
                 for x in xs { c.Bump(); }
 
-                // A library generic instantiated over a class declared in *this* file. The
-                // stamped List[Counter] lands in List.g, which has never heard of Counter,
-                // so this only resolves if the instance is given the requesting file's scope.
                 let List[Counter] cs = new List[Counter]();
                 cs.Add(c);
                 cs.Add(new Counter());
@@ -127,9 +114,6 @@ public class HostedEndToEndTests
                     deref = *p + 1;
                 }
 
-                // A managed union over stdlib types: its payload is a reference-counted String,
-                // so this only prints the right thing if the generated retain/release pair keeps
-                // the string alive exactly as long as the union owns it.
                 let Note n1 = Note.Titled("hi");
                 let Note n2 = Note.Numbered(7);
                 let String label = "?";
@@ -150,10 +134,7 @@ public class HostedEndToEndTests
                 let Set[int] set = new Set[int]();
                 let bool fresh = set.AddNew(1);
                 let bool dupe = set.AddNew(1);
-
-                // Optional[V]: the lookup that can say "absent" as distinct from "stored zero".
-                // m holds 5 -> 1, so Find(5) is Some and Find(99) is None, where Get answers 0
-                // for the missing key and could not be told apart from a stored 0.
+                
                 m.Put(7, 0);
                 let int found = ValueOr(m.Find(5), -1);
                 let int storedZero = ValueOr(m.Find(7), -1);
@@ -163,9 +144,6 @@ public class HostedEndToEndTests
                 let int firstEl = ValueOr(xs.At(0), -1);
                 let int oob = ValueOr(xs.At(99), -1);
 
-                // A map whose value type is a class declared in this file. Map.Values() returns
-                // List[V], so this only compiles if that nested instantiation resolves under the
-                // file that named the type argument rather than the one declaring Map.
                 let Map[int, Counter] byId = new Map[int, Counter]();
                 byId.Put(1, c);
 
@@ -176,9 +154,6 @@ public class HostedEndToEndTests
                 Console.PrintLine($"len={xs.Length()} map={m.Length()} bumps={c.Value()}");
                 Console.PrintLine($"arr={arr[2]} deref={deref} abs={Math.Abs(-9)}");
                 Console.PrintLine($"generic={cs.Length()} first={cs.Get(0).Value()}");
-                // 6 is the realm's Twice, 4 the file's - one name, two meanings, decided by where
-                // the call is written. xs holds 12 rather than 8 for the same reason.
-                // The realm's Twice, the file's reached past it, and the realm's named outright.
                 Console.PrintLine($"shadow={Twice(2)} outer={OuterTwice(2)} xs1={xs.Get(1)} local={Cfg}");
                 Console.PrintLine($"qual={::Twice(2)}{userspace.Twice(2)} qt={::Widen(new ::Cfg())}");
             }
@@ -216,8 +191,6 @@ public class HostedEndToEndTests
             </appa>
             """);
 
-        // Transpile through the real CLI so manifest handling and import resolution are
-        // covered too, not just the parts SingleFileCompile reaches.
         var appaDll = Path.Combine(AppContext.BaseDirectory, "Appa.dll");
         var (buildCode, buildOut) = Run("dotnet",
             $"\"{appaDll}\" build \"{work.Path}\" --stdlib \"{Path.Combine(gata, "libgata")}\"", work.Path);
@@ -227,8 +200,6 @@ public class HostedEndToEndTests
         Assert.True(File.Exists(Path.Combine(outDir, "program.c")),
             $"expected transpilation/program.c, got: {string.Join(", ", Directory.GetFiles(outDir).Select(Path.GetFileName))}");
 
-        // -Werror is the point: libgata's emitted C must be clean, not merely accepted.
-        // A few warnings are about C style the emitter deliberately does not chase.
         var exe = work.Combine("prog");
         var (ccCode, ccOut) = Run(cc,
             $"-std=c11 -I. -Wall -Wextra -Werror -Wno-unused-parameter -Wno-unused-function " +

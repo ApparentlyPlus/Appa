@@ -2,12 +2,6 @@ namespace Appa.Tests;
 
 /// <summary>
 /// Compiles the emitted C the way a user would rather than the way the rest of the suite does.
-///
-/// Everything else here compiles at the default -O0 with whichever compiler is first on PATH.
-/// That combination hid three defects at once: gcc only reports -Wfree-nonheap-object once
-/// inlining has run, so it needs -O1 or better, and clang rejects two constructs gcc accepts at
-/// any level. A release build with warnings as errors is an ordinary thing to ask for, and until
-/// this test existed nothing performed one.
 /// </summary>
 public class CPortabilityTests
 {
@@ -42,22 +36,26 @@ public class CPortabilityTests
         }
         """;
 
-    public static TheoryData<string, string> Matrix()
+    public static TheoryData<string, string, string> Matrix()
     {
-        var data = new TheoryData<string, string>();
+        var data = new TheoryData<string, string, string>();
         foreach (var cc in (string[])["gcc", "clang"])
+        {
             foreach (var opt in (string[])["-O0", "-O1", "-O2", "-Os"])
-                data.Add(cc, opt);
+                data.Add(cc, opt, "c11");
+            foreach (var std in (string[])["c17", "c23"])
+                data.Add(cc, "-O2", std);
+        }
         return data;
     }
 
     [Theory]
     [MemberData(nameof(Matrix))]
-    public void EmittedCCompilesCleanUnderWerror(string cc, string opt)
+    public void EmittedCCompilesCleanUnderWerror(string cc, string opt, string std)
     {
         var gata = HostedRun.FindGataCheckout();
-        if (gata == null) return;                       // not a source checkout
-        if (HostedRun.FindCompiler() == null) return;   // no host toolchain
+        if (gata == null) return;
+        if (HostedRun.FindCompiler() == null) return;
 
         using var work = TempDir.Create("appa-portability-");
         Directory.CreateDirectory(work.Combine("src"));
@@ -78,13 +76,11 @@ public class CPortabilityTests
         Assert.True(buildCode == 0, $"appa build failed:\n{buildOut}");
 
         var outDir = work.Combine("transpilation");
-
-        // A compiler that is not installed is not a failure; one that is must be satisfied.
         var (probe, _) = HostedRun.Run(cc, "--version", outDir);
         if (probe != 0) return;
 
         var (code, output) = HostedRun.Run(cc,
-            $"-std=c11 -I. {opt} {Warnings} -c program.c -o /dev/null", outDir);
-        Assert.True(code == 0, $"{cc} {opt} rejected the emitted C:\n{output}");
+            $"-std={std} -I. {opt} {Warnings} -c program.c -o /dev/null", outDir);
+        Assert.True(code == 0, $"{cc} {opt} -std={std} rejected the emitted C:\n{output}");
     }
 }

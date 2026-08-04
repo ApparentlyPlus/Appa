@@ -83,21 +83,15 @@ public class ScopeFuzzTests
             mine.Add(name);
         }
 
-        // The three every level declares, so shadowing is the default rather than a special case:
-        // a use written at one level must pick that level's meaning.
         Decl("Cargo", $"class Cargo {{ public int {tag}; }}");
         Decl("Phase", $"enum Phase {{ Boot{tag}, Ready{tag} }}");
         Decl("Step", $"int func Step(int n) {{ return n + {tag.Length}; }}");
-        // A parameter named like a type this very scope declares: the same rule as a local, on the
-        // path that binds before the body is walked rather than during it.
         Decl($"Param{tag}", $"int func Param{tag}(int Cargo) {{ return Cargo; }}");
 
         if (rng.Next(2) == 0)
         {
             cov.ScopedGenerics++;
             Decl("Box", "class Box[T] { public T v; }");
-            // Unique per level, so these exercise the other branch: a scoped declaration that
-            // shadows nothing and must therefore carry no annotation.
             Decl($"Use{tag}", $"void func Use{tag}(Box[Cargo] b) {{ let int n = b.v.{tag}; }}");
             if (rng.Next(2) == 0)
             {
@@ -122,10 +116,6 @@ public class ScopeFuzzTests
     {
         cov.CrossLevelUses++;
         cov.LocalBindings++;
-
-        // Every enclosing scope, named explicitly. The field name is the oracle: each level's Cargo
-        // has its own, so a qualifier landing on the wrong one fails to resolve a field rather than
-        // silently compiling to the wrong type - which a link could never tell apart.
         var reach = new StringBuilder();
         for (int i = 0; i < outer.Length; i++)
         {
@@ -134,9 +124,6 @@ public class ScopeFuzzTests
             reach.Append($"let {path}Cargo o{i} = new {path}Cargo(); ")
                  .Append($"o{i}.{otag} = {path}Step({i}); ");
         }
-        // The inner block binds two names this scope declares as types, so the qualifying rewrite
-        // has to stop at them and start again once the block closes - which the trailing use of
-        // both names as types is what proves.
         return $"let Cargo c = new Cargo(); c.{tag} = 1; " +
                $"let Phase p = Phase.Boot{tag}; let int n = Step(c.{tag}); " +
                $"{{ let int Cargo = 7; let int Phase = Cargo + 1; n = n + Phase; }} " +
@@ -161,7 +148,6 @@ public class ScopeFuzzTests
         foreach (var (realm, rtag) in ((string, string)[])[("kernel", "kern"), ("userspace", "user")])
         {
             sb.Append($"realm {realm} {{\n");
-            // Sibling realms cannot see each other, so each one's outer set is the root's alone.
             var inRealm = new HashSet<string>();
             sb.Append(Declarations(rng, rtag, "    ", cov, atRoot, inRealm, mark));
 
@@ -278,9 +264,6 @@ public class ScopeFuzzTests
                              .Select(f => f.Name).ToList();
             if (units.Count == 0) continue;
 
-            // Linked, not just compiled: two scopes whose names collide produce translation units
-            // that each compile and only conflict once the objects are put together. No generated
-            // program has a main, so this is a relocatable link.
             var psi = new ProcessStartInfo(cc,
                 $"-std=c11 -I. -r -nostdlib -Werror=return-type -o linked.out {string.Join(" ", units)}")
             { WorkingDirectory = dir, RedirectStandardError = true, UseShellExecute = false };

@@ -28,8 +28,6 @@ public class LexerTests
     [InlineData("import", nameof(TK.Import))]
     [InlineData("realm", nameof(TK.Realm))]
     [InlineData("kernel", nameof(TK.Kernel))]
-    // Both realm names are reserved: a scope qualifier has to be recognisable before anything is
-    // resolved. 'process' and 'thread' stay contextual, and usable as ordinary identifiers.
     [InlineData("userspace", nameof(TK.Userspace))]
     [InlineData("process", nameof(TK.Ident))]
     [InlineData("thread", nameof(TK.Ident))]

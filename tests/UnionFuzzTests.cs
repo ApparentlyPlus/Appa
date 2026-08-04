@@ -157,8 +157,6 @@ public class UnionFuzzTests
         /// </summary>
         public string Construct(Union u, List<Union> unions, int depth)
         {
-            // Past a nesting cap, prefer a variant with no payload so recursion terminates
-            // regardless of how the field types happened to fall out.
             var v = depth > 3 && u.Variants.Any(x => x.FieldTypes.Count == 0)
                 ? u.Variants.First(x => x.FieldTypes.Count == 0)
                 : Pick(u.Variants);
@@ -245,13 +243,9 @@ public class UnionFuzzTests
         }
         src.Append('\n');
 
-        // A function per union whose every arm returns - the shape whose lowering has to close
-        // the if/else chain so the emitted C does not fall off the end of a non-void function.
         foreach (var u in unions)
             src.Append($"int func Weigh_{u.Name}({u.Name} v) {{ {gen.Match(u, "v", allArmsReturn: true)} }}\n");
 
-        // A class holding a union field, so the generated destructor has to release it, and a
-        // function taking and returning one by value.
         foreach (var u in unions)
         {
             src.Append($"class Box_{u.Name} {{ {u.Name} slot; " +
@@ -268,24 +262,14 @@ public class UnionFuzzTests
             string b = gen.Fresh("b");
             body.Append($"    let {u.Name} {a} = {gen.Construct(u, unions, 0)};\n");
             body.Append($"    let {u.Name} {b} = {gen.Construct(u, unions, 0)};\n");
-
-            // reassignment: releases whatever the slot held
             body.Append($"    {a} = {gen.Construct(u, unions, 0)};\n");
-
-            // equality both ways, and self-comparison
             body.Append($"    if ({a} == {b}) {{ acc = acc + 1; }}\n");
             body.Append($"    if ({a} != {b}) {{ acc = acc + 2; }}\n");
-
-            // borrow, round trip through a class field, and through a generic
             body.Append($"    acc = acc + Weigh_{u.Name}({a});\n");
             body.Append($"    acc = acc + Weigh_{u.Name}(Echo_{u.Name}({b}));\n");
             body.Append($"    let Box_{u.Name} {gen.Fresh("box")} = new Box_{u.Name}({a});\n");
             body.Append($"    let Crate[{u.Name}] {gen.Fresh("cr")} = new Crate[{u.Name}]();\n");
-
-            // match as a statement, in both shapes
             body.Append($"    {gen.Match(u, a, allArmsReturn: false)}\n");
-
-            // a union owner live across a scope that exits early
             body.Append($"    {{ let {u.Name} {gen.Fresh("t")} = {gen.Construct(u, unions, 0)}; " +
                         $"if (acc > 100000) {{ acc = 0; }} }}\n");
         }
@@ -308,8 +292,6 @@ public class UnionFuzzTests
         var body = new StringBuilder();
         int names = 0;
 
-        // Concrete types the templates get instantiated over. Two per template, always
-        // different, so an instance mixup shows up as a type error rather than passing.
         string[] concretes = ["int", "bool", "double", "Plain", "Valued", "Colour"];
 
         int count = 1 + r.Next(3);
@@ -319,10 +301,6 @@ public class UnionFuzzTests
         {
             int np = 1 + r.Next(2);
             var ps = Enumerable.Range(0, np).Select(i => $"P{i}").ToArray();
-
-            // Field types draw from this template's own parameters, concrete types, and earlier
-            // templates instantiated over this one's parameters - the nesting that made
-            // 'List[Node[T]]' fail to resolve.
             var fieldChoices = new List<string>(ps);
             fieldChoices.AddRange(ps);
             fieldChoices.AddRange(["int", "bool", "double", "Plain", "Valued", "[2]int"]);
@@ -336,8 +314,6 @@ public class UnionFuzzTests
                 int nf = r.Next(3);
                 variants.Add(($"V{v}", Enumerable.Range(0, nf).Select(_ => fieldChoices[r.Next(fieldChoices.Count)]).ToArray()));
             }
-            // At least one payload-free variant, so construction has a terminating option and
-            // the expected-type path gets exercised.
             variants.Add(("Nil", []));
 
             string baseName = $"G{g}";
@@ -346,7 +322,6 @@ public class UnionFuzzTests
                 : $"{v.V}({string.Join(", ", v.F.Select((t, i) => $"{t} f{i}"))})");
             src.Append($"union {baseName}[{string.Join(", ", ps)}] {{ {string.Join(", ", decl)} }}\n");
 
-            // Two distinct instantiations.
             var pick = concretes.OrderBy(_ => r.Next()).Take(np * 2).ToArray();
             string instA = string.Join(", ", pick.Take(np));
             string instB = string.Join(", ", pick.Skip(np).Take(np));
@@ -354,7 +329,6 @@ public class UnionFuzzTests
             coverage?.Observe(np, variants, fieldChoices);
         }
 
-        // Build values for both instantiations of every template.
         foreach (var d in declared)
             foreach (var inst in d.Inst)
             {
@@ -367,9 +341,6 @@ public class UnionFuzzTests
                     var args = new List<string>(v.F.Length);
                     foreach (var f in v.F)
                     {
-                        // A payload that is itself a template has to be bound to an annotated
-                        // local first: inline as a call argument there is no expected type, so
-                        // which instantiation is meant would be undeterminable - by design.
                         string concreteField = SubstituteParams(f, binding);
                         if (concreteField.Contains('[') && !concreteField.StartsWith('['))
                         {
@@ -663,10 +634,6 @@ public class UnionFuzzTests
         }
 
         Assert.Equal(Seeds, accepted);
-
-        // Guard against generator drift: every category below changes what the compiler
-        // generates for a union, so a corpus missing one is no longer testing that path even
-        // though it still goes green.
         Assert.True(coverage.ManagedPayload > 20, $"too few reference-counted payloads: {coverage.ManagedPayload}");
         Assert.True(coverage.ValuedPayload > 20, $"too few payloads with an '==' overload: {coverage.ValuedPayload}");
         Assert.True(coverage.NestedUnion > 20, $"too few nested-union payloads: {coverage.NestedUnion}");
@@ -721,8 +688,6 @@ public class UnionFuzzTests
                         : $"{v.Name}({string.Join(", ", v.FieldTypes.Select((t, i) => $"{Hosted(t, seed)} {v.FieldName(i)}"))})");
                 src.Append($"union {name} {{ {string.Join(", ", variants)} }}\n");
 
-                // Two constructions per variant, so the matrix contains both same-variant and
-                // different-variant pairs.
                 string list = $"l{seed}_{u.Name}";
                 body.Append($"        let List[{name}] {list} = new List[{name}]();\n");
                 var variantOf = new List<int>();
@@ -754,8 +719,6 @@ public class UnionFuzzTests
         src.Append("        let int bad = 0;\n        let int checked = 0;\n");
         src.Append(body);
         src.Append("        Console.PrintLine($\"bad={bad} checked={checked}\");\n    }\n}\n");
-
-        // Guard against a degenerate generation quietly reducing this to nothing.
         Assert.True(totalPairs > 2000, $"only {totalPairs} comparison pairs were generated");
 
         var r = HostedRun.BuildAndRun(src.ToString(), gata, cc);
@@ -790,8 +753,6 @@ public class UnionFuzzTests
             case "[3]bool": return "[true, false, true]";
             default:
             {
-                // A nested union: build its first payload-free variant when it has one, and
-                // otherwise its first variant, recursing for that variant's own fields.
                 var nested = unions.First(u => u.Name == type);
                 var v = nested.Variants.FirstOrDefault(x => x.FieldTypes.Count == 0) ?? nested.Variants[0];
                 var args = v.FieldTypes.Select(t => HostedValue(t, seed, gen, unions));

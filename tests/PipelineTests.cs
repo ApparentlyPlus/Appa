@@ -2,9 +2,6 @@ namespace Appa.Tests;
 
 using Appa;
 
-// G016/G039 need libgata imported and G020/G036/G042 a real environment; G019 comes from
-// Pipeline.ValidateIntrinsics, above BuildModule so these sources stay clean.
-
 /// <summary>
 /// One minimal repro per diagnostic code reachable without libgata, plus error-free "good path"
 /// programs. The repros come from the torture corpus's import-free fixtures, so the expected code
@@ -82,9 +79,6 @@ public class PipelineTests
 
     [Theory]
     [InlineData("G002", "module M { }")]
-    // A duplicate realm block and a duplicate entry func report the same code here as they do on
-    // the Hosted path below. They used to differ - G001 and the catch-all G003 - purely because the
-    // two paths were written at different times.
     [InlineData("G057", "realm kernel { entry func Main() { } } realm kernel { entry func Main2() { } }")]
     [InlineData("G059", "realm kernel { entry func A() { } entry func B() { } }")]
     public void StructureGivesExpectedCode(string expectedCode, string src)

@@ -240,7 +240,7 @@ static (IrModule Module, IReadOnlyDictionary<string, string> Sourcemap, Capabili
     if (manifest?.Target == Target.Hosted && module.HasKernelRealm)
         diag.Error(Codes.KernelBlockInHosted, "<environment>", TextSpan.None,
             "the active environment declares a kernel preamble, which is not allowed for a Hosted build");
-    if (!diag.HasErrors) Pipeline.WarnReferenceCycles(module);
+    if (!diag.HasErrors) Pipeline.WarnReferenceCycles(module, diag, programs, stdlibDir);
     Pipeline.ReportGataFiles(attempted, diag, warnAsError, stdlibDir);
 
     return (module, sourcemap, caps, diag);

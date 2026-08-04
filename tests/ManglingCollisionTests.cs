@@ -103,8 +103,6 @@ public class ManglingCollisionTests
             $"union {x} {{ {y}(int n) }} int func {x}_{y}() {{ return 1; }} " +
             "realm kernel { entry func Main() { } }");
 
-        // The same shapes with the declarations scoped: a scope suffix hashes into the name, so
-        // these must stay accepted rather than start colliding.
         yield return ("scoped/method",
             $"realm kernel {{ class {x} {{ public int func {y}() {{ return 1; }} }} " +
             $"int func {x}_{y}() {{ return 2; }} entry func Main() {{ }} }}");
@@ -139,7 +137,6 @@ public class ManglingCollisionTests
     /// several used to link silently, binding a call to a body the author never wrote.
     /// </summary>
     [Theory]
-    // Rejected: the declaration would take a generated name over.
     [InlineData("@extern void func uapps(); realm kernel { entry func Main() { uapps(); } } " +
                 "realm userspace { foreground process P { thread T { entry func R() { } } } }", false)]
     [InlineData("@extern void func gata_kernelspace_main(); realm kernel { entry func Main() { } }", false)]
@@ -148,7 +145,6 @@ public class ManglingCollisionTests
     [InlineData("class Fn_void__void_p { public int n; } " +
                 "realm kernel { entry func Main() { let Fn_void__void_p f = new Fn_void__void_p(); } }", false)]
     [InlineData("native type Fn_void__void_p { int n; } realm kernel { entry func Main() { } }", false)]
-    // Accepted: a dense token is a name the compiler chooses, so it gives way rather than colliding.
     [InlineData("@extern int func _g0(); @extern int func _g1(); @extern int func _g2(); " +
                 "realm kernel { class A { public int n; public int func M() { return 1; } } " +
                 "entry func Main() { let A a = new A(); let int q = a.M() + _g0() + _g1() + _g2(); } }", true)]
@@ -235,8 +231,6 @@ public class ManglingCollisionTests
                     }
                 }
 
-        // Both halves have to happen, or the sweep is passing because it built nothing worth
-        // compiling, or because every shape was waved through.
         Assert.True(accepted > 40, $"only {accepted} programs were accepted; the generator stopped covering");
         Assert.True(rejected > 10, $"only {rejected} programs were rejected; the collision rule stopped firing");
 

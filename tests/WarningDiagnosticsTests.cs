@@ -103,8 +103,6 @@ public class WarningDiagnosticsTests
     [Fact]
     public void IndexSelfAssignNeedsLiterals()
     {
-        // Computed indices may denote different elements on each side, so only two identical
-        // literal subscripts are enough to call it a self-assignment.
         AssertNoWarn(Codes.SelfAssignment,
             "realm kernel { entry func Main() { let int[4] a; let i = 0; let j = 1; a[i] = a[j]; } }");
     }
@@ -374,6 +372,35 @@ public class WarningDiagnosticsTests
         Assert.Contains(lines[(msgLine + 1)..helpLine], l => l.Contains('^'));
     }
 
+    /// <summary>
+    /// The caret has to land under what it points at when the line is indented with tabs.
+    /// </summary>
+    [Fact]
+    public void TheCaretRowRepeatsTheSourceLinesTabs()
+    {
+        var bag = new DiagnosticBag(new SourceSet());
+        bag.Sources.Add("t.g", "\t\tlet int x = wrong;\n");
+        bag.Error(Codes.UndefinedVariable, "t.g", new TextSpan(14, 5), "'wrong' is not defined");
+
+        var lines = bag.Render(bag.All[0]).Split('\n');
+        string caretRow = Assert.Single(lines.Where(l => l.Contains('^')));
+        string sourceRow = Assert.Single(lines.Where(l => l.Contains("let int x")));
+
+        Assert.Equal(2, caretRow.Count(c => c == '\t'));
+        string plainCaret = Plain(caretRow), plainSource = Plain(sourceRow);
+        int caretAt = plainCaret.IndexOf('^');
+        int tokenAt = plainSource.IndexOf("wrong", StringComparison.Ordinal);
+        Assert.True(caretAt == tokenAt,
+            $"caret at {caretAt} but 'wrong' at {tokenAt}:\n{plainSource}\n{plainCaret}");
+        Assert.Equal("wrong".Length, plainCaret.Count(c => c == '^'));
+    }
+
+    /// <summary>
+    /// Strips ANSI colour escapes, which take up bytes but no terminal columns.
+    /// </summary>
+    private static string Plain(string s) =>
+        System.Text.RegularExpressions.Regex.Replace(s, "\\[[0-9;]*m", "");
+
     [Fact]
     public void MultipleHintsEachGetTheirOwnLine()
     {
@@ -414,7 +441,7 @@ public class WarningDiagnosticsTests
     /// </summary>
     [Theory]
     [InlineData("private")]
-    [InlineData("")]   // no modifier: the visible-to-importers case, which 'public' cannot spell
+    [InlineData("")]
     public void InstancesAreCalledByTheirOwnName(string vis)
     {
         var (diag, module) = SingleFileCompile.Check(
@@ -427,8 +454,6 @@ public class WarningDiagnosticsTests
         foreach (var f in module.FreeFunctions)
             if (f.Body != null) collector.Collect(f.Body);
 
-        // Names are densified by this point, so the instantiation is matched by structure, not
-        // spelling: the entry point calls exactly one thing, and that thing must be defined.
         Assert.NotEmpty(collector.Targets);
         Assert.All(collector.Targets, t => Assert.Contains(t, defined));
     }
@@ -448,10 +473,6 @@ public class WarningDiagnosticsTests
     #endregion
 
     #region Union comparison hazards
-
-    // Union equality is generated, so what it does to each payload is invisible at the
-    // comparison. These two say so where it will not mean "holds the same value". Both are paired
-    // with a negative case, since an unsilenceable warning is worse than none.
 
     private const string PlainClass = "class Plain { public int n; } ";
     private const string ValuedClass =
@@ -596,10 +617,6 @@ public class WarningDiagnosticsTests
     #endregion
 
     #region Union comparisons keep the existing lint coverage
-
-    // Making unions comparable moved their '==' off IrBinOp onto a call, so every lint matching
-    // IrBinOp silently stopped seeing them - and a warning that stops firing breaks no test.
-    // These pin the parity: what is said about 'i == i' must be said about 'u == u'.
 
     private const string SmallUnion = "union U { A(int n), B } ";
 
