@@ -123,7 +123,7 @@ internal sealed class Desugar(SymbolTable sym, DiagnosticBag diag) : IrRewriter
         {
             IrExpr sb = new IrNew(sbClass, []) { Span = ip.Span };
             foreach (var part in ip.Parts)
-                sb = new IrInstanceCall(sb, put.CName, new IrClassRef(sbClass), [part]) { Span = ip.Span };
+                sb = new IrInstanceCall(sb, put.CName, IrTypes.ClassRef(sbClass), [part]) { Span = ip.Span };
             return new IrInstanceCall(sb, toStr.CName, IrType.String, []) { Span = ip.Span };
         }
         var acc = ip.Parts[0];

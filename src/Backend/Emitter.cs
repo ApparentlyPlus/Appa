@@ -19,7 +19,13 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
 
     // Per-writer type dedup. Each distinct (writer, key) is emitted exactly once
     // into that translation unit.
-    private readonly Dictionary<CodeWriter, HashSet<(char Kind, string Name)>> _emitted = [];
+    private readonly HashSet<EmitKey> _emitted = [];
+
+    /// <summary>
+    /// One declaration in one translation unit. Writer identity is the translation unit, so two
+    /// units may each carry their own copy of the same typedef.
+    /// </summary>
+    private readonly record struct EmitKey(CodeWriter Writer, char Kind, string Name);
 
     // ARC-managed classes: every non-module Gata class carries a refcount header
     // and a generated destructor.
@@ -35,11 +41,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// Returns true the first time the given key is seen for the given writer, suppressing
     /// duplicate emission within a single translation unit.
     /// </summary>
-    private bool FirstInto(CodeWriter w, char kind, string name)
-    {
-        if (!_emitted.TryGetValue(w, out var s)) _emitted[w] = s = [];
-        return s.Add((kind, name));
-    }
+    private bool FirstInto(CodeWriter w, char kind, string name) => _emitted.Add(new EmitKey(w, kind, name));
 
     /// <summary>
     /// Returns true if the IR type participates in reference counting - a managed class reference,
@@ -882,7 +884,12 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             w.Line($"{Intrinsic(Roles.ObjInit)}(_o, {dtorArg});");
             foreach (var f in cls.Fields)
                 if (cls.FieldInits.TryGetValue(f.Name, out var init))
-                    w.Line($"_o->{f.Name} = {EmitExpr(init)};");
+                {
+                    using var line = w.Open();
+                    line.Buffer.Append("_o->").Append(f.Name).Append(" = ");
+                    Write(init, line.Buffer);
+                    line.Buffer.Append(';');
+                }
             if (cls.HasInit && InitOf(cls) is { } ctor)
             {
                 var args = new StringBuilder("_o");
@@ -978,7 +985,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// </summary>
     private static string MethodSig(IrFunction m)
     {
-        string ret = m.IsThrows ? new IrResultType(m.ReturnType).ToCType() : m.ReturnType.ToCType();
+        string ret = m.IsThrows ? IrTypes.Result(m.ReturnType).ToCType() : m.ReturnType.ToCType();
         var sb = new StringBuilder();
         sb.Append(ret).Append(' ').Append(m.CName).Append('(');
         
@@ -1065,7 +1072,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// </summary>
     private static string FuncSig(IrFunction fn)
     {
-        string ret = fn.IsThrows ? new IrResultType(fn.ReturnType).ToCType() : fn.ReturnType.ToCType();
+        string ret = fn.IsThrows ? IrTypes.Result(fn.ReturnType).ToCType() : fn.ReturnType.ToCType();
         var sb = new StringBuilder();
         sb.Append(ret).Append(' ').Append(fn.CName).Append('(');
         for (int i = 0; i < fn.Params.Count; i++)
@@ -1276,15 +1283,43 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             case IrBlock b:       EmitBlock(b, w); break;
             case IrUnsafeBlock u: EmitBlock(u.Body, w); break;
             case IrDeclVar dv:    EmitDeclVar(dv, w); break;
-            case IrAssign a:      w.Line($"{EmitExpr(a.Target)} {a.Op.Sym()} {EmitExpr(a.Value)};"); break;
-            case IrExprStmt es:   w.Line($"{EmitExpr(es.Expr)};"); break;
-            case IrReturn rs:     w.Line(rs.Value == null ? "return;" : $"return {EmitExpr(rs.Value)};"); break;
+            case IrAssign a:
+            {
+                using var line = w.Open();
+                WriteAssign(a, line.Buffer);
+                line.Buffer.Append(';');
+                break;
+            }
+            case IrExprStmt es:
+            {
+                using var line = w.Open();
+                Write(es.Expr, line.Buffer);
+                line.Buffer.Append(';');
+                break;
+            }
+            case IrReturn { Value: null }: w.Line("return;"); break;
+            case IrReturn rs:
+            {
+                using var line = w.Open();
+                line.Buffer.Append("return ");
+                Write(rs.Value!, line.Buffer);
+                line.Buffer.Append(';');
+                break;
+            }
             case IrBreak:         w.Line("break;"); break;
             case IrContinue:      w.Line("continue;"); break;
             case IrDebug d:       w.Line($"{module.Symbols.FloorName(Roles.EnvDebug)}({NoTrigraphs(d.Raw)});"); break;
             case IrPanic p:       w.Line($"{module.Symbols.FloorName(Roles.EnvPanic)}({NoTrigraphs(p.Raw)});"); break;
             case IrIf ifs:        EmitIf(ifs, w); break;
-            case IrWhile ws:      w.Line($"while ({EmitCond(ws.Cond)})"); EmitBlock(ws.Body, w); break;
+            case IrWhile ws:
+                using (var line = w.Open())
+                {
+                    line.Buffer.Append("while (");
+                    WriteCond(ws.Cond, line.Buffer);
+                    line.Buffer.Append(')');
+                }
+                EmitBlock(ws.Body, w);
+                break;
             case IrFor fr:        EmitFor(fr, w); break;
             default: throw new System.Diagnostics.UnreachableException($"[Emitter] unhandled IrStmt: {s.GetType().Name}");
         }
@@ -1295,10 +1330,37 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// </summary>
     private void EmitDeclVar(IrDeclVar dv, CodeWriter w)
     {
-        if (dv.Init != null) { w.Line($"{dv.Type.ToCType()} {Mangler.Local(dv.Name)} = {EmitExpr(dv.Init)};"); return; }
-        w.Line(dv.Type is IrArrayType or IrUnionType ? $"{dv.Type.ToCType()} {Mangler.Local(dv.Name)} = {{0}};"
-             : IsManaged(dv.Type)                    ? $"{dv.Type.ToCType()} {Mangler.Local(dv.Name)} = NULL;"
-             :                                         $"{dv.Type.ToCType()} {Mangler.Local(dv.Name)};");
+        using var line = w.Open();
+        WriteDecl(dv, line.Buffer, withDefault: true);
+        line.Buffer.Append(';');
+    }
+
+    /// <summary>
+    /// Writes a declaration without its terminator. A statement declaration with no initializer
+    /// still takes a default, so no local is read before it is written; a for-init does not, which
+    /// is the only reason this is a parameter.
+    /// </summary>
+    private void WriteDecl(IrDeclVar dv, StringBuilder sb, bool withDefault)
+    {
+        sb.Append(dv.Type.ToCType()).Append(' ').Append(Mangler.Local(dv.Name));
+        if (dv.Init != null)
+        {
+            sb.Append(" = ");
+            Write(dv.Init, sb);
+        }
+        else if (!withDefault) return;
+        else if (dv.Type is IrArrayType or IrUnionType) sb.Append(" = {0}");
+        else if (IsManaged(dv.Type)) sb.Append(" = NULL");
+    }
+
+    /// <summary>
+    /// Writes an assignment without its terminator.
+    /// </summary>
+    private void WriteAssign(IrAssign a, StringBuilder sb)
+    {
+        Write(a.Target, sb);
+        sb.Append(' ').Append(a.Op.Sym()).Append(' ');
+        Write(a.Value, sb);
     }
 
     /// <summary>
@@ -1306,7 +1368,12 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// </summary>
     private void EmitIf(IrIf ifs, CodeWriter w)
     {
-        w.Line($"if ({EmitCond(ifs.Cond)})");
+        using (var line = w.Open())
+        {
+            line.Buffer.Append("if (");
+            WriteCond(ifs.Cond, line.Buffer);
+            line.Buffer.Append(')');
+        }
         EmitBlock(ifs.Then, w);
         if (ifs.Else != null) { w.Line("else"); EmitBlock(ifs.Else, w); }
     }
@@ -1316,41 +1383,34 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// </summary>
     private void EmitFor(IrFor fr, CodeWriter w)
     {
-        string init = fr.Init switch
+        using (var line = w.Open())
         {
-            IrDeclVar dv => dv.Init != null
-                ? $"{dv.Type.ToCType()} {Mangler.Local(dv.Name)} = {EmitExpr(dv.Init)}"
-                : $"{dv.Type.ToCType()} {Mangler.Local(dv.Name)}",
-            IrAssign aa  => $"{EmitExpr(aa.Target)} {aa.Op.Sym()} {EmitExpr(aa.Value)}",
-            IrExprStmt e => EmitExpr(e.Expr),
-            _            => ""
-        };
-        string cond = fr.Cond != null ? EmitCond(fr.Cond) : "";
-        string step = fr.Step switch
-        {
-            IrAssign sa  => $"{EmitExpr(sa.Target)} {sa.Op.Sym()} {EmitExpr(sa.Value)}",
-            IrExprStmt e => EmitExpr(e.Expr),
-            null         => "",
-            _            => throw new InvalidOperationException($"[Emitter] for-step must be an assignment or expression, got {fr.Step.GetType().Name}")
-        };
-        w.Line($"for ({init}; {cond}; {step})");
+            var sb = line.Buffer;
+            sb.Append("for (");
+            switch (fr.Init)
+            {
+                case IrDeclVar dv: WriteDecl(dv, sb, withDefault: false); break;
+                case IrAssign aa:  WriteAssign(aa, sb); break;
+                case IrExprStmt e: Write(e.Expr, sb); break;
+            }
+            sb.Append("; ");
+            if (fr.Cond != null) WriteCond(fr.Cond, sb);
+            sb.Append("; ");
+            switch (fr.Step)
+            {
+                case IrAssign sa:  WriteAssign(sa, sb); break;
+                case IrExprStmt e: Write(e.Expr, sb); break;
+                case null: break;
+                default: throw new InvalidOperationException($"[Emitter] for-step must be an assignment or expression, got {fr.Step.GetType().Name}");
+            }
+            sb.Append(')');
+        }
         EmitBlock(fr.Body, w);
     }
 
     #endregion
 
     #region Expressions
-
-    /// <summary>
-    /// Renders an IR expression to C text. One buffer serves the whole tree, so a subexpression is
-    /// written once instead of being copied again by every level enclosing it.
-    /// </summary>
-    private string EmitExpr(IrExpr e)
-    {
-        var sb = new StringBuilder();
-        Write(e, sb);
-        return sb.ToString();
-    }
 
     /// <summary>
     /// Writes an IR expression into the buffer. Every node kind must be fully resolved before
@@ -1521,14 +1581,12 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// Pins an integer operator result to the type the front end gave it, which C would otherwise
     /// have chosen for itself.
     /// </summary>
-    private string EmitCond(IrExpr e)
+    private void WriteCond(IrExpr e, StringBuilder sb)
     {
-        if (e is not IrBinOp { Type: IrPrimType { CName: "bool" } } bo) return EmitExpr(e);
-        var sb = new StringBuilder();
+        if (e is not IrBinOp { Type: IrPrimType { CName: "bool" } } bo) { Write(e, sb); return; }
         Write(bo.Left, sb);
         sb.Append(' ').Append(bo.Op.Sym()).Append(' ');
         Write(bo.Right, sb);
-        return sb.ToString();
     }
 
     /// <summary>

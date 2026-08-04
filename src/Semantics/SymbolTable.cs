@@ -152,10 +152,8 @@ internal sealed class SymbolTable
         return name switch
         {
             BuiltinTypes.String => IrType.String,
-            // StringBuilder is an ordinary managed class - the binding only exists so the
-            // interpolation lowering (Desugar) can find it without hardcoding the name.
-            BuiltinTypes.StringBuilder => new IrClassRef(Builtins[name]),
-            BuiltinTypes.Process or BuiltinTypes.Thread => new IrPtrType(IrType.Void),
+            BuiltinTypes.StringBuilder => IrTypes.ClassRef(Builtins[name]),
+            BuiltinTypes.Process or BuiltinTypes.Thread => IrTypes.Ptr(IrType.Void),
             _ => null
         };
     }

@@ -11,7 +11,19 @@ internal sealed class NameTable
     public ScopeTree? Scopes { get; set; }
 
     // Dense naming. Populated by the Densifier after reachability.
-    public Dictionary<string, string> Dense { get; set; } = [];
+    public Dictionary<string, string> Dense { get; private set; } = [];
+
+    // What each IR type spells itself as under the current naming.
+    public Dictionary<IrType, string> CTypes { get; private set; } = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>
+    /// Adopts the dense name map the Densifier produced, dropping the spellings it supersedes.
+    /// </summary>
+    public void SetDense(Dictionary<string, string> map)
+    {
+        Dense = map;
+        CTypes = new Dictionary<IrType, string>(ReferenceEqualityComparer.Instance);
+    }
 
     // Instantiations the Monomorphizer stamped, which is the set that actually exists.
     public Dictionary<string, GenericKey> Stamped { get; } = [];
@@ -36,7 +48,7 @@ internal sealed class NameTable
     public void BeginRound()
     {
         Scopes = null;
-        Dense = [];
+        SetDense([]);
         Stamped.Clear();
         StampedByBase.Clear();
         Templates.Clear();

@@ -87,15 +87,17 @@ internal static class Mangler
         return false;
     }
 
-    // The name table of the compilation in progress. One ambient slot instead of a row of them, and
-    // a build that never opened a table gets a fresh one rather than the last build's.
-    [ThreadStatic] private static NameTable? _namesTls;
-    private static NameTable _names => _namesTls ??= new NameTable();
+    [field: ThreadStatic]
+    private static NameTable _names
+    {
+        get => field ??= new NameTable();
+        set;
+    }
 
     /// <summary>
     /// Starts a compilation, discarding whatever the last one invented.
     /// </summary>
-    public static void Begin() => _namesTls = new NameTable();
+    public static void Begin() => _names = new NameTable();
 
     /// <summary>
     /// Starts a front-end round within the current compilation.
@@ -105,7 +107,17 @@ internal static class Mangler
     /// <summary>
     /// Replaces the dense name map with the given mapping produced by the Densifier.
     /// </summary>
-    public static void SetDense(Dictionary<string, string> map) => _names.Dense = map;
+    public static void SetDense(Dictionary<string, string> map) => _names.SetDense(map);
+
+    /// <summary>
+    /// The C spelling of an IR type under the current naming, composed on first ask.
+    /// </summary>
+    public static string CType(IrType t)
+    {
+        var cache = _names.CTypes;
+        if (cache.TryGetValue(t, out var c)) return c;
+        return cache[t] = t.ComposeCType();
+    }
 
     /// <summary>
     /// Adopts the scope tree of the round about to run.
@@ -494,6 +506,10 @@ internal static class Mangler
         return sb.ToString();
     }
 
+    private static readonly System.Buffers.SearchValues<char> IdentChars =
+        System.Buffers.SearchValues.Create(
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_");
+
     /// <summary>
     /// Converts a Gata type name to a C-identifier fragment. Every non-identifier character becomes
     /// a separating underscore (collapsed to prevent runs); pointer stars become _p markers so
@@ -515,14 +531,20 @@ internal static class Mangler
             int destIdx = 0;
             bool lastWasSep = false;
 
-            foreach (char ch in span)
+            while (!span.IsEmpty)
             {
-                if (char.IsLetterOrDigit(ch) || ch == '_')
+                int at = span.IndexOfAnyExcept(IdentChars);
+                int run = at < 0 ? span.Length : at;
+                if (run > 0)
                 {
-                    dest[destIdx++] = ch;
+                    span[..run].CopyTo(dest[destIdx..]);
+                    destIdx += run;
                     lastWasSep = false;
+                    span = span[run..];
+                    if (span.IsEmpty) break;
                 }
-                else if (ch == '*')
+
+                if (span[0] == '*')
                 {
                     dest[destIdx++] = '_';
                     dest[destIdx++] = 'p';
@@ -533,6 +555,7 @@ internal static class Mangler
                     dest[destIdx++] = '_';
                     lastWasSep = true;
                 }
+                span = span[1..];
             }
 
             while (destIdx > 0 && dest[destIdx - 1] == '_')

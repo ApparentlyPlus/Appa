@@ -120,9 +120,14 @@ internal static class PrimTypes
 internal abstract record IrType
 {
     /// <summary>
-    /// Returns the C type spelling used in emitted output.
+    /// The C type spelling used in emitted output.
     /// </summary>
-    public abstract string ToCType();
+    public string ToCType() => Mangler.CType(this);
+
+    /// <summary>
+    /// Composes the C type spelling from scratch. Reached once per type per naming round.
+    /// </summary>
+    protected internal abstract string ComposeCType();
 
     /// <summary>
     /// Returns the stable C-identifier mangling of a type.
@@ -138,17 +143,48 @@ internal abstract record IrType
     public virtual bool IsError   => false;
 
     // Singletons for primitives (CName is the canonical token, see PrimTypes)
-    public static readonly IrVoidType Void   = new();
-    public static readonly IrErrorType Error = new();
-    public static readonly IrPrimType Bool   = new("bool");
-    public static readonly IrPrimType Int    = new("int");
-    public static readonly IrPrimType Char   = new("char");
-    public static readonly IrPrimType Short  = new("short");
-    public static readonly IrPrimType Long   = new("int64");
-    public static readonly IrPrimType Float  = new("float");
-    public static readonly IrPrimType Double = new("double");
-    public static readonly IrPrimType SizeT  = new("usize");
-    public static readonly IrClassRef String = new(BuiltinTypes.String);
+    public static readonly IrVoidType Void   = IrTypes.Intern(new IrVoidType());
+    public static readonly IrErrorType Error = IrTypes.Intern(new IrErrorType());
+    public static readonly IrPrimType Bool   = IrTypes.Prim("bool");
+    public static readonly IrPrimType Int    = IrTypes.Prim("int");
+    public static readonly IrPrimType Char   = IrTypes.Prim("char");
+    public static readonly IrPrimType Short  = IrTypes.Prim("short");
+    public static readonly IrPrimType Long   = IrTypes.Prim("int64");
+    public static readonly IrPrimType Float  = IrTypes.Prim("float");
+    public static readonly IrPrimType Double = IrTypes.Prim("double");
+    public static readonly IrPrimType SizeT  = IrTypes.Prim("usize");
+    public static readonly IrClassRef String = IrTypes.ClassRef(BuiltinTypes.String);
+}
+
+/// <summary>
+/// The hash-consing table for IR types. A type is a value, so one instance per distinct shape is
+/// enough for the whole process, and reference equality then answers type equality outright.
+/// </summary>
+internal static class IrTypes
+{
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<IrType, IrType> Table = new();
+
+    /// <summary>
+    /// The canonical instance for a type's shape, which is the given one the first time that shape
+    /// is seen.
+    /// </summary>
+    public static T Intern<T>(T t) where T : IrType => (T)Table.GetOrAdd(t, t);
+
+    public static IrPrimType Prim(string canon) => Intern(new IrPrimType(canon));
+
+    public static IrClassRef ClassRef(string className) => Intern(new IrClassRef(className));
+
+    public static IrEnumType Enum(string name) => Intern(new IrEnumType(name));
+
+    public static IrUnionType Union(string name) => Intern(new IrUnionType(name));
+
+    public static IrPtrType Ptr(IrType inner) => Intern(new IrPtrType(inner));
+
+    public static IrArrayType Array(IrType elem, int size) => Intern(new IrArrayType(elem, size));
+
+    public static IrResultType Result(IrType inner) => Intern(new IrResultType(inner));
+
+    public static IrFuncPtrType FuncPtr(IrType ret, List<IrType> ps) => Intern(new IrFuncPtrType(ret, ps));
 }
 
 /// <summary>
@@ -156,7 +192,7 @@ internal abstract record IrType
 /// </summary>
 internal record IrVoidType : IrType
 {
-    public override string ToCType()
+    protected internal override string ComposeCType()
     {
         return "void";
     }
@@ -172,7 +208,7 @@ internal record IrVoidType : IrType
 /// </summary>
 internal record IrErrorType : IrType
 {
-    public override string ToCType() => "gata_ERROR_TYPE";
+    protected internal override string ComposeCType() => "gata_ERROR_TYPE";
     public override string MangledName => "error";
     public override bool IsError => true;
 }
@@ -189,7 +225,7 @@ internal record IrPrimType(string CName) : IrType
     private readonly bool _isChar = CName == "char";
     private readonly bool _isUnsigned = PrimTypes.IsUnsignedCanon(CName);
 
-    public override string ToCType()
+    protected internal override string ComposeCType()
     {
         return _cType;
     }
@@ -206,11 +242,8 @@ internal record IrPrimType(string CName) : IrType
 /// </summary>
 internal record IrClassRef(string ClassName) : IrType
 {
-    // No SymbolTable is threaded through IrType's static singletons, so this
-    // still names BuiltinTypes.String directly rather than resolving a binding. The
-    // constant itself is shared with everywhere else that references the same slot.
     private readonly bool _isString = ClassName == BuiltinTypes.String || ClassName == $"gata_{BuiltinTypes.String}";
-    public override string ToCType()
+    protected internal override string ComposeCType()
     {
         return $"{Mangler.Class(ClassName)}*";
     }
@@ -229,10 +262,7 @@ internal record IrClassRef(string ClassName) : IrType
 /// </summary>
 internal record IrEnumType(string Name) : IrType
 {
-    // An instance may be
-    // constructed before Densifier.SetDense runs, at which point Mangler.Enum
-    // would freeze the pre-dense name into a cached field.
-    public override string ToCType()
+    protected internal override string ComposeCType()
     {
         return Mangler.Enum(Name);
     }
@@ -245,8 +275,7 @@ internal record IrEnumType(string Name) : IrType
 /// </summary>
 internal record IrPtrType(IrType Inner) : IrType
 {
-    // Computed on every call - see IrEnumType.ToCType for why this can't be cached.
-    public override string ToCType()
+    protected internal override string ComposeCType()
     {
         return $"{Inner.ToCType()}*";
     }
@@ -261,14 +290,11 @@ internal record IrPtrType(IrType Inner) : IrType
 /// </summary>
 internal record IrArrayType(IrType Elem, int Size) : IrType
 {
-    // Computed on every call - see IrEnumType.ToCType for why this can't be cached.
-    public override string ToCType()
+    protected internal override string ComposeCType()
     {
         return Mangler.Class(MangledName);
     }
 
-    // Recursive over the element type and used as a dictionary key by the resolver and Dce, so it
-    // is composed once at construction rather than per lookup.
     public override string MangledName { get; } = $"Arr_{Elem.MangledName}_{Size}";
 }
 
@@ -285,7 +311,7 @@ internal record IrResultType(IrType Inner) : IrType
     /// </summary>
     public string ResultName { get; } = $"Result_{(Inner is IrVoidType ? "int" : Inner.MangledName)}";
 
-    public override string ToCType()
+    protected internal override string ComposeCType()
     {
         return ResultName;
     }
@@ -312,7 +338,7 @@ internal record IrFuncPtrType(IrType Ret, List<IrType> Params) : IrType
     /// <summary>
     /// Returns the typedef name for this function pointer type
     /// </summary>
-    public override string ToCType()
+    protected internal override string ComposeCType()
     {
         return Mangler.Class(MangledName);
     }
@@ -348,8 +374,7 @@ internal record IrFuncPtrType(IrType Ret, List<IrType> Params) : IrType
 /// </summary>
 internal record IrUnionType(string Name) : IrType
 {
-    // Computed on every call - see IrEnumType.ToCType for why this can't be cached.
-    public override string ToCType()
+    protected internal override string ComposeCType()
     {
         return Mangler.Union(Name);
     }
@@ -400,7 +425,7 @@ internal record IrLitNull(IrType T) : IrExpr(T);
 /// <summary>
 /// A reference to a named enum member.
 /// </summary>
-internal record IrEnumConst(string EnumName, string Member) : IrExpr(new IrEnumType(EnumName));
+internal record IrEnumConst(string EnumName, string Member) : IrExpr(IrTypes.Enum(EnumName));
 
 /// <summary>
 /// A local variable or parameter reference.
@@ -416,7 +441,7 @@ internal record IrGlobal(string CName, IrType T) : IrExpr(T);
 /// <summary>
 /// A reference to the implicit self object inside a method body.
 /// </summary>
-internal record IrSelfExpr(string ClassName) : IrExpr(new IrClassRef(ClassName));
+internal record IrSelfExpr(string ClassName) : IrExpr(IrTypes.ClassRef(ClassName));
 
 /// <summary>
 /// A field load from an object expression.
@@ -442,12 +467,12 @@ internal record IrInstanceCall(IrExpr Recv, string CName, IrType RetType, List<I
 /// <summary>
 /// A call to a throws-annotated static function. The result type wraps the inner type in Result.
 /// </summary>
-internal record IrThrowsCall(string CName, IrType InnerType, List<IrExpr> Args) : IrExpr(new IrResultType(InnerType));
+internal record IrThrowsCall(string CName, IrType InnerType, List<IrExpr> Args) : IrExpr(IrTypes.Result(InnerType));
 
 /// <summary>
 /// A call to a throws-annotated instance method. The result type wraps the inner type in Result.
 /// </summary>
-internal record IrThrowsInstanceCall(IrExpr Recv, string CName, IrType InnerType, List<IrExpr> Args) : IrExpr(new IrResultType(InnerType));
+internal record IrThrowsInstanceCall(IrExpr Recv, string CName, IrType InnerType, List<IrExpr> Args) : IrExpr(IrTypes.Result(InnerType));
 
 /// <summary>
 /// A throwing call carrying its own inline failure handler (`f() catch { ... }`). Its type is the
@@ -507,14 +532,14 @@ internal record IrCast(IrType To, IrExpr Value) : IrExpr(To);
 /// <summary>
 /// A heap allocation of a named class with constructor arguments.
 /// </summary>
-internal record IrNew(string ClassName, List<IrExpr> Args) : IrExpr(new IrClassRef(ClassName));
+internal record IrNew(string ClassName, List<IrExpr> Args) : IrExpr(IrTypes.ClassRef(ClassName));
 
 /// <summary>
 /// A heap allocation followed by repeated Add calls to populate a collection. Lowered to a GNU
 /// statement expression by the emitter.
 /// </summary>
 internal record IrNewInit(string ClassName, List<IrExpr> Args, string AddCName, List<IrExpr> Inits)
-    : IrExpr(new IrClassRef(ClassName));
+    : IrExpr(IrTypes.ClassRef(ClassName));
 
 /// <summary>
 /// A fixed-array literal [e1, e2, ...] lowered to a C compound literal.
@@ -529,7 +554,7 @@ internal record IrInterp(List<IrExpr> Parts) : IrExpr(IrType.String);
 /// <summary>
 /// Takes the address of a target expression, producing a pointer.
 /// </summary>
-internal record IrAddrOf(IrExpr Target) : IrExpr(new IrPtrType(Target.Type));
+internal record IrAddrOf(IrExpr Target) : IrExpr(IrTypes.Ptr(Target.Type));
 
 /// <summary>
 /// Dereferences a pointer expression to yield the pointed-to value.

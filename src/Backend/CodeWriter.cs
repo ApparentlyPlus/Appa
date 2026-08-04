@@ -52,6 +52,30 @@ internal sealed class CodeWriter
     }
 
     /// <summary>
+    /// Begins a line composed in pieces. The indent is written now and the newline on disposal, so a
+    /// caller writes straight into the output rather than into a string of its own first. The text
+    /// written must not contain a newline; use Line for anything multi-line.
+    /// </summary>
+    public Pending Open()
+    {
+        if (_depth > 0) _sb.Append(' ', _depth * Unit.Length);
+        return new Pending(this);
+    }
+
+    /// <summary>
+    /// One line under composition. Buffer is the writer's own, so nothing is copied.
+    /// </summary>
+    public readonly struct Pending(CodeWriter w) : IDisposable
+    {
+        public StringBuilder Buffer => w._sb;
+
+        /// <summary>
+        /// Closes the line.
+        /// </summary>
+        public void Dispose() => w._sb.Append('\n');
+    }
+
+    /// <summary>
     /// Appends the header line, increases indentation, and returns a scope that decreases
     /// indentation and writes the closer string on disposal.
     /// </summary>

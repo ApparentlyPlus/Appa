@@ -251,7 +251,7 @@ internal sealed class Ownership(IrModule module)
     {
         if (f.Body == null) return f;
         var prev = (_inThrowsFunc, _resultType);
-        if (f.IsThrows) { _inThrowsFunc = true; _resultType = new IrResultType(f.ReturnType); }
+        if (f.IsThrows) { _inThrowsFunc = true; _resultType = IrTypes.Result(f.ReturnType); }
         var body = LowerBlock(f.Body);
         (_inThrowsFunc, _resultType) = prev;
         return f with { Body = body };
@@ -1222,7 +1222,7 @@ internal sealed class Ownership(IrModule module)
     private IrVar LowerNewInit(IrNewInit ni)
     {
         string v = Tmp("_ci");
-        var ct = new IrClassRef(ni.ClassName);
+        var ct = IrTypes.ClassRef(ni.ClassName);
         int acStart = _cl.Count;
         var args = FlattenArgs(ni.Args);
 

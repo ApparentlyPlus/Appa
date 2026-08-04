@@ -107,11 +107,9 @@ internal sealed class TypeResolver(
         return null;
     }
 
-    // Every distinct fixed-array (T, N) pair used; the emitter stamps one struct per pair.
-    // Deduped on the way in, mirroring _funcPtrTypes below, so the emitter's sort in
-    // EmitArrayTypes runs over distinct entries rather than one per syntactic occurrence.
+    // Every distinct fixed-array (T, N) pair used
     private readonly List<IrArrayType> _arrays = [];
-    private readonly HashSet<string> _arraysSeen = [];
+    private readonly HashSet<IrArrayType> _arraysSeen = new(ReferenceEqualityComparer.Instance);
     private int _tmpSeq;
 
     /// <summary>
@@ -127,24 +125,25 @@ internal sealed class TypeResolver(
     /// </summary>
     private IrArrayType Arr(IrType elem, int size)
     {
-        var a = new IrArrayType(elem, size);
-        if (_arraysSeen.Add(a.MangledName)) _arrays.Add(a);
+        var a = IrTypes.Array(elem, size);
+        if (_arraysSeen.Add(a)) _arrays.Add(a);
         return a;
     }
 
-    // Every distinct function-pointer signature used; the emitter stamps one typedef per signature.
+    // Every distinct function-pointer signature this module uses; the emitter stamps one typedef
+    // per signature. Interning is process-wide, so the seen set stays per-module: a signature an
+    // earlier build already canonicalised still has to be stamped into this one.
     private readonly List<IrFuncPtrType> _funcPtrTypes = [];
-    private readonly Dictionary<IrFuncPtrType, IrFuncPtrType> _funcPtrSeen = [];
+    private readonly HashSet<IrFuncPtrType> _funcPtrSeen = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>
-    /// Returns or creates a function-pointer type for the given return type and parameter list.
+    /// Returns the function-pointer type for a return type and parameter list, recording it the
+    /// first time this module names it.
     /// </summary>
     private IrFuncPtrType FnPtr(IrType ret, List<IrType> ps)
     {
-        var f = new IrFuncPtrType(ret, ps);
-        if (_funcPtrSeen.TryGetValue(f, out var existing)) return existing;
-        _funcPtrSeen[f] = f;
-        _funcPtrTypes.Add(f);
+        var f = IrTypes.FuncPtr(ret, ps);
+        if (_funcPtrSeen.Add(f)) _funcPtrTypes.Add(f);
         return f;
     }
 
@@ -774,7 +773,7 @@ internal sealed class TypeResolver(
         foreach (var op in sym.OperatorOverloads(destCls, "as"))
         {
             if (op.Sig!.Params.Count == 1 && ResolveType(op.Sig.Params[0].Type) == from
-                && ResolveType(op.Sig.ReturnType) == new IrClassRef(destCls))
+                && ResolveType(op.Sig.ReturnType) == IrTypes.ClassRef(destCls))
                 return op;
         }
         return null;
@@ -2456,7 +2455,7 @@ internal sealed class TypeResolver(
                 // CheckType reports an invalid size; resolve defensively to size 0.
                 return Arr(ResolveType(a.Elem), TryParseIntLit(a.SizeText, out var v, out _, out _) ? (int)v : 0);
             case PtrSpec p2:
-                return new IrPtrType(ResolveType(p2.Inner));
+                return IrTypes.Ptr(ResolveType(p2.Inner));
             case NamedSpec { Name: NamedSpec.Poison }:
                 return IrType.Error;
             case NamedSpec nm:
@@ -2466,13 +2465,13 @@ internal sealed class TypeResolver(
                 if (BuiltinTypes.All.Contains(name))
                     return sym.ResolveBuiltinType(name)
                         ?? (name == BuiltinTypes.String ? IrType.String
-                          : name == BuiltinTypes.StringBuilder ? new IrClassRef(name)
-                          : new IrPtrType(IrType.Void));
-                if (PrimTypes.IsPrim(name)) return new IrPrimType(name);
-                if (sym.IsEnum(name)) return new IrEnumType(name);
-                if (sym.IsUnion(name)) return new IrUnionType(name);
+                          : name == BuiltinTypes.StringBuilder ? IrTypes.ClassRef(name)
+                          : IrTypes.Ptr(IrType.Void));
+                if (PrimTypes.IsPrim(name)) return IrTypes.Prim(name);
+                if (sym.IsEnum(name)) return IrTypes.Enum(name);
+                if (sym.IsUnion(name)) return IrTypes.Union(name);
                 if (Mangler.GenericFailed(name)) return IrType.Error;
-                return new IrClassRef(name);
+                return IrTypes.ClassRef(name);
             }
             default:
                 throw new System.Diagnostics.UnreachableException($"[TypeResolver] unhandled TypeSpec: {t.GetType().Name}");
@@ -2576,7 +2575,7 @@ internal sealed class TypeResolver(
         string cname = Mangler.Method(cls, md.Name, md.Params, sym.IsOverloadedMethod(cls, md.Name));
         var mctx = ctx.WithClass(cls).WithFunc(md.Name).WithStatic(isStatic)
             .WithThrowsFunc(md.Throws).PushScope(isParams: true);
-        if (!isStatic) mctx.Locals.Declare("self", new IrClassRef(cls));
+        if (!isStatic) mctx.Locals.Declare("self", IrTypes.ClassRef(cls));
         foreach (var p in md.Params) mctx.Locals.Declare(p.Name, ResolveType(p.Type), p.IsRef);
         var (body, native) = ResolveBodyOrNative(md.Body, mctx, ret);
         CheckMissingReturn(body, ret, md.Throws, md.Span, $"{Mangler.DisplayName(cls)}.{md.Name}", ctx);
@@ -2603,7 +2602,7 @@ internal sealed class TypeResolver(
         bool isMutator = OperatorRules.IsMutator(od.Op);
         TypeSpec retSpec = od.ReturnType ?? new NamedSpec(OperatorRules.DefaultReturn(od.Op, cls), od.Span);
         var ret = ResolveType(retSpec);
-        if (isAs && od.ReturnType != null && ret != new IrClassRef(cls))
+        if (isAs && od.ReturnType != null && ret != IrTypes.ClassRef(cls))
             diag.Error(Codes.TypeMismatch, ctx.File, od.Span,
                 $"'as' converts its parameter to '{Mangler.DisplayName(cls)}' " +
                 $"and must return '{Mangler.DisplayName(cls)}', not '{Describe(ret)}'");
@@ -2625,7 +2624,7 @@ internal sealed class TypeResolver(
 
         string cname = Mangler.Operator(cls, od.Op, od.Params, sym.IsOverloadedOperator(cls, od.Op));
         var octx = ctx.WithClass(cls).WithFunc($"op_{Mangler.OpSuffix(od.Op)}").WithStatic(isAs).PushScope(isParams: true);
-        if (!isAs) octx.Locals.Declare("self", new IrClassRef(cls));
+        if (!isAs) octx.Locals.Declare("self", IrTypes.ClassRef(cls));
         foreach (var p in od.Params) octx.Locals.Declare(p.Name, ResolveType(p.Type), p.IsRef);
         var (body, native) = ResolveBodyOrNative(od.Body, octx, ret);
         CheckMissingReturn(body, ret, false, od.Span, $"operator {od.Op} on {Mangler.DisplayName(cls)}", ctx);
@@ -3749,7 +3748,7 @@ internal sealed class TypeResolver(
             {
                 fallbackCases.Add(new IrMatchCase(0, [], ResolveBlock(ms.Cases[i].Body, ctx, retType)));
             }
-            return new IrMatch(scrut, new IrUnionType("?"), fallbackCases,
+            return new IrMatch(scrut, IrTypes.Union("?"), fallbackCases,
                 ms.Default == null ? null : ResolveBlock(ms.Default, ctx, retType));
         }
         var variants = sym.UnionDef(ut.Name)!;
@@ -4359,12 +4358,12 @@ internal sealed class TypeResolver(
 
         bool isLong = lCount >= 1;
         type =
-            hasU && isLong       ? new IrPrimType("uint64") :
+            hasU && isLong       ? IrTypes.Prim("uint64") :
             isLong               ? IrType.Long :
-            hasU                 ? (mag <= uint.MaxValue ? new IrPrimType("uint") : new IrPrimType("uint64")) :
+            hasU                 ? (mag <= uint.MaxValue ? IrTypes.Prim("uint") : IrTypes.Prim("uint64")) :
             mag <= int.MaxValue  ? IrType.Int :
             mag <= long.MaxValue ? IrType.Long :
-                                   new IrPrimType("uint64");
+                                   IrTypes.Prim("uint64");
 
         ctext =
             isHex || hasSuffix                     ? raw.ToString() :
@@ -4430,7 +4429,7 @@ internal sealed class TypeResolver(
             return slot;
         }
 
-        if (ClassInScope(name)) return new IrVar(name, new IrClassRef(name));
+        if (ClassInScope(name)) return new IrVar(name, IrTypes.ClassRef(name));
 
         var fsym = LookupFreeFuncVisible(name);
         if (fsym != null && FuncInScope(fsym))
@@ -4507,7 +4506,7 @@ internal sealed class TypeResolver(
                 diag.Error(Codes.UndefinedVariable, ctx.File, ma.Span,
                     $"union '{uid.Name}' has no variant '{ma.Member}'");
 
-            return new IrUnionConstruct(new IrUnionType(uid.Name), 0, []) { Span = ma.Span };
+            return new IrUnionConstruct(IrTypes.Union(uid.Name), 0, []) { Span = ma.Span };
         }
 
         var obj = ResolveExpr(ma.Object, ctx);
@@ -4695,7 +4694,7 @@ internal sealed class TypeResolver(
             return new IrInstanceCall(recv, Mangler.FreeFunc(ma.Member, [], false, false, false), IrType.Error, args);
         }
 
-        // bare call: name(args)
+        // bare call
         if (ce.Callee is IdentExpr id)
         {
             // local variable holding a function pointer shadows any free function of the same name
@@ -4720,8 +4719,6 @@ internal sealed class TypeResolver(
                     return new IrStaticCall(Mangler.FreeFunc(id.Name, [], false, false, false), IrType.Void, args);
                 }
 
-                // Peek at the lower precedence candidates a bare call would otherwise reach, so a
-                // generic template can't silently shadow something equally plausible.
                 var otherPf = sym.LookupPrivateFunc(ctx.File, id.Name);
                 var otherFsym = LookupFreeFuncVisible(id.Name);
                 bool otherFsymInScope = FuncInScope(otherFsym);
@@ -5167,8 +5164,9 @@ internal sealed class TypeResolver(
             {
                 diag.Error(Codes.CannotInfer, ctx.File, span,
                     $"generic '{baseName}' is never instantiated, so '{baseName}.{variant}' has no type",
-                    [$"name the type somewhere first, e.g. 'let {baseName}[int] x = {baseName}.{variant}(...);'"]);
-                return new IrUnionConstruct(new IrUnionType(baseName), 0, args);
+                    [$"name the type somewhere first, e.g. 'let {baseName}[i
+            // file local private free functions take priority over globalsnt] x = {baseName}.{variant}(...);'"]);
+                return new IrUnionConstruct(IrTypes.Union(baseName), 0, args);
             }
             return null;
         }
@@ -5189,7 +5187,7 @@ internal sealed class TypeResolver(
                 $"no instantiation of generic union '{baseName}' has a variant '{variant}' " +
                 $"taking {args.Count} argument(s)",
                 [$"instantiated as: {string.Join(", ", instances.Select(Mangler.DisplayName))}"]);
-            return new IrUnionConstruct(new IrUnionType(instances[0]), 0, args);
+            return new IrUnionConstruct(IrTypes.Union(instances[0]), 0, args);
         }
 
         // The arguments decide it when exactly one candidate accepts them all.
@@ -5237,7 +5235,7 @@ internal sealed class TypeResolver(
         if (idx < 0)
         {
             diag.Error(Codes.UndefinedVariable, ctx.File, span, $"union '{unionName}' has no variant '{variant}'");
-            return new IrUnionConstruct(new IrUnionType(unionName), 0, args);
+            return new IrUnionConstruct(IrTypes.Union(unionName), 0, args);
         }
         var fields = variants[idx].Fields;
         if (fields.Length != args.Count)
@@ -5251,7 +5249,7 @@ internal sealed class TypeResolver(
                 diag.Error(Codes.ArgTypeMismatch, ctx.File, args[i].Span,
                     $"argument {i + 1} ('{Describe(args[i].Type)}') is not assignable to '{Describe(ft)}'");
         }
-        return new IrUnionConstruct(new IrUnionType(unionName), idx, args);
+        return new IrUnionConstruct(IrTypes.Union(unionName), idx, args);
     }
 
     #endregion

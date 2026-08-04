@@ -82,6 +82,14 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
         /// True when a local binding, not a declaration in some scope, owns this name here.
         /// </summary>
         public bool IsBound(string name) => _bound.Contains(name);
+        private static readonly System.Buffers.SearchValues<char> AsciiWord =
+            System.Buffers.SearchValues.Create(
+                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_");
+
+        /// <summary>
+        /// True when a character is part of a word substitution may replace.
+        /// </summary>
+        private static bool IsWordChar(char c) => char.IsAscii(c) ? AsciiWord.Contains(c) : char.IsLetterOrDigit(c);
 
         /// <summary>
         /// Substitutes type parameters in raw native C text, replacing whole words that match a
@@ -101,20 +109,16 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
             int idx = 0;
             while (idx < text.Length)
             {
-                char c = text[idx];
-                if (char.IsLetterOrDigit(c) || c == '_')
+                if (IsWordChar(text[idx]))
                 {
                     int start = idx;
-                    while (idx < text.Length && (char.IsLetterOrDigit(text[idx]) || text[idx] == '_'))
-                    {
-                        idx++;
-                    }
+                    while (idx < text.Length && IsWordChar(text[idx])) idx++;
                     string word = text[start..idx];
                     sb.Append(CMap.TryGetValue(word, out var replacement) ? replacement : word);
                 }
                 else
                 {
-                    sb.Append(c);
+                    sb.Append(text[idx]);
                     idx++;
                 }
             }
