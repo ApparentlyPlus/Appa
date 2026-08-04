@@ -18,8 +18,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     private readonly CodeWriter _uFunc = new();
 
     // Per-writer type dedup. Each distinct (writer, key) is emitted exactly once
-    // into that translation unit. Keys are namespaced T: (forward typedef),
-    // S: (struct or aggregate def), FP: (function-pointer typedef).
+    // into that translation unit.
     private readonly Dictionary<CodeWriter, HashSet<(char Kind, string Name)>> _emitted = [];
 
     // ARC-managed classes: every non-module Gata class carries a refcount header
@@ -28,6 +27,9 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
 
     // Roles for which no @intrinsic binding was found; each role is reported once.
     private readonly HashSet<string> _missingRoles = [];
+
+    // The C struct behind a String value, named by every string literal in the program.
+    private readonly string _stringStruct = IrType.String.ToCType().TrimEnd('*');
 
     /// <summary>
     /// Returns true the first time the given key is seen for the given writer, suppressing
@@ -881,10 +883,11 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             foreach (var f in cls.Fields)
                 if (cls.FieldInits.TryGetValue(f.Name, out var init))
                     w.Line($"_o->{f.Name} = {EmitExpr(init)};");
-            if (cls.HasInit)
+            if (cls.HasInit && InitOf(cls) is { } ctor)
             {
-                var args = string.Join(", ", new[] { "_o" }.Concat((InitOf(cls)?.Params ?? []).Select(p => Mangler.Local(p.Name))));
-                w.Line($"{InitOf(cls)!.CName}({args});");
+                var args = new StringBuilder("_o");
+                foreach (var p in ctor.Params) args.Append(", ").Append(Mangler.Local(p.Name));
+                w.Line($"{ctor.CName}({args});");
             }
             w.Line("return _o;");
         }
@@ -1339,113 +1342,233 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     #region Expressions
 
     /// <summary>
-    /// Emits an IR expression and returns the corresponding C text. Every node kind must be fully
-    /// resolved before reaching this method; unrecognised nodes throw.
+    /// Renders an IR expression to C text. One buffer serves the whole tree, so a subexpression is
+    /// written once instead of being copied again by every level enclosing it.
     /// </summary>
     private string EmitExpr(IrExpr e)
     {
-        return e switch
+        var sb = new StringBuilder();
+        Write(e, sb);
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Writes an IR expression into the buffer. Every node kind must be fully resolved before
+    /// reaching this method; unrecognised nodes throw.
+    /// </summary>
+    private void Write(IrExpr e, StringBuilder sb)
+    {
+        switch (e)
         {
-            IrLitInt li => li.CText ?? li.Value.ToString(),
-            IrLitChar lc => lc.Codepoint.ToString(),
-            IrLitFloat lf => lf.Raw,
-            IrLitBool lb => lb.Value ? "true" : "false",
-            IrLitString ls => $"GATA_STRLIT({IrType.String.ToCType().TrimEnd('*')}, {NoTrigraphs(ls.Raw)})",
-            IrLitNull => "NULL",
-            IrEnumConst ec => Mangler.EnumMember(ec.EnumName, ec.Member),
-            IrVar v => v.IsRef ? $"(*{Mangler.Local(v.Name)})" : Mangler.Local(v.Name),
-            IrGlobal g => g.CName,
-            IrSelfExpr => "self",
-            IrFieldLoad fl => fl.Obj.Type is IrUnionType or IrResultType
-                                ? $"{EmitExpr(fl.Obj)}.{fl.Field}"
-                                : $"{EmitExpr(fl.Obj)}->{fl.Field}",
-            IrIndex ix => ix.Obj.Type is IrArrayType
-                                ? $"({EmitExpr(ix.Obj)})._[{EmitExpr(ix.Idx)}]"
-                                : $"{EmitExpr(ix.Obj)}[{EmitExpr(ix.Idx)}]",
-            IrStaticCall sc => $"{sc.CName}({EmitArgs(sc.Args)})",
-            IrInstanceCall ic => $"{ic.CName}({EmitArgs(ic.Args, EmitExpr(ic.Recv))})",
-            IrBinOp bo => Narrow(bo.Type, $"({EmitExpr(bo.Left)} {bo.Op.Sym()} {EmitExpr(bo.Right)})"),
-            IrTernary tn => $"({EmitExpr(tn.Cond)} ? {EmitExpr(tn.Then)} : {EmitExpr(tn.Else)})",
-            IrUnaryOp uo => Narrow(uo.Type, $"({uo.Op.Sym()}{EmitExpr(uo.Operand)})"),
-            IrPostfix pf => $"({EmitExpr(pf.Operand)}{pf.Op.Sym()})",
-            IrCast c => $"(({c.To.ToCType()}){EmitExpr(c.Value)})",
-            IrNew n => $"{Mangler.Allocator(n.ClassName)}({EmitArgs(n.Args)})",
-            IrArrayLit al => $"({al.ArrType.ToCType()}){{ {{ {EmitArgs(al.Elems)} }} }}",
-            IrAddrOf ao => $"(&{EmitExpr(ao.Target)})",
-            IrDeref dr => $"(*{EmitExpr(dr.Ptr)})",
-            IrSizeof so => $"sizeof({so.Of.ToCType()})",
-            IrStructLit sl => $"({sl.StructType.ToCType()}){{ {EmitStructFields(sl.Fields)} }}",
-            IrDefault df => IsAggregate(df.Of)
-                ? $"({df.Of.ToCType()}){{ 0 }}"
-                : $"(({df.Of.ToCType()})0)",
-            IrFuncRef fr => fr.CName,
-            IrIndirectCall ic2 => $"({EmitExpr(ic2.Target)})({EmitArgs(ic2.Args)})",
-            IrUnionConstruct uc => EmitUnionConstruct(uc),
-            IrUnionField uf => $"{EmitExpr(uf.Union)}.payload.{UnionVariantName(uf.Union.Type, uf.VariantIndex)}.{uf.Field}",
-            _ => throw new System.Diagnostics.UnreachableException($"[Emitter] unhandled IrExpr: {e.GetType().Name}")
-        };
+            case IrLitInt li:
+                if (li.CText is { } text) sb.Append(text); else sb.Append(li.Value);
+                break;
+            case IrLitChar lc: sb.Append(lc.Codepoint); break;
+            case IrLitFloat lf: sb.Append(lf.Raw); break;
+            case IrLitBool lb: sb.Append(lb.Value ? "true" : "false"); break;
+            case IrLitString ls:
+                sb.Append("GATA_STRLIT(").Append(_stringStruct).Append(", ").Append(NoTrigraphs(ls.Raw)).Append(')');
+                break;
+            case IrLitNull: sb.Append("NULL"); break;
+            case IrEnumConst ec: sb.Append(Mangler.EnumMember(ec.EnumName, ec.Member)); break;
+            case IrVar { IsRef: true } vr: sb.Append("(*").Append(Mangler.Local(vr.Name)).Append(')'); break;
+            case IrVar v: sb.Append(Mangler.Local(v.Name)); break;
+            case IrGlobal g: sb.Append(g.CName); break;
+            case IrSelfExpr: sb.Append("self"); break;
+
+            case IrFieldLoad fl:
+                Write(fl.Obj, sb);
+                sb.Append(fl.Obj.Type is IrUnionType or IrResultType ? "." : "->").Append(fl.Field);
+                break;
+
+            case IrIndex ix:
+            {
+                bool boxed = ix.Obj.Type is IrArrayType;
+                if (boxed) sb.Append('(');
+                Write(ix.Obj, sb);
+                sb.Append(boxed ? ")._[" : "[");
+                Write(ix.Idx, sb);
+                sb.Append(']');
+                break;
+            }
+
+            case IrStaticCall sc:
+                sb.Append(sc.CName).Append('(');
+                WriteArgs(sc.Args, sb, null);
+                sb.Append(')');
+                break;
+
+            case IrInstanceCall ic:
+                sb.Append(ic.CName).Append('(');
+                WriteArgs(ic.Args, sb, ic.Recv);
+                sb.Append(')');
+                break;
+
+            case IrBinOp bo:
+            {
+                var narrowed = NarrowTo(bo.Type);
+                if (narrowed != null) sb.Append("((").Append(narrowed).Append(')');
+                sb.Append('(');
+                Write(bo.Left, sb);
+                sb.Append(' ').Append(bo.Op.Sym()).Append(' ');
+                Write(bo.Right, sb);
+                sb.Append(')');
+                if (narrowed != null) sb.Append(')');
+                break;
+            }
+
+            case IrTernary tn:
+                sb.Append('(');
+                Write(tn.Cond, sb);
+                sb.Append(" ? ");
+                Write(tn.Then, sb);
+                sb.Append(" : ");
+                Write(tn.Else, sb);
+                sb.Append(')');
+                break;
+
+            case IrUnaryOp uo:
+            {
+                var narrowed = NarrowTo(uo.Type);
+                if (narrowed != null) sb.Append("((").Append(narrowed).Append(')');
+                sb.Append('(').Append(uo.Op.Sym());
+                Write(uo.Operand, sb);
+                sb.Append(')');
+                if (narrowed != null) sb.Append(')');
+                break;
+            }
+
+            case IrPostfix pf:
+                sb.Append('(');
+                Write(pf.Operand, sb);
+                sb.Append(pf.Op.Sym()).Append(')');
+                break;
+
+            case IrCast c:
+                sb.Append("((").Append(c.To.ToCType()).Append(')');
+                Write(c.Value, sb);
+                sb.Append(')');
+                break;
+
+            case IrNew n:
+                sb.Append(Mangler.Allocator(n.ClassName)).Append('(');
+                WriteArgs(n.Args, sb, null);
+                sb.Append(')');
+                break;
+
+            case IrArrayLit al:
+                sb.Append('(').Append(al.ArrType.ToCType()).Append("){ { ");
+                WriteArgs(al.Elems, sb, null);
+                sb.Append(" } }");
+                break;
+
+            case IrAddrOf ao:
+                sb.Append("(&");
+                Write(ao.Target, sb);
+                sb.Append(')');
+                break;
+
+            case IrDeref dr:
+                sb.Append("(*");
+                Write(dr.Ptr, sb);
+                sb.Append(')');
+                break;
+
+            case IrSizeof so: sb.Append("sizeof(").Append(so.Of.ToCType()).Append(')'); break;
+
+            case IrStructLit sl:
+                sb.Append('(').Append(sl.StructType.ToCType()).Append("){ ");
+                for (int i = 0; i < sl.Fields.Count; i++)
+                {
+                    if (i > 0) sb.Append(", ");
+                    sb.Append('.').Append(sl.Fields[i].Field).Append(" = ");
+                    Write(sl.Fields[i].Value, sb);
+                }
+                sb.Append(" }");
+                break;
+
+            case IrDefault df:
+            {
+                bool aggregate = IsAggregate(df.Of);
+                sb.Append(aggregate ? "(" : "((").Append(df.Of.ToCType()).Append(aggregate ? "){ 0 }" : ")0)");
+                break;
+            }
+
+            case IrFuncRef fr: sb.Append(fr.CName); break;
+
+            case IrIndirectCall ic2:
+                sb.Append('(');
+                Write(ic2.Target, sb);
+                sb.Append(")(");
+                WriteArgs(ic2.Args, sb, null);
+                sb.Append(')');
+                break;
+
+            case IrUnionConstruct uc: WriteUnionConstruct(uc, sb); break;
+
+            case IrUnionField uf:
+                Write(uf.Union, sb);
+                sb.Append(".payload.").Append(UnionVariantName(uf.Union.Type, uf.VariantIndex))
+                  .Append('.').Append(uf.Field);
+                break;
+
+            default:
+                throw new System.Diagnostics.UnreachableException($"[Emitter] unhandled IrExpr: {e.GetType().Name}");
+        }
     }
 
     /// <summary>
     /// Pins an integer operator result to the type the front end gave it, which C would otherwise
     /// have chosen for itself.
     /// </summary>
-    private string EmitCond(IrExpr e) =>
-        e is IrBinOp bo && bo.Type is IrPrimType { CName: "bool" }
-            ? $"{EmitExpr(bo.Left)} {bo.Op.Sym()} {EmitExpr(bo.Right)}"
-            : EmitExpr(e);
-
-    /// <summary>
-    /// Narrows a numeric expression to the given type, unless it's a boolean or non-numeric type,
-    /// in which case the expression is returned as-is
-    /// </summary>
-    private static string Narrow(IrType t, string c)
+    private string EmitCond(IrExpr e)
     {
-        if (t is not IrPrimType p || !p.IsNumeric || p.CName == "bool") return c;
-        return $"(({p.ToCType()}){c})";
-    }
-
-    /// <summary>
-    /// Renders the designated initializer body of an IrStructLit
-    /// </summary>
-    private string EmitStructFields(List<(string Field, IrExpr Value)> fields)
-    {
+        if (e is not IrBinOp { Type: IrPrimType { CName: "bool" } } bo) return EmitExpr(e);
         var sb = new StringBuilder();
-        for (int i = 0; i < fields.Count; i++)
-        {
-            if (i > 0) sb.Append(", ");
-            sb.Append('.').Append(fields[i].Field).Append(" = ").Append(EmitExpr(fields[i].Value));
-        }
+        Write(bo.Left, sb);
+        sb.Append(' ').Append(bo.Op.Sym()).Append(' ');
+        Write(bo.Right, sb);
         return sb.ToString();
     }
 
     /// <summary>
-    /// Renders a comma-separated argument list, with an optional leading receiver, without LINQ
-    /// enumerator or intermediate array allocations.
+    /// The C type an operator result is narrowed to, or null when the type is boolean or not
+    /// numeric and C's own choice already agrees.
     /// </summary>
-    private string EmitArgs(List<IrExpr> args, string? first = null)
+    private static string? NarrowTo(IrType t) =>
+        t is IrPrimType p && p.IsNumeric && p.CName != "bool" ? p.ToCType() : null;
+
+    /// <summary>
+    /// Writes a comma-separated argument list, with an optional leading receiver.
+    /// </summary>
+    private void WriteArgs(List<IrExpr> args, StringBuilder sb, IrExpr? receiver)
     {
-        var sb = new StringBuilder();
-        if (first != null) sb.Append(first);
+        if (receiver != null) Write(receiver, sb);
         for (int i = 0; i < args.Count; i++)
         {
-            if (sb.Length > 0) sb.Append(", ");
-            sb.Append(EmitExpr(args[i]));
+            if (receiver != null || i > 0) sb.Append(", ");
+            Write(args[i], sb);
         }
-        return sb.ToString();
     }
 
     /// <summary>
-    /// Emits a union construction expression, building the tag and payload compound literal.
+    /// Writes a union construction, building the tag and payload compound literal.
     /// </summary>
-    private string EmitUnionConstruct(IrUnionConstruct uc)
+    private void WriteUnionConstruct(IrUnionConstruct uc, StringBuilder sb)
     {
-        var u = module.Unions.First(x => x.Name == uc.T.Name);
-        var variant = u.Variants[uc.VariantIndex];
-        if (variant.Fields.Count == 0)
-            return $"({uc.T.ToCType()}){{ .__tag = {uc.VariantIndex} }}";
-        var inits = variant.Fields.Zip(uc.Args, (f, a) => $".{f.Name} = {EmitExpr(a)}");
-        return $"({uc.T.ToCType()}){{ .__tag = {uc.VariantIndex}, .payload.{variant.Name} = {{ {string.Join(", ", inits)} }} }}";
+        var variant = module.UnionNamed(uc.T.Name).Variants[uc.VariantIndex];
+        sb.Append('(').Append(uc.T.ToCType()).Append("){ .__tag = ").Append(uc.VariantIndex);
+        if (variant.Fields.Count == 0) { sb.Append(" }"); return; }
+
+        sb.Append(", .payload.").Append(variant.Name).Append(" = { ");
+        int n = Math.Min(variant.Fields.Count, uc.Args.Count);
+        for (int i = 0; i < n; i++)
+        {
+            if (i > 0) sb.Append(", ");
+            sb.Append('.').Append(variant.Fields[i].Name).Append(" = ");
+            Write(uc.Args[i], sb);
+        }
+        sb.Append(" } }");
     }
 
     /// <summary>
@@ -1453,7 +1576,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// </summary>
     private string UnionVariantName(IrType unionType, int idx)
     {
-        return unionType is IrUnionType ut ? module.Unions.First(u => u.Name == ut.Name).Variants[idx].Name : "?";
+        return unionType is IrUnionType ut ? module.UnionNamed(ut.Name).Variants[idx].Name : "?";
     }
 
     #endregion

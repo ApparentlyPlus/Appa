@@ -885,6 +885,23 @@ internal record IrModule(
     /// </summary>
     public bool HasUserRealm => NativeBlocks.Any(nb =>
         nb.Vis == Visibility.User && nb.Section == NativeSection.Preamble);
+
+    // Unions by name, built on first ask.
+    private FrozenDictionary<string, IrUnion>? _unionsByName;
+
+    /// <summary>
+    /// The union declared under a name. First declaration wins, as the linear scan it replaces did.
+    /// </summary>
+    public IrUnion UnionNamed(string name)
+    {
+        if (_unionsByName == null)
+        {
+            var map = new Dictionary<string, IrUnion>(Unions.Count, StringComparer.Ordinal);
+            foreach (var u in Unions) map.TryAdd(u.Name, u);
+            _unionsByName = map.ToFrozenDictionary(StringComparer.Ordinal);
+        }
+        return _unionsByName[name];
+    }
 }
 
 #endregion

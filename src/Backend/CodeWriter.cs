@@ -6,6 +6,8 @@ internal sealed class CodeWriter
 {
     private readonly StringBuilder _sb = new();
     private int _depth;
+
+    // One indentation step. Spaces only, so a depth's worth is a single Append of its length.
     private const string Unit = "    ";
 
     /// <summary>
@@ -45,7 +47,7 @@ internal sealed class CodeWriter
     private void Indented(ReadOnlySpan<char> s)
     {
         if (s.Length == 0) { _sb.Append('\n'); return; }
-        if (_depth > 0) _sb.Append(' ', _depth * 4);
+        if (_depth > 0) _sb.Append(' ', _depth * Unit.Length);
         _sb.Append(s).Append('\n');
     }
 

@@ -53,26 +53,51 @@ internal static class Layout
     }
 
     /// <summary>
-    /// A stable SHA hash of the emitted content, used to seed the decorative header generator.
+    /// A stable SHA hash of the emitted content, used to seed the decorative header generator. Fed
+    /// section by section, so the program text is not materialised a third time to be hashed.
     /// </summary>
     private static int ContentSeed(EmitOutput o)
     {
-        string st = o.SharedHeader + o.KernelPreamble + o.KernelTypes + o.KernelFwd + o.KernelFuncs +
-                    o.KernelBoot + o.UserPreamble + o.UserTypes + o.UserFwd + o.UserFuncs;
-        
-        int byteCount = System.Text.Encoding.UTF8.GetByteCount(st);
-        
-        // we can rent a temporary buffer or use stackalloc if the file is small
-        byte[]? rentedArray = null;
-        Span<byte> byteBuffer = byteCount <= 128 * 1024 ? stackalloc byte[byteCount] 
-            : (rentedArray = System.Buffers.ArrayPool<byte>.Shared.Rent(byteCount));
+        using var hash = System.Security.Cryptography.IncrementalHash.CreateHash(
+            System.Security.Cryptography.HashAlgorithmName.SHA256);
 
-        // We also need a buffer for the hash itself
-        Span<byte> hashBuffer = stackalloc byte[32];
+        ReadOnlySpan<string> sections =
+        [
+            o.SharedHeader, o.KernelPreamble, o.KernelTypes, o.KernelFwd, o.KernelFuncs,
+            o.KernelBoot, o.UserPreamble, o.UserTypes, o.UserFwd, o.UserFuncs,
+        ];
 
-        System.Text.Encoding.UTF8.GetBytes(st, byteBuffer);
-        System.Security.Cryptography.SHA256.HashData(byteBuffer[..byteCount], hashBuffer);
-        return BitConverter.ToInt32(hashBuffer[..4]);
+        byte[] buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(64 * 1024);
+        try
+        {
+            foreach (var section in sections) Feed(hash, section, buffer);
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
+        }
+
+        Span<byte> digest = stackalloc byte[32];
+        hash.GetHashAndReset(digest);
+        return BitConverter.ToInt32(digest[..4]);
+    }
+
+    /// <summary>
+    /// Feeds one section's UTF-8 bytes to the hash in buffer-sized chunks, splitting on whole
+    /// characters so a surrogate pair is never encoded across two chunks.
+    /// </summary>
+    private static void Feed(System.Security.Cryptography.IncrementalHash hash, string section, byte[] buffer)
+    {
+        var utf8 = System.Text.Encoding.UTF8;
+        ReadOnlySpan<char> rest = section.AsSpan();
+        int chunk = buffer.Length / 3;
+        while (rest.Length > chunk)
+        {
+            int take = char.IsHighSurrogate(rest[chunk - 1]) ? chunk - 1 : chunk;
+            hash.AppendData(buffer.AsSpan(0, utf8.GetBytes(rest[..take], buffer)));
+            rest = rest[take..];
+        }
+        if (!rest.IsEmpty) hash.AppendData(buffer.AsSpan(0, utf8.GetBytes(rest, buffer)));
     }
 
     /// <summary>
