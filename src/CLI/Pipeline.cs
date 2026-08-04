@@ -81,7 +81,7 @@ internal static class Pipeline
         Dictionary<string, HashSet<string>> visible, Mode mode, DiagnosticBag diag)
     {
         var pristine = new List<(string path, Program prog)>(programs);
-        Mangler.ResetComposedNames();
+        Mangler.Begin();
         var seeds = new List<GenericSeed>();
         var seeded = new HashSet<string>(StringComparer.Ordinal);
         int mark = diag.All.Count;
@@ -94,9 +94,7 @@ internal static class Pipeline
             programs.AddRange(pristine);
             diag.TruncateTo(mark);
 
-            Mangler.ResetDense();
-            Mangler.ResetGenericDisplay();
-            Mangler.ResetScopes();
+            Mangler.BeginRound();
             new ScopeBinder(diag).Bind(programs, visible);
             var genericRequestFile = new Monomorphizer(diag).Process(programs, seeds);
             collected = new SymbolCollector(diag).Collect([.. programs.Select(t => (t.path, t.prog))]);
@@ -144,7 +142,6 @@ internal static class Pipeline
 
         void Resolve(string path, string? from, TextSpan fromSpan)
         {
-            path = Path.GetFullPath(path);
             if (!visited.Add(path)) return;
             if (!File.Exists(path))
             {
@@ -164,7 +161,7 @@ internal static class Pipeline
                 foreach (var imp in prog.Items.OfType<ImportDecl>())
                 {
                     string resolved = imp.IsPath
-                        ? Path.GetFullPath(Path.Combine(projectRoot, imp.Name))
+                        ? Path.Combine(projectRoot, imp.Name)
                         : ResolveLibgata(imp.Name, libgataDir, path, diag, imp.Span);
                     if (resolved == "") continue;
                     resolved = Path.GetFullPath(resolved);
@@ -243,9 +240,7 @@ internal static class Pipeline
                     $"the active environment's @preamble provides no definition of '{name}'; add one (the environment file, not your Gata source, is incomplete)");
     }
 
-    // The reference-counting runtime as one contract, not five knobs. Binding some but not all
-    // is not partial working: every managed class needs alloc + obj_init, obj_header, and a
-    // destructor whose cleanup and callers go through retain/release.
+    // The reference-counting runtime as one contract, not five knobs.
     private static readonly string[] ArcRoles =
         [Roles.Alloc, Roles.Retain, Roles.Release, Roles.ObjHeader, Roles.ObjInit];
 
@@ -295,15 +290,11 @@ internal static class Pipeline
         foreach (var fp in module.FuncPtrTypes) Claim(fp.ToCType(), $"the function type '{fp.MangledName}'");
         foreach (var ar in module.ArrayTypes) Claim(ar.ToCType(), $"the array type '{ar.MangledName}'");
 
-        // Names the compiler emits itself. An @extern declaring one of these links, binds to the
-        // generated definition, and calls something the author never wrote.
         Claim(Layout.LauncherName, "the generated process launcher");
 
         foreach (var (name, cname) in module.Symbols.Externs())
             Claim(cname, $"'@extern' declaration of '{name}'");
 
-        // Named with the realm, because two processes of one name in different realms are the case
-        // this exists for, and without it the two describe identically and read as one declaration.
         foreach (var p in module.Processes)
         {
             string realm = p.StateInit?.Vis == Visibility.Kernel ? "kernel" : "userspace";

@@ -172,7 +172,7 @@ public class ScopeHardeningTests
         var tree = new ScopeTree();
         var kernel = tree.Intern(ScopeId.Root, "kernel", Realm.Kernel);
         var process = tree.Intern(kernel, "P", Realm.None);
-        Mangler.ResetGenericDisplay();
+        Mangler.Begin();
         Mangler.SetScopes(tree);
 
         string box = tree.Qualify(kernel, "Box");

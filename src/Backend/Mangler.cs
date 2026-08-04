@@ -58,6 +58,14 @@ internal static class Mangler
         "_ixi", "_ixo", "_mt", "_res_", "_ret", "_sw", "_tern", "_wh", "_catch_", "_end_",
     ];
 
+
+    // GeneratedPrefixes bucketed by their second character, derived from the list itself so the two
+    // cannot drift. A name is then tested against the two or three prefixes that could match.
+    private static readonly System.Collections.Frozen.FrozenDictionary<char, string[]> PrefixesByLetter =
+        System.Collections.Frozen.FrozenDictionary.ToFrozenDictionary(
+            GeneratedPrefixes.GroupBy(p => p[1]), g => g.Key, g => g.ToArray());
+
+
     /// <summary>
     /// True if a user-written local would collide with a compiler temporary. Renaming the user's is
     /// not an option - both go through this path, so any rule that moves one moves the other. Only
@@ -66,7 +74,9 @@ internal static class Mangler
     public static bool IsReservedLocal(string name)
     {
         if (name is "_has_error" or "_o") return true;
-        foreach (var prefix in GeneratedPrefixes)
+        if (name.Length < 2 || name[0] != '_') return false;
+        if (!PrefixesByLetter.TryGetValue(name[1], out var candidates)) return false;
+        foreach (var prefix in candidates)
         {
             if (name.Length <= prefix.Length || !name.StartsWith(prefix, StringComparison.Ordinal)) continue;
             bool allDigits = true;
@@ -77,66 +87,40 @@ internal static class Mangler
         return false;
     }
 
-    // Dense naming
-    [ThreadStatic] private static Dictionary<string, string>? _denseTls;
-    private static Dictionary<string, string> _dense => _denseTls ??= [];
+    // The name table of the compilation in progress. One ambient slot instead of a row of them, and
+    // a build that never opened a table gets a fresh one rather than the last build's.
+    [ThreadStatic] private static NameTable? _namesTls;
+    private static NameTable _names => _namesTls ??= new NameTable();
 
-    // Every generic instantiation the Monomorphizer stamped, which is the set of instances that actually exist
-    [ThreadStatic] private static Dictionary<string, GenericKey>? _genericInfoTls;
-    private static Dictionary<string, GenericKey> _genericInfo => _genericInfoTls ??= [];
+    /// <summary>
+    /// Starts a compilation, discarding whatever the last one invented.
+    /// </summary>
+    public static void Begin() => _namesTls = new NameTable();
 
-    // Every instance name GenericInstance ever composed, stamped or not
-    [ThreadStatic] private static Dictionary<string, GenericKey>? _composedTls;
-    private static Dictionary<string, GenericKey> _composed => _composedTls ??= [];
+    /// <summary>
+    /// Starts a front-end round within the current compilation.
+    /// </summary>
+    public static void BeginRound() => _names.BeginRound();
 
     /// <summary>
     /// Replaces the dense name map with the given mapping produced by the Densifier.
     /// </summary>
-    public static void SetDense(Dictionary<string, string> map)
-    {
-        _denseTls = map;
-    }
+    public static void SetDense(Dictionary<string, string> map) => _names.Dense = map;
 
     /// <summary>
-    /// Clears the dense name map, restoring readable names for the next build.
+    /// Adopts the scope tree of the round about to run.
     /// </summary>
-    public static void ResetDense()
-    {
-        _denseTls = [];
-    }
-
-    /// <summary>
-    /// Clears what the last front-end round stamped. Runs per round, since a round starts from the
-    /// unstamped programs again and re-decides what exists.
-    /// </summary>
-    public static void ResetGenericDisplay()
-    {
-        _genericInfo.Clear();
-        _genericTemplates.Clear();
-        _genericFailed.Clear();
-    }
-
-    /// <summary>
-    /// Clears what a flat instance name means, for the next build.
-    /// </summary>
-    public static void ResetComposedNames()
-    {
-        _composed.Clear();
-    }
-
-    // Instantiations the Monomorphizer rejected and therefore never stamped
-    [ThreadStatic] private static HashSet<string>? _genericFailedTls;
-    private static HashSet<string> _genericFailed => _genericFailedTls ??= [];
+    public static void SetScopes(ScopeTree tree) => _names.Scopes = tree;
 
     /// <summary>
     /// Records that this instantiation was rejected with a diagnostic of its own.
     /// </summary>
-    public static void MarkGenericFailed(string mangled) => _genericFailed.Add(mangled);
+    public static void MarkGenericFailed(string mangled) => _names.Failed.Add(mangled);
 
     /// <summary>
     /// True if this instantiation was already rejected, so a missing-type report would cascade.
     /// </summary>
-    public static bool GenericFailed(string mangled) => _genericFailed.Contains(mangled);
+    public static bool GenericFailed(string mangled) => _names.Failed.Contains(mangled);
 
     /// <summary>
     /// Composes the internal name of a generic instantiation: ("List", ["int"]) is "List_int". The
@@ -147,7 +131,7 @@ internal static class Mangler
         var sb = new System.Text.StringBuilder(baseName);
         foreach (var a in args) sb.Append('_').Append(a);
         string mangled = sb.ToString();
-        _composed[mangled] = new GenericKey(baseName, [.. args]);
+        _names.Composed[mangled] = new GenericKey(baseName, [.. args]);
         return mangled;
     }
 
@@ -157,7 +141,7 @@ internal static class Mangler
     /// </summary>
     public static void RegisterGenericInstance(string mangled)
     {
-        if (_composed.TryGetValue(mangled, out var key)) _genericInfo[mangled] = key;
+        if (_names.Composed.TryGetValue(mangled, out var key)) _names.AddStamped(mangled, key);
     }
 
     /// <summary>
@@ -167,7 +151,7 @@ internal static class Mangler
     /// </summary>
     public static bool TryGetGenericInstance(string mangled, out string baseName, out ImmutableArray<string> args)
     {
-        if (_genericInfo.TryGetValue(mangled, out var info))
+        if (_names.Stamped.TryGetValue(mangled, out var info))
         {
             (baseName, args) = info;
             return true;
@@ -177,17 +161,10 @@ internal static class Mangler
         return false;
     }
 
-    // Base names of every generic template seen this build, whether or not anything instantiated them
-    [ThreadStatic] private static HashSet<string>? _genericTemplatesTls;
-    private static HashSet<string> _genericTemplates => _genericTemplatesTls ??= [];
-
     /// <summary>
     /// Records that a generic template with this base name was declared.
     /// </summary>
-    public static void RegisterGenericTemplate(string baseName)
-    {
-        _genericTemplates.Add(baseName);
-    }
+    public static void RegisterGenericTemplate(string baseName) => _names.Templates.Add(baseName);
 
     /// <summary>
     /// Splits a mangled instance name back into the template it instantiates and its arguments, for
@@ -196,7 +173,7 @@ internal static class Mangler
     /// </summary>
     public static bool TrySplitInstance(string mangled, out string baseName, out ImmutableArray<string> args)
     {
-        if (_composed.TryGetValue(mangled, out var key) && _genericTemplates.Contains(key.Base))
+        if (_names.Composed.TryGetValue(mangled, out var key) && _names.Templates.Contains(key.Base))
         {
             (baseName, args) = key;
             return true;
@@ -208,57 +185,36 @@ internal static class Mangler
     /// <summary>
     /// Returns true if a generic template with this base name was declared.
     /// </summary>
-    public static bool IsGenericTemplate(string baseName) => _genericTemplates.Contains(baseName);
+    public static bool IsGenericTemplate(string baseName) => _names.Templates.Contains(baseName);
 
     /// <summary>
-    /// Every registered instantiation of a generic base name, mangled and ordinally sorted - which
-    /// stamped instance 'Maybe.Found(7)' means once the template is gone. Sorted because these
-    /// reach the user, and dictionary order is not stable.
+    /// Every stamped instantiation of a generic base name, ordinally sorted - which instance
+    /// 'Maybe.Found(7)' means once the template is gone.
     /// </summary>
-    public static List<string> InstancesOf(string baseName)
-    {
-        var found = new List<string>();
-        foreach (var (mangled, key) in _genericInfo)
-            if (key.Base == baseName) found.Add(mangled);
-        found.Sort(StringComparer.Ordinal);
-        return found;
-    }
-
-    // The scope tree of the build in progress
-    [ThreadStatic] private static ScopeTree? _scopes;
-
-    /// <summary>
-    /// Adopts the scope tree of the build about to run, replacing the previous build's.
-    /// </summary>
-    public static void SetScopes(ScopeTree tree) => _scopes = tree;
-
-    /// <summary>
-    /// Drops the scope tree for the next build. Leaving it in place leaks names between builds,
-    /// which in the in-process test harness means leaking them between tests.
-    /// </summary>
-    public static void ResetScopes() => _scopes = null;
+    public static IReadOnlyList<string> InstancesOf(string baseName) =>
+        _names.StampedByBase.GetValueOrDefault(baseName) ?? [];
 
     /// <summary>
     /// What a scope-qualified name was declared as, or null when nothing scoped declares it.
     /// </summary>
-    public static string? ScopedKind(string qualified) => _scopes?.KindOf(qualified);
+    public static string? ScopedKind(string qualified) => _names.Scopes?.KindOf(qualified);
 
     /// <summary>
     /// The readable paths of every scope declaring this bare name, ordinally sorted. Empty when
     /// nothing scoped declares it, which is the ordinary case.
     /// </summary>
-    public static List<string> ScopedCandidates(string bare) => _scopes?.Candidates(bare) ?? [];
+    public static List<string> ScopedCandidates(string bare) => _names.Scopes?.Candidates(bare) ?? [];
 
     /// <summary>
     /// The readable, fully-qualified form of a scoped declaration name.
     /// </summary>
     private static string Unqualified(string name) =>
-        _scopes is { } t && t.TryUnqualify(name, out var qn) ? t.Display(qn.Scope, qn.Name) : name;
+        _names.Scopes is { } t && t.TryUnqualify(name, out var qn) ? t.Display(qn.Scope, qn.Name) : name;
 
     /// <summary>
     /// True when a scope declares this exact qualified name, as opposed to it merely containing one.
     /// </summary>
-    private static bool IsScoped(string name) => _scopes?.TryUnqualify(name, out _) == true;
+    private static bool IsScoped(string name) => _names.Scopes?.TryUnqualify(name, out _) == true;
 
     /// <summary>
     /// Returns the user readable display name for a type, expanding generic instantiations
@@ -279,9 +235,9 @@ internal static class Mangler
     /// </summary>
     private static bool TryStructure(string name, out GenericKey key)
     {
-        if (_genericInfo.TryGetValue(name, out key)) return true;
+        if (_names.Stamped.TryGetValue(name, out key)) return true;
         key = default;
-        return !IsScoped(name) && _composed.TryGetValue(name, out key);
+        return !IsScoped(name) && _names.Composed.TryGetValue(name, out key);
     }
 
     /// <summary>
@@ -310,7 +266,7 @@ internal static class Mangler
     /// </summary>
     public static string Sanitize(string name)
     {
-        if (_scopes is { } tree && tree.TryUnqualify(name, out var qn)) return qn.Name + tree.Token(qn.Scope);
+        if (_names.Scopes is { } tree && tree.TryUnqualify(name, out var qn)) return qn.Name + tree.Token(qn.Scope);
         int at = name.IndexOf('@');
         return at < 0 ? name : string.Concat(name.AsSpan(0, at), "_s", Hash(name.AsSpan(at)));
     }
@@ -320,7 +276,7 @@ internal static class Mangler
     /// </summary>
     public static string Class(string name)
     {
-        return _dense.GetValueOrDefault(name, $"gata_{Sanitize(name)}");
+        return _names.Dense.GetValueOrDefault(name, $"gata_{Sanitize(name)}");
     }
 
     /// <summary>
@@ -328,7 +284,7 @@ internal static class Mangler
     /// </summary>
     public static string Allocator(string cls)
     {
-        return _dense.TryGetValue(cls, out var d) ? d + "_n" : $"new_{Sanitize(cls)}";
+        return _names.Dense.TryGetValue(cls, out var d) ? d + "_n" : $"new_{Sanitize(cls)}";
     }
 
     /// <summary>
@@ -336,7 +292,7 @@ internal static class Mangler
     /// </summary>
     public static string Dtor(string cls)
     {
-        return _dense.TryGetValue(cls, out var d) ? d + "_d" : $"gata_{Sanitize(cls)}__dtor";
+        return _names.Dense.TryGetValue(cls, out var d) ? d + "_d" : $"gata_{Sanitize(cls)}__dtor";
     }
 
     /// <summary>

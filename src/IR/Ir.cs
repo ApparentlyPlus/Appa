@@ -871,19 +871,20 @@ internal record IrModule(
     List<IrUnion> Unions
 )
 {
-    // Realms come from the environment's @preamble targets. Computed per access rather than
-    // cached, since ResolveTop populates NativeBlocks on this instance after the constructor ran.
+    private bool? _hasKernelRealm;
+    private bool? _hasUserRealm;
+
     /// <summary>
     /// True if the module emits a kernel realm, from its preamble or boot blocks.
     /// </summary>
-    public bool HasKernelRealm => NativeBlocks.Any(nb =>
+    public bool HasKernelRealm => _hasKernelRealm ??= NativeBlocks.Any(nb =>
         nb.Vis == Visibility.Kernel && nb.Section is NativeSection.Preamble or NativeSection.Boot);
 
     /// <summary>
     /// Returns true if the module emits a user realm, determined by the presence of user preamble
     /// blocks.
     /// </summary>
-    public bool HasUserRealm => NativeBlocks.Any(nb =>
+    public bool HasUserRealm => _hasUserRealm ??= NativeBlocks.Any(nb =>
         nb.Vis == Visibility.User && nb.Section == NativeSection.Preamble);
 
     // Unions by name, built on first ask.

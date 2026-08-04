@@ -14,28 +14,30 @@ internal sealed class ManagedTypes
         }
 
         _unions = [];
-        bool changed = true;
-        while (changed)
-        {
-            changed = false;
-            foreach (var u in m.Unions)
-            {
-                if (_unions.Contains(u.Name)) continue;
-                if (HoldsManaged(u)) changed |= _unions.Add(u.Name);
-            }
-        }
-    }
 
-    /// <summary>
-    /// Returns true if any variant of the union stores a value that is managed under the
-    /// classification built so far.
-    /// </summary>
-    private bool HoldsManaged(IrUnion u)
-    {
-        foreach (var v in u.Variants)
-            foreach (var f in v.Fields)
-                if (IsManaged(f.Type)) return true;
-        return false;
+        var holders = new Dictionary<string, List<string>>();
+        var work = new Queue<string>();
+
+        foreach (var u in m.Unions)
+        {
+            bool managed = false;
+            foreach (var v in u.Variants)
+                foreach (var f in v.Fields)
+                {
+                    if (f.Type is IrClassRef cr && _classes.Contains(cr.ClassName)) managed = true;
+                    else if (f.Type is IrUnionType ut)
+                    {
+                        if (!holders.TryGetValue(ut.Name, out var up)) holders[ut.Name] = up = [];
+                        up.Add(u.Name);
+                    }
+                }
+            if (managed && _unions.Add(u.Name)) work.Enqueue(u.Name);
+        }
+
+        while (work.Count > 0)
+            if (holders.TryGetValue(work.Dequeue(), out var up))
+                foreach (var h in up)
+                    if (_unions.Add(h)) work.Enqueue(h);
     }
 
     /// <summary>
