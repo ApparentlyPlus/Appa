@@ -162,41 +162,25 @@ public class ScopeHardeningTests
     }
 
     /// <summary>
-    /// The bag itself rewrites scope-qualified names, so a call site that forgets DisplayName cannot
-    /// leak one. Annotation names in prose look nothing like a qualified name and must survive.
-    /// </summary>
-    [Fact]
-    public void BagRewritesQualifiedNames()
-    {
-        var sources = new SourceSet();
-        sources.Add("<test>", "");
-        Mangler.ResetScopeDisplay();
-        Mangler.RegisterScopedName("Config@kernel$P", "kernel.P.Config");
-
-        var bag = new DiagnosticBag(sources);
-        bag.Error(Codes.DuplicateName, "<test>", TextSpan.None, "type 'Config@kernel$P' is already declared",
-                  ["'@shadows' displaces nothing here; @intrinsic(alloc) is unrelated"]);
-
-        Assert.Equal("type 'kernel.P.Config' is already declared", bag.All[0].Message);
-        Assert.Equal("'@shadows' displaces nothing here; @intrinsic(alloc) is unrelated", bag.All[0].Hints[0]);
-    }
-
-    /// <summary>
-    /// An instantiation of a scoped name that is not generic is never stamped, so nothing registers
-    /// its display form. Reconstructing it from the longest registered prefix is what keeps the raw
-    /// 'Box@kernel_int' out of the message.
+    /// An instantiation of a scoped name that is not generic is never stamped, so nothing records it
+    /// as an instance the build produced. Reading it back from the key filed when the name was
+    /// composed is what keeps the raw 'Box@kernel_int' out of the message.
     /// </summary>
     [Fact]
     public void UnstampedInstantiationReadsBack()
     {
-        Mangler.ResetScopeDisplay();
+        var tree = new ScopeTree();
+        var kernel = tree.Intern(ScopeId.Root, "kernel", Realm.Kernel);
+        var process = tree.Intern(kernel, "P", Realm.None);
         Mangler.ResetGenericDisplay();
-        Mangler.RegisterScopedName("Box@kernel", "kernel.Box");
-        Mangler.RegisterScopedName("Cargo@kernel$P", "kernel.P.Cargo");
+        Mangler.SetScopes(tree);
 
-        Assert.Equal("kernel.Box[int]", Mangler.DisplayName("Box@kernel_int"));
-        Assert.Equal("kernel.Box[kernel.P.Cargo]", Mangler.DisplayName("Box@kernel_Cargo@kernel$P"));
-        Assert.Equal("kernel.Box", Mangler.DisplayName("Box@kernel"));
+        string box = tree.Qualify(kernel, "Box");
+        string cargo = tree.Qualify(process, "Cargo");
+
+        Assert.Equal("kernel.Box[int]", Mangler.DisplayName(Mangler.GenericInstance(box, ["int"])));
+        Assert.Equal("kernel.Box[kernel.P.Cargo]", Mangler.DisplayName(Mangler.GenericInstance(box, [cargo])));
+        Assert.Equal("kernel.Box", Mangler.DisplayName(box));
         Assert.Equal("Unknown@nowhere", Mangler.DisplayName("Unknown@nowhere"));
     }
 

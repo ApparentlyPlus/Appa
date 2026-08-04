@@ -91,11 +91,9 @@ internal sealed class ScopeBinder(DiagnosticBag diag)
                                 Dictionary<string, HashSet<string>>? visible = null)
     {
         var tree = new ScopeTree();
+        Mangler.SetScopes(tree);
         var index = new ScopeIndex(tree);
         var atRoot = _atRoot = RootDeclarations(programs);
-
-        // A realm is one project global namespace, so a process cannot be told what it shadows
-        // until the whole realm is known - including the half declared after it, or in another file.
         var processes = new List<(string File, ScopeId Realm, ProcessDecl Decl)>();
         foreach (var (file, prog) in programs)
             foreach (var item in prog.Items)
@@ -149,8 +147,6 @@ internal sealed class ScopeBinder(DiagnosticBag diag)
             var uses = prog.GenericUses;
             GenericUse[]? newUses = null;
 
-            // Root level code may write a qualifier too, like '::Name' for a name it shadows nowhere,
-            // or a realm it is not inside, which has to be reported rather than left standing
             if (prog.HasScopedRefs)
             {
                 var rootSub = SubstitutionFor(tree, index, ScopeId.Root, file);
@@ -222,10 +218,6 @@ internal sealed class ScopeBinder(DiagnosticBag diag)
     /// </summary>
     private void DeclareItem(ScopeTree tree, ScopeIndex index, ScopeId scope, TopLevel item, string file)
     {
-        // A generic template is declared under its base name, so 'Box' inside the scope resolves
-        // to 'Box@kernel' and its stamps follow. The base is carried on the declaration, which is
-        // what makes qualifying it a composition rather than a guess at the mangled form.
-
         string? name = item switch
         {
             ClassDecl cd => cd.BaseName,
@@ -244,7 +236,7 @@ internal sealed class ScopeBinder(DiagnosticBag diag)
         }
         string qualified = tree.Qualify(scope, name);
         index.Declare(scope, name, qualified);
-        Mangler.RegisterScopedKind(qualified, Describe(KindOf(item)));
+        tree.SetKind(qualified, Describe(KindOf(item)));
         _declared.Add((file, scope, name, item));
         Claim(new Named(name, scope, KindOf(item), IsPrivate(item), file, item.Span));
     }
@@ -259,11 +251,10 @@ internal sealed class ScopeBinder(DiagnosticBag diag)
     private readonly record struct Named(string Name, ScopeId Scope, NameKind Kind, bool Private,
                                          string File, TextSpan Span);
 
-    // Qualifiers already rejected, per file. One written 'kernel.Cfg' is reached from the let's type
-    // and again from the 'new', and each is the same fact about the same path.
+    // Qualifiers already rejected, per file
     private readonly HashSet<(string File, string Path, string Name)> _badQualifier = [];
 
-    // Every top level name in the build, so '::Name' can say when nothing declares it.
+    // Every top level name in the build, so '::Name' can say when nothing declares it
     private Dictionary<string, List<RootDecl>> _atRoot = [];
 
     // Every declaration that claims a name, in every scope including root, keyed the way both the
@@ -344,8 +335,6 @@ internal sealed class ScopeBinder(DiagnosticBag diag)
         foreach (var (file, prog) in programs)
             foreach (var item in prog.Items)
             {
-                // An @extern names a C symbol under exactly its own spelling, so it cannot be
-                // qualified - but a scoped declaration of that name still takes the name over
                 string? n = item switch
                 {
                     ClassDecl cd => cd.BaseName,
@@ -379,8 +368,6 @@ internal sealed class ScopeBinder(DiagnosticBag diag)
                                 Dictionary<string, List<RootDecl>> atRoot,
                                 Dictionary<string, HashSet<string>>? visible)
     {
-        // Root has nothing outside it, so a declaration at file scope can never be displacing
-        // anything. Checked here rather than in _declared, which only holds scoped declarations.
         foreach (var (file, prog) in programs)
             foreach (var item in prog.Items)
                 RejectStrayShadows(item, file, "move the declaration inside the realm or process it " +
@@ -407,21 +394,14 @@ internal sealed class ScopeBinder(DiagnosticBag diag)
     /// Where an enclosing scope declares this name, rendered for a diagnostic, or null. Walks out to
     /// root, then falls back to the file's imports - the two ways a name can already mean something.
     /// </summary>
-    private string? OuterDeclaring(ScopeTree tree, ScopeId scope, string name,
-                                   string file, Dictionary<string, List<RootDecl>> atRoot,
-                                   Dictionary<string, HashSet<string>>? visible)
+    private string? OuterDeclaring(ScopeTree tree, ScopeId scope, string name, string file, Dictionary<string, List<RootDecl>> atRoot,
+                                    Dictionary<string, HashSet<string>>? visible)
     {
-        // Outward one scope at a time rather than through ScopeIndex.Resolve, because a 'private'
-        // declaration in another file is not a name this file could read: it has to be walked past
-        // rather than reported as the thing being displaced.
         for (var s = tree.Parent(scope); !s.IsRoot; s = tree.Parent(s))
             foreach (var d in _named.GetValueOrDefault((s, name), []))
                 if (!d.Private || PathsEqual(d.File, file))
                     return $"'{Owner(tree, s)}'";
 
-
-        // A name not declared in any enclosing scope may still be imported from another file, so check
-        // the file's imports
         if (!atRoot.TryGetValue(name, out var decls)) return null;
         HashSet<string>? reachable = null;
         visible?.TryGetValue(file, out reachable);
@@ -640,7 +620,6 @@ internal sealed class ScopeBinder(DiagnosticBag diag)
                 specs[written] = new NamedSpec(qualified);
                 names[written] = qualified;
                 cTypes[written] = Mangler.Class(qualified) + "*";
-                Mangler.RegisterScopedName(qualified, tree.Display(s, written));
             }
             if (s.IsRoot) break;
         }
@@ -753,8 +732,6 @@ internal sealed class ScopeBinder(DiagnosticBag diag)
             args[i] = q;
         }
 
-        // A qualified argument was already told which scope it means, so it is resolved rather than
-        // looked up from here: 'Box[::Cargo]' inside a realm declaring Cargo means the root one.
         if (s.Scope != null)
         {
             var resolved = ResolveScopedType(s, tree, index, scope, file);
@@ -781,8 +758,6 @@ internal sealed class ScopeBinder(DiagnosticBag diag)
     private TopLevel RewriteProcess(ProcessDecl pd, ScopeTree tree, ScopeIndex index,
                                     ScopeId realmScope, string file)
     {
-        // A repeat was already reported and declares nothing, so it is emptied rather than left to
-        // stamp a second copy of every C symbol its twin already owns.
         if (_duplicates.Contains(pd)) return pd with { Items = [], Threads = [] };
 
         var proc = tree.Intern(realmScope, pd.Name, Realm.None);

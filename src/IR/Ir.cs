@@ -251,7 +251,7 @@ internal record IrPtrType(IrType Inner) : IrType
         return $"{Inner.ToCType()}*";
     }
 
-    public override string MangledName => Inner.MangledName + "_p";
+    public override string MangledName { get; } = Inner.MangledName + "_p";
 }
 
 /// <summary>
@@ -264,10 +264,12 @@ internal record IrArrayType(IrType Elem, int Size) : IrType
     // Computed on every call - see IrEnumType.ToCType for why this can't be cached.
     public override string ToCType()
     {
-        return Mangler.Class($"Arr_{Elem.MangledName}_{Size}");
+        return Mangler.Class(MangledName);
     }
 
-    public override string MangledName => $"Arr_{Elem.MangledName}_{Size}";
+    // Recursive over the element type and used as a dictionary key by the resolver and Dce, so it
+    // is composed once at construction rather than per lookup.
+    public override string MangledName { get; } = $"Arr_{Elem.MangledName}_{Size}";
 }
 
 /// <summary>
@@ -281,14 +283,14 @@ internal record IrResultType(IrType Inner) : IrType
     /// MangledName so it always agrees with the typedef registered by SymbolTable.RegisterThrows
     /// (see SymbolTable.ResultInnerName). void folds to int.
     /// </summary>
-    public string ResultName => $"Result_{(Inner is IrVoidType ? "int" : Inner.MangledName)}";
+    public string ResultName { get; } = $"Result_{(Inner is IrVoidType ? "int" : Inner.MangledName)}";
 
     public override string ToCType()
     {
         return ResultName;
     }
 
-    public override string MangledName => "Result_" + Inner.MangledName;
+    public override string MangledName { get; } = "Result_" + Inner.MangledName;
 }
 
 /// <summary>
@@ -307,17 +309,36 @@ internal record IrFuncPtrType(IrType Ret, List<IrType> Params) : IrType
         }
     )}";
 
-    // Computed on every call
+    /// <summary>
+    /// Returns the typedef name for this function pointer type
+    /// </summary>
     public override string ToCType()
     {
-        return Mangler.Class($"Fn_{Ret.MangledName}__{(
-            Params.Count switch
-            {
-                0 => "",
-                1 => Params[0].MangledName,
-                _ => string.Join("_", Params.Select(p => p.MangledName))
-            }
-        )}");
+        return Mangler.Class(MangledName);
+    }
+
+    /// <summary>
+    /// Structural equality over the parameter list. The generated one compares Params by reference,
+    /// which is the single reason every other IrType needed a hand-written structural comparison.
+    /// </summary>
+    public virtual bool Equals(IrFuncPtrType? other)
+    {
+        if (ReferenceEquals(this, other)) return true;
+        if (other is null || Ret != other.Ret || Params.Count != other.Params.Count) return false;
+        for (int i = 0; i < Params.Count; i++)
+            if (Params[i] != other.Params[i]) return false;
+        return true;
+    }
+
+    /// <summary>
+    /// Structural hash code over the parameter list.
+    /// </summary>
+    public override int GetHashCode()
+    {
+        var h = new HashCode();
+        h.Add(Ret);
+        foreach (var p in Params) h.Add(p);
+        return h.ToHashCode();
     }
 }
 

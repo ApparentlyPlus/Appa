@@ -81,6 +81,7 @@ internal static class Pipeline
         Dictionary<string, HashSet<string>> visible, Mode mode, DiagnosticBag diag)
     {
         var pristine = new List<(string path, Program prog)>(programs);
+        Mangler.ResetComposedNames();
         var seeds = new List<GenericSeed>();
         var seeded = new HashSet<string>(StringComparer.Ordinal);
         int mark = diag.All.Count;
@@ -95,7 +96,7 @@ internal static class Pipeline
 
             Mangler.ResetDense();
             Mangler.ResetGenericDisplay();
-            Mangler.ResetScopeDisplay();
+            Mangler.ResetScopes();
             new ScopeBinder(diag).Bind(programs, visible);
             var genericRequestFile = new Monomorphizer(diag).Process(programs, seeds);
             collected = new SymbolCollector(diag).Collect([.. programs.Select(t => (t.path, t.prog))]);

@@ -291,15 +291,34 @@ internal sealed record NamedSpec(string Name, NamedSpec[] Args, TextSpan Span) :
     /// </summary>
     public string[]? Scope { get; init; }
 
-    public string Mangled
+    // Read at least thirteen times per spec in the resolver alone, plus the parser, the binder, the
+    // monomorphizer and the symbol table.
+    private string? _mangled;
+
+    public string Mangled => _mangled ??= Flatten(Name, Args);
+
+    /// <summary>
+    /// Flattens a name and its type arguments the way the rest of the compiler identifies the type:
+    /// Base, or Base_Arg1_Arg2. Static so a caller already holding the parts need not build a spec
+    /// just to reach the property.
+    /// </summary>
+    public static string Flatten(string name, NamedSpec[] args)
     {
-        get
-        {
-            if (Args.Length == 0) return Name;
-            var sb = new System.Text.StringBuilder(Name);
-            foreach (var a in Args) sb.Append('_').Append(a.Mangled);
-            return sb.ToString();
-        }
+        if (args.Length == 0) return name;
+        var parts = new string[args.Length];
+        for (int i = 0; i < args.Length; i++) parts[i] = args[i].Mangled;
+        return Mangler.GenericInstance(name, parts);
+    }
+
+    /// <summary>
+    /// Copies everything but the memoized spelling, which the record's own copy constructor would
+    /// carry across a 'with' that changed the very fields it was composed from.
+    /// </summary>
+    private NamedSpec(NamedSpec other) : base(other)
+    {
+        Name = other.Name;
+        Args = other.Args;
+        Scope = other.Scope;
     }
 
     public override string ToSpecString() => Mangled;
@@ -650,7 +669,7 @@ internal record GenericTypeRefExpr(string Name, NamedSpec[] Args, Expr? IndexFor
     /// <summary>
     /// The mangled instance name this reference denotes, e.g. Maybe_int.
     /// </summary>
-    public string Mangled => new NamedSpec(Name, Args, Span).Mangled;
+    public string Mangled => NamedSpec.Flatten(Name, Args);
 
     /// <summary>
     /// The reference as written, e.g. Maybe[int] - for diagnostics, which must never show a mangled

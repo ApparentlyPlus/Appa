@@ -134,32 +134,29 @@ internal sealed class TypeResolver(
 
     // Every distinct function-pointer signature used; the emitter stamps one typedef per signature.
     private readonly List<IrFuncPtrType> _funcPtrTypes = [];
-    private readonly Dictionary<FuncPtrKey, IrFuncPtrType> _funcPtrSeen = [];
+    private readonly Dictionary<IrFuncPtrType, IrFuncPtrType> _funcPtrSeen = [];
 
     /// <summary>
     /// Returns or creates a function-pointer type for the given return type and parameter list.
     /// </summary>
     private IrFuncPtrType FnPtr(IrType ret, List<IrType> ps)
     {
-        var key = new FuncPtrKey(ret, ps);
-        if (_funcPtrSeen.TryGetValue(key, out var existing)) return existing;
         var f = new IrFuncPtrType(ret, ps);
-        _funcPtrSeen[key] = f;
+        if (_funcPtrSeen.TryGetValue(f, out var existing)) return existing;
+        _funcPtrSeen[f] = f;
         _funcPtrTypes.Add(f);
         return f;
     }
 
     // Generic free function templates, bucketed by name (several files may each declare their
-    // own private generic under the same name without clobbering one another); each distinct
-    // instantiation is stamped once.
+    // own private generic under the same name without clobbering one another)
     private readonly Dictionary<string, List<(FuncDecl Decl, string File, Realm Realm, bool IsPrivate)>> _funcTemplates = [];
     
     // Generic method templates on classes/modules, keyed by owner+name; mirrors _funcTemplates.
     private readonly Dictionary<MemberKey, (MethodDecl Decl, string File, Realm Realm)> _methodTemplates = [];
     
     // Generic type instantiations this pass needed but could not find, because they only became
-    // concrete while stamping a generic function or method. The pipeline seeds these into the
-    // Monomorphizer and runs again; see Pipeline.BuildModule.
+    // concrete while stamping a generic function or method.
     private readonly List<GenericSeed> _pendingInstances = [];
 
     /// <summary>
@@ -299,7 +296,7 @@ internal sealed class TypeResolver(
                 if (nm.Args.Length == 0 && Mangler.TrySplitInstance(name, out var splitBase, out var splitArgs))
                 {
                     if (SeedDepth(name) <= MaxSeedDepth)
-                        _pendingInstances.Add(new GenericSeed(splitBase, splitArgs, Sp(nm, span), ctx.File)
+                        _pendingInstances.Add(new GenericSeed(splitBase, [.. splitArgs], Sp(nm, span), ctx.File)
                             { Scope = [.. _scope] });
                     diag.Error(Codes.UndefinedType, ctx.File, Sp(nm, span),
                         $"'{Mangler.DisplayName(splitBase)}[{string.Join(", ", splitArgs.Select(Mangler.DisplayName))}]'" +
@@ -469,12 +466,12 @@ internal sealed class TypeResolver(
         var from = arg.Type;
         if (from.IsError || to.IsError) return 0;
         if (arg is IrLitNull) return to is IrClassRef or IrPtrType or IrFuncPtrType ? 0 : null;
-        if (SameType(from, to)) return 0;
+        if (from == to) return 0;
         if ((from.IsNumeric || from.IsFloat) && (to.IsNumeric || to.IsFloat))
             return NumRank(from) <= NumRank(to) ? 1 : 2;
         if (from.IsString && to.IsString) return 0;
         if (from is IrPtrType fp && to is IrPtrType tp
-            && (SameType(fp.Inner, tp.Inner) || fp.Inner is IrVoidType || tp.Inner is IrVoidType))
+            && (fp.Inner == tp.Inner || fp.Inner is IrVoidType || tp.Inner is IrVoidType))
             return 1;
         return null;
     }
@@ -503,38 +500,6 @@ internal sealed class TypeResolver(
     #region Type compatibility
 
     /// <summary>
-    /// Returns true when both IR types are structurally identical.
-    /// </summary>
-    private static bool SameType(IrType a, IrType b)
-    {
-        return (a, b) switch
-        {
-            (IrVoidType, IrVoidType) => true,
-            (IrPrimType x, IrPrimType y) => x.CName == y.CName,
-            (IrClassRef x, IrClassRef y) => x.ClassName == y.ClassName,
-            (IrEnumType x, IrEnumType y) => x.Name == y.Name,
-            (IrPtrType x, IrPtrType y) => SameType(x.Inner, y.Inner),
-            (IrArrayType x, IrArrayType y) => x.Size == y.Size && SameType(x.Elem, y.Elem),
-            (IrResultType x, IrResultType y) => SameType(x.Inner, y.Inner),
-            (IrFuncPtrType x, IrFuncPtrType y) => SameFuncPtrParams(x, y),
-            (IrUnionType x, IrUnionType y) => x.Name == y.Name,
-            _ => false
-        };
-    }
-
-    /// <summary>
-    /// Returns true when two function pointer types have the same return type and
-    /// pairwise-identical parameter types, without allocating a LINQ enumerator.
-    /// </summary>
-    private static bool SameFuncPtrParams(IrFuncPtrType x, IrFuncPtrType y)
-    {
-        if (!SameType(x.Ret, y.Ret) || x.Params.Count != y.Params.Count) return false;
-        for (int i = 0; i < x.Params.Count; i++)
-            if (!SameType(x.Params[i], y.Params[i])) return false;
-        return true;
-    }
-
-    /// <summary>
     /// Returns true when value's type is assignment-compatible with the target type, accounting for
     /// implicit numeric widening, null-to-reference, and pointer covariance.
     /// </summary>
@@ -543,14 +508,14 @@ internal sealed class TypeResolver(
         var from = value.Type;
         if (from.IsError || to.IsError) return true;
         if (value is IrLitNull) return to is IrClassRef or IrPtrType or IrFuncPtrType;
-        if (SameType(from, to)) return true;
+        if (from == to) return true;
         if (to is IrVoidType) return false;
         if ((value is IrLitChar || LiteralValue(value) is not null) && IsNum(to)) return true;
         if (value is IrLitFloat && to.IsFloat) return true;
         if (IsNum(from) && IsNum(to)) return NumRank(from) <= NumRank(to);
         if (from.IsString && to.IsString) return true;
         if (from is IrPtrType fp && to is IrPtrType tp)
-            return SameType(fp.Inner, tp.Inner) || fp.Inner is IrVoidType || tp.Inner is IrVoidType;
+            return fp.Inner == tp.Inner || fp.Inner is IrVoidType || tp.Inner is IrVoidType;
         return false;
     }
 
@@ -808,8 +773,8 @@ internal sealed class TypeResolver(
     {
         foreach (var op in sym.OperatorOverloads(destCls, "as"))
         {
-            if (op.Sig!.Params.Count == 1 && SameType(ResolveType(op.Sig.Params[0].Type), from)
-                && SameType(ResolveType(op.Sig.ReturnType), new IrClassRef(destCls)))
+            if (op.Sig!.Params.Count == 1 && ResolveType(op.Sig.Params[0].Type) == from
+                && ResolveType(op.Sig.ReturnType) == new IrClassRef(destCls))
                 return op;
         }
         return null;
@@ -822,7 +787,7 @@ internal sealed class TypeResolver(
     private void CheckCast(IrExpr value, IrType to, ResolveCtx ctx)
     {
         var from = value.Type;
-        if (SameType(from, to))
+        if (from == to)
         {
             // Casting to the type a value already has converts nothing. It is usually left
             // over from an earlier signature, and it hides a later real type change.
@@ -964,7 +929,7 @@ internal sealed class TypeResolver(
         if (a is IrClassRef ca && b is IrClassRef cb) return ca.ClassName == cb.ClassName;
         if (a is IrEnumType ea && b is IrEnumType eb) return ea.Name == eb.Name;
         if (a is IrUnionType ua && b is IrUnionType ub) return ua.Name == ub.Name;
-        if (a is IrFuncPtrType && b is IrFuncPtrType) return SameType(a, b);
+        if (a is IrFuncPtrType && b is IrFuncPtrType) return a == b;
         return false;
     }
 
@@ -1889,11 +1854,11 @@ internal sealed class TypeResolver(
         if (a is IrLitNull && b is IrLitNull) return null;
         if (a is IrLitNull) return b.Type is IrClassRef or IrPtrType ? b.Type : null;
         if (b is IrLitNull) return a.Type is IrClassRef or IrPtrType ? a.Type : null;
-        if (SameType(a.Type, b.Type)) return a.Type;
+        if (a.Type == b.Type) return a.Type;
         if (IsNum(a.Type) && IsNum(b.Type)) return NumRank(a.Type) >= NumRank(b.Type) ? a.Type : b.Type;
         if (a.Type.IsString && b.Type.IsString) return IrType.String;
         if (a.Type is IrPtrType ap && b.Type is IrPtrType bp)
-            return SameType(ap.Inner, bp.Inner) ? a.Type
+            return ap.Inner == bp.Inner ? a.Type
                 : ap.Inner is IrVoidType ? a.Type
                 : bp.Inner is IrVoidType ? b.Type : null;
         return null;
@@ -1905,7 +1870,7 @@ internal sealed class TypeResolver(
     private static IrExpr CoerceTo(IrExpr e, IrType t)
     {
         if (e is IrLitNull) return new IrLitNull(t) { Span = e.Span };
-        if (SameType(e.Type, t)) return e;
+        if (e.Type == t) return e;
         if (IsNum(e.Type) && IsNum(t)) return new IrCast(t, e) { Span = e.Span };
         return e;
     }
@@ -2627,10 +2592,6 @@ internal sealed class TypeResolver(
     private IrOperator ResolveOperator(string cls, OperatorDecl od, ResolveCtx ctx, bool lib, Visibility vis)
     {
         bool isAs = od.Op == "as";
-
-        // Arity, comparison/mutator classification, and default return all come from the
-        // shared OperatorRules table, the same source SymbolCollector keys declarations by
-
         int want = OperatorRules.RequiredArity(od.Op, od.Params.Length);
         if (od.Params.Length != want)
             diag.Error(Codes.WrongArgCount, ctx.File, od.Span,
@@ -2642,20 +2603,15 @@ internal sealed class TypeResolver(
         bool isMutator = OperatorRules.IsMutator(od.Op);
         TypeSpec retSpec = od.ReturnType ?? new NamedSpec(OperatorRules.DefaultReturn(od.Op, cls), od.Span);
         var ret = ResolveType(retSpec);
-        if (isAs && od.ReturnType != null && !SameType(ret, new IrClassRef(cls)))
+        if (isAs && od.ReturnType != null && ret != new IrClassRef(cls))
             diag.Error(Codes.TypeMismatch, ctx.File, od.Span,
                 $"'as' converts its parameter to '{Mangler.DisplayName(cls)}' " +
                 $"and must return '{Mangler.DisplayName(cls)}', not '{Describe(ret)}'");
         
-        // Comparisons and logical not produce truth values, and '!=' is derived from '==' (and
-        // vice versa) by negation when only one of the pair is declared - both only work if
-        // these return bool.
         if ((isCmp || od.Op == "!") && ret is not IrPrimType { CName: "bool" })
             diag.Error(Codes.TypeMismatch, ctx.File, od.Span,
                 $"operator '{od.Op}' must return 'bool', not '{Describe(ret)}'");
         
-        // ++/-- mutate self in place. A value-producing form would be ambiguous about
-        // pre/post semantics, so they are statements, never expressions.
         if (isMutator && ret is not IrVoidType)
             diag.Error(Codes.TypeMismatch, ctx.File, od.Span,
                 $"operator '{od.Op}' mutates in place and must return 'void', not '{Describe(ret)}'");
@@ -2941,7 +2897,7 @@ internal sealed class TypeResolver(
             return new IrStaticCall(fallback, IrType.Void, args);
         }
 
-        string mangled = Mangler.GenericInstance(fd.Name, fd.GenericParams.Select(p => Monomorphizer.SanitizeTypeName(binds[p].ToSpecString())));
+        string mangled = Mangler.GenericInstance(fd.Name, [.. fd.GenericParams.Select(p => Monomorphizer.SanitizeTypeName(binds[p]))]);
         _usedFuncTemplates.Add((t.File, fd.Name));
         if (_genericSeen.Add(mangled))
             _genericQueue.Enqueue((fd, t.File, t.Realm, binds, mangled, _scope));
@@ -2999,7 +2955,7 @@ internal sealed class TypeResolver(
             return FallbackCall();
         }
 
-        string mangled = Mangler.GenericInstance(md.Name, md.GenericParams.Select(p => Monomorphizer.SanitizeTypeName(binds[p].ToSpecString())));
+        string mangled = Mangler.GenericInstance(md.Name, [.. md.GenericParams.Select(p => Monomorphizer.SanitizeTypeName(binds[p]))]);
         string seenKey = owner + "::" + mangled;
         _usedMethodTemplates.Add(new MemberKey(owner, md.Name));
         if (_genericSeen.Add(seenKey))
@@ -3179,8 +3135,7 @@ internal sealed class TypeResolver(
 
     /// <summary>
     /// True for values that participate in ARC: a class reference, or a union with a managed
-    /// payload. What <see cref="ManagedTypes"/> answers for the back end, asked before the IR
-    /// exists - and the two disagreeing is a leak or a link error.
+    /// payload.
     /// </summary>
     private bool IsManagedRef(IrType t)
     {
@@ -3241,8 +3196,6 @@ internal sealed class TypeResolver(
     /// </summary>
     private IrEnum ResolveEnum(EnumDecl ed, ResolveCtx ctx)
     {
-        // "typedef enum { } E;" is a constraint violation in C, so an enum with no
-        // members has to be rejected here rather than surfacing as a gcc error later.
         if (ed.Members.Length == 0)
             diag.Error(Codes.BadDeclHeader, ctx.File, ed.Span,
                 $"enum '{ed.Name}' declares no members",
@@ -3374,9 +3327,6 @@ internal sealed class TypeResolver(
                 diag.Error(Codes.DuplicateName, ctx.File, v.Span,
                     $"union '{ud.Name}' already declares a variant '{v.Name}'");
             var fields = new List<IrParam>();
-            // A variant's fields become one C struct, so two of the same name would emit
-            // two members with one name - rejected by the C compiler, not by us, unless
-            // this catches it first.
             var seenFields = new HashSet<string>();
             foreach (var f in v.Fields)
             {
@@ -4017,7 +3967,7 @@ internal sealed class TypeResolver(
                 var inner = ResolveExpr(ce.Value, ctx);
                 var to = ResolveType(ce.TargetType);
 
-                if (!SameType(inner.Type, to) && ClassNameOf(to) is { } destCls
+                if (inner.Type != to && ClassNameOf(to) is { } destCls
                     && FindAsOperator(destCls, inner.Type) is { } asOp)
                 {
                     CheckOperatorAccess(destCls, "as", ctx, ce.Span);
@@ -5306,36 +5256,4 @@ internal sealed class TypeResolver(
 
     #endregion
 
-    private readonly struct FuncPtrKey(IrType ret, List<IrType> ps) : IEquatable<FuncPtrKey>
-    {
-        public readonly IrType Ret = ret;
-        public readonly List<IrType> Params = ps;
-
-        public bool Equals(FuncPtrKey other)
-        {
-            if (!SameType(Ret, other.Ret)) return false;
-            if (Params.Count != other.Params.Count) return false;
-            for (int i = 0; i < Params.Count; i++)
-            {
-                if (!SameType(Params[i], other.Params[i])) return false;
-            }
-            return true;
-        }
-
-        public override bool Equals(object? obj)
-        {
-            return obj is FuncPtrKey other && Equals(other);
-        }
-
-        public override int GetHashCode()
-        {
-            var hash = new HashCode();
-            hash.Add(Ret);
-            for (int i = 0; i < Params.Count; i++)
-            {
-                hash.Add(Params[i]);
-            }
-            return hash.ToHashCode();
-        }
-    }
 }

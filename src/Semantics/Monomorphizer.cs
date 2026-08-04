@@ -208,7 +208,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
             return SubType(a) switch
             {
                 NamedSpec ns => ns,
-                var sub => new NamedSpec(SanitizeTypeName(sub!.ToSpecString()), a.Span)
+                var sub => new NamedSpec(SanitizeTypeName(sub!), a.Span)
             };
         }
     }
@@ -267,7 +267,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
                     diag.Error(Codes.DuplicateName, path, item.Span,
                         $"generic type '{Mangler.DisplayName(baseName)}' is already declared");
                 templates[baseName] = new Template(item, genericParams!, baseName);
-                Mangler.RegisterGenericTemplate(baseName, genericParams!.Length);
+                Mangler.RegisterGenericTemplate(baseName);
                 tmplNames.Add(Mangler.GenericInstance(baseName, genericParams!));
             }
 
@@ -334,7 +334,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
                 diag.Error(Codes.WrongArgCount, file, span,
                     $"generic '{baseName}' expects {tmpl.Params.Length} type argument(s) " +
                     $"({string.Join(", ", tmpl.Params)}), got {args.Length} ({string.Join(", ", args)})");
-                Mangler.RegisterGenericInstance(mangled, baseName, [..args]);
+                Mangler.RegisterGenericInstance(mangled);
                 Mangler.MarkGenericFailed(mangled);
                 continue;
             }
@@ -342,12 +342,12 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
             {
                 diag.Error(Codes.UndefinedType, file, span,
                     $"'void' is not a valid type argument to '{baseName}'");
-                Mangler.RegisterGenericInstance(mangled, baseName, [..args]);
+                Mangler.RegisterGenericInstance(mangled);
                 Mangler.MarkGenericFailed(mangled);
                 continue;
             }
             var (concrete, binds) = Instantiate(tmpl, args, mangled);
-            Mangler.RegisterGenericInstance(mangled, baseName, [..args]);
+            Mangler.RegisterGenericInstance(mangled);
             string requester = scopeRequester.GetValueOrDefault(mangled, file);
             requestedFrom[mangled] = requester;
             if (!instancesByBase.TryGetValue(baseName, out var list))
@@ -1160,12 +1160,9 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
                 when Array.IndexOf(gparams, pn.Name) >= 0 && argType is IrPtrType ptr:
                 return Bind(pn.Name, SpecOf(ptr.Inner), binds);
 
-            // A generic instantiation in parameter position, matched against the stamped
-            // instance passed in. Both a class and a union arrive here - 'Count[T](Node[T] n)'
-            // called with a Node[int] carries an IrUnionType, not an IrClassRef.
             case NamedSpec gn when gn.Args.Length > 0 && NameOfInstance(argType) is { } instName
                 && Mangler.TryGetGenericInstance(instName, out var instBase, out var instArgs)
-                && instBase == gn.Name && instArgs.Count == gn.Args.Length:
+                && instBase == gn.Name && instArgs.Length == gn.Args.Length:
             {
                 for (int i = 0; i < gn.Args.Length; i++)
                     if (gn.Args[i] is { Args.Length: 0 } an && Array.IndexOf(gparams, an.Name) >= 0
@@ -1224,13 +1221,49 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     /// Reduces a type name to a valid C-identifier fragment for use in mangled generic names.
     /// Pointer stars become "_p"; all other non-identifier characters are dropped.
     /// </summary>
-    internal static string SanitizeTypeName(string t)
+    internal static string SanitizeTypeName(TypeSpec t)
     {
         var sb = new System.Text.StringBuilder();
-        foreach (char ch in t.Trim())
-            if (char.IsLetterOrDigit(ch) || ch == '_') sb.Append(ch);
-            else if (ch == '*') sb.Append("_p");
+        AppendSanitized(sb, t);
         return sb.Length == 0 ? "x" : sb.ToString();
+    }
+
+    /// <summary>
+    /// Appends one spec's C-identifier fragment: identifier text is kept, a pointer star becomes a
+    /// _p marker, and the punctuation the flat spelling would have introduced is never written in
+    /// the first place.
+    /// </summary>
+    private static void AppendSanitized(System.Text.StringBuilder sb, TypeSpec t)
+    {
+        switch (t)
+        {
+            case NamedSpec n:
+                AppendIdentifierChars(sb, n.Name);
+                foreach (var a in n.Args) { sb.Append('_'); AppendSanitized(sb, a); }
+                break;
+            case PtrSpec p:
+                AppendSanitized(sb, p.Inner);
+                sb.Append("_p");
+                break;
+            case ArraySpec a:
+                AppendIdentifierChars(sb, a.SizeText);
+                AppendSanitized(sb, a.Elem);
+                break;
+            case FuncSpec f:
+                sb.Append("func");
+                foreach (var p in f.Params) AppendSanitized(sb, p);
+                AppendSanitized(sb, f.Ret);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Appends the characters of a written name that a C identifier may carry.
+    /// </summary>
+    private static void AppendIdentifierChars(System.Text.StringBuilder sb, string s)
+    {
+        foreach (char ch in s)
+            if (char.IsLetterOrDigit(ch) || ch == '_') sb.Append(ch);
     }
 
     #endregion

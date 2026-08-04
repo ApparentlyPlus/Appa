@@ -1,5 +1,13 @@
 namespace Appa;
 
+using System.Collections.Immutable;
+
+/// <summary>
+/// A generic instantiation's structure. The template it stamps and the arguments it stamps it over,
+/// each already flat because a nested instantiation is registered under its own key.
+/// </summary>
+internal readonly record struct GenericKey(string Base, ImmutableArray<string> Args);
+
 internal static class Mangler
 {
     public const string KernelEntry = "gata_kernelspace_main";
@@ -69,15 +77,17 @@ internal static class Mangler
         return false;
     }
 
-    // Step 7 dense naming. When populated by the Densifier after reachability, a
-    // class's readable C name collapses to a short machine token. Empty during resolution.
+    // Dense naming
     [ThreadStatic] private static Dictionary<string, string>? _denseTls;
     private static Dictionary<string, string> _dense => _denseTls ??= [];
 
-    // Every generic instantiation the Monomorphizer stamps is recorded here so
-    // diagnostics can show the user-written form instead of the mangled name.
-    [ThreadStatic] private static Dictionary<string, (string Base, List<string> Args)>? _genericInfoTls;
-    private static Dictionary<string, (string Base, List<string> Args)> _genericInfo => _genericInfoTls ??= [];
+    // Every generic instantiation the Monomorphizer stamped, which is the set of instances that actually exist
+    [ThreadStatic] private static Dictionary<string, GenericKey>? _genericInfoTls;
+    private static Dictionary<string, GenericKey> _genericInfo => _genericInfoTls ??= [];
+
+    // Every instance name GenericInstance ever composed, stamped or not
+    [ThreadStatic] private static Dictionary<string, GenericKey>? _composedTls;
+    private static Dictionary<string, GenericKey> _composed => _composedTls ??= [];
 
     /// <summary>
     /// Replaces the dense name map with the given mapping produced by the Densifier.
@@ -96,14 +106,22 @@ internal static class Mangler
     }
 
     /// <summary>
-    /// Clears the generic instance display registry for the next build.
+    /// Clears what the last front-end round stamped. Runs per round, since a round starts from the
+    /// unstamped programs again and re-decides what exists.
     /// </summary>
     public static void ResetGenericDisplay()
     {
         _genericInfo.Clear();
         _genericTemplates.Clear();
-        _genericArity.Clear();
         _genericFailed.Clear();
+    }
+
+    /// <summary>
+    /// Clears what a flat instance name means, for the next build.
+    /// </summary>
+    public static void ResetComposedNames()
+    {
+        _composed.Clear();
     }
 
     // Instantiations the Monomorphizer rejected and therefore never stamped
@@ -124,28 +142,30 @@ internal static class Mangler
     /// Composes the internal name of a generic instantiation: ("List", ["int"]) is "List_int". The
     /// single place this rule is spelled, so no caller's own concatenation can drift from it.
     /// </summary>
-    public static string GenericInstance(string baseName, IEnumerable<string> args)
+    public static string GenericInstance(string baseName, IReadOnlyList<string> args)
     {
         var sb = new System.Text.StringBuilder(baseName);
         foreach (var a in args) sb.Append('_').Append(a);
-        return sb.ToString();
+        string mangled = sb.ToString();
+        _composed[mangled] = new GenericKey(baseName, [.. args]);
+        return mangled;
     }
 
     /// <summary>
-    /// Records the base name and type arguments for a generic instantiation so diagnostics can
-    /// display it in user-readable form.
+    /// Records that this instantiation was stamped, so diagnostics can tell an instance the build
+    /// produced from a spelling that merely names one.
     /// </summary>
-    public static void RegisterGenericInstance(string mangled, string baseName, List<string> args)
+    public static void RegisterGenericInstance(string mangled)
     {
-        _genericInfo[mangled] = (baseName, args);
+        if (_composed.TryGetValue(mangled, out var key)) _genericInfo[mangled] = key;
     }
 
     /// <summary>
-    /// Returns the registered base name and type arguments for a mangled generic instance name,
-    /// such as Map_int_String, which yields ("Map", ["int", "String"]). Structural consumers
+    /// Returns the base name and type arguments of a stamped generic instance, such as
+    /// Map_int_String, which yields ("Map", ["int", "String"]). Structural consumers
     /// (generic-function type inference) use this instead of re-splitting the mangled string.
     /// </summary>
-    public static bool TryGetGenericInstance(string mangled, out string baseName, out List<string> args)
+    public static bool TryGetGenericInstance(string mangled, out string baseName, out ImmutableArray<string> args)
     {
         if (_genericInfo.TryGetValue(mangled, out var info))
         {
@@ -157,44 +177,31 @@ internal static class Mangler
         return false;
     }
 
-    // Base names of every generic template seen this build, whether or not anything
-    // instantiated them. Kept for diagnostics: a template nothing names as a type is replaced
-    // by nothing, so without this the base name looks like an undefined identifier.
+    // Base names of every generic template seen this build, whether or not anything instantiated them
     [ThreadStatic] private static HashSet<string>? _genericTemplatesTls;
     private static HashSet<string> _genericTemplates => _genericTemplatesTls ??= [];
-
-    // How many type parameters each registered template takes, which is what lets a mangled
-    // instance name be split back into its base and arguments.
-    [ThreadStatic] private static Dictionary<string, int>? _genericArityTls;
-    private static Dictionary<string, int> _genericArity => _genericArityTls ??= [];
 
     /// <summary>
     /// Records that a generic template with this base name was declared.
     /// </summary>
-    public static void RegisterGenericTemplate(string baseName, int arity = 1)
+    public static void RegisterGenericTemplate(string baseName)
     {
         _genericTemplates.Add(baseName);
-        _genericArity[baseName] = arity;
     }
 
     /// <summary>
     /// Splits a mangled instance name back into the template it instantiates and its arguments, for
-    /// a name that reached a pass already flattened.
+    /// a name that reached a pass already flattened. The split is the key filed when the name was
+    /// composed, so a base or an argument containing an underscore costs nothing.
     /// </summary>
-    public static bool TrySplitInstance(string mangled, out string baseName, out string[] args)
+    public static bool TrySplitInstance(string mangled, out string baseName, out ImmutableArray<string> args)
     {
-        baseName = ""; args = [];
-        for (int i = mangled.IndexOf('_'); i > 0; i = mangled.IndexOf('_', i + 1))
+        if (_composed.TryGetValue(mangled, out var key) && _genericTemplates.Contains(key.Base))
         {
-            string candidate = mangled[..i];
-            if (!_genericArity.TryGetValue(candidate, out int arity)) continue;
-            string rest = mangled[(i + 1)..];
-            if (rest.Length == 0) continue;
-            if (arity == 1) { baseName = candidate; args = [rest]; return true; }
-            var parts = rest.Split('_');
-            if (parts.Length != arity) continue;
-            baseName = candidate; args = parts; return true;
+            (baseName, args) = key;
+            return true;
         }
+        baseName = ""; args = [];
         return false;
     }
 
@@ -211,76 +218,47 @@ internal static class Mangler
     public static List<string> InstancesOf(string baseName)
     {
         var found = new List<string>();
-        foreach (var (mangled, info) in _genericInfo)
-            if (info.Base == baseName) found.Add(mangled);
+        foreach (var (mangled, key) in _genericInfo)
+            if (key.Base == baseName) found.Add(mangled);
         found.Sort(StringComparer.Ordinal);
         return found;
     }
 
-    // Readable form of every scope-qualified name this build produced: 'Config@kernel$P1' maps to
-    // 'kernel.P1.Config'. Without this every diagnostic naming a scoped type would print the raw
-    // internal spelling, which is both unreadable and a lie about what the user wrote.
-    [ThreadStatic] private static Dictionary<string, string>? _scopeDisplayTls;
-    private static Dictionary<string, string> _scopeDisplay => _scopeDisplayTls ??= [];
-
-    // Bare name to the readable paths of every scope declaring it. Lets a diagnostic say where a
-    // name it could not resolve does exist, instead of insisting it does not exist at all.
-    [ThreadStatic] private static Dictionary<string, List<string>>? _scopedByBareTls;
-    private static Dictionary<string, List<string>> _scopedByBare => _scopedByBareTls ??= [];
-
-    // What each scope qualified name was declared as: "a type", "a function", "a generic type". A
-    // scope holds one meaning per name, so a use in the wrong position can be told what it found
-    // instead of being answered with "unknown type".
-    [ThreadStatic] private static Dictionary<string, string>? _scopeKindTls;
-    private static Dictionary<string, string> _scopeKind => _scopeKindTls ??= [];
+    // The scope tree of the build in progress
+    [ThreadStatic] private static ScopeTree? _scopes;
 
     /// <summary>
-    /// Records what kind of declaration a scope-qualified name refers to.
+    /// Adopts the scope tree of the build about to run, replacing the previous build's.
     /// </summary>
-    public static void RegisterScopedKind(string qualified, string kind) => _scopeKind[qualified] = kind;
+    public static void SetScopes(ScopeTree tree) => _scopes = tree;
+
+    /// <summary>
+    /// Drops the scope tree for the next build. Leaving it in place leaks names between builds,
+    /// which in the in-process test harness means leaking them between tests.
+    /// </summary>
+    public static void ResetScopes() => _scopes = null;
 
     /// <summary>
     /// What a scope-qualified name was declared as, or null when nothing scoped declares it.
     /// </summary>
-    public static string? ScopedKind(string qualified) => _scopeKind.GetValueOrDefault(qualified);
-
-    /// <summary>
-    /// Records the readable, fully-qualified form of a scope-qualified name.
-    /// </summary>
-    public static void RegisterScopedName(string qualified, string display)
-    {
-        _scopeDisplay[qualified] = display;
-
-        int dot = display.LastIndexOf('.');
-        if (dot < 0) return;
-        string bare = display[(dot + 1)..];
-        if (!_scopedByBare.TryGetValue(bare, out var paths)) _scopedByBare[bare] = paths = [];
-        if (!paths.Contains(display)) paths.Add(display);
-    }
+    public static string? ScopedKind(string qualified) => _scopes?.KindOf(qualified);
 
     /// <summary>
     /// The readable paths of every scope declaring this bare name, ordinally sorted. Empty when
     /// nothing scoped declares it, which is the ordinary case.
     /// </summary>
-    public static List<string> ScopedCandidates(string bare)
-    {
-        if (!_scopedByBare.TryGetValue(bare, out var paths)) return [];
-        var copy = new List<string>(paths);
-        copy.Sort(StringComparer.Ordinal);
-        return copy;
-    }
+    public static List<string> ScopedCandidates(string bare) => _scopes?.Candidates(bare) ?? [];
 
     /// <summary>
-    /// Clears the scoped-name display registry for the next build. Called beside the other resets;
-    /// leaving it populated leaks names between builds, which in the in-process test harness means
-    /// leaking them between tests.
+    /// The readable, fully-qualified form of a scoped declaration name.
     /// </summary>
-    public static void ResetScopeDisplay()
-    {
-        _scopeDisplayTls = [];
-        _scopedByBareTls = [];
-        _scopeKindTls = [];
-    }
+    private static string Unqualified(string name) =>
+        _scopes is { } t && t.TryUnqualify(name, out var qn) ? t.Display(qn.Scope, qn.Name) : name;
+
+    /// <summary>
+    /// True when a scope declares this exact qualified name, as opposed to it merely containing one.
+    /// </summary>
+    private static bool IsScoped(string name) => _scopes?.TryUnqualify(name, out _) == true;
 
     /// <summary>
     /// Returns the user readable display name for a type, expanding generic instantiations
@@ -288,31 +266,22 @@ internal static class Mangler
     /// </summary>
     public static string DisplayName(string name)
     {
-        if (!_genericInfo.ContainsKey(name))
-        {
-            if (_scopeDisplay.TryGetValue(name, out var plain)) return plain;
-            return name.Contains('@') ? UnstampedScoped(name) : name;
-        }
+        if (!TryStructure(name, out _)) return Unqualified(name);
         var sb = new System.Text.StringBuilder();
         AppendDisplayName(sb, name);
         return sb.ToString();
     }
 
     /// <summary>
-    /// The readable form of a scope-qualified instantiation.
-    /// 'Box[int]' over a scoped 'Box' that is not generic. The longest registered prefix is
-    /// the base, and what follows it the arguments, as GenericInstance wrote them.
+    /// The instantiation a flat name denotes: what the build stamped, or failing that whatever
+    /// composed the spelling, which is how an instantiation that was never stamped still reads as
+    /// 'Box[int]' rather than as its internal name.
     /// </summary>
-    private static string UnstampedScoped(string name)
+    private static bool TryStructure(string name, out GenericKey key)
     {
-        for (int cut = name.LastIndexOf('_'); cut > 0; cut = name.LastIndexOf('_', cut - 1))
-        {
-            if (!_scopeDisplay.TryGetValue(name[..cut], out var head)) continue;
-            var args = name[(cut + 1)..].Split('_');
-            for (int i = 0; i < args.Length; i++) args[i] = DisplayName(args[i]);
-            return $"{head}[{string.Join(", ", args)}]";
-        }
-        return name;
+        if (_genericInfo.TryGetValue(name, out key)) return true;
+        key = default;
+        return !IsScoped(name) && _composed.TryGetValue(name, out key);
     }
 
     /// <summary>
@@ -320,31 +289,28 @@ internal static class Mangler
     /// </summary>
     private static void AppendDisplayName(System.Text.StringBuilder sb, string name)
     {
-        if (_genericInfo.TryGetValue(name, out var info))
+        if (TryStructure(name, out var key))
         {
-            sb.Append(_scopeDisplay.GetValueOrDefault(info.Base, info.Base)).Append('[');
-            for (int i = 0; i < info.Args.Count; i++)
+            sb.Append(Unqualified(key.Base)).Append('[');
+            for (int i = 0; i < key.Args.Length; i++)
             {
                 if (i > 0) sb.Append(", ");
-                AppendDisplayName(sb, info.Args[i]);
+                AppendDisplayName(sb, key.Args[i]);
             }
             sb.Append(']');
         }
         else
         {
-            // A scoped type reached as a generic argument lands here, so the unqualification has to
-            // happen on this branch too: List_Config@kernel$P1 must read List[kernel.P1.Config].
-            sb.Append(_scopeDisplay.GetValueOrDefault(name, name));
+            sb.Append(Unqualified(name));
         }
     }
 
     /// <summary>
-    /// Turns a scope-qualified Gata name into a C-safe fragment: 'Config@kernel$P' becomes
-    /// 'Config_s3f2a71c9'. The token hashes the suffix, so depth costs no length; an unqualified
-    /// name passes through, so a program declaring nothing in a scope emits identical C.
+    /// Turns a scope-qualified Gata name into a C-safe fragment.
     /// </summary>
     public static string Sanitize(string name)
     {
+        if (_scopes is { } tree && tree.TryUnqualify(name, out var qn)) return qn.Name + tree.Token(qn.Scope);
         int at = name.IndexOf('@');
         return at < 0 ? name : string.Concat(name.AsSpan(0, at), "_s", Hash(name.AsSpan(at)));
     }
@@ -501,7 +467,7 @@ internal static class Mangler
     /// A stable 8-hex C-identifier fragment derived from a string via 32-bit FNV-1a. Stable across
     /// builds and machines, which matters because it ends up in emitted C.
     /// </summary>
-    private static string Hash(ReadOnlySpan<char> s)
+    internal static string Hash(ReadOnlySpan<char> s)
     {
         uint h = 2166136261;
         foreach (char c in s) { h ^= c; h *= 16777619; }

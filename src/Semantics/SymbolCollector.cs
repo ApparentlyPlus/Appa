@@ -12,11 +12,12 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
     private readonly HashSet<string> _declaredTypes = [];
     private readonly Dictionary<string, HashSet<string>> _declaredFieldNames = [];
     private readonly Dictionary<string, HashSet<string>> _declaredMethodNames = [];
-    private readonly Dictionary<string, HashSet<string>> _declaredMethodSigs = [];
-    private readonly Dictionary<string, HashSet<string>> _declaredOperatorSigs = [];
+    private readonly Dictionary<string, HashSet<SignatureKey>> _declaredMethodSigs = [];
+    private readonly Dictionary<string, HashSet<SignatureKey>> _declaredAsConversions = [];
+    private readonly Dictionary<string, HashSet<(string Op, int Arity)>> _declaredOperatorSigs = [];
     private readonly HashSet<string> _declaredFuncs = [];
-    private readonly HashSet<string> _declaredFuncSigs = [];
-    private readonly HashSet<(string File, string Sig)>  _declaredPrivateFuncSigs  = [];
+    private readonly HashSet<(SignatureKey Sig, bool IsEntry)> _declaredFuncSigs = [];
+    private readonly HashSet<(string File, SignatureKey Sig)> _declaredPrivateFuncSigs = [];
     private readonly HashSet<string> _externFuncs = [];
     private readonly Dictionary<string, string> _externShapes = [];
     private readonly HashSet<string> _preDefinedStructs = [];
@@ -158,6 +159,7 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
         var methodNames = _declaredMethodNames.TryGetValue(cd.Name, out var ms) ? ms : (_declaredMethodNames[cd.Name] = []);
         var methodSigs = _declaredMethodSigs.TryGetValue(cd.Name, out var ss)  ? ss : (_declaredMethodSigs[cd.Name]  = []);
         var operatorSigs = _declaredOperatorSigs.TryGetValue(cd.Name, out var os) ? os : (_declaredOperatorSigs[cd.Name] = []);
+        var asConversions = _declaredAsConversions.TryGetValue(cd.Name, out var cs) ? cs : (_declaredAsConversions[cd.Name] = []);
 
         foreach (var m in cd.Members)
         {
@@ -183,7 +185,7 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
                     if ((fd.Modifiers & Modifiers.Public) == 0) _sym.PrivateMembers.Add(new(cd.Name, fd.Name));
                     break;
                 case MethodDecl md:
-                    string mSigKey = md.Name + "/" + Mangler.OverloadSuffix(md.Params);
+                    var mSigKey = SignatureKey.Of(md.Name, md.Params);
                     if (fieldNames.Contains(md.Name))
                     {
                         diag.Error(Codes.DuplicateName, file, md.Span,
@@ -220,10 +222,10 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
                     TypeSpec retType = od.ReturnType
                         ?? new NamedSpec(OperatorRules.DefaultReturn(od.Op, cd.Name), od.Span);
 
-                    string opSigKey = od.Op == "as" && od.Params.Length == 1
-                        ? "as/param/" + od.Params[0].Type.ToSpecString()
-                        : od.Op + "/" + od.Params.Length;
-                    if (!operatorSigs.Add(opSigKey))
+                    bool fresh = od.Op == "as" && od.Params.Length == 1
+                        ? asConversions.Add(SignatureKey.Of("as", od.Params))
+                        : operatorSigs.Add((od.Op, od.Params.Length));
+                    if (!fresh)
                     {
                         diag.Error(Codes.DuplicateName, file, od.Span,
                             od.Op == "as" && od.Params.Length == 1
@@ -255,7 +257,7 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
         var sig = new MethodSig(fd.ReturnType, [.. fd.Params], true, fd.Throws, fd.IsEntry, [.. fd.Annotations]);
         if ((fd.Modifiers & Modifiers.Private) != 0)
         {
-            if (!_declaredPrivateFuncSigs.Add((file, fd.Name + "/" + Mangler.OverloadSuffix(fd.Params))))
+            if (!_declaredPrivateFuncSigs.Add((file, SignatureKey.Of(fd.Name, fd.Params))))
             {
                 diag.Error(Codes.DuplicateName, file, fd.Span,
                     $"private function '{Mangler.DisplayName(fd.Name)}' is already declared in this file with the same parameter types");
@@ -266,7 +268,7 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
             return;
         }
 
-        if (!_declaredFuncSigs.Add(fd.Name + "/" + Mangler.OverloadSuffix(fd.Params) + (fd.IsEntry ? "/entry" : "")))
+        if (!_declaredFuncSigs.Add((SignatureKey.Of(fd.Name, fd.Params), fd.IsEntry)))
         {
             diag.Error(Codes.DuplicateName, file, fd.Span,
                 $"function '{Mangler.DisplayName(fd.Name)}' is already declared with the same parameter types");
@@ -305,8 +307,6 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
     /// </summary>
     private void P1Extern(ExternFuncDecl ed, string file)
     {
-        // Re-declaring the same extern across files is harmless; clashing with a
-        // defined Gata function is not.
         if (_declaredFuncs.Contains(ed.Name))
         {
             if (!_externFuncs.Contains(ed.Name))
