@@ -283,9 +283,8 @@ internal static class Pipeline
         }
         foreach (var u in module.Unions) Claim(u.CName, $"union '{Mangler.DisplayName(u.Name)}'");
         foreach (var n in module.NativeTypes) Claim(n.CName, $"native type '{Mangler.DisplayName(n.Name)}'");
-
         foreach (var f in module.FreeFunctions)
-            Claim(f.CName, $"function '{Mangler.DisplayName(f.Name)}'");
+            Claim(f.CName, f.IsEntry ? "the entry point" : $"function '{Mangler.DisplayName(f.Name)}'");
 
         foreach (var fp in module.FuncPtrTypes) Claim(fp.ToCType(), $"the function type '{fp.MangledName}'");
         foreach (var ar in module.ArrayTypes) Claim(ar.ToCType(), $"the array type '{ar.MangledName}'");
@@ -341,13 +340,13 @@ internal static class Pipeline
     }
 
     /// <summary>
-    /// Validates realm structure against the target: GatOS wants one kernel block with one entry
-    /// func and any number of user blocks; Hosted forbids kernel blocks and wants one user block
-    /// with one entry func. With no target, the GatOS-shaped rule applies.
+    /// Validates realm structure against the target. A realm is one namespace however many blocks
+    /// open it, in however many files, so what is counted is entry points rather than blocks.
     /// </summary>
-    public static void ValidateStructure(List<(string path, Program prog)> programs, Target? target, DiagnosticBag diag)
+    public static void ValidateStructure(List<(string path, Program prog)> programs, Target? target,
+                                         DiagnosticBag diag, bool parsed = true)
     {
-        if (diag.HasErrors) return;
+        if (!parsed) return;
 
         var kernelBlocks = new List<(string file, TextSpan span)>();
         var userBlocks = new List<(string file, TextSpan span, TopLevel[] items)>();
@@ -367,31 +366,31 @@ internal static class Pipeline
             if (userBlocks.Count == 0)
             {
                 diag.Error(Codes.MissingRealm, ProjectWide, TextSpan.None,
-                    "no 'realm userspace { }' block found in any .g file - a Hosted build requires exactly one",
+                    "no 'realm userspace { }' block found in any .g file, but a Hosted build needs one",
                     ["wrap the entry point in 'realm userspace { entry func Main() { ... } }'"]);
                 return;
             }
-            foreach (var (file, span, _) in userBlocks.Skip(1))
-                diag.Error(Codes.DuplicateRealm, file, span, "only one 'realm userspace { }' block may exist in a Hosted build");
 
             var entryFuncs = new List<(string file, TextSpan span)>();
-            foreach (var inner in userBlocks[0].items)
-                if (inner is FuncDecl { IsEntry: true } ef)
-                    entryFuncs.Add((userBlocks[0].file, ef.Span));
+            foreach (var (file, _, items) in userBlocks)
+                foreach (var inner in items)
+                    if (inner is FuncDecl { IsEntry: true } ef)
+                        entryFuncs.Add((file, ef.Span));
 
             if (entryFuncs.Count == 0)
                 diag.Error(Codes.MissingEntry, userBlocks[0].file, userBlocks[0].span,
                     "the 'realm userspace { }' block declares no 'entry func'");
             else
                 foreach (var (file, span) in entryFuncs.Skip(1))
-                    diag.Error(Codes.DuplicateEntry, file, span, "the 'realm userspace { }' block declares more than one 'entry func'");
+                    diag.Error(Codes.DuplicateEntry, file, span,
+                        "the userspace realm declares more than one 'entry func'");
             return;
         }
         foreach (var (path, prog) in programs)
             foreach (var item in prog.Items)
                 if (item is ContextDecl ctx)
                     foreach (var inner in ctx.Items)
-                        if (inner is ProcessDecl { Threads.Length: 0 } pd)
+                        if (inner is ProcessDecl { Threads.Length: 0 } pd && !Reported(diag, path, pd.Span))
                             diag.Error(Codes.ProcessWithoutThreads, path, pd.Span,
                                 $"process '{pd.Name}' declares no threads",
                                 ["a process runs only through its threads, so this one would be created and never do anything",
@@ -429,15 +428,25 @@ internal static class Pipeline
             return;
         }
 
-        foreach (var (file, span) in kernelBlocks.Skip(1))
-            diag.Error(Codes.DuplicateRealm, file, span, "only one 'realm kernel { }' block may exist in the project");
-
         if (kernelEntryFuncs.Count == 0)
             diag.Error(Codes.MissingEntryPoint, kernelBlocks[0].file, kernelBlocks[0].span,
                 "the 'realm kernel { }' block declares no 'entry func'");
         else
             foreach (var (file, span) in kernelEntryFuncs.Skip(1))
-                diag.Error(Codes.DuplicateEntry, file, span, "the 'realm kernel { }' block declares more than one 'entry func'");
+                diag.Error(Codes.DuplicateEntry, file, span,
+                    "the kernel realm declares more than one 'entry func'");
+    }
+
+    /// <summary>
+    /// True when something has already been reported at exactly this declaration.
+    /// </summary>
+    private static bool Reported(DiagnosticBag diag, string file, TextSpan span)
+    {
+        foreach (var d in diag.All)
+            if (d.Severity == Severity.Error && d.Loc.Span == span
+                && string.Equals(d.Loc.File, file, StringComparison.OrdinalIgnoreCase))
+                return true;
+        return false;
     }
 
     /// <summary>

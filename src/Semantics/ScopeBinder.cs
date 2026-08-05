@@ -370,8 +370,15 @@ internal sealed class ScopeBinder(DiagnosticBag diag)
     {
         foreach (var (file, prog) in programs)
             foreach (var item in prog.Items)
+            {
+                if (item is FuncDecl { IsEntry: false } fd && (fd.Modifiers & Modifiers.Private) != 0)
+                {
+                    CheckPrivateShadow(fd, file, atRoot, visible);
+                    continue;
+                }
                 RejectStrayShadows(item, file, "move the declaration inside the realm or process it " +
                                                "belongs to, or remove the annotation");
+            }
 
         foreach (var (file, scope, name, item) in _declared)
         {
@@ -414,6 +421,53 @@ internal sealed class ScopeBinder(DiagnosticBag diag)
             imported ??= $"'{Path.GetFileNameWithoutExtension(d.File)}'";
         }
         return imported;
+    }
+
+    /// <summary>
+    /// Reports a file-local function that takes a name an imported file already gave a public
+    /// meaning.
+    /// </summary>
+    private void CheckPrivateShadow(FuncDecl fd, string file, Dictionary<string, List<RootDecl>> atRoot,
+                                    Dictionary<string, HashSet<string>>? visible)
+    {
+        bool marked = fd.Annotations.Any(a => a is ShadowsAnnotation);
+        string? owner = ImportedDeclaring(fd.Name, file, atRoot, visible);
+
+        if (owner != null && !marked)
+        {
+            if (!_privateShadow.Add((file, fd.Name))) return;
+            diag.Warn(Codes.ShadowedFunction, file, fd.Span,
+                $"'{fd.Name}' shadows the '{fd.Name}' declared in '{owner}'",
+                [$"every call to '{fd.Name}' in this file resolves to this one",
+                 $"reach the other through its file: '{owner}.{fd.Name}(...)'",
+                 "write '@shadows' before it if displacing that name is deliberate, or rename this one"]);
+        }
+        else if (owner == null && marked)
+            RejectStrayShadows(fd, file, "nothing this file imports declares that name");
+    }
+
+    // Private functions already reported as shadowing, so a set of overloads says it once.
+    private readonly HashSet<(string File, string Name)> _privateShadow = [];
+
+    /// <summary>
+    /// The module basename of an imported file declaring this name publicly, or null. Only a file
+    /// this one can actually see counts, since a name it cannot reach was never displaced.
+    /// </summary>
+    private static string? ImportedDeclaring(string name, string file,
+                                             Dictionary<string, List<RootDecl>> atRoot,
+                                             Dictionary<string, HashSet<string>>? visible)
+    {
+        if (!atRoot.TryGetValue(name, out var decls)) return null;
+        HashSet<string>? reachable = null;
+        visible?.TryGetValue(file, out reachable);
+        if (reachable == null) return null;
+
+        foreach (var d in decls)
+        {
+            if (d.Private || PathsEqual(d.File, file)) continue;
+            if (reachable.Contains(d.File)) return Path.GetFileNameWithoutExtension(d.File);
+        }
+        return null;
     }
 
     /// <summary>

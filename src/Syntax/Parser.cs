@@ -900,17 +900,12 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     /// </summary>
     private string ParseOperatorSymbol()
     {
-        if (AtP("+") || AtP("-") || AtP("*") || AtP("/") || AtP("<") || AtP(">")) return Advance().Value;
+        if (AtP("+") || AtP("-") || AtP("*") || AtP("/") || AtP("%") || AtP("<") || AtP(">")) return Advance().Value;
         if (At(TK.EqEq) || At(TK.NotEq) || At(TK.LtEq) || At(TK.GtEq)) return Advance().Value;
         if (AtP("&") || AtP("|") || AtP("^") || At(TK.Shl) || At(TK.Shr)) return Advance().Value;
-        // Unary ('!', '~', 0-param '-') and postfix ('++', '--') operators are overloadable too.
         if (AtP("!") || AtP("~")) return Advance().Value;
         if (At(TK.Inc) || At(TK.Dec)) return Advance().Value;
-        // 'operator V func [](K)' for getter, 'operator func []=(K, V)' for setter.
         if (At(TK.LBrack)) { Advance(); Expect(TK.RBrack); return Try(TK.Eq) ? "[]=" : "[]"; }
-        // 'operator Target func as(Source s)': a user-defined conversion, invoked by
-        // 'value as Target'. Declared on the class being converted TO, static (no self) -
-        // it converts its one parameter to self, not the other way around.
         if (At(TK.As)) { Advance(); return "as"; }
         Fail($"expected an operator symbol, found {Found()}");
         return "+";
@@ -977,9 +972,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     #region Process and thread
 
     /// <summary>
-    /// Parses a process declaration, requiring exactly one foreground/background mode - leading
-    /// keyword or trailing colon form, never both, never neither. The mode owns TTY focus and
-    /// scheduling visibility, so it is not allowed to default silently.
+    /// Parses a process declaration. The mode is written before 'process' and is mandatory: it owns
+    /// TTY focus and scheduling visibility, so it is not allowed to default silently.
     /// </summary>
     private ProcessDecl ParseProcessDeclTop()
     {
@@ -991,14 +985,11 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         if (!AtValue("process")) Fail($"expected 'process', found {Found()}", Codes.BadDeclHeader);
         Advance();
         var name = Expect(TK.Ident).Value;
-        if (Try(TK.Colon))
-        {
-            // Two spellings of the mode is an error; one of them has to go.
-            if (modeExplicit) Fail($"'{name}': mode specified twice", Codes.BadDeclHeader);
-            if (At(TK.Foreground)) { mode = "foreground"; modeExplicit = true; Advance(); }
-            else if (At(TK.Background)) { mode = "background"; modeExplicit = true; Advance(); }
-            else Fail($"expected 'foreground' or 'background' after ':', found {Found()}", Codes.BadDeclHeader);
-        }
+
+        if (At(TK.Colon))
+            Fail($"'{name}': the deployment mode is written before 'process'", Codes.MissingProcessMode,
+                 [$"write 'foreground process {name} {{ ... }}' or 'background process {name} {{ ... }}'"]);
+
         if (!modeExplicit)
             Fail($"'{name}': process declaration is missing a foreground/background mode", Codes.MissingProcessMode,
                  [$"write 'foreground process {name}' or 'background process {name}'"]);

@@ -85,7 +85,7 @@ internal static class Codes
     public const string CannotInfer           = "G054";
     public const string KernelBlockInHosted    = "G055";
     public const string MissingRealm           = "G056";
-    public const string DuplicateRealm         = "G057";
+    public const string ShadowedFunction       = "G057";
     public const string MissingEntry           = "G058";
     public const string DuplicateEntry         = "G059";
     public const string MissingProcessMode     = "G060";

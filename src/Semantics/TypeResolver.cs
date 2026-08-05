@@ -251,7 +251,6 @@ internal sealed class TypeResolver(
                 return;
             case PtrSpec ptr:
             {
-                // Any level of pointer to void is legal; otherwise validate the pointee.
                 TypeSpec inner = ptr.Inner;
                 while (inner is PtrSpec ip) inner = ip.Inner;
                 if (inner is NamedSpec { Name: "void", Args.Length: 0 }) return;
@@ -366,8 +365,10 @@ internal sealed class TypeResolver(
     {
         if (!Mangler.IsReservedLocal(name)) return;
         diag.Error(Codes.DuplicateName, ctx.File, span,
-            $"'{name}' is reserved for compiler-generated {what}s",
-            ["pick another name; this shape is used for the temporaries lowering introduces"]);
+            $"a {what} name cannot begin with '__'",
+            ["that prefix belongs to the temporaries lowering introduces, which land in this same " +
+             "C scope",
+             $"one underscore is yours: '_{name.TrimStart('_')}'"]);
     }
 
     /// <summary>
@@ -2562,7 +2563,10 @@ internal sealed class TypeResolver(
         if (!md.Throws) CheckType(md.ReturnType, ctx, md.Span, allowVoid: true);
         foreach (var p in md.Params) CheckType(p.Type, ctx, p.Span);
         CheckParams(md.Params, ctx);
-        var ret = md.Throws && md.ReturnType is null ? IrType.Int : ResolveType(md.ReturnType);
+        // A 'throws' declaration with no return type produces no value, exactly as 'throws void'
+        // does. The Result typedef the two share folds void to int for its C name (IrResultType),
+        // so the two spellings agree all the way down without this pass inventing an int.
+        var ret = ResolveType(md.ReturnType);
         CheckThrowsReturn(ret, md.Throws, $"{Mangler.DisplayName(cls)}.{md.Name}", ctx, md.Span);
         
         var pars = new List<IrParam>(md.Params.Length);
@@ -2656,7 +2660,7 @@ internal sealed class TypeResolver(
         if (!fd.Throws) CheckType(fd.ReturnType, ctx, fd.Span, allowVoid: true);
         foreach (var p in fd.Params) CheckType(p.Type, ctx, p.Span);
         CheckParams(fd.Params, ctx);
-        var ret = fd.Throws && fd.ReturnType is null ? IrType.Int : ResolveType(fd.ReturnType);
+        var ret = ResolveType(fd.ReturnType);
         CheckThrowsReturn(ret, fd.Throws, fd.Name, ctx, fd.Span);
         
         var pars = new List<IrParam>(fd.Params.Length);
@@ -2908,7 +2912,7 @@ internal sealed class TypeResolver(
                 sym.PrivateFuncOverloads(t.File, mangled).Count > 1)
             : Mangler.FreeFunc(mangled, concreteParams, overloaded: false, isEntry: false, isExtern: false);
         var ret = fd.ReturnType is null
-            ? (fd.Throws ? IrType.Int : IrType.Void)
+            ? IrType.Void
             : ResolveType(Monomorphizer.SubType(fd.ReturnType, binds));
         CoerceArgs(args, new MethodSig(fd.ReturnType, [..concreteParams], true, fd.Throws, false, [..fd.Annotations]), ctx, astArgs);
 
@@ -2963,7 +2967,7 @@ internal sealed class TypeResolver(
         var concreteParams = Monomorphizer.SubParams(md.Params, binds);
         string cname = Mangler.Method(owner, mangled, concreteParams, overloaded: false);
         var ret = md.ReturnType is null
-            ? (md.Throws ? IrType.Int : IrType.Void)
+            ? IrType.Void
             : ResolveType(Monomorphizer.SubType(md.ReturnType, binds));
         CoerceArgs(args, new MethodSig(md.ReturnType, [..concreteParams], isStatic, md.Throws, false, [..md.Annotations]), ctx, astArgs);
 
@@ -3436,7 +3440,7 @@ internal sealed class TypeResolver(
             {
                 var e = ResolveExpr(es.E, ctx);
                 ForbidNestedThrows(e, ctx, allowRoot: true);
-                if (e is IrCatchCall sc && ContainsAssignValue(sc.Handler))
+                if (e is IrCatchCall { InnerType: not IrVoidType } sc && ContainsAssignValue(sc.Handler))
                     diag.Error(Codes.AssignOutsideCatch, ctx.File, sc.Handler.Span,
                         "'assign' needs a declaration to supply a value for, and this call's result is discarded",
                         [$"bind the call first: 'let T x = ... catch {{ assign <value>; }};'"]);
@@ -3571,6 +3575,17 @@ internal sealed class TypeResolver(
                 if (ctx.InDefer)
                     diag.Error(Codes.DeferTransfer, ctx.File, s.Span, "a 'defer' body cannot 'assign'");
 
+                if (ctx.AssignType is IrVoidType)
+                {
+                    diag.Error(Codes.AssignOutsideCatch, ctx.File, s.Span,
+                        "this call produces no value, so there is nothing for 'assign' to supply",
+                        ["the handler ends through 'return', 'throw', 'break', or 'continue', " +
+                         "or simply by reaching its closing brace",
+                         "give the function a return type - 'throws T func ...' - if the call was " +
+                         "meant to produce one"]);
+                    return new IrAssignValue(ResolveExpr(av.Value, ctx));
+                }
+
                 var value = ResolveExpr(av.Value, ctx);
                 ForbidNestedThrows(value, ctx, allowRoot: false);
                 value = Coerce(value, ctx.AssignType, ctx);
@@ -3638,6 +3653,7 @@ internal sealed class TypeResolver(
         if (collection.Type is IrArrayType at)
         {
             var ainner = ctx.PushScope() with { LoopDepth = ctx.LoopDepth + 1 };
+            CheckNotReservedLocal(fi.Var, fi.Span, "loop variable", ctx);
             ainner.Locals.Declare(fi.Var, at.Elem);
             var abody = ResolveBlock(fi.Body, ainner, retType);
             WarnIfEmpty(abody, "for..in", ctx, fi.Span);
@@ -3672,6 +3688,7 @@ internal sealed class TypeResolver(
         }
 
         var inner = ctx.PushScope() with { LoopDepth = ctx.LoopDepth + 1 };
+        CheckNotReservedLocal(fi.Var, fi.Span, "loop variable", ctx);
         inner.Locals.Declare(fi.Var, elemType);
         var body = ResolveBlock(fi.Body, inner, retType);
         WarnIfEmpty(body, "for..in", ctx, fi.Span);
@@ -3774,6 +3791,7 @@ internal sealed class TypeResolver(
             for (int i = 0; i < c.Bindings.Length && i < fields.Length; i++)
             {
                 var ft = ResolveType(fields[i].Type);
+                CheckNotReservedLocal(c.Bindings[i], c.Span, "binding", ctx);
                 caseCtx.Locals.Declare(c.Bindings[i], ft);
                 binds.Add(new IrMatchBind(fields[i].Name, c.Bindings[i], ft));
             }
@@ -3805,7 +3823,7 @@ internal sealed class TypeResolver(
     private IrTryCatch ResolveTryCatch(TryCatchStmt tc, ResolveCtx ctx, IrType retType)
     {
         int seq = _labelSeq++;
-        var tctx = ctx.WithTry($"_catch_{seq}");
+        var tctx = ctx.WithTry($"__catch_{seq}");
         var tryBlock = ResolveBlock(tc.Try, tctx, retType);
         var catchBlock = ResolveBlock(tc.Catch, ctx, retType);
         return new IrTryCatch(tryBlock, catchBlock, seq);
@@ -3820,8 +3838,6 @@ internal sealed class TypeResolver(
 
         if (call.Type is not IrResultType rt)
         {
-            // Not a throwing call, so there is no failure to handle. Resolve the handler anyway
-            // (against the value's own type) so names inside it still get checked and reported.
             diag.Error(Codes.ThrowsOutsideTry, ctx.File, cce.Call.Span,
                 "'catch' here needs a call to a 'throws' function; this call cannot fail",
                 ["remove the 'catch' block"]);
@@ -4919,8 +4935,8 @@ internal sealed class TypeResolver(
                 return new IrExprStmt(new IrInstanceCall(obj, setOp.CName, IrType.Void, [idx, value])) { Span = asgn.Span };
             }
             var stmts = new List<IrStmt>();
-            var objRef = HoistIfImpure(obj, "_ixo", stmts);
-            var idxRef = HoistIfImpure(idx, "_ixi", stmts);
+            var objRef = HoistIfImpure(obj, "__ixo", stmts);
+            var idxRef = HoistIfImpure(idx, "__ixi", stmts);
             var getOp = sym.LookupOperator(cr.ClassName, "[]");
             IrExpr current;
             if (getOp != null)
@@ -4989,8 +5005,8 @@ internal sealed class TypeResolver(
             CheckOperatorAccess(elemClass2, elemBaseOp, ctx, asgn.Span);
             val = CheckOpArg(elemOp2, val, ctx);
             var stmts = new List<IrStmt>();
-            var objRef = HoistIfImpure(obj, "_ixo", stmts);
-            var idxRef = HoistIfImpure(idx, "_ixi", stmts);
+            var objRef = HoistIfImpure(obj, "__ixo", stmts);
+            var idxRef = HoistIfImpure(idx, "__ixi", stmts);
             var readTarget = new IrIndex(objRef, idxRef, elem) { Span = ixt.Span };
             var writeTarget = new IrIndex(objRef, idxRef, elem) { Span = ixt.Span };
             var composed = new IrStaticCall(elemOp2.CName, ResolveType(elemOp2.Type), [readTarget, val]);
@@ -5164,14 +5180,12 @@ internal sealed class TypeResolver(
             {
                 diag.Error(Codes.CannotInfer, ctx.File, span,
                     $"generic '{baseName}' is never instantiated, so '{baseName}.{variant}' has no type",
-                    [$"name the type somewhere first, e.g. 'let {baseName}[i
-            // file local private free functions take priority over globalsnt] x = {baseName}.{variant}(...);'"]);
+                    [$"name the type somewhere first, e.g. 'let {baseName}[int] x = {baseName}.{variant}(...);'"]);
                 return new IrUnionConstruct(IrTypes.Union(baseName), 0, args);
             }
             return null;
         }
 
-        // Only instances that actually declare this variant with a matching arity are candidates.
         var candidates = new List<string>();
         foreach (var inst in instances)
         {

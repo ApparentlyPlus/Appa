@@ -236,7 +236,7 @@ static (IrModule Module, IReadOnlyDictionary<string, string> Sourcemap, Capabili
     Pipeline.ValidateEnvironment(programs, diag);
     Pipeline.ValidateFloor(module, diag);
     Pipeline.ValidateIntrinsics(module, diag);
-    Pipeline.ValidateStructure(programs, target, diag);
+    Pipeline.ValidateStructure(programs, target, diag, parsed: true);
     if (manifest?.Target == Target.Hosted && module.HasKernelRealm)
         diag.Error(Codes.KernelBlockInHosted, "<environment>", TextSpan.None,
             "the active environment declares a kernel preamble, which is not allowed for a Hosted build");

@@ -507,6 +507,7 @@ public static class TortureCorpus
             "auto", "extern", "volatile", "restrict", "inline", "const", "do", "float",
             "NULL", "bool", "true", "false", "alignas", "static_assert",
             "_g0", "_has_error", "_res_v", "_sw0", "_o", "_ixi", "_catch_0",
+            "__g0", "__has_error", "__res_v", "__sw0", "__o", "__ixi", "__catch_0",
             "_", "__", "_unused", "x_", "Main", "self_",
         ];
         (string Name, string Template)[] shapes =
@@ -914,8 +915,8 @@ public static class TortureCorpus
         yield return new("operator/index-get-no-set",
             "class C { public operator int func [](int k) { return k; } } realm kernel { entry func Main() { let C c = new C(); c[0] = 1; } }",
             Expect.Rejected, Codes.NoIndexSetter);
-        yield return new("operator/mod-not-overloadable",
-            "class C { public operator C func %(C o) { return o; } } realm kernel { entry func Main() { } }", Expect.Rejected);
+        yield return new("operator/mod-overloadable",
+            "class C { public operator C func %(C o) { return o; } } realm kernel { entry func Main() { } }", Expect.Any);
         yield return new("operator/on-module",
             "module M { public operator int func +(int a) { return a; } } realm kernel { entry func Main() { } }", Expect.Any);
 
@@ -1626,8 +1627,10 @@ public static class TortureCorpus
         yield return new("struct/two-entries",
             "realm kernel { entry func A() { } entry func B() { } }", Expect.Rejected);
         yield return new("struct/nested-kernel", "realm kernel { realm kernel { } }", Expect.Rejected);
-        yield return new("struct/dup-kernel",
-            "realm kernel { entry func Main() { } } realm kernel { }", Expect.Rejected);
+        yield return new("struct/split-kernel",
+            "realm kernel { entry func Main() { } } realm kernel { }", Expect.Accepted);
+        yield return new("struct/split-kernel-two-entries",
+            "realm kernel { entry func Main() { } } realm kernel { entry func Other() { } }", Expect.Rejected);
         yield return new("struct/entry-outside-kernel",
             "entry func Main() { }", Expect.Rejected);
         yield return new("struct/panic-in-user",

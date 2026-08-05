@@ -110,7 +110,7 @@ internal sealed class Ownership(IrModule module)
 
     // The per-try error flag. One is declared at the top of each try block; nested throwing
     // calls inside that block set it, and the block's tail tests it to reach the catch label.
-    private const string HasErrorFlag = "_has_error";
+    private const string HasErrorFlag = "__has_error";
     private static IrVar HasErrorVar => new(HasErrorFlag, IrType.Bool);
 
     /// <summary>
@@ -166,7 +166,7 @@ internal sealed class Ownership(IrModule module)
 
     // The induction variable both for-in shapes count with. A nested for-in re-declares it in
     // its own C for-scope, which shadows the outer one exactly as the previous raw text did.
-    private const string IndexName = "_fi";
+    private const string IndexName = "__fi";
     private static IrVar IndexVar => new(IndexName, IrType.Int);
 
     /// <summary>
@@ -428,7 +428,7 @@ internal sealed class Ownership(IrModule module)
                 outs.Add(_pre[i]);
             _pre.RemoveRange(preStart, _pre.Count - preStart);
 
-            string res = $"_res_{dv.Name}";
+            string res = $"__res_{dv.Name}";
             outs.Add(new IrDeclVar(res, dv.Init.Type, call));
             
             int clCount = _cl.Count - clStart;
@@ -485,7 +485,7 @@ internal sealed class Ownership(IrModule module)
         outs.Add(new IrDeclVar(dv.Name, dv.Type, null) { Span = dv.Span });
         if (managed) RegisterOwner(dv.Name, dv.Type);
 
-        CatchBranch(cc, new IrVar(dv.Name, dv.Type), $"_res_{dv.Name}", call, clStart,
+        CatchBranch(cc, new IrVar(dv.Name, dv.Type), $"__res_{dv.Name}", call, clStart,
                     ownsOldValue: false, outs);
     }
 
@@ -503,7 +503,7 @@ internal sealed class Ownership(IrModule module)
         for (int i = preStart; i < _pre.Count; i++) outs.Add(_pre[i]);
         _pre.RemoveRange(preStart, _pre.Count - preStart);
 
-        CatchBranch(cc, target, Tmp("_res_asg"), call, clStart,
+        CatchBranch(cc, target, Tmp("__res_asg"), call, clStart,
                     ownsOldValue: IsManaged(a.Target.Type) && !_inUnsafe, outs);
     }
 
@@ -558,7 +558,7 @@ internal sealed class Ownership(IrModule module)
         _pre.RemoveRange(preStart, _pre.Count - preStart);
 
         var rt = (IrResultType)cc.Call.Type;
-        string res = Tmp("_res_tmp_");
+        string res = Tmp("__res_tmp_");
         outs.Add(new IrDeclVar(res, cc.Call.Type, call));
 
         int clCount = _cl.Count - clStart;
@@ -618,7 +618,7 @@ internal sealed class Ownership(IrModule module)
             outs.Add(new IrAssign(target, AssignOp.Assign, value));
             return;
         }
-        string tmp = Tmp("_cas");
+        string tmp = Tmp("__cas");
         outs.Add(new IrDeclVar(tmp, target.Type, value));
         outs.Add(ReleaseStmt(target));
         outs.Add(new IrAssign(target, AssignOp.Assign, new IrVar(tmp, target.Type)));
@@ -645,7 +645,7 @@ internal sealed class Ownership(IrModule module)
                 outs.Add(_pre[i]);
             _pre.RemoveRange(preStart, _pre.Count - preStart);
 
-            string tmp = Tmp("_asg");
+            string tmp = Tmp("__asg");
             outs.Add(new IrDeclVar(tmp, a.Target.Type, val));
             outs.Add(ReleaseStmt(tgt));
             outs.Add(new IrAssign(tgt, AssignOp.Assign, new IrVar(tmp, a.Target.Type)));
@@ -690,7 +690,7 @@ internal sealed class Ownership(IrModule module)
         _pre.RemoveRange(preStart, _pre.Count - preStart);
 
         var rt = (IrResultType)a.Value.Type;
-        string res = Tmp("_res_asg");
+        string res = Tmp("__res_asg");
         outs.Add(new IrDeclVar(res, a.Value.Type, call));
 
         int clCount = _cl.Count - clStart;
@@ -724,7 +724,7 @@ internal sealed class Ownership(IrModule module)
                 outs.Add(_pre[i]);
             _pre.RemoveRange(pStart, _pre.Count - pStart);
 
-            string res = Tmp("_res_tmp_");
+            string res = Tmp("__res_tmp_");
             outs.Add(new IrDeclVar(res, es.Expr.Type, call));
 
             int cCount = _cl.Count - cStart;
@@ -777,7 +777,7 @@ internal sealed class Ownership(IrModule module)
             outs.Add(_pre[i]);
         _pre.RemoveRange(pStart, _pre.Count - pStart);
 
-        string tmp = Tmp("_ret");
+        string tmp = Tmp("__ret");
         outs.Add(new IrDeclVar(tmp, rs.Value.Type, val));
 
         int cCount = _cl.Count - cStart;
@@ -811,7 +811,7 @@ internal sealed class Ownership(IrModule module)
             outs.Add(_pre[i]);
         _pre.RemoveRange(pStart, pCount);
 
-        string cv = Tmp("_if");
+        string cv = Tmp("__if");
         outs.Add(new IrDeclVar(cv, IrType.Bool, cond));
 
         for (int i = cStart; i < _cl.Count; i++)
@@ -839,13 +839,12 @@ internal sealed class Ownership(IrModule module)
             return;
         }
 
-        // Condition allocates each iteration: re-evaluate (and release) per pass.
         var inner = new List<IrStmt>(pCount + 2);
         for (int i = pStart; i < _pre.Count; i++)
             inner.Add(_pre[i]);
         _pre.RemoveRange(pStart, pCount);
 
-        string cv = Tmp("_wh");
+        string cv = Tmp("__wh");
         inner.Add(new IrDeclVar(cv, IrType.Bool, cond));
 
         for (int i = cStart; i < _cl.Count; i++)
@@ -870,9 +869,6 @@ internal sealed class Ownership(IrModule module)
         IrExpr? cond = fr.Cond == null ? null : Flatten(fr.Cond, false);
         int cpCount = _pre.Count - cpStart;
         int ccCount = _cl.Count - ccStart;
-
-        // The step is a full statement; LowerStmt consumes its own pre/cleanup entries,
-        // so a single plain assignment or expression coming back means it can stay inline.
         var stepOut = new List<IrStmt>();
         if (fr.Step != null) LowerStmt(fr.Step, stepOut);
         bool stepSimple = stepOut.Count == 0 || (stepOut.Count == 1 && stepOut[0] is IrExprStmt or IrAssign);
@@ -896,9 +892,6 @@ internal sealed class Ownership(IrModule module)
             return;
         }
 
-        // Lowered form: the init variable spans the whole loop in its own frame. The
-        // step runs at the top of each iteration after the first, so a C `continue`
-        // still advances the loop instead of skipping it.
         var outer = new List<IrStmt>();
         var frame = new Frame();
         _frames.Push(frame);
@@ -906,7 +899,7 @@ internal sealed class Ownership(IrModule module)
         var loop = new List<IrStmt>();
         if (stepOut.Count > 0)
         {
-            string firstFlag = Tmp("_first");
+            string firstFlag = Tmp("__first");
             var flagVar = new IrVar(firstFlag, IrType.Bool);
             outer.Add(new IrDeclVar(firstFlag, IrType.Bool, new IrLitBool(true)));
             loop.Add(IfThen(Not(flagVar), stepOut));
@@ -916,7 +909,7 @@ internal sealed class Ownership(IrModule module)
         {
             for (int i = 0; i < cpCount; i++)
                 loop.Add(_pre[cpStart + i]);
-            string cv = Tmp("_fc");
+            string cv = Tmp("__fc");
             loop.Add(new IrDeclVar(cv, IrType.Bool, cond));
             for (int i = 0; i < ccCount; i++)
                 loop.Add(ReleaseStmt(new IrVar(_cl[ccStart + i].Name, _cl[ccStart + i].Type)));
@@ -950,7 +943,7 @@ internal sealed class Ownership(IrModule module)
                 outs.Add(_pre[i]);
             _pre.RemoveRange(pStart, _pre.Count - pStart);
 
-            string av = Tmp("_arr");
+            string av = Tmp("__arr");
             outs.Add(new IrDeclVar(av, fi.Collection.Type, acol));
 
             int cCount = _cl.Count - cStart;
@@ -982,7 +975,7 @@ internal sealed class Ownership(IrModule module)
         _pre.RemoveRange(pStart, _pre.Count - pStart);
 
         bool colManaged = IsManaged(fi.Collection.Type);
-        string cv = Tmp("_col");
+        string cv = Tmp("__col");
         outs.Add(new IrDeclVar(cv, fi.Collection.Type, col));
 
         int c2Count = _cl.Count - cStart;
@@ -1010,8 +1003,8 @@ internal sealed class Ownership(IrModule module)
     /// </summary>
     private void LowerTryCatch(IrTryCatch tc, List<IrStmt> outs)
     {
-        string catchLbl = $"_catch_{tc.Seq}";
-        string endLbl = $"_end_{tc.Seq}";
+        string catchLbl = $"__catch_{tc.Seq}";
+        string endLbl = $"__end_{tc.Seq}";
 
         var tryStmts = new List<IrStmt> { new IrDeclVar(HasErrorFlag, IrType.Bool, new IrLitBool(false)) };
         var prev = (_inTry, _catchLabel);
@@ -1160,7 +1153,7 @@ internal sealed class Ownership(IrModule module)
             return t with { Cond = cond, Then = tv, Else = ev };
         }
 
-        string tmp = Tmp("_tern");
+        string tmp = Tmp("__tern");
         var tgt = new IrVar(tmp, t.Type);
         _pre.Insert(thenPreStart, new IrDeclVar(tmp, t.Type, null));
         thenPreStart++;
@@ -1189,7 +1182,6 @@ internal sealed class Ownership(IrModule module)
         return tgt;
     }
 
-    // A +1-owned value for a consuming position: producers pass through; a managed borrow is retained.
     private IrExpr Consume(IrExpr e)
     {
         IrExpr s = Flatten(e, true);
@@ -1198,7 +1190,7 @@ internal sealed class Ownership(IrModule module)
 
     private IrVar Hoist(IrExpr inline, IrType t)
     {
-        string tmp = Tmp("_a");
+        string tmp = Tmp("__a");
         _pre.Add(new IrDeclVar(tmp, t, inline));
         _cl.Add((tmp, t));
         return new IrVar(tmp, t);
@@ -1221,7 +1213,7 @@ internal sealed class Ownership(IrModule module)
     /// </summary>
     private IrVar LowerNewInit(IrNewInit ni)
     {
-        string v = Tmp("_ci");
+        string v = Tmp("__ci");
         var ct = IrTypes.ClassRef(ni.ClassName);
         int acStart = _cl.Count;
         var args = FlattenArgs(ni.Args);
@@ -1241,7 +1233,7 @@ internal sealed class Ownership(IrModule module)
 
             if (IsProducer(el) && IsManaged(el.Type))
             {
-                string e2 = Tmp("_e");
+                string e2 = Tmp("__e");
                 _pre.Add(new IrDeclVar(e2, el.Type, es));
                 _pre.Add(new IrExprStmt(new IrStaticCall(ni.AddCName, IrType.Void, [new IrVar(v, ct), new IrVar(e2, el.Type)])));
                 _pre.Add(ReleaseStmt(new IrVar(e2, el.Type)));
