@@ -63,7 +63,7 @@ internal static class HostedRun
             if (!CanRun(exe)) continue;
             try
             {
-                using var probe = TempDir.Create("appa-relflags-probe-");
+                using var probe = Scratch.Create("appa-relflags-probe-");
                 File.WriteAllText(probe.Combine("p.c"), "int main(void){return 0;}");
                 var (code, _) = Run(exe, $"{flags} -o probe p.c", probe.Path);
                 if (code == 0) return exe;
@@ -107,7 +107,7 @@ internal static class HostedRun
             bool answer;
             try
             {
-                using var probe = TempDir.Create("appa-asan-probe-");
+                using var probe = Scratch.Create("appa-asan-probe-");
                 File.WriteAllText(probe.Combine("p.c"), "int main(void){return 0;}");
                 var (code, _) = Run(cc, $"{SanitizerFlags} -o probe p.c", probe.Path);
                 answer = code == 0;
@@ -131,7 +131,7 @@ internal static class HostedRun
     /// </summary>
     public static Result BuildAndRun(IReadOnlyDictionary<string, string> files, string gata, string cc, bool release)
     {
-        using var work = TempDir.Create("appa-managed-union-");
+        using var work = Scratch.Create("appa-managed-union-");
         Directory.CreateDirectory(work.Combine("src"));
         foreach (var (name, text) in files)
         {
@@ -196,7 +196,16 @@ internal static class HostedRun
     }
 
     /// <summary>
-    /// Runs a process to completion, returning its exit code and combined output.
+    /// The exit code for a command that does not exist, borrowed from the shells. A caller probing
+    /// for an optional tool reads the exit code; Process.Start reports a missing binary by throwing
+    /// instead, so every one of those probes used to sail past its guard and fail later as a crash.
+    /// </summary>
+    public const int NotFound = 127;
+
+    /// <summary>
+    /// Runs a process to completion, returning its exit code and combined output. A tool that is not
+    /// installed comes back as <see cref="NotFound"/> rather than an exception, so "skip when the
+    /// compiler is absent" can be written the obvious way.
     /// </summary>
     public static (int Code, string Output) Run(
         string exe, string args, string cwd, IReadOnlyDictionary<string, string>? env = null)
@@ -210,7 +219,11 @@ internal static class HostedRun
         };
         if (env != null)
             foreach (var (k, v) in env) psi.Environment[k] = v;
-        using var p = Process.Start(psi)!;
+
+        Process? started;
+        try { started = Process.Start(psi); }
+        catch (System.ComponentModel.Win32Exception e) { return (NotFound, $"'{exe}' is not installed: {e.Message}"); }
+        using var p = started!;
         var stdout = p.StandardOutput.ReadToEndAsync();
         var stderr = p.StandardError.ReadToEndAsync();
         if (!p.WaitForExit(180_000))

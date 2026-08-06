@@ -8,12 +8,12 @@ public class CliDiagnosticsTests
     /// <summary>
     /// Creates a project tree with an environment and an entry, and optionally a .gconf.
     /// </summary>
-    private static TempDir Project(string? gconf)
+    private static Scratch Project(string? gconf)
     {
         string? gata = HostedRun.FindGataCheckout();
         Assert.NotNull(gata);
 
-        var work = TempDir.Create("appa-cli-diag-");
+        var work = Scratch.Create("appa-cli-diag-");
         Directory.CreateDirectory(work.Combine("src"));
         File.WriteAllText(work.Combine("src", "main.g"), "realm userspace { entry func Main() { } }");
         File.Copy(Path.Combine(gata, "envs", "env.hosted.g"), work.Combine("env.g"));
@@ -50,7 +50,7 @@ public class CliDiagnosticsTests
         using var work = Project(gconf: null);
         string got = Run("build --env env.g --entry src/main.g", work.Path);
         Assert.Contains("--pure-transpile", got);
-        Assert.DoesNotContain("run 'appa init'", got);
+        Assert.DoesNotContain("run 'appa new <name>'", got);
     }
 
     /// <summary>
@@ -70,10 +70,10 @@ public class CliDiagnosticsTests
     /// With no flags and no project, the original advice is still the right advice.
     /// </summary>
     [Fact]
-    public void NoArgsPointsAtInit()
+    public void NoArgsPointsAtNew()
     {
         using var work = Project(gconf: null);
-        Assert.Contains("run 'appa init'", Run("check", work.Path));
+        Assert.Contains("run 'appa new <name>'", Run("check", work.Path));
     }
 
     /// <summary>
@@ -112,7 +112,7 @@ public class CliDiagnosticsTests
     }
 
     /// <summary>
-    /// The project 'appa init' writes has to compile. It did not: the starter main.g still used the
+    /// The project 'appa new' writes has to compile. It did not: the starter main.g still used the
     /// pre-realm 'kernel { }' and 'user { }' block syntax, so the very first thing a new user runs
     /// after creating a project was a syntax error in code they had not written. The book was swept
     /// for that spelling; the template it was generated alongside was not.
@@ -123,8 +123,8 @@ public class CliDiagnosticsTests
         string? gata = HostedRun.FindGataCheckout();
         if (gata == null) return;
 
-        using var work = TempDir.Create("appa-init-");
-        string made = Run("init demo", work.Path);
+        using var work = Scratch.Create("appa-new-");
+        string made = Run("new demo", work.Path);
         Assert.Contains("Created", made);
 
         string got = Run($"check demo --stdlib \"{Path.Combine(gata, "libgata")}\"", work.Path);
@@ -202,12 +202,12 @@ public class CliDiagnosticsTests
     /// <summary>
     /// Writes a project whose classes hold each other in a reference cycle.
     /// </summary>
-    private static TempDir CycleProject(string source = CycleAtRoot)
+    private static Scratch CycleProject(string source = CycleAtRoot)
     {
         string? gata = HostedRun.FindGataCheckout();
         Assert.NotNull(gata);
 
-        var work = TempDir.Create("appa-cycle-");
+        var work = Scratch.Create("appa-cycle-");
         Directory.CreateDirectory(work.Combine("src"));
         File.WriteAllText(work.Combine("src", "main.g"), source);
         File.Copy(Path.Combine(gata, "envs", "env.hosted.g"), work.Combine("env.g"));
@@ -315,7 +315,7 @@ public class CliDiagnosticsTests
         string? gata = HostedRun.FindGataCheckout();
         if (gata == null) return;
 
-        using var stdlib = TempDir.Create("appa-stdlib-");
+        using var stdlib = Scratch.Create("appa-stdlib-");
         foreach (var f in Directory.GetFiles(Path.Combine(gata, "libgata"), "*.g"))
             File.Copy(f, stdlib.Combine(Path.GetFileName(f)));
 
@@ -386,7 +386,7 @@ public class CliDiagnosticsTests
     /// </summary>
     private static string RunArcBody(string body, string gata)
     {
-        using var work = TempDir.Create("appa-arc-unsafe-");
+        using var work = Scratch.Create("appa-arc-unsafe-");
         Directory.CreateDirectory(work.Combine("src"));
         File.WriteAllText(work.Combine("src", "main.g"), $$"""
             import Console;
@@ -460,7 +460,7 @@ public class CliDiagnosticsTests
         string? gata = HostedRun.FindGataCheckout();
         if (gata == null) return;
 
-        using var work = TempDir.Create("appa-strkey-");
+        using var work = Scratch.Create("appa-strkey-");
         Directory.CreateDirectory(work.Combine("src"));
         File.WriteAllText(work.Combine("src", "main.g"), $$"""
             import Console;
@@ -489,12 +489,12 @@ public class CliDiagnosticsTests
     /// A generic container over the author's own union, which is what drags libgata's internals
     /// into the analyses: every retain into List's raw storage, and its generated '=='.
     /// </summary>
-    private static TempDir LibraryWarningProject()
+    private static Scratch LibraryWarningProject()
     {
         string? gata = HostedRun.FindGataCheckout();
         Assert.NotNull(gata);
 
-        var work = TempDir.Create("appa-libwarn-");
+        var work = Scratch.Create("appa-libwarn-");
         Directory.CreateDirectory(work.Combine("src"));
         File.WriteAllText(work.Combine("src", "main.g"), """
             import Console;

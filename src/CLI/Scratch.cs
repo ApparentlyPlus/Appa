@@ -1,23 +1,19 @@
-namespace Appa.Tests;
+namespace Appa;
 
-/// <summary>
-/// A scratch directory that deletes itself at the end of the enclosing 'using', so cleanup is
-/// structural rather than a try/finally each test must remember. Best-effort: a held handle must
-/// not turn a passing test red on the way out.
-/// </summary>
-internal sealed class TempDir : IDisposable
+internal sealed class Scratch : IDisposable
 {
     /// <summary>
     /// Absolute path of the directory, which exists for the lifetime of this object.
     /// </summary>
     public string Path { get; }
 
-    private TempDir(string path) => Path = path;
+    private Scratch(string path) => Path = path;
 
     /// <summary>
-    /// Creates a uniquely named directory under the system temp root.
+    /// Creates a uniquely named, private directory under the system temp root. The prefix is for
+    /// the human who finds one left behind after a kill -9, so name it after the work.
     /// </summary>
-    public static TempDir Create(string prefix) =>
+    public static Scratch Create(string prefix) =>
         new(Directory.CreateTempSubdirectory(prefix).FullName);
 
     /// <summary>

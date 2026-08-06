@@ -5,36 +5,43 @@ using System.Runtime.InteropServices;
 
 #region Entry point
 
-// Windows consoles historically default to a non-UTF8 codepage; Unix terminals
-// already default to UTF-8, so this only needs to run on Windows.
 if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) Console.OutputEncoding = System.Text.Encoding.UTF8;
 
-if (args.Length == 0) { PrintHelp(); Environment.Exit(1); }
+if (args.Length == 0) { PrintHelp(); return; }
 try
 {
     switch (args[0])
     {
-        case "setup": await Installer.RunSetup(isUpdate: false); break;
-        case "update": await Installer.RunSetup(isUpdate: true); break;
-        case "init": RunInit(args[1..]); break;
-        case "build": RunBuild(args[1..]); break;
+        case "install":
+        case "update":
+        {
+            var (pathPref, force) = InstallOptions(args[1..]);
+            await Installer.RunSetup(isUpdate: args[0] == "update", pathPref, force);
+            break;
+        }
+        case "new": RunNew(args[1..]); break;
+        case "clean": RunClean(args[1..]); break;
+        case "build": RunBuild(args[1..], doRun: false); break;
+        case "run": RunBuild(args[1..], doRun: true); break;
         case "check": RunCheck(args[1..]); break;
+        case "help":
         case "--help":
         case "-h": PrintHelp(); break;
+        case "version":
         case "--version":
         case "-v": Console.WriteLine($"appa {AppaVersion.Current}"); break;
         default:
-            Log.Error($"Unknown command '{args[0]}'",
-                Suggest.Closest(args[0], ["init", "setup", "update", "build", "check", "--help", "--version"]) is { } near
-                    ? $"did you mean '{near}'?" : null);
-            PrintHelp();
+            Log.Error($"unknown command '{args[0]}'",
+                args[0] == "setup" ? "'appa setup' is now 'appa install'"
+                : Suggest.Closest(args[0], Commands()) is { } near ? $"did you mean 'appa {near}'?"
+                : "run 'appa --help' for the list of commands");
             Environment.Exit(1);
             break;
     }
 }
-catch (Exception ex) when (args[0] is "setup" or "update" && Installer.IsExpectedSetupFailure(ex))
+catch (Exception ex) when (args[0] is "install" or "update" && Installer.IsExpectedSetupFailure(ex))
 {
-    Log.Error($"setup could not complete: {ex.Message}", Installer.SetupFailureHint(ex));
+    Log.Error($"{args[0]} could not complete: {ex.Message}", Installer.SetupFailureHint(ex));
     Environment.Exit(1);
 }
 catch (Exception ex)
@@ -46,13 +53,37 @@ catch (Exception ex)
 
 #endregion
 
-#region appa init
+#region appa install / appa update
+
+/// <summary>
+/// Reads the options off an install/update invocation.
+/// </summary>
+static (bool? PathPref, bool Force) InstallOptions(string[] args)
+{
+    bool? pref = null;
+    bool force = false;
+    foreach (var a in args)
+        switch (a)
+        {
+            case "--with-path": pref = true; break;
+            case "--no-path": pref = false; break;
+            case "--force": force = true; break;
+            default:
+                Cli.Fail($"unknown option '{a}'", "install takes --with-path, --no-path, or --force");
+                break;
+        }
+    return (pref, force);
+}
+
+#endregion
+
+#region appa new
 
 /// <summary>
 /// Scaffolds a new GatOS project: a .gconf, an env.g copied from the installed environment, and a
 /// starter src/main.g, then prints a short file tree.
 /// </summary>
-static void RunInit(string[] args)
+static void RunNew(string[] args)
 {
     string name = args.ElementAtOrDefault(0) ?? "myproject";
     if (!System.Text.RegularExpressions.Regex.IsMatch(name, @"^[a-zA-Z_][a-zA-Z0-9_]*$"))
@@ -63,7 +94,7 @@ static void RunInit(string[] args)
 
     string envSrc = Path.Combine(AppaPaths.EnvsDir, "env.GatOS.g");
     if (!File.Exists(envSrc))
-        Cli.Fail("GatOS environment not found. Run 'appa setup' first.");
+        Cli.Fail("GatOS environment not found. Run 'appa install' first.");
 
     Directory.CreateDirectory(Path.Combine(projDir, "src"));
     File.Copy(envSrc, Path.Combine(projDir, "env.g"));
@@ -76,37 +107,84 @@ static void RunInit(string[] args)
         ("env.g", "platform environment (@environment)"),
         ("src/main.g", "entry point"),
     };
-    int width = entries.Max(e => e.Path.Length);
 
     Console.WriteLine();
-    Console.WriteLine($"Created {C.BOLD}{name}{C.NC} {C.DIM}(GatOS){C.NC}");
+    Console.WriteLine($"{C.LEAF}✓{C.NC} Created {C.BOLD}{name}{C.NC} {C.DIM}(GatOS){C.NC}");
     Console.WriteLine();
-    Console.WriteLine($"{C.DIM}{name}/{C.NC}");
-    for (int i = 0; i < entries.Length; i++)
-    {
-        string branch = i == entries.Length - 1 ? "└─" : "├─";
-        var (p, desc) = entries[i];
-        Console.WriteLine($"{C.DIM}{branch}{C.NC} {p.PadRight(width)}  {C.DIM}{desc}{C.NC}");
-    }
-    Console.WriteLine();
-    Console.WriteLine($"{C.CYAN}Common next steps:{C.NC}");
-    Console.WriteLine($"  cd {name}");
-    Console.WriteLine($"  appa build");
+    Console.WriteLine($"{Fmt.Indent}{C.DIM}{name}/{C.NC}");
+    Fmt.Table([..entries.Select((e, i) =>
+        ($"{C.DIM}{(i == entries.Length - 1 ? "└─" : "├─")}{C.NC} {e.Path}", $"{C.DIM}{e.Desc}{C.NC}"))],
+        Fmt.Indent);
+
+    Fmt.Section("Next steps");
+    Out.Note($"cd {name}");
+    Out.Note("appa run");
     Console.WriteLine();
 }
 
 #endregion
 
-#region appa build
+#region appa clean
+
+/// <summary>
+/// Removes the directories a build writes into the project root - transpilation/, artifacts/, and
+/// build/ - leaving sources and the .gconf untouched.
+/// </summary>
+static void RunClean(string[] args)
+{
+    string? dirArg = null;
+    foreach (var a in args)
+        if (a.StartsWith("--")) Cli.Fail($"unknown option '{a}'");
+        else dirArg = a;
+
+    string projectRoot = Path.GetFullPath(dirArg ?? ".");
+    if (!Directory.Exists(projectRoot)) Cli.Fail($"'{dirArg}' does not exist");
+
+    string? manifestPath = null;
+    try { manifestPath = ManifestReader.Discover(projectRoot); }
+    catch (ManifestError e) { Cli.Fail(e.Message); }
+    if (manifestPath == null)
+        Cli.Fail($"no <project>.gconf found in {projectRoot}",
+                 "clean only removes build output from a project directory");
+
+    Console.WriteLine();
+    Console.WriteLine($"{C.LEAF}Cleaning{C.NC} {Path.GetFileNameWithoutExtension(manifestPath)} {C.DIM}({projectRoot}){C.NC}");
+    Console.WriteLine();
+
+    int removed = 0;
+    foreach (var name in Cli.GeneratedDirs)
+    {
+        string path = Path.Combine(projectRoot, name);
+        if (!Directory.Exists(path)) continue;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try { Directory.Delete(path, true); }
+        catch (Exception e) { Cli.Fail($"could not remove {name}{Path.DirectorySeparatorChar}: {e.Message}"); }
+        Out.Step($"removed {name}{Path.DirectorySeparatorChar}", sw.Elapsed);
+        removed++;
+    }
+
+    if (removed == 0) Out.Note($"{C.DIM}nothing to remove - the project is already clean{C.NC}");
+    else
+    {
+        Console.WriteLine();
+        Console.WriteLine($"{C.LEAF}✓{C.NC} {C.BOLD}Clean{C.NC}");
+    }
+    Console.WriteLine();
+}
+
+#endregion
+
+#region appa build / appa run
 
 /// <summary>
 /// Parses build arguments, transpiles and lowers the project, then dispatches to the GatOS image
-/// builder or the hosted pure-transpile path.
+/// builder or the hosted pure-transpile path. <paramref name="doRun"/> is set by `appa run`, which
+/// is `appa build` followed by launching the image in QEMU.
 /// </summary>
-static void RunBuild(string[] args)
+static void RunBuild(string[] args, bool doRun)
 {
     string? manifestArg = null, envOverride = null, entryOverride = null, stdlibOverride = null;
-    bool warnAsError = false, doRun = false, headless = false, pureTranspile = false, emitSourcemap = false;
+    bool warnAsError = false, headless = false, pureTranspile = false, emitSourcemap = false;
     int? timeout = null;
 
     for (int i = 0; i < args.Length; i++)
@@ -116,16 +194,23 @@ static void RunBuild(string[] args)
             case "--entry" when i+1 < args.Length: entryOverride = args[++i]; break;
             case "--stdlib" when i+1 < args.Length: stdlibOverride = args[++i]; break;
             case "--werror": warnAsError = true; break;
-            case "--run": doRun = true; break;
-            case "--headless": headless = true; break;
+            case "headless":
+            case "--headless": headless = RunOnly(args[i]); break;
             case "--pure-transpile": pureTranspile = true; break;
             case "--emit-sourcemap": emitSourcemap = true; break;
             default:
-                if (args[i].StartsWith("--timeout=")) timeout = Cli.ParseTimeout(args[i]["--timeout=".Length..]);
+                if (args[i].StartsWith("timeout=")) { RunOnly(args[i]); timeout = Cli.ParseTimeout(args[i]["timeout=".Length..]); }
+                else if (args[i].StartsWith("--timeout=")) { RunOnly(args[i]); timeout = Cli.ParseTimeout(args[i]["--timeout=".Length..]); }
                 else if (args[i].StartsWith("--")) Cli.Fail($"unknown option '{args[i]}'");
                 else manifestArg = args[i];
                 break;
         }
+
+    bool RunOnly(string opt)
+    {
+        if (!doRun) Cli.Fail($"'{opt}' only applies to 'appa run'", "use 'appa run' to build the ISO and launch it");
+        return true;
+    }
 
     bool looseTranspile = pureTranspile && envOverride != null && entryOverride != null;
     var (manifest, envPath, entryPath, projectRoot, stdlibDir) = Cli.ResolveInputs(
@@ -133,9 +218,9 @@ static void RunBuild(string[] args)
         "--pure-transpile --env <file> --entry <file>", "--pure-transpile --env --entry");
 
     if (manifest != null)
-        Console.WriteLine($"{C.BOLD}Building{C.NC} {manifest.ProjectName} {C.DIM}({manifest.Target}, {manifest.Mode.ToString().ToLowerInvariant()}){C.NC}");
+        Console.WriteLine($"{C.LEAF}Building{C.NC} {manifest.ProjectName} {C.DIM}({manifest.Target}, {manifest.Mode.ToString().ToLowerInvariant()}){C.NC}");
     else
-        Console.WriteLine($"{C.BOLD}Building{C.NC} {C.DIM}(--pure-transpile){C.NC}");
+        Console.WriteLine($"{C.LEAF}Building{C.NC} {C.DIM}(--pure-transpile){C.NC}");
     Console.WriteLine();
 
     var (module, sourcemap, caps, diag) = RunFrontEnd(envPath, entryPath, projectRoot, stdlibDir, manifest, warnAsError);
@@ -150,16 +235,16 @@ static void RunBuild(string[] args)
     }
 
     bool emitIso = !pureTranspile && manifest is { Target: Target.GatOS };
-    if (!emitIso && (doRun || headless || timeout != null))
-        Log.Warn("--run/--headless/--timeout only apply to a GatOS image build; ignoring (this build just writes C)");
+    if (!emitIso && doRun)
+        Log.Warn("'appa run' only launches a GatOS image; there is nothing to boot here (this build just writes C)");
     if (!emitIso)
     {
-        string outDir = Path.Combine(projectRoot, "transpilation");
+        string outDir = Path.Combine(projectRoot, Cli.TranspileDir);
         Cli.WriteOutputs(output, outDir);
         if (emitSourcemap) Cli.WriteSourcemap(sourcemap, outDir);
         Console.WriteLine();
-        Console.WriteLine($"{C.BOLD}Finished{C.NC} {C.DIM}→{C.NC} {outDir}{Path.DirectorySeparatorChar}");
-        foreach (var f in output) Out.Child($"{C.DIM}{Path.Combine("transpilation", f.Name)}{C.NC}");
+        Console.WriteLine($"{C.LEAF}✓{C.NC} {C.BOLD}Finished{C.NC} {C.DIM}→{C.NC} {outDir}{Path.DirectorySeparatorChar}");
+        foreach (var f in output) Out.Child($"{C.DIM}{Path.Combine(Cli.TranspileDir, f.Name)}{C.NC}");
         return;
     }
 
@@ -200,9 +285,9 @@ static void RunCheck(string[] args)
         "--env <file> --entry <file>", "--env --entry");
 
     if (manifest != null)
-        Console.WriteLine($"{C.BOLD}Checking{C.NC} {manifest.ProjectName} {C.DIM}({manifest.Target}, {manifest.Mode.ToString().ToLowerInvariant()}){C.NC}");
+        Console.WriteLine($"{C.LEAF}Checking{C.NC} {manifest.ProjectName} {C.DIM}({manifest.Target}, {manifest.Mode.ToString().ToLowerInvariant()}){C.NC}");
     else
-        Console.WriteLine($"{C.BOLD}Checking{C.NC} {C.DIM}(--env/--entry){C.NC}");
+        Console.WriteLine($"{C.LEAF}Checking{C.NC} {C.DIM}(--env/--entry){C.NC}");
     Console.WriteLine();
 
     RunFrontEnd(envPath, entryPath, projectRoot, stdlibDir, manifest, warnAsError);
@@ -252,46 +337,73 @@ static (IrModule Module, IReadOnlyDictionary<string, string> Sourcemap, Capabili
 #region Help
 
 /// <summary>
-/// Prints the top-level usage text: commands, build options, and examples.
+/// Every command name, in the order the help lists them. Also what a mistyped command is matched
+/// against, so the two can never drift apart.
 /// </summary>
-static void PrintHelp() => Console.WriteLine($$"""
-{{C.GREEN}}Welcome to Appa {{C.NC}} {{AppaVersion.Current}} - the Gata language compiler for GatOS
+static string[] Commands() => ["install", "update", "new", "check", "build", "run", "clean"];
 
-{{C.CYAN}}Usage:{{C.NC}}
-  appa setup                      Install the GatOS toolchain, template, and libgata
-  appa update                     Re-download and overwrite the installed GatOS bundle
-  appa init [project]             Create a GatOS project
-  appa build [project|.gconf]     Build the project described by its .gconf
-  appa check [project|.gconf]     Lex, parse, and type-check only - reports errors, emits nothing
-  appa --version / -v             Print the appa version
+/// <summary>
+/// Prints the top-level usage: commands, options, and examples. The text is data, laid out by Fmt
+/// against the real terminal width - no line in here is wrapped or padded by hand.
+/// </summary>
+static void PrintHelp()
+{
+    Console.WriteLine();
+    Console.WriteLine($"{C.LEAF}appa{C.NC} {AppaVersion.Current} {C.DIM}- the Gata language compiler for GatOS{C.NC}");
 
-{{C.YELLOW}}Build options:{{C.NC}}
-  --stdlib  <dir>                 Override the libgata directory
-  --werror                        Treat warnings as errors
-  --pure-transpile                Emit C and stop (file-level: needs --env + --entry)
-  --env <env.g>                   Environment file (overrides discovery; required for --pure-transpile)
-  --entry <file.g>                Entry source (overrides discovery; required for --pure-transpile)
-  --emit-sourcemap                 Write sourcemap.json (dense name -> readable name)
-  --run / --headless / --timeout=<Xs>   Launch QEMU after a GatOS image build
+    Fmt.Section("Commands");
+    Fmt.Table([
+        ("appa install",              "Install the GatOS toolchain, template, and libgata"),
+        ("appa update",               "Re-download the GatOS bundle and self-update appa"),
+        ("appa new <name>",           "Create a GatOS project"),
+        ("appa check [project]",      "Lex, parse, and type-check only - reports errors, emits nothing"),
+        ("appa build [project]",      "Build the project described by its .gconf into an ISO"),
+        ("appa run [project]",        "Build the ISO, then launch it in QEMU"),
+        ("appa clean [project]",      $"Remove {string.Join("/, ", Cli.GeneratedDirs)}/"),
+        ("appa --version / -v",       "Print the appa version"),
+    ]);
+    Console.WriteLine();
+    Fmt.Para($"{C.DIM}A project argument is a directory or a path to its .gconf; the default is the current directory.{C.NC}");
 
-  A project build auto-discovers its environment (the @environment file in the
-  project dir) and entry (src/main.g) - no --env/--entry needed.
+    Fmt.Section("Install options");
+    Fmt.Table([
+        ("--with-path", "Add appa to PATH without asking - re-runs elevated if it has to"),
+        ("--no-path",   "Install without touching PATH, and without asking"),
+        ("--force",     "Overwrite an existing install without confirming"),
+    ]);
 
-{{C.YELLOW}}Check options:{{C.NC}}
-  --stdlib <dir> / --werror / --env <env.g> / --entry <file.g>   Same meaning as for build
-  (no --pure-transpile needed for --env/--entry: check never emits, loose or not)
+    Fmt.Section("Run options", "(on top of every build option below)");
+    Fmt.Table([
+        ("headless",     "No QEMU window - serial only"),
+        ("timeout=<Xs>", "Kill the guest after a duration (30s, 5m, 1h)"),
+    ]);
 
-{{C.BLUE}}Examples:{{C.NC}}
-  appa setup
-  appa init myos && cd myos && appa build --run
-  appa build --pure-transpile --env env.g --entry src/main.g
-  appa check myos
-  appa check --env env.g --entry src/main.g
-""");
+    Fmt.Section("Build options", "(also accepted by run and check)");
+    Fmt.Table([
+        ("--stdlib <dir>",   "Override the libgata directory"),
+        ("--werror",         "Treat warnings as errors"),
+        ("--env <env.g>",    "Environment file, overriding discovery"),
+        ("--entry <file.g>", "Entry source, overriding discovery"),
+        ("--emit-sourcemap", "Write sourcemap.json (dense name -> readable name)"),
+        ("--pure-transpile", "Emit C and stop, with no .gconf at all - needs --env and --entry (build only; check never emits, so it takes --env/--entry on their own)"),
+    ]);
+    Console.WriteLine();
+    Fmt.Para($"{C.DIM}A project build discovers its own environment (the @environment file in the project directory) and entry (src/main.g), so --env and --entry are only for loose files.{C.NC}");
+
+    Fmt.Section("Examples");
+    Fmt.Table([
+        ("appa install", ""),
+        ("appa new myos && cd myos && appa run", ""),
+        ("appa run headless timeout=30s", ""),
+        ("appa build --pure-transpile --env env.g --entry src/main.g", ""),
+        ("appa check myos --werror", ""),
+        ("appa clean", ""),
+    ]);
+    Console.WriteLine();
+}
 
 #endregion
 
-// Files written by `appa init`.
 static class Templates
 {
     /// <summary>
@@ -350,7 +462,6 @@ static class GatosFlags
         ["-m64", "-ffreestanding", "-nostdlib", "-fno-pic", "-mcmodel=kernel",
          "-mno-red-zone", "-ffunction-sections", "-fdata-sections"];
 
-    // Applied ONLY to the interrupt-path files below - never to ordinary kernel code.
     public static readonly string[] FpuRestrictions =
         ["-mno-sse", "-mno-sse2", "-mno-mmx", "-mno-80387"];
 
@@ -376,7 +487,6 @@ static class GatosFlags
         : [];
 }
 
-// Plain, flush-left narration for setup/update/init.
 static class Log
 {
     /// <summary>
@@ -387,24 +497,37 @@ static class Log
     /// <summary>
     /// Prints a success message with a green checkmark.
     /// </summary>
-    public static void Ok(string m) => Console.WriteLine($"{C.GREEN}✓{C.NC} {m}");
+    public static void Ok(string m) => Console.WriteLine($"{C.LEAF}✓{C.NC} {m}");
 
     /// <summary>
     /// Prints a step message in cyan.
     /// </summary>
-    public static void Step(string m) => Console.WriteLine($"{C.CYAN}{m}{C.NC}");
+    public static void Step(string m) => Console.WriteLine($"{C.FOREST}{m}{C.NC}");
 
     /// <summary>
-    /// Prints a warning message.
+    /// Prints a warning message, wrapped under its own label.
     /// </summary>
-    public static void Warn(string m) => Console.WriteLine($"{C.YELLOW}warning:{C.NC} {m}");
+    public static void Warn(string m) => Console.Out.Write(Tagged($"{C.YELLOW}warning:{C.NC}", m));
 
     /// <summary>
-    /// Prints an error message and optional hint to stderr.
+    /// Prints an error message and optional hint to stderr. Both wrap to the terminal and hang under
+    /// their label, so a long hint reads as one block instead of running off the right edge.
     /// </summary>
     public static void Error(string m, string? hint = null)
     {
-        Console.Error.WriteLine($"{C.RED}error:{C.NC} {m}");
-        if (hint != null) Console.Error.WriteLine($"{C.BLUE}={C.NC} {C.CYAN}help{C.NC}: {hint}");
+        Console.Error.Write(Tagged($"{C.RED}error:{C.NC}", m));
+        if (hint != null) Console.Error.Write(Tagged($"{C.SAGE}={C.NC} {C.CYAN}help{C.NC}:", hint));
+    }
+
+    /// <summary>
+    /// Lays out "label: message" with the message wrapped and continuation lines indented under it.
+    /// </summary>
+    private static string Tagged(string label, string message)
+    {
+        string indent = new string(' ', Fmt.Visible(label) + 1);
+        var lines = Fmt.Wrap(message, Math.Max(20, Fmt.Width - indent.Length));
+        var sb = new System.Text.StringBuilder($"{label} {lines[0]}{Environment.NewLine}");
+        for (int i = 1; i < lines.Count; i++) sb.AppendLine(indent + lines[i]);
+        return sb.ToString();
     }
 }

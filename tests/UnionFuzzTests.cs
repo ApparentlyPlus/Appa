@@ -423,7 +423,7 @@ public class UnionFuzzTests
     public void GenericUnionProgramsCompile()
     {
         var cc = FindCompiler();
-        using var work = TempDir.Create("appa-gufuzz-");
+        using var work = Scratch.Create("appa-gufuzz-");
         var failures = new List<string>();
         var coverage = new GenericCoverage();
         int accepted = 0;
@@ -544,7 +544,7 @@ public class UnionFuzzTests
     public void UnionProgramsCompile()
     {
         var cc = FindCompiler();
-        using var work = TempDir.Create("appa-ufuzz-");
+        using var work = Scratch.Create("appa-ufuzz-");
         var failures = new List<string>();
         var coverage = new Coverage();
         int accepted = 0;

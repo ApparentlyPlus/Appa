@@ -26,7 +26,7 @@ public class MultiFileTests
     /// Program.RunFrontEnd does, minus the toolchain. The caller owns the directory, so it can go
     /// on to compile what was emitted and still get cleanup from a single 'using'.
     /// </summary>
-    private static BuildResult Build(MultiFileCase c, TempDir dir)
+    private static BuildResult Build(MultiFileCase c, Scratch dir)
     {
         var work = dir.Path;
         try
@@ -123,7 +123,7 @@ public class MultiFileTests
         var fails = new Failures();
         foreach (var c in MultiFileCorpus.All)
         {
-            using var work = TempDir.Create("appa-multifile-");
+            using var work = Scratch.Create("appa-multifile-");
             var r = Build(c, work);
             if (r.Crash != null) fails.Add($"[{c.Name}] {r.Crash}\n{Describe(c)}");
         }
@@ -138,7 +138,7 @@ public class MultiFileTests
         {
             if (c.Expect == Expect.Any) continue;
 
-            using var work = TempDir.Create("appa-multifile-");
+            using var work = Scratch.Create("appa-multifile-");
             var r = Build(c, work);
             if (r.Crash != null) continue; // owned by NoProjectCrashesCompiler
 
@@ -171,7 +171,7 @@ public class MultiFileTests
         var fails = new Failures();
         foreach (var c in MultiFileCorpus.All)
         {
-            using var work = TempDir.Create("appa-multifile-");
+            using var work = Scratch.Create("appa-multifile-");
             var r = Build(c, work);
             if (r.Crash != null) continue;
 
@@ -215,7 +215,7 @@ public class MultiFileTests
 
         foreach (var c in MultiFileCorpus.All)
         {
-            using var work = TempDir.Create("appa-multifile-");
+            using var work = Scratch.Create("appa-multifile-");
             var r = Build(c, work);
             if (r.Crash != null || r.Files == null) continue;
 
@@ -308,7 +308,7 @@ public class MultiFileTests
             var c = new MultiFileCase($"graph/{shape}/seed{seed}", [.. files],
                                       acyclic ? Expect.Accepted : Expect.Any);
 
-            using var work = TempDir.Create("appa-multifile-");
+            using var work = Scratch.Create("appa-multifile-");
             var r = Build(c, work);
 
             if (r.Crash != null) { fails.Add($"[{c.Name}] {r.Crash}\n{Describe(c)}"); continue; }
@@ -350,7 +350,7 @@ public class MultiFileTests
         };
 
         var c = new MultiFileCase($"shadow/{shape}", [files.Item1, files.Item2], Expect.Any);
-        using var work = TempDir.Create("appa-multifile-");
+        using var work = Scratch.Create("appa-multifile-");
         var r = Build(c, work);
 
         Assert.Null(r.Crash);
@@ -377,7 +377,7 @@ public class MultiFileTests
                            $"realm userspace {{ {mark}int func Helper() {{ return 2; }} entry func Main() {{ }} }}\n"),
         ], Expect.Any);
 
-        using var work = TempDir.Create("appa-multifile-");
+        using var work = Scratch.Create("appa-multifile-");
         var r = Build(c, work);
 
         Assert.Null(r.Crash);
@@ -398,7 +398,7 @@ public class MultiFileTests
                            "realm userspace { int func Solo() { return 2; } entry func Main() { } }\n"),
         ], Expect.Any);
 
-        using var work = TempDir.Create("appa-multifile-");
+        using var work = Scratch.Create("appa-multifile-");
         var r = Build(c, work);
 
         Assert.Null(r.Crash);
@@ -418,7 +418,7 @@ public class MultiFileTests
             ("src/main.g", main),
         ], Expect.Any);
 
-        using var work = TempDir.Create("appa-multifile-");
+        using var work = Scratch.Create("appa-multifile-");
         var r = Build(c, work);
         Assert.Null(r.Crash);
         return r.Diag!.All;

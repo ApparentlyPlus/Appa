@@ -9,7 +9,7 @@ using System.Diagnostics;
 internal static class ToolchainProbe
 {
     /// <summary>
-    /// True if the GatOS cross toolchain, libgata, and QEMU are installed (via 'appa setup').
+    /// True if the GatOS cross toolchain, libgata, and QEMU are installed (via 'appa install').
     /// </summary>
     public static bool HasGatOSToolchain() =>
         Directory.Exists(AppaPaths.ToolchainDir) && File.Exists(AppaPaths.Gcc()) &&

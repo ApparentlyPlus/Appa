@@ -168,7 +168,7 @@ public class ManglingCollisionTests
 
         // Accepted means it has to compile: the token that gave way must not reappear elsewhere.
         var files = Layout.Compose(new Emitter(module!, diag).Build(), module!.Symbols);
-        using var work = TempDir.Create("appa-generated-");
+        using var work = Scratch.Create("appa-generated-");
         foreach (var f in files) File.WriteAllText(Path.Combine(work.Path, f.Name), f.Content);
         foreach (var tu in files.Where(f => f.Name.EndsWith(".c", StringComparison.Ordinal)))
         {
@@ -188,7 +188,7 @@ public class ManglingCollisionTests
         var cc = FindCompiler();
         if (cc == null) { Assert.Skip("no host C compiler found; skipping mangling-collision sweep"); return; }
 
-        using var work = TempDir.Create("appa-mangle-");
+        using var work = Scratch.Create("appa-mangle-");
         var failures = new List<string>();
         int accepted = 0, rejected = 0, unit = 0;
 
