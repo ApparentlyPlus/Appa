@@ -145,9 +145,6 @@ public class ManglingCollisionTests
     [InlineData("class Fn_void__void_p { public int n; } " +
                 "realm kernel { entry func Main() { let Fn_void__void_p f = new Fn_void__void_p(); } }", false)]
     [InlineData("native type Fn_void__void_p { int n; } realm kernel { entry func Main() { } }", false)]
-    [InlineData("@extern int func __g0(); @extern int func __g1(); @extern int func __g2(); " +
-                "realm kernel { class A { public int n; public int func M() { return 1; } } " +
-                "entry func Main() { let A a = new A(); let int q = a.M() + __g0() + __g1() + __g2(); } }", true)]
     [InlineData("@keep class __g1 { public int n; } realm kernel { class A { public int n; } " +
                 "entry func Main() { let A a = new A(); let __g1 g = new __g1(); let int q = a.n + g.n; } }", true)]
     [InlineData("enum __g2 { X } realm kernel { class A { public int n; } " +

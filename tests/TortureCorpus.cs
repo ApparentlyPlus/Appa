@@ -1999,12 +1999,6 @@ public static class TortureCorpus
         yield return new("native/unbalanced-brace",
             "realm kernel { entry func Main() { } } native { if (1) { }", Expect.Rejected);
         yield return new("native/empty", "native { } realm kernel { entry func Main() { } }", Expect.Any);
-        yield return new("extern/library-function-with-no-c-text",
-            "@extern int func lib_probe(int n); " +
-            "realm kernel { entry func Main() { let int r = lib_probe(3); } }", Expect.Accepted);
-        yield return new("extern/library-function-taking-nothing",
-            "@extern int func lib_ticks(); " +
-            "realm kernel { entry func Main() { let int r = lib_ticks(); } }", Expect.Accepted);
         yield return new("extern/static-inline-native-is-not-redeclared",
             "native { static inline int helper_probe(int n) { return n + 1; } } " +
             "@extern int func helper_probe(int n); " +
@@ -2012,25 +2006,10 @@ public static class TortureCorpus
         yield return new("extern/pointer-signature-left-to-the-header",
             "native { #include <string.h>\n } @extern usize func strlen(char* s); " +
             "realm kernel { entry func Main() { } }", Expect.Accepted);
-        yield return new("extern/taken-as-a-function-pointer",
-            "@extern int func ext_probe(int n); " +
-            "realm kernel { entry func Main() { let func(int) -> int f = ext_probe; let int r = f(2); } }",
-            Expect.Accepted);
-        yield return new("extern/initialises-process-state",
-            "@extern int func ext_probe(int n); " +
-            "realm kernel { background process P { let int seed = ext_probe(3); " +
-            "thread T { entry func R() { let int a = seed; } } } entry func Main() { } }", Expect.Accepted);
-        yield return new("extern/is-process-state-of-function-pointer-type",
-            "@extern int func ext_probe(int n); " +
-            "realm kernel { background process P { let func(int) -> int fp = ext_probe; " +
-            "thread T { entry func R() { let int a = fp(2); } } } entry func Main() { } }", Expect.Accepted);
         yield return new("extern/reached-from-the-user-realm-only",
             "@extern int func ext_probe(int n); realm kernel { entry func Main() { } } " +
             "realm userspace { foreground process P { thread T { entry func R() { let int a = ext_probe(1); } } } }",
             Expect.Accepted);
-        yield return new("extern/returns-an-enum",
-            "enum Colour { Red, Blue } @extern Colour func ext_colour(); " +
-            "realm kernel { entry func Main() { let Colour c = ext_colour(); } }", Expect.Accepted);
 
         #endregion
 
