@@ -76,7 +76,7 @@ graph LR
 Appa is the `B` and the arrow into `D`. It owns everything from the first token to handing GRUB a kernel binary.
 
 > [!WARNING]
-> Appa does not produce a standalone executable for the GatOS target. The output is an ISO — the program and the kernel are the same artifact. If you want a normal binary, that is what the `Hosted` backend is for.
+> Appa does not produce an executable for the GatOS target. The output is an ISO — and that ISO is your program's logic as an Operating System! You can flash it in a DVD, a CD or a USB and boot from it, assuming you are on an x86_64 machine. If you want a normal binary, that is what the `Hosted` backend is for.
 
 ### What's with these names?
 
@@ -102,12 +102,12 @@ The end goal is for this to serve as a helpful reference in a field where access
 
 Yes, and by this point it's documented. Writing a kernel was the ambitious part. Writing a *language* for the kernel was the stubborn part. Writing the compiler that connects them, with its own type system, ARC insertion and dead-code elimination, was the part where I stopped being able to explain the project at parties.
 
-Update: it works. You can write ten lines of Gata and get an ISO that boots on real hardware, and the compiler will have quietly decided you didn't need a scheduler.
+Update: It freakin' WORKS!1!!!1!
 
 
 ## What's Inside the Compiler
 
-Appa is roughly **23,000 lines of C#** across 43 files, published as a **self-contained, ahead-of-time-compiled** native binary — so there is no .NET runtime to install and startup is instant.
+Appa is roughly **23,000 lines of C#** across 43 files, published as a **self-contained, ahead-of-time-compiled** native binary, so there is no .NET runtime to install and startup is instant.
 
 It is a real compiler, not a preprocessor. Source goes through a full frontend into a typed IR, gets lowered and optimized, and only then becomes C.
 
@@ -124,11 +124,11 @@ The frontend re-runs for up to **6 rounds**, because resolving a generic call ca
 |---|---|
 | **Lexer / Parser** | Hand-written, producing a full syntax tree with source spans preserved for diagnostics. |
 | **ScopeBinder** | Realm and process scopes, `@shadows`, qualifiers. Names in Gata are global by design, so this is where that gets enforced. |
-| **Monomorphizer** | Stamps out concrete versions of generic classes and unions. Gata has no runtime generics — `List[int]` and `List[String]` are two distinct types by the time the backend sees them. |
+| **Monomorphizer** | Stamps out concrete versions of generic classes and unions. Gata has no runtime generics, meaning `List[int]` and `List[String]` are two distinct types by the time the backend sees them. |
 | **SymbolCollector** | The declaration registry, plus binding for `@intrinsic` and `@builtin`. |
 | **TypeResolver** | Types, overload resolution, and every semantic diagnostic. This is the largest single piece of the compiler and it is where most of the errors you'll ever see come from. |
 | **Desugar** | String interpolation, `switch`, `match`. |
-| **CapabilityScan** | Walks the reachable call graph from every entry point to work out what the OS actually has to provide. See below — this is the interesting one. |
+| **CapabilityScan** | Walks the reachable call graph from every entry point to work out what the OS actually has to provide. See below, this is the interesting one. |
 | **DCE** | Drops everything the entry points can't reach. You import `List` and use one method; you pay for one method. |
 | **Densifier** | Rewrites readable names to dense ones. `--emit-sourcemap` writes a `sourcemap.json` so you can map them back. |
 | **Ownership** | Inserts ARC retain/release, and lowers `throws` and `defer`. |
@@ -142,16 +142,18 @@ This is the part that makes PawStack more than "a transpiler with a kernel attac
 
 | Capability | Inferred when |
 |---|---|
-| `GATA_CAP_MEM` | The program allocates — collections, strings, anything through the heap. |
+| `GATA_CAP_MEM` | The program allocates. Collections, strings, anything through the heap. |
 | `GATA_CAP_THREADS` | Any process or thread is declared, kernel or user. |
 | `GATA_CAP_INPUT` | The program reads input, or `THREADS` is on. |
 | `GATA_CAP_TIME` | The program reads the clock. |
 | `GATA_CAP_FRAMEBUFFER` / `GATA_OUTPUT_SERIAL` | From the manifest's `OutputType`, not inferred. |
 | `GATA_KBD_DEFAULT` / `_EXTERNAL` / `_HOTPLUG` | From the manifest's `KeyboardSupport`. |
 
-The capabilities imply one another rather than sitting independently: threads pull in the heap and the input path, USB keyboards pull in the heap, and anything needing an IRQ pulls in ACPI/APIC. Those rules live in three places that must agree — `ResolveCaps` here, `src/kernel/caps.h` in GatOS, and GatOS's `run.py` — and there is a CI matrix specifically to keep them honest.
+The capabilities imply one another rather than sitting independently: threads pull in the heap and the input path, USB keyboards pull in the heap, and anything needing an IRQ pulls in ACPI/APIC. Those rules live in three places that must agree: `ResolveCaps` here, `src/kernel/caps.h` in GatOS, and GatOS's `run.py`. There is an entire CI matrix specifically to keep them honest.
 
 The practical effect, measured on a real build: a minimal serial program produces a kernel around **66 KB**, where a full-featured framebuffer one is around **218 KB**. You only ship the OS you asked for.
+
+And the best part? You needn't worry about any of that stuff. Focus on writing your logic, and Appa will do the rest for you.
 
 ### Diagnostics
 
@@ -168,23 +170,22 @@ main.g:3:9: error[G007]: unknown type 'long'
 | Backend | Output |
 |---|---|
 | **GatOS** | The full path. Emits C, stages the GatOS template, compiles both with the bundled cross-GCC, links against the linker script, and packages an ISO with GRUB. |
-| **Hosted** | Emits `program.c` and `shared.h` and stops. Compile it with any normal C compiler and run it as an ordinary program. Invaluable for testing language semantics without booting anything. |
+| **Hosted** | Emits `program.c` and `shared.h` and stops. Compile it with any normal C compiler (Clang, gcc) and run it as an ordinary program. Invaluable for testing language semantics without booting anything. |
 
 ### The Bundled Toolchain
 
 `appa install` fetches and installs a complete, statically built cross-toolchain, so nothing on your host is required beyond appa itself:
 
-* **GCC + Binutils** — the `x86_64-elf` cross compiler
-* **GRUB** + **xorriso** + **mtools** — for producing the hybrid bootable ISO
-* **QEMU** — so `appa run` just works
-* **The GatOS template** and **libgata** — the kernel sources and the standard library
+* **GCC + Binutils**: the `x86_64-elf` cross compiler
+* **GRUB** + **xorriso** + **mtools** for producing the hybrid bootable ISO
+* **QEMU** so `appa run` just works
+* **The GatOS template** and **libgata**: the kernel sources and the standard library
 
 `appa update` refreshes all of it and self-updates the appa binary in place.
 
-
 ## What's *not* Inside the Compiler
 
-Same deal as GatOS: better you hear it from me now than discover it three hours in.
+Same deal as GatOS: better you hear it from me now than discover it yourself.
 
 | Not here | Why not |
 |---|---|
@@ -197,20 +198,20 @@ Same deal as GatOS: better you hear it from me now than discover it three hours 
 
 ## Getting Started
 
-If you have nothing installed, this is the whole thing:
+If you have nothing installed, grab a copy of appa for your platform from the [Releases](https://github.com/ApparentlyPlus/Appa/releases/latest), and execute:
 
 ```bash
-# 1. Install appa, the toolchain, the template and the stdlib
+# Install appa, the toolchain, the template and the stdlib
 appa install
 
-# 2. Scaffold a project
+# Scaffold a project
 appa new myos && cd myos
 
-# 3. Build it and boot it in QEMU
+# Build it and boot it in QEMU
 appa run
 ```
 
-That's it! You now have an operating system.
+That's it! You now have an operating system. Crazy, right?
 
 `appa new` gives you three files:
 
@@ -259,13 +260,12 @@ Every project is described by exactly one `<name>.gconf` file in its root:
 |---|---|---|
 | `ProjectName` | any | Names the output artifacts. |
 | `TargetBackend` | `GatOS` \| `Hosted` | Bootable ISO, or plain C for a normal machine. |
-| `BuildMode` | `Debug` \| `Release` | Optimization level for the emitted C. |
+| `BuildMode` | `Debug` \| `Release` | Optimization level for the emitted C. Prefer release. |
 | `OutputType` | `Framebuffer` \| `Serial` | Where output goes. `Serial` builds no framebuffer console at all — output, screen control and even the panic report go to COM1. |
 | `KeyboardSupport` | `Default` \| `External` \| `Hotplug` | PS/2 only, plus USB HID, or plus USB hotplug detection. |
 | `CapabilityDiscovery` | `On` \| `Off` | `On` infers capabilities from your program. `Off` assumes all of them — the escape valve for when inference has a blind spot. |
 
 GCC flags, the entry file and the environment file are deliberately *not* configurable here. Appa owns those.
-
 
 ## CLI Reference
 
@@ -282,7 +282,7 @@ GCC flags, the entry file and the environment file are deliberately *not* config
 | `appa clean [project]` | Remove `transpilation/`, `build/`, `artifacts/`. |
 | `appa --version` | Print the version. |
 
-A project argument is a directory or a path to its `.gconf`; the default is the current directory.
+A project argument is a directory or a path to its `.gconf`; the default is the current directory. Run `appa help` for more.
 
 **Install options:**
 
@@ -341,7 +341,7 @@ Appa has **1186 tests across 59 files**, run with `dotnet test`. They are not al
 | **Book samples** | Every code sample in the language guide is compiled, so the docs cannot silently rot. |
 
 ```bash
-dotnet test --project tests/Appa.Tests.csproj -c Release
+dotnet test
 ```
 
 The boot tests need the toolchain installed (`appa install`); they skip cleanly if it isn't.
@@ -361,7 +361,6 @@ src/
 ├── Diagnostics/     Diagnostic bag, codes, formatting
 └── CLI/             Commands, manifest parsing, toolchain driver, installer
 tests/               xunit suite + fixtures
-appa/                Staged payload: toolchain, template, libgata, envs
 ```
 
 ### Building From Source
@@ -373,10 +372,10 @@ Requires the **.NET 10 SDK**:
 dotnet run --project Appa.csproj -- --help
 
 # Produce the native AOT binary
-dotnet publish -c Release -r linux-x64 -o publish/linux-x64
+dotnet publish /p:PublishProfile=Linux-x64
 ```
 
-Swap `linux-x64` for `win-x64` or `osx-arm64` as needed.
+Swap `Linux-x64` for `Windows-x64` or `Mac-Arm` or `Mac-Intel` as needed.
 
 ### Development Workflow
 
@@ -389,13 +388,13 @@ Same shape as the rest of PawStack:
 
 ### Debugging
 
-`--emit-sourcemap` is the single most useful flag when the emitted C looks wrong — the Densifier's names are unreadable by design, and the sourcemap turns them back into something you can grep for.
+`--emit-sourcemap` is the single most useful flag when the emitted C looks wrong. The Densifier's names are unreadable by design, and the sourcemap turns them back into something you can grep for.
 
 Past that, `--pure-transpile` lets you look at exactly what the backend produced without a kernel build in the way:
 
 ```bash
 appa build --pure-transpile --env env.g --entry src/main.g
-$EDITOR transpilation/program.c
+cat transpilation/program.c
 ```
 
 And because the `Hosted` backend emits ordinary C, you can put the output under `gdb`, `valgrind` or a sanitizer build and debug language semantics with normal tools.
@@ -405,7 +404,7 @@ And because the `Hosted` backend emits ordinary C, you can put the output under 
 
 The language itself is documented at book length in [The Gata Programming Language](https://github.com/ApparentlyPlus/Gata) — grammar, type system, diagnostics reference, and the standard library. Every sample in it is compiled by Appa's test suite, so it stays true.
 
-For the compiler's own internals, the write-ups live with the rest of the thesis material in the [GatOS `docs/`](https://github.com/ApparentlyPlus/GatOS/tree/next/docs) folder.
+For the compiler's own internals, the write-ups (will) live in an upcoming `docs/` folder.
 
 
 ## Contributing
@@ -438,10 +437,7 @@ The restrictive nature is partly due to academic requirements and partly because
 
 ## So... what now?
 
-Appa on its own is a compiler with nothing to compile. The fun starts with [the Gata language](https://github.com/ApparentlyPlus/Gata) and the [GatOS kernel](https://github.com/ApparentlyPlus/GatOS) it targets.
-
-So go on — `appa new myos && cd myos && appa run`. You are about ten lines of Gata away from an operating system that is entirely yours.
-
+Just go on and run `appa new myos && cd myos && appa run`. You are about ten lines of Gata away from an operating system that is entirely yours.
 
 ## Note to Readers
 

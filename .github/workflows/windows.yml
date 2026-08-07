@@ -90,7 +90,7 @@ jobs:
 
       - name: Publish the native executable (win-x64)
         working-directory: Appa
-        run: dotnet publish Appa.csproj -c Release -p:PublishProfile=Windows-x64
+        run: dotnet publish /p:PublishProfile=Windows-x64
 
       - name: Upload the executable
         uses: actions/upload-artifact@v4
