@@ -151,15 +151,13 @@ internal static class HostedRun
         }
     }
 
-    // Whether a given compiler can actually link a sanitized binary
+    // Whether a given compiler can actually produce a runnable sanitized binary
     private static readonly Dictionary<string, bool> _sanitizerProbe = [];
 
     private const string SanitizerFlags = "-fsanitize=address,undefined -fno-omit-frame-pointer";
 
     /// <summary>
-    /// Returns true if the host toolchain can compile and link with ASan/UBSan. A compiler that
-    /// accepts the flag but has no runtime library to link against fails here rather than turning
-    /// every later test red.
+    /// Returns true if the host toolchain can compile, link <em>and run</em> with ASan/UBSan.
     /// </summary>
     public static bool SupportsSanitizers(string cc)
     {
@@ -171,8 +169,15 @@ internal static class HostedRun
             {
                 using var probe = Scratch.Create("appa-asan-probe-");
                 File.WriteAllText(probe.Combine("p.c"), "int main(void){return 0;}");
-                var (code, _) = Run(cc, $"{SanitizerFlags} -o probe p.c", probe.Path);
-                answer = code == 0;
+                string exe = probe.Combine("probe");
+                var (code, _) = Run(cc, $"{SanitizerFlags} -o \"{exe}\" p.c", probe.Path);
+                if (code != 0) answer = false;
+                else
+                {
+                    var (runCode, _) = Run(exe, "", probe.Path,
+                        new Dictionary<string, string> { ["ASAN_OPTIONS"] = "detect_leaks=0" });
+                    answer = runCode == 0;
+                }
             }
             catch { answer = false; }
             _sanitizerProbe[cc] = answer;

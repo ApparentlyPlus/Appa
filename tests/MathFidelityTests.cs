@@ -117,30 +117,52 @@ public class MathFidelityTests
         g.AppendLine("    Console.PrintLine($\"{t} {((b >> 32) & 0xFFFFFFFFULL) as int64} " +
                      "{(b & 0xFFFFFFFFULL) as int64}\");");
         g.AppendLine("}");
-        g.AppendLine("realm userspace {");
-        g.AppendLine("entry func Main() {");
-
         c.AppendLine("#include <math.h>\n#include <stdio.h>\n#include <stdint.h>\n#include <string.h>");
         c.AppendLine("static void emit(const char* t, double r){uint64_t b;memcpy(&b,&r,8);" +
                      "printf(\"%s %lld %lld\\n\",t,(long long)((b>>32)&0xFFFFFFFFULL)," +
                      "(long long)(b&0xFFFFFFFFULL));}");
         c.AppendLine("static double frombits(uint64_t u){double d;memcpy(&d,&u,8);return d;}");
-        c.AppendLine("int main(void){");
 
+        var gCalls = new List<string>();
+        var cCalls = new List<string>();
         for (int i = 0; i < xs.Length; i++)
             foreach (var (gn, cn, _) in Unary)
             {
-                g.AppendLine($"    emit(\"{gn}/{i}\", Math.{gn}(frombits({Hex(xs[i])})));");
-                c.AppendLine($"    emit(\"{gn}/{i}\", {cn}(frombits({Hex(xs[i])})));");
+                gCalls.Add($"    emit(\"{gn}/{i}\", Math.{gn}(frombits({Hex(xs[i])})));");
+                cCalls.Add($"    emit(\"{gn}/{i}\", {cn}(frombits({Hex(xs[i])})));");
             }
         for (int i = 0; i < pairs.Count; i++)
             foreach (var (gn, cn, _) in Binary)
             {
-                g.AppendLine($"    emit(\"{gn}/{i}\", Math.{gn}(frombits({Hex(pairs[i].A)}), " +
-                             $"frombits({Hex(pairs[i].B)})));");
-                c.AppendLine($"    emit(\"{gn}/{i}\", {cn}(frombits({Hex(pairs[i].A)}), " +
-                             $"frombits({Hex(pairs[i].B)})));");
+                gCalls.Add($"    emit(\"{gn}/{i}\", Math.{gn}(frombits({Hex(pairs[i].A)}), " +
+                           $"frombits({Hex(pairs[i].B)})));");
+                cCalls.Add($"    emit(\"{gn}/{i}\", {cn}(frombits({Hex(pairs[i].A)}), " +
+                           $"frombits({Hex(pairs[i].B)})));");
             }
+
+        const int PerPart = 250;
+        int parts = (gCalls.Count + PerPart - 1) / PerPart;
+        for (int p = 0; p < parts; p++)
+        {
+            g.AppendLine($"void func Part{p}() {{");
+            c.AppendLine($"static void part{p}(void){{");
+            for (int i = p * PerPart; i < Math.Min(gCalls.Count, (p + 1) * PerPart); i++)
+            {
+                g.AppendLine(gCalls[i]);
+                c.AppendLine(cCalls[i]);
+            }
+            g.AppendLine("}");
+            c.AppendLine("}");
+        }
+
+        g.AppendLine("realm userspace {");
+        g.AppendLine("entry func Main() {");
+        c.AppendLine("int main(void){");
+        for (int p = 0; p < parts; p++)
+        {
+            g.AppendLine($"    Part{p}();");
+            c.AppendLine($"    part{p}();");
+        }
         g.AppendLine("}\n}");
         c.AppendLine("return 0;}");
 

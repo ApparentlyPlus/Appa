@@ -671,7 +671,8 @@ public class UnionFuzzTests
             }
 
             """);
-        var body = new StringBuilder();
+        var parts = new StringBuilder();
+        var calls = new StringBuilder();
         int totalPairs = 0;
 
         for (int seed = 1; seed <= 40; seed++)
@@ -687,6 +688,12 @@ public class UnionFuzzTests
                         ? v.Name
                         : $"{v.Name}({string.Join(", ", v.FieldTypes.Select((t, i) => $"{Hosted(t, seed)} {v.FieldName(i)}"))})");
                 src.Append($"union {name} {{ {string.Join(", ", variants)} }}\n");
+
+                string fn = $"Check_{name}";
+                calls.Append($"        {fn}(ref bad, ref checked);\n");
+                var body = new StringBuilder();
+                body.Append($"void func {fn}(ref int bad, ref int checked) {{\n");
+                body.Append("        let bool eq = false;\n        let bool ne = false;\n");
 
                 string list = $"l{seed}_{u.Name}";
                 body.Append($"        let List[{name}] {list} = new List[{name}]();\n");
@@ -711,13 +718,15 @@ public class UnionFuzzTests
                         else if (variantOf[i] != variantOf[j]) body.Append("        if (eq) { bad = bad + 1; }\n");
                         body.Append("        checked = checked + 1;\n");
                     }
+
+                body.Append("}\n\n");
+                parts.Append(body);
             }
         }
-
+        src.Append('\n').Append(parts);
         src.Append("\nrealm userspace {\n    entry func Main() {\n");
-        src.Append("        let bool eq = false;\n        let bool ne = false;\n");
         src.Append("        let int bad = 0;\n        let int checked = 0;\n");
-        src.Append(body);
+        src.Append(calls);
         src.Append("        Console.PrintLine($\"bad={bad} checked={checked}\");\n    }\n}\n");
         Assert.True(totalPairs > 2000, $"only {totalPairs} comparison pairs were generated");
 
