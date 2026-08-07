@@ -14,16 +14,21 @@ internal static class Installer
     private static string Tag(string label) => $"({++_step}/{_steps}) {label}";
 
     /// <summary>
-    /// Downloads and installs (or re-installs) the GatOS toolchain, libgata, template, and appa
+    /// Downloads and installs (or re-installs) the GatOS toolchain, libgata, template, and Appa
     /// binary.
     /// </summary>
     internal static async Task RunSetup(bool isUpdate, bool? pathPref = null, bool force = false)
     {
         bool isWin = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
         bool isMac = RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
-        Console.WriteLine();
-        Console.WriteLine($"{C.EMBER}{(isUpdate ? "Updating" : "Installing")} appa{C.NC} {C.DIM}{AppaVersion.Current}{C.NC}");
-        Console.WriteLine();
+        if (isUpdate)
+        {
+            Console.WriteLine();
+            Console.WriteLine($"{Fmt.Indent}{C.EMBER}Updating Appa{C.NC} {C.DIM}{AppaVersion.Current}{C.NC}");
+            Console.WriteLine();
+        }
+        else Banner.Print(Fmt.Indent);
+
         Fmt.Table([
             ($"{C.DIM}into{C.NC}",       AppaPaths.Root),
             ($"{C.DIM}components{C.NC}", "cross-toolchain, libgata, envs, GatOS template, compiler"
@@ -32,7 +37,7 @@ internal static class Installer
         if (!isUpdate && !force && Directory.Exists(AppaPaths.ToolchainDir) && !Console.IsInputRedirected)
         {
             Console.WriteLine();
-            if (!Ask($"appa is already installed at {AppaPaths.Root}. Re-download and overwrite?", defaultYes: false))
+            if (!Ask($"Appa is already installed at {AppaPaths.Root}. Re-download and overwrite?", defaultYes: false))
             {
                 Out.Note($"{C.DIM}Install cancelled - the existing install was left untouched.{C.NC}");
                 Console.WriteLine();
@@ -45,7 +50,7 @@ internal static class Installer
         if (!isUpdate && pathPref is null && !Console.IsInputRedirected)
         {
             RecommendPath(isWin);
-            wantsPath = Ask("Add appa to your PATH?", defaultYes: true);
+            wantsPath = Ask("Add Appa to your PATH?", defaultYes: true);
         }
 
         if (wantsPath && !elevated) Elevate(isWin);
@@ -106,7 +111,7 @@ internal static class Installer
 
         Console.WriteLine();
         Console.WriteLine(isUpdate
-            ? $"{C.EMBER}✓{C.NC} {C.BOLD}Up to date{C.NC} {C.DIM}- toolchain, libgata, template, and appa{C.NC}"
+            ? $"{C.EMBER}✓{C.NC} {C.BOLD}Up to date{C.NC} {C.DIM}- toolchain, libgata, template, and Appa{C.NC}"
             : $"{C.EMBER}✓{C.NC} {C.BOLD}Installed{C.NC} {C.DIM}→{C.NC} {AppaPaths.Root}");
 
         if (!isUpdate)
@@ -114,16 +119,17 @@ internal static class Installer
             Fmt.Section("Next steps");
             if (!onPath)
             {
-                Fmt.Para($"{C.DIM}appa is not on your PATH, so invoke it as:{C.NC}");
+                Fmt.Para($"{C.DIM}Appa is not on your PATH, so invoke it as:{C.NC}");
                 Out.Child(AppaPaths.AppaBin);
                 Console.WriteLine();
             }
             Out.Note("appa new myos");
             Out.Note("cd myos && appa run");
         }
-        Console.WriteLine();
 
-        if (onPath) OfferSelfDelete(isWin);
+        string? stale = onPath ? StaleSelfCopy() : null;
+        if (stale is null) { Console.WriteLine(); return; }
+        OfferSelfDelete(isWin, stale);
     }
 
     /// <summary>
@@ -144,8 +150,8 @@ internal static class Installer
     private static void RecommendPath(bool isWin)
     {
         Fmt.Section("PATH", "(recommended)");
-        Fmt.Para($"{C.DIM}Putting appa on your PATH lets you type {C.NC}appa run{C.DIM} in any project directory " +
-                 $"instead of the full path to it. That is how the docs, the book, and every message appa " +
+        Fmt.Para($"{C.DIM}Putting Appa on your PATH lets you type {C.NC}appa run{C.DIM} in any project directory " +
+                 $"instead of the full path to it. That is how the docs, the book, and every message Appa " +
                  $"prints assume you will invoke the compiler.{C.NC}");
         Console.WriteLine();
         Fmt.Para(isWin ? $"{C.DIM}It appends this directory to the machine PATH:{C.NC}"
@@ -163,11 +169,11 @@ internal static class Installer
     {
         Fmt.Section("Elevating");
         Fmt.Para(isWin
-            ? $"{C.DIM}Adding appa to PATH edits the machine PATH, which needs Administrator. Windows will ask you to confirm.{C.NC}"
-            : $"{C.DIM}Adding appa to PATH writes to /usr/local/bin, which needs root. sudo may ask for your password.{C.NC}");
+            ? $"{C.DIM}Adding Appa to PATH edits the machine PATH, which needs Administrator. Windows will ask you to confirm.{C.NC}"
+            : $"{C.DIM}Adding Appa to PATH writes to /usr/local/bin, which needs root. sudo may ask for your password.{C.NC}");
         Console.WriteLine();
         string exe = Environment.ProcessPath
-            ?? Cli.Fail<string>("could not determine the appa executable to re-run",
+            ?? Cli.Fail<string>("could not determine the Appa executable to re-run",
                                 isWin ? "start an Administrator terminal and run 'appa install'"
                                       : "run 'sudo appa install'");
         var argv = new List<string>();
@@ -196,6 +202,7 @@ internal static class Installer
                 foreach (var a in argv) psi.ArgumentList.Add(a);
             }
 
+            Console.Clear();
             using var proc = Process.Start(psi)
                 ?? throw new InvalidOperationException("the elevated process did not start");
             proc.WaitForExit();
@@ -203,7 +210,7 @@ internal static class Installer
         }
         catch (Exception ex)
         {
-            Cli.Fail($"could not re-run appa with elevated privileges: {ex.Message}",
+            Cli.Fail($"could not re-run Appa with elevated privileges: {ex.Message}",
                 isWin ? "accept the Windows prompt, or start an Administrator terminal and run 'appa install'"
                       : "run 'sudo appa install', or 'appa install --no-path' to install without touching PATH");
         }
@@ -212,22 +219,30 @@ internal static class Installer
     }
 
     /// <summary>
-    /// Once appa lives in its install directory and answers to its own name, the downloaded binary
-    /// the user ran this from is a stale duplicate sitting in Downloads.
+    /// The binary this run was started from, when it is a duplicate left over in Downloads rather
+    /// than the copy that now lives in the install directory - and null when there is nothing to
+    /// clean up, or no one at the keyboard to ask.
     /// </summary>
-    private static void OfferSelfDelete(bool isWin)
+    private static string? StaleSelfCopy()
     {
-        if (Console.IsInputRedirected) return;
+        if (Console.IsInputRedirected) return null;
 
         string self = Environment.ProcessPath ?? "";
-        if (string.IsNullOrEmpty(self) || !File.Exists(self)) return;
-        if (!Path.GetFileNameWithoutExtension(self).StartsWith("appa", StringComparison.OrdinalIgnoreCase)) return;
+        if (string.IsNullOrEmpty(self) || !File.Exists(self)) return null;
+        if (!Path.GetFileNameWithoutExtension(self).StartsWith("appa", StringComparison.OrdinalIgnoreCase)) return null;
         string full = Path.GetFullPath(self);
         string root = Path.GetFullPath(AppaPaths.Root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        if (full.StartsWith(root, StringComparison.OrdinalIgnoreCase)) return;
+        return full.StartsWith(root, StringComparison.OrdinalIgnoreCase) ? null : full;
+    }
 
+    /// <summary>
+    /// Once Appa lives in its install directory and answers to its own name, the downloaded binary
+    /// the user ran this from is a stale duplicate sitting in Downloads.
+    /// </summary>
+    private static void OfferSelfDelete(bool isWin, string full)
+    {
         Fmt.Section("Cleanup");
-        Fmt.Para($"{C.DIM}appa now lives at {C.NC}{AppaPaths.AppaBin}{C.DIM} and is on your PATH, so the copy you ran " +
+        Fmt.Para($"{C.DIM}Appa now lives at {C.NC}{AppaPaths.AppaBin}{C.DIM} and is on your PATH, so the copy you ran " +
                  $"this from is no longer needed:{C.NC}");
         Out.Note(full);
         Console.WriteLine();
@@ -333,7 +348,7 @@ internal static class Installer
     /// </summary>
     internal static bool AddToPath(bool isWin)
     {
-        string label = Tag("Adding appa to PATH");
+        string label = Tag("Adding Appa to PATH");
         var sw = Stopwatch.StartNew();
         try
         {
@@ -363,7 +378,7 @@ internal static class Installer
             Out.Child($"{C.DIM}{link} → {AppaPaths.AppaBin}{C.NC}");
             return true;
         }
-        catch (Exception ex) { Log.Warn($"Could not add appa to PATH: {ex.Message}"); return false; }
+        catch (Exception ex) { Log.Warn($"Could not add Appa to PATH: {ex.Message}"); return false; }
     }
 
     /// <summary>
@@ -371,12 +386,12 @@ internal static class Installer
     /// </summary>
     internal static void InstallSelf(bool isWin)
     {
-        string label = Tag("Installing the appa compiler");
+        string label = Tag("Installing the Appa compiler");
         var sw = Stopwatch.StartNew();
 
         string self = Environment.ProcessPath ?? "";
         if (string.IsNullOrEmpty(self) || !File.Exists(self))
-        { Log.Warn("Could not locate the running appa binary to install."); return; }
+        { Log.Warn("Could not locate the running Appa binary to install."); return; }
 
         string target = AppaPaths.AppaBin;
         if (string.Equals(Path.GetFullPath(self), Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase))
@@ -393,7 +408,7 @@ internal static class Installer
             Out.Step(label, sw.Elapsed);
             Out.Child($"{C.DIM}{target}{C.NC}");
         }
-        catch (Exception ex) { Log.Warn($"Could not install appa binary: {ex.Message}"); }
+        catch (Exception ex) { Log.Warn($"Could not install Appa binary: {ex.Message}"); }
     }
 
     /// <summary>
@@ -409,8 +424,8 @@ internal static class Installer
         try
         {
             string newBin = stage.Combine(isWin ? "appa.exe" : "appa");
-            try { DownloadWithProgress(Urls.AppaBinary(), newBin, Tag("Downloading the latest appa")); }
-            catch (Exception ex) { Log.Warn($"Could not download new appa binary: {ex.Message}"); return; }
+            try { DownloadWithProgress(Urls.AppaBinary(), newBin, Tag("Downloading the latest Appa")); }
+            catch (Exception ex) { Log.Warn($"Could not download new Appa binary: {ex.Message}"); return; }
 
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
 
@@ -434,7 +449,7 @@ internal static class Installer
                 Out.Child($"{C.DIM}{target}{C.NC}");
             }
         }
-        catch (Exception ex) { Log.Warn($"Could not install the new appa binary: {ex.Message}"); }
+        catch (Exception ex) { Log.Warn($"Could not install the new Appa binary: {ex.Message}"); }
         finally { if (!deferred) stage.Dispose(); }
     }
 

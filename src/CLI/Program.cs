@@ -29,7 +29,7 @@ try
         case "-h": PrintHelp(); break;
         case "version":
         case "--version":
-        case "-v": Console.WriteLine($"appa {AppaVersion.Current}"); break;
+        case "-v": Console.WriteLine($"Appa {AppaVersion.Current}"); break;
         default:
             Log.Error($"unknown command '{args[0]}'",
                 args[0] == "setup" ? "'appa setup' is now 'appa install'"
@@ -348,26 +348,26 @@ static string[] Commands() => ["install", "update", "new", "check", "build", "ru
 /// </summary>
 static void PrintHelp()
 {
-    Console.WriteLine();
-    Console.WriteLine($"{C.EMBER}appa{C.NC} {AppaVersion.Current} {C.DIM}- the Gata language compiler for GatOS{C.NC}");
+    Banner.Print();
+    Fmt.Para($"{C.DIM}The Gata language compiler for GatOS. Invoked as {C.NC}appa{C.DIM}.{C.NC}");
 
     Fmt.Section("Commands");
     Fmt.Table([
         ("appa install",              "Install the GatOS toolchain, template, and libgata"),
-        ("appa update",               "Re-download the GatOS bundle and self-update appa"),
+        ("appa update",               "Re-download the GatOS bundle and self-update Appa"),
         ("appa new <name>",           "Create a GatOS project"),
         ("appa check [project]",      "Lex, parse, and type-check only - reports errors, emits nothing"),
         ("appa build [project]",      "Build the project described by its .gconf into an ISO"),
         ("appa run [project]",        "Build the ISO, then launch it in QEMU"),
         ("appa clean [project]",      $"Remove {string.Join("/, ", Cli.GeneratedDirs)}/"),
-        ("appa --version / -v",       "Print the appa version"),
+        ("appa --version / -v",       "Print the Appa version"),
     ]);
     Console.WriteLine();
     Fmt.Para($"{C.DIM}A project argument is a directory or a path to its .gconf; the default is the current directory.{C.NC}");
 
     Fmt.Section("Install options");
     Fmt.Table([
-        ("--with-path", "Add appa to PATH without asking - re-runs elevated if it has to"),
+        ("--with-path", "Add Appa to PATH without asking - re-runs elevated if it has to"),
         ("--no-path",   "Install without touching PATH, and without asking"),
         ("--force",     "Overwrite an existing install without confirming"),
     ]);
