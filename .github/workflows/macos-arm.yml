@@ -1,0 +1,86 @@
+name: Appa macOS ARM
+
+on:
+  push:
+    branches: [main]
+    paths: ['src/**', 'tests/**', '*.csproj', '*.slnx', 'global.json', '.github/workflows/**']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  Deploy_MacOS_ARM:
+    name: Build & Test (macOS arm64)
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout Appa
+        uses: actions/checkout@v4
+        with:
+          path: Appa
+
+      - name: Checkout Gata (sibling, required by the execution tests)
+        uses: actions/checkout@v4
+        with:
+          repository: ApparentlyPlus/Gata
+          path: Gata
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Verify host C compilers
+        run: |
+          set -euo pipefail
+          fail=0
+          for cc in cc gcc clang; do
+            if "$cc" --version >/dev/null 2>&1; then
+              echo "  ok   $cc -> $("$cc" --version | head -1)"
+            else
+              echo "  MISS $cc"; fail=1
+            fi
+          done
+          if [ -f Gata/libgata/List.g ] && [ -f Gata/envs/env.hosted.g ]; then
+            echo "  ok   sibling Gata checkout"
+          else
+            echo "  MISS sibling Gata checkout"; fail=1
+          fi
+          [ "$fail" -eq 0 ] || { echo "::error::preconditions missing - tests would silently skip"; exit 1; }
+
+      - name: Restore
+        working-directory: Appa
+        run: dotnet restore
+
+      - name: Build
+        working-directory: Appa
+        run: dotnet build -c Release --no-restore
+
+      - name: Install the GatOS toolchain (for the boot tests)
+        working-directory: Appa
+        run: dotnet run --project Appa.csproj -c Release --no-build -- install --no-path --force
+
+      - name: Verify the boot tests will actually run
+        run: |
+          set -euo pipefail
+          root="$HOME/.local/share/appa"
+          fail=0
+          for p in "$root/toolchain/x86_64-macos/gcc/bin/x86_64-elf-gcc" \
+                   "$root/toolchain/x86_64-macos/qemu/bin/qemu-system-x86_64"; do
+            [ -f "$p" ] && echo "  ok   $p" || { echo "  MISS $p"; fail=1; }
+          done
+          n=$(ls "$root"/libgata/*.g 2>/dev/null | wc -l)
+          [ "$n" -gt 0 ] && echo "  ok   libgata ($n modules)" || { echo "  MISS libgata"; fail=1; }
+          [ "$fail" -eq 0 ] || { echo "::error::toolchain incomplete - BootTests would skip"; exit 1; }
+
+      - name: Test
+        working-directory: Appa
+        run: dotnet test --project tests/Appa.Tests.csproj -c Release --no-build

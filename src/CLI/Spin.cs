@@ -32,7 +32,7 @@ static class Spin
         long now = _clock.ElapsedMilliseconds;
         if (now - _drawnAt < _frameMs) return;
 
-        string line = $"  {C.LEAF}{Frames[(int)(now / _frameMs) % Frames.Length]}{C.NC} " +
+        string line = $"  {C.EMBER}{Frames[(int)(now / _frameMs) % Frames.Length]}{C.NC} " +
                       $"{label}{C.DIM}{(detail is null ? "..." : " " + detail)}{C.NC}";
         _drawnAt = now;
         if (line == _drawn) return;

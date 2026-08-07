@@ -135,17 +135,14 @@ static class AppaPaths
 
 #region Console Output
 
-/// <summary>
-/// appa's palette. The identity is green, so the three greens below are analogous.
-/// </summary>
 static class C
 {
     public const string NC = "\x1b[0m";
     public const string BOLD = "\x1b[1m";
     public const string DIM = "\x1b[2m";
-    public const string LEAF = "\x1b[1;38;5;77m";
-    public const string FOREST = "\x1b[1;38;5;71m";
-    public const string SAGE = "\x1b[38;5;108m";
+    public const string EMBER = "\x1b[1;38;5;209m";
+    public const string GOLD = "\x1b[1;38;5;221m";
+    public const string SAND = "\x1b[38;5;180m";
     public const string CYAN = "\x1b[1;38;5;80m";
     public const string YELLOW = "\x1b[1;38;5;214m";
     public const string RED = "\x1b[1;38;5;203m";

@@ -15,7 +15,7 @@ internal static class Toolchain
         bool silent = false, bool capture = false, string? spinner = null)
     {
         if (!silent && !capture && spinner == null)
-            Console.WriteLine($"{C.SAGE}>>> {exe} {arguments}{C.NC}");
+            Console.WriteLine($"{C.SAND}>>> {exe} {arguments}{C.NC}");
 
         var psi = new ProcessStartInfo(exe, arguments)
         {
@@ -155,7 +155,7 @@ internal static class Toolchain
             File.Copy(isoPath, outIso, true);
             Out.Note(capsNote);
             Console.WriteLine();
-            Console.WriteLine($"{C.LEAF}✓{C.NC} {C.BOLD}Finished{C.NC} {C.DIM}in {Spin.Fmt(total.Elapsed)} →{C.NC} {outIso}");
+            Console.WriteLine($"{C.EMBER}✓{C.NC} {C.BOLD}Finished{C.NC} {C.DIM}in {Spin.Fmt(total.Elapsed)} →{C.NC} {outIso}");
 
             if (doRun)
             {
@@ -220,7 +220,7 @@ internal static class Toolchain
         {
             string rel = Path.GetRelativePath(srcDir, src);
             string obj = Path.Combine(objDir, rel.Replace(Path.DirectorySeparatorChar, '_') + ".o");
-            var asmFlags = new List<string> { $"-I{srcDir}", "-D__ASSEMBLER__" };
+            var asmFlags = new List<string> { $"-I{srcDir}", $"-Wa,-I{srcDir}", "-D__ASSEMBLER__" };
             asmFlags.AddRange(defines);
             jobs.Add((src, obj, asmFlags.ToArray()));
         }

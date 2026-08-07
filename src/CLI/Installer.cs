@@ -22,7 +22,7 @@ internal static class Installer
         bool isWin = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
         bool isMac = RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
         Console.WriteLine();
-        Console.WriteLine($"{C.LEAF}{(isUpdate ? "Updating" : "Installing")} appa{C.NC} {C.DIM}{AppaVersion.Current}{C.NC}");
+        Console.WriteLine($"{C.EMBER}{(isUpdate ? "Updating" : "Installing")} appa{C.NC} {C.DIM}{AppaVersion.Current}{C.NC}");
         Console.WriteLine();
         Fmt.Table([
             ($"{C.DIM}into{C.NC}",       AppaPaths.Root),
@@ -106,8 +106,8 @@ internal static class Installer
 
         Console.WriteLine();
         Console.WriteLine(isUpdate
-            ? $"{C.LEAF}✓{C.NC} {C.BOLD}Up to date{C.NC} {C.DIM}- toolchain, libgata, template, and appa{C.NC}"
-            : $"{C.LEAF}✓{C.NC} {C.BOLD}Installed{C.NC} {C.DIM}→{C.NC} {AppaPaths.Root}");
+            ? $"{C.EMBER}✓{C.NC} {C.BOLD}Up to date{C.NC} {C.DIM}- toolchain, libgata, template, and appa{C.NC}"
+            : $"{C.EMBER}✓{C.NC} {C.BOLD}Installed{C.NC} {C.DIM}→{C.NC} {AppaPaths.Root}");
 
         if (!isUpdate)
         {
@@ -132,7 +132,7 @@ internal static class Installer
     /// </summary>
     private static bool Ask(string question, bool defaultYes)
     {
-        Console.Write($"  {C.FOREST}?{C.NC} {question} {C.DIM}[{(defaultYes ? "Y/n" : "y/N")}]{C.NC} ");
+        Console.Write($"  {C.GOLD}?{C.NC} {question} {C.DIM}[{(defaultYes ? "Y/n" : "y/N")}]{C.NC} ");
         string answer = Console.ReadLine()?.Trim().ToLowerInvariant() ?? "";
         return answer.Length == 0 ? defaultYes : answer is "y" or "yes";
     }
@@ -238,12 +238,12 @@ internal static class Installer
             if (isWin)
             {
                 DeferOnWindows($"Remove-Item -LiteralPath '{Escape(full)}' -Force -ErrorAction Stop");
-                Out.Note($"{C.LEAF}✓{C.NC} {C.DIM}Scheduled - removed as soon as this process exits.{C.NC}");
+                Out.Note($"{C.EMBER}✓{C.NC} {C.DIM}Scheduled - removed as soon as this process exits.{C.NC}");
             }
             else
             {
                 File.Delete(full);
-                Out.Note($"{C.LEAF}✓{C.NC} {C.DIM}Removed{C.NC} {full}");
+                Out.Note($"{C.EMBER}✓{C.NC} {C.DIM}Removed{C.NC} {full}");
             }
         }
         catch (Exception ex) { Log.Warn($"Could not delete {full}: {ex.Message}"); }

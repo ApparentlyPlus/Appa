@@ -109,7 +109,7 @@ static void RunNew(string[] args)
     };
 
     Console.WriteLine();
-    Console.WriteLine($"{C.LEAF}✓{C.NC} Created {C.BOLD}{name}{C.NC} {C.DIM}(GatOS){C.NC}");
+    Console.WriteLine($"{C.EMBER}✓{C.NC} Created {C.BOLD}{name}{C.NC} {C.DIM}(GatOS){C.NC}");
     Console.WriteLine();
     Console.WriteLine($"{Fmt.Indent}{C.DIM}{name}/{C.NC}");
     Fmt.Table([..entries.Select((e, i) =>
@@ -148,7 +148,7 @@ static void RunClean(string[] args)
                  "clean only removes build output from a project directory");
 
     Console.WriteLine();
-    Console.WriteLine($"{C.LEAF}Cleaning{C.NC} {Path.GetFileNameWithoutExtension(manifestPath)} {C.DIM}({projectRoot}){C.NC}");
+    Console.WriteLine($"{C.EMBER}Cleaning{C.NC} {Path.GetFileNameWithoutExtension(manifestPath)} {C.DIM}({projectRoot}){C.NC}");
     Console.WriteLine();
 
     int removed = 0;
@@ -167,7 +167,7 @@ static void RunClean(string[] args)
     else
     {
         Console.WriteLine();
-        Console.WriteLine($"{C.LEAF}✓{C.NC} {C.BOLD}Clean{C.NC}");
+        Console.WriteLine($"{C.EMBER}✓{C.NC} {C.BOLD}Clean{C.NC}");
     }
     Console.WriteLine();
 }
@@ -218,9 +218,9 @@ static void RunBuild(string[] args, bool doRun)
         "--pure-transpile --env <file> --entry <file>", "--pure-transpile --env --entry");
 
     if (manifest != null)
-        Console.WriteLine($"{C.LEAF}Building{C.NC} {manifest.ProjectName} {C.DIM}({manifest.Target}, {manifest.Mode.ToString().ToLowerInvariant()}){C.NC}");
+        Console.WriteLine($"{C.EMBER}Building{C.NC} {manifest.ProjectName} {C.DIM}({manifest.Target}, {manifest.Mode.ToString().ToLowerInvariant()}){C.NC}");
     else
-        Console.WriteLine($"{C.LEAF}Building{C.NC} {C.DIM}(--pure-transpile){C.NC}");
+        Console.WriteLine($"{C.EMBER}Building{C.NC} {C.DIM}(--pure-transpile){C.NC}");
     Console.WriteLine();
 
     var (module, sourcemap, caps, diag) = RunFrontEnd(envPath, entryPath, projectRoot, stdlibDir, manifest, warnAsError);
@@ -243,7 +243,7 @@ static void RunBuild(string[] args, bool doRun)
         Cli.WriteOutputs(output, outDir);
         if (emitSourcemap) Cli.WriteSourcemap(sourcemap, outDir);
         Console.WriteLine();
-        Console.WriteLine($"{C.LEAF}✓{C.NC} {C.BOLD}Finished{C.NC} {C.DIM}→{C.NC} {outDir}{Path.DirectorySeparatorChar}");
+        Console.WriteLine($"{C.EMBER}✓{C.NC} {C.BOLD}Finished{C.NC} {C.DIM}→{C.NC} {outDir}{Path.DirectorySeparatorChar}");
         foreach (var f in output) Out.Child($"{C.DIM}{Path.Combine(Cli.TranspileDir, f.Name)}{C.NC}");
         return;
     }
@@ -285,9 +285,9 @@ static void RunCheck(string[] args)
         "--env <file> --entry <file>", "--env --entry");
 
     if (manifest != null)
-        Console.WriteLine($"{C.LEAF}Checking{C.NC} {manifest.ProjectName} {C.DIM}({manifest.Target}, {manifest.Mode.ToString().ToLowerInvariant()}){C.NC}");
+        Console.WriteLine($"{C.EMBER}Checking{C.NC} {manifest.ProjectName} {C.DIM}({manifest.Target}, {manifest.Mode.ToString().ToLowerInvariant()}){C.NC}");
     else
-        Console.WriteLine($"{C.LEAF}Checking{C.NC} {C.DIM}(--env/--entry){C.NC}");
+        Console.WriteLine($"{C.EMBER}Checking{C.NC} {C.DIM}(--env/--entry){C.NC}");
     Console.WriteLine();
 
     RunFrontEnd(envPath, entryPath, projectRoot, stdlibDir, manifest, warnAsError);
@@ -349,7 +349,7 @@ static string[] Commands() => ["install", "update", "new", "check", "build", "ru
 static void PrintHelp()
 {
     Console.WriteLine();
-    Console.WriteLine($"{C.LEAF}appa{C.NC} {AppaVersion.Current} {C.DIM}- the Gata language compiler for GatOS{C.NC}");
+    Console.WriteLine($"{C.EMBER}appa{C.NC} {AppaVersion.Current} {C.DIM}- the Gata language compiler for GatOS{C.NC}");
 
     Fmt.Section("Commands");
     Fmt.Table([
@@ -497,12 +497,12 @@ static class Log
     /// <summary>
     /// Prints a success message with a green checkmark.
     /// </summary>
-    public static void Ok(string m) => Console.WriteLine($"{C.LEAF}✓{C.NC} {m}");
+    public static void Ok(string m) => Console.WriteLine($"{C.EMBER}✓{C.NC} {m}");
 
     /// <summary>
     /// Prints a step message in cyan.
     /// </summary>
-    public static void Step(string m) => Console.WriteLine($"{C.FOREST}{m}{C.NC}");
+    public static void Step(string m) => Console.WriteLine($"{C.GOLD}{m}{C.NC}");
 
     /// <summary>
     /// Prints a warning message, wrapped under its own label.
@@ -516,7 +516,7 @@ static class Log
     public static void Error(string m, string? hint = null)
     {
         Console.Error.Write(Tagged($"{C.RED}error:{C.NC}", m));
-        if (hint != null) Console.Error.Write(Tagged($"{C.SAGE}={C.NC} {C.CYAN}help{C.NC}:", hint));
+        if (hint != null) Console.Error.Write(Tagged($"{C.SAND}={C.NC} {C.CYAN}help{C.NC}:", hint));
     }
 
     /// <summary>

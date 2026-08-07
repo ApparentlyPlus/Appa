@@ -138,6 +138,6 @@ static class Fmt
     public static void Section(string title, string? note = null)
     {
         Console.WriteLine();
-        Console.WriteLine($"{C.FOREST}{title}{C.NC}{(note is null ? "" : $" {C.DIM}{note}{C.NC}")}");
+        Console.WriteLine($"{C.GOLD}{title}{C.NC}{(note is null ? "" : $" {C.DIM}{note}{C.NC}")}");
     }
 }
