@@ -80,7 +80,7 @@ jobs:
                    "$root/toolchain/x86_64-win/qemu/qemu-system-x86_64.exe"; do
             [ -f "$p" ] && echo "  ok   $p" || { echo "  MISS $p"; fail=1; }
           done
-          n=$(ls "$root"/libgata/*.g 2>/dev/null | wc -l)
+          n=$(ls "$root"/libgata/*.g 2>/dev/null | wc -l || true)
           [ "$n" -gt 0 ] && echo "  ok   libgata ($n modules)" || { echo "  MISS libgata"; fail=1; }
           [ "$fail" -eq 0 ] || { echo "::error::toolchain incomplete - BootTests would skip"; exit 1; }
 

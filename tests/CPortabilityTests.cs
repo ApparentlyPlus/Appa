@@ -79,8 +79,11 @@ public class CPortabilityTests
         var (probe, _) = HostedRun.Run(cc, "--version", outDir);
         if (probe != 0) Assert.Skip($"{cc} is not installed; skipping the {cc} portability matrix");
 
+        var stdFlag = HostedRun.StdFlag(cc, std);
+        if (stdFlag == null) Assert.Skip($"{cc} knows no spelling of -std={std}; skipping");
+
         var (code, output) = HostedRun.Run(cc,
-            $"-std={std} -I. {opt} {Warnings} -c program.c -o /dev/null", outDir);
-        Assert.True(code == 0, $"{cc} {opt} -std={std} rejected the emitted C:\n{output}");
+            $"-std={stdFlag} -I. {opt} {Warnings} -c program.c -o program.o", outDir);
+        Assert.True(code == 0, $"{cc} {opt} -std={stdFlag} rejected the emitted C:\n{output}");
     }
 }

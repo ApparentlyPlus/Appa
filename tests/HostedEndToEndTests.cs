@@ -203,7 +203,8 @@ public class HostedEndToEndTests
         var exe = work.Combine("prog");
         var (ccCode, ccOut) = Run(cc,
             $"-std=c11 -I. -Wall -Wextra -Werror -Wno-unused-parameter -Wno-unused-function " +
-            $"-Wno-unused-variable -Wno-missing-field-initializers -o \"{exe}\" program.c -lm", outDir);
+            $"-Wno-unused-variable -Wno-missing-field-initializers " +
+            $"-o \"{exe}\" program.c {HostedRun.MathLib(cc)}", outDir);
         Assert.True(ccCode == 0, $"{cc} rejected the emitted C:\n{ccOut}");
 
         var (runCode, runOut) = Run(exe, "", work.Path);

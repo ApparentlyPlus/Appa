@@ -89,6 +89,68 @@ internal static class HostedRun
         catch { return false; /* not on PATH */ }
     }
 
+    private static readonly Dictionary<string, string> _mathLibProbe = [];
+
+    /// <summary>
+    /// Returns the flag that links libm for <paramref name="cc"/>, or the empty string where the
+    /// math functions are already in the C runtime.
+    /// </summary>
+    public static string MathLib(string cc)
+    {
+        lock (_mathLibProbe)
+        {
+            if (_mathLibProbe.TryGetValue(cc, out string? known)) return known;
+            string answer = "-lm";
+            try
+            {
+                using var probe = Scratch.Create("appa-libm-probe-");
+                File.WriteAllText(probe.Combine("p.c"),
+                    "#include <math.h>\nint main(void){return (int)sqrt(4.0) - 2;}");
+                var (code, _) = Run(cc, "-o probe p.c -lm", probe.Path);
+                if (code != 0) answer = "";
+            }
+            catch { answer = ""; }
+            _mathLibProbe[cc] = answer;
+            return answer;
+        }
+    }
+
+    private static readonly Dictionary<string, string?> _stdProbe = [];
+
+    /// <summary>
+    /// Returns the <c>-std=</c> spelling <paramref name="cc"/> accepts for <paramref name="std"/>,
+    /// falling back to the pre-ratification name (c23 -> c2x) where the compiler predates the final
+    /// one, or null when it knows neither.
+    /// </summary>
+    public static string? StdFlag(string cc, string std)
+    {
+        lock (_stdProbe)
+        {
+            string key = $"{cc}/{std}";
+            if (_stdProbe.TryGetValue(key, out string? known)) return known;
+            string?[] candidates = std switch
+            {
+                "c23" => ["c23", "c2x"],
+                "c17" => ["c17", "c18", "c11"],
+                _ => [std],
+            };
+            string? answer = null;
+            try
+            {
+                using var probe = Scratch.Create("appa-std-probe-");
+                File.WriteAllText(probe.Combine("p.c"), "int main(void){return 0;}");
+                foreach (var candidate in candidates)
+                {
+                    var (code, _) = Run(cc, $"-std={candidate} -c p.c -o p.o", probe.Path);
+                    if (code == 0) { answer = candidate; break; }
+                }
+            }
+            catch { answer = null; }
+            _stdProbe[key] = answer;
+            return answer;
+        }
+    }
+
     // Whether a given compiler can actually link a sanitized binary
     private static readonly Dictionary<string, bool> _sanitizerProbe = [];
 
@@ -166,7 +228,8 @@ internal static class HostedRun
 
         string opt = release ? string.Join(" ", GatosFlags.For(Mode.Release)) : "";
         var (ccCode, ccOut) = Run(cc,
-            $"-std=c11 -I. {warnings} {opt} {(sanitized ? SanitizerFlags + " -g" : "")} -o \"{exe}\" program.c -lm",
+            $"-std=c11 -I. {warnings} {opt} {(sanitized ? SanitizerFlags + " -g" : "")} " +
+            $"-o \"{exe}\" program.c {MathLib(cc)}",
             outDir);
         Assert.True(ccCode == 0, $"{cc} rejected the emitted C:\n{ccOut}");
         var env = new Dictionary<string, string> { ["ASAN_OPTIONS"] = "detect_leaks=0" };

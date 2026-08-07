@@ -213,7 +213,8 @@ public class ArithmeticFidelityFuzzTests
         foreach (var (cc, opt) in Configs())
         {
             string exe = Path.Combine(outDir, $"prog_{cc}{opt.Replace("-", "")}");
-            var (ccCode, ccOut) = HostedRun.Run(cc, $"-std=c11 {opt} -w -I. -o \"{exe}\" program.c -lm", outDir);
+            var (ccCode, ccOut) = HostedRun.Run(cc,
+                $"-std=c11 {opt} -w -I. -o \"{exe}\" program.c {HostedRun.MathLib(cc)}", outDir);
             if (ccCode != 0)
             {
                 Assert.DoesNotContain("error:", ccOut);

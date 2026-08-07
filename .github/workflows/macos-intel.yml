@@ -71,13 +71,13 @@ jobs:
       - name: Verify the boot tests will actually run
         run: |
           set -euo pipefail
-          root="$HOME/.local/share/appa"
+          root="$HOME/Library/Application Support/appa"
           fail=0
-          for p in "$root/toolchain/x86_64-macos/gcc/bin/x86_64-elf-gcc" \
-                   "$root/toolchain/x86_64-macos/qemu/bin/qemu-system-x86_64"; do
+          for p in "$root/toolchain/x86_64-macOS/gcc/bin/x86_64-elf-gcc" \
+                   "$root/toolchain/x86_64-macOS/qemu/bin/qemu-system-x86_64"; do
             [ -f "$p" ] && echo "  ok   $p" || { echo "  MISS $p"; fail=1; }
           done
-          n=$(ls "$root"/libgata/*.g 2>/dev/null | wc -l)
+          n=$(ls "$root"/libgata/*.g 2>/dev/null | wc -l || true)
           [ "$n" -gt 0 ] && echo "  ok   libgata ($n modules)" || { echo "  MISS libgata"; fail=1; }
           [ "$fail" -eq 0 ] || { echo "::error::toolchain incomplete - BootTests would skip"; exit 1; }
 

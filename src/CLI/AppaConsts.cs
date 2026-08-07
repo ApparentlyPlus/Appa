@@ -103,7 +103,7 @@ static class AppaPaths
 
     public static string PlatformToolchain => Path.Combine(ToolchainDir,
         RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "x86_64-win" :
-        RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? "x86_64-macos" :
+        RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? "x86_64-macOS" :
         "x86_64-linux");
 
     public static string GccBin => Path.Combine(PlatformToolchain, "gcc", "bin");
