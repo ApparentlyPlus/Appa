@@ -44,7 +44,7 @@ public class SanitizerCoverageTests
         var cc = HostedRun.FindCompiler();
         if (cc == null || !HostedRun.SupportsSanitizers(cc)) { Assert.Skip("no sanitizing compiler"); return; }
 
-        using var work = TempDir.Create("appa-asan-selftest-");
+        using var work = Scratch.Create("appa-asan-selftest-");
         File.WriteAllText(work.Combine("uaf.c"), """
             #include <stdlib.h>
             int main(void) { int* p = malloc(sizeof(int)); free(p); return *p; }

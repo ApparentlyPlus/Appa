@@ -7,6 +7,17 @@ internal static class Cli
     #region Utilities
 
     /// <summary>
+    /// Where a non-image build writes its C, relative to the project root.
+    /// </summary>
+    internal const string TranspileDir = "transpilation";
+
+    /// <summary>
+    /// The project-root directories a build owns end to end, and so the ones `appa clean` removes:
+    /// the emitted C, the ISO, and the QEMU logs.
+    /// </summary>
+    internal static readonly string[] GeneratedDirs = [TranspileDir, "build", "artifacts"];
+
+    /// <summary>
     /// Resolves the environment file, entry file, project root, and libgata directory for a build
     /// or check invocation.
     /// </summary>
@@ -49,7 +60,7 @@ internal static class Cli
 
         string projectRoot = manifest?.Dir ?? Path.GetDirectoryName(Path.GetFullPath(entryPath))!;
         string? stdlibDir = stdlibOverride ?? Pipeline.FindLibgata();
-        if (stdlibDir == null) Fail("cannot find libgata - run 'appa setup' or pass --stdlib <dir>");
+        if (stdlibDir == null) Fail("cannot find libgata - run 'appa install' or pass --stdlib <dir>");
         foreach (var p in new[] { envPath, entryPath })
             if (!File.Exists(p)) Fail($"file not found: {p}");
 
@@ -73,7 +84,7 @@ internal static class Cli
         if (envOverride != null)
             Fail("--env and --entry need '--pure-transpile' to build without a .gconf",
                 $"use '{manifestHint}' to emit C from loose files, or run this in a project directory");
-        Fail("no <project>.gconf found - run 'appa init', or use " + manifestHint);
+        Fail("no <project>.gconf found - run 'appa new <name>', or use " + manifestHint);
     }
 
     /// <summary>
@@ -120,7 +131,7 @@ internal static class Cli
         var m = System.Text.RegularExpressions.Regex.Match(val, @"^(\d+)([smh])$");
         if (m.Success && int.TryParse(m.Groups[1].Value, out int n))
             return m.Groups[2].Value switch { "m" => n * 60, "h" => n * 3600, _ => n };
-        Fail($"invalid --timeout value '{val}'; expected a duration like 30s, 5m, or 1h");
+        Fail($"invalid timeout value '{val}'; expected a duration like 30s, 5m, or 1h");
         return 0;
     }
 
@@ -129,6 +140,12 @@ internal static class Cli
     /// </summary>
     [DoesNotReturn]
     internal static void Fail(string message, string? hint = null) { Log.Error(message, hint); Environment.Exit(1); }
+
+    /// <summary>
+    /// Fail, in expression position - for the ?? arm of a value that has to exist.
+    /// </summary>
+    [DoesNotReturn]
+    internal static T Fail<T>(string message, string? hint = null) { Fail(message, hint); return default!; }
 
     #endregion
 }

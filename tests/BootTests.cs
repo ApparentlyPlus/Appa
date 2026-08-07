@@ -4,20 +4,20 @@ using System.Diagnostics;
 
 /// <summary>
 /// End-to-end boot regression: builds a full GatOS ISO and boots it headless in QEMU, asserting the
-/// kernel reaches its idle loop and every section announced itself. Needs what 'appa setup'
+/// kernel reaches its idle loop and every section announced itself. Needs what 'appa install'
 /// installs, and skips gracefully without it.
 /// </summary>
 [Collection("Boot")]
 public class BootTests(BootFixture fixture)
 {
     /// <summary>
-    /// How long the booted image gets to reach its idle loop. Passed to 'appa build --run', so it
+    /// How long the booted image gets to reach its idle loop. Passed to 'appa run', so it
     /// bounds the QEMU run alone - the cross-compile ahead of it is not on this clock.
     /// </summary>
     private static readonly TimeSpan BootTimeout = TimeSpan.FromSeconds(35);
 
     /// <summary>
-    /// Backstop for the whole 'appa build --run' process, which cross-compiles the kernel, builds an
+    /// Backstop for the whole 'appa run' process, which cross-compiles the kernel, builds an
     /// ISO with grub-mkrescue and xorriso, and only then boots it.
     /// </summary>
     private static readonly TimeSpan ProcessTimeout = TimeSpan.FromMinutes(10);
@@ -107,7 +107,7 @@ public class BootTests(BootFixture fixture)
     {
         if (!ToolchainProbe.HasGatOSToolchain())
         {
-            Assert.Skip("GatOS toolchain/QEMU not installed (run 'appa setup'); skipping boot regression");
+            Assert.Skip("GatOS toolchain/QEMU not installed (run 'appa install'); skipping boot regression");
             return;
         }
 
@@ -152,7 +152,7 @@ public class BootTests(BootFixture fixture)
     {
         if (!ToolchainProbe.HasGatOSToolchain())
         {
-            Assert.Skip("GatOS toolchain/QEMU not installed (run 'appa setup'); skipping release boot regression");
+            Assert.Skip("GatOS toolchain/QEMU not installed (run 'appa install'); skipping release boot regression");
             return;
         }
 
@@ -225,7 +225,7 @@ public class BootTests(BootFixture fixture)
         string fixturesDir = Path.Combine(AppContext.BaseDirectory, "Fixtures");
         string appaDll = Path.Combine(AppContext.BaseDirectory, "Appa.dll");
 
-        using var work = TempDir.Create("appa-boot-");
+        using var work = Scratch.Create("appa-boot-");
         Directory.CreateDirectory(Path.Combine(work.Path, "src"));
         foreach (var g in Directory.GetFiles(Path.Combine(fixturesDir, fixtureName), "*.g"))
             File.Copy(g, Path.Combine(work.Path, "src", Path.GetFileName(g)));
@@ -241,7 +241,7 @@ public class BootTests(BootFixture fixture)
 
         // No --stdlib
         var psi = new ProcessStartInfo("dotnet",
-            $"\"{appaDll}\" build --run --headless --timeout={(int)BootTimeout.TotalSeconds}s")
+            $"\"{appaDll}\" run headless timeout={(int)BootTimeout.TotalSeconds}s")
         {
             UseShellExecute = false,
             RedirectStandardOutput = true,

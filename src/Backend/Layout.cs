@@ -178,7 +178,7 @@ internal static class Layout
             for (int i = 0; i < procs.Count; i++)
             {
                 var proc = procs[i];
-                string handle = $"_p{i}";
+                string handle = $"__p{i}";
                 w.Line($"void* {handle} = {procCreate}(\"{proc.Name}\");");
                 if (proc.Mode == "background")
                     w.Line($"{procHide}({handle});");

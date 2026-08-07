@@ -191,7 +191,7 @@ public class ArithmeticFidelityFuzzTests
         if (gata == null || HostedRun.FindCompiler() == null) return;
 
         var (src, expected, nodes) = Program();
-        using var work = TempDir.Create("appa-arith-fidelity-");
+        using var work = Scratch.Create("appa-arith-fidelity-");
         Directory.CreateDirectory(work.Combine("src"));
         File.WriteAllText(work.Combine("src", "main.g"), src);
         File.Copy(Path.Combine(gata, "envs", "env.hosted.g"), work.Combine("env.g"));

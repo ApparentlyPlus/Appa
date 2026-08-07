@@ -179,7 +179,7 @@ public class HostedEndToEndTests
         var cc = FindCompiler();
         if (cc == null) { Assert.Skip("no host C compiler (cc/gcc/clang) found; skipping hosted end-to-end"); return; }
 
-        using var work = TempDir.Create("appa-hosted-e2e-");
+        using var work = Scratch.Create("appa-hosted-e2e-");
         Directory.CreateDirectory(work.Combine("src"));
         File.WriteAllText(work.Combine("src", "main.g"), ProgramSource);
         File.Copy(Path.Combine(gata, "envs", "env.hosted.g"), work.Combine("env.g"));

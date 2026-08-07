@@ -367,4 +367,85 @@ public class OperatorConsistencyTests
     }
 
     #endregion
+
+    #region The arithmetic family is whole
+
+    /// <summary>
+    /// '%' is an ordinary binary arithmetic operator and overloads like the other four.
+    /// </summary>
+    [Theory]
+    [InlineData("+")]
+    [InlineData("-")]
+    [InlineData("*")]
+    [InlineData("/")]
+    [InlineData("%")]
+    public void EveryArithmeticOperatorOverloads(string op)
+    {
+        AssertClean($$"""
+            class Fixed {
+                public int raw;
+                public operator Fixed func {{op}}(Fixed other) { return self; }
+            }
+            realm kernel { entry func Main() {
+                let Fixed a = new Fixed();
+                let Fixed b = a {{op}} a;
+                let Fixed c = b;
+            } }
+            """);
+    }
+
+    /// <summary>
+    /// And the compound form composes from it, as it does for every other overloaded operator.
+    /// </summary>
+    [Fact]
+    public void ModCompoundAssignmentComposes()
+    {
+        var (diag, module) = SingleFileCompile.Check("""
+            class Fixed {
+                public int raw;
+                public operator Fixed func %(Fixed other) { return self; }
+            }
+            realm kernel { entry func Main() {
+                let Fixed a = new Fixed();
+                a %= a;
+            } }
+            """);
+        Assert.False(diag.HasErrors);
+        var op = Assert.Single(module!.Classes.Single(c => c.Name == "Fixed").Operators);
+        Assert.Equal("%", op.Op);
+    }
+
+    /// <summary>
+    /// '%' has a C name of its own rather than the fallback every unnamed operator shares, which is
+    /// what keeps it from colliding with the one other operator that lands there.
+    /// </summary>
+    [Fact]
+    public void ModHasItsOwnMangledSuffix()
+    {
+        Assert.Equal("mod", Mangler.OpSuffix("%"));
+        Assert.NotEqual(Mangler.OpSuffix("%"), Mangler.OpSuffix("as"));
+    }
+
+    /// <summary>
+    /// '%' gets a mangled name of its own rather than the shared fallback, so a class declaring both
+    /// it and a conversion does not emit two functions under one C name.
+    /// </summary>
+    [Fact]
+    public void ModAndConversionDoNotCollide()
+    {
+        AssertClean("""
+            class Fixed {
+                public int raw;
+                public operator Fixed func %(Fixed other) { return self; }
+                public operator Fixed func as(int n) { return new Fixed(); }
+            }
+            realm kernel { entry func Main() {
+                let Fixed a = new Fixed();
+                let Fixed b = a % a;
+                let Fixed c = 3 as Fixed;
+            } }
+            """);
+    }
+
+    #endregion
 }

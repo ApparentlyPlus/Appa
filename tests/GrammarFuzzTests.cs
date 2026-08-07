@@ -200,7 +200,7 @@ public class GrammarFuzzTests
     public void FuzzedProgramsCompile()
     {
         var cc = FindCompiler();
-        using var work = TempDir.Create("appa-gfuzz-");
+        using var work = Scratch.Create("appa-gfuzz-");
         var failures = new List<string>();
         int accepted = 0;
 

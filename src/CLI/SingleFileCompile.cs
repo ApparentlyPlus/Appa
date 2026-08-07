@@ -31,6 +31,7 @@ internal static class SingleFileCompile
         var programs = new List<(string path, Program prog)> { (path, prog) };
         var visible = new Dictionary<string, HashSet<string>> { [path] = [path] };
         var (module, _, _) = Pipeline.BuildModule(programs, visible, Mode.Debug, diag);
+        Pipeline.ValidateStructure(programs, target: null, diag);
         return (diag, module);
     }
 

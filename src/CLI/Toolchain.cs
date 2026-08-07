@@ -15,7 +15,7 @@ internal static class Toolchain
         bool silent = false, bool capture = false, string? spinner = null)
     {
         if (!silent && !capture && spinner == null)
-            Console.WriteLine($"{C.BLUE}>>> {exe} {arguments}{C.NC}");
+            Console.WriteLine($"{C.SAND}>>> {exe} {arguments}{C.NC}");
 
         var psi = new ProcessStartInfo(exe, arguments)
         {
@@ -115,16 +115,13 @@ internal static class Toolchain
                                 bool doRun, bool headless, int? timeout)
     {
         if (!Directory.Exists(AppaPaths.TemplateDir) || !Directory.GetDirectories(AppaPaths.TemplateDir).Any())
-            Cli.Fail("GatOS template not found. Run 'appa setup' first.");
+            Cli.Fail("GatOS template not found. Run 'appa install' first.");
         if (!File.Exists(AppaPaths.Gcc()))
-            Cli.Fail("Toolchain not found. Run 'appa setup' first.");
-
-        string buildDir = Path.Combine(Path.GetTempPath(),
-            $"appa-build-{Environment.ProcessId}-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}");
-        Directory.CreateDirectory(buildDir);
+            Cli.Fail("Toolchain not found. Run 'appa install' first.");
+        using var work = Scratch.Create("appa-build-");
+        string buildDir = work.Path;
         var total = Stopwatch.StartNew();
 
-        try
         {
             Spin.Step("Prepared build workspace", () => Cli.CopyDirectory(AppaPaths.TemplateDir, buildDir));
 
@@ -158,7 +155,7 @@ internal static class Toolchain
             File.Copy(isoPath, outIso, true);
             Out.Note(capsNote);
             Console.WriteLine();
-            Console.WriteLine($"{C.BOLD}Finished{C.NC} in {Spin.Fmt(total.Elapsed)} {C.DIM}→{C.NC} {outIso}");
+            Console.WriteLine($"{C.EMBER}✓{C.NC} {C.BOLD}Finished{C.NC} {C.DIM}in {Spin.Fmt(total.Elapsed)} →{C.NC} {outIso}");
 
             if (doRun)
             {
@@ -167,7 +164,6 @@ internal static class Toolchain
                 RunQemu(outIso, artifactsDir, headless, timeout);
             }
         }
-        finally { try { Directory.Delete(buildDir, true); } catch { } }
     }
 
     /// <summary>
@@ -224,7 +220,7 @@ internal static class Toolchain
         {
             string rel = Path.GetRelativePath(srcDir, src);
             string obj = Path.Combine(objDir, rel.Replace(Path.DirectorySeparatorChar, '_') + ".o");
-            var asmFlags = new List<string> { $"-I{srcDir}", "-D__ASSEMBLER__" };
+            var asmFlags = new List<string> { $"-I{srcDir}", $"-Wa,-I{srcDir}", "-D__ASSEMBLER__" };
             asmFlags.AddRange(defines);
             jobs.Add((src, obj, asmFlags.ToArray()));
         }

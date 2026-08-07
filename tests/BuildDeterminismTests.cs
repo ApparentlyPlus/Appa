@@ -115,8 +115,8 @@ public class BuildDeterminismTests
         var gata = HostedRun.FindGataCheckout();
         if (gata == null) { Assert.Skip("no Gata checkout"); return; }
 
-        using var one = TempDir.Create("appa-det-a-");
-        using var two = TempDir.Create("appa-det-b-");
+        using var one = Scratch.Create("appa-det-a-");
+        using var two = Scratch.Create("appa-det-b-");
         BuildInto(one.Path, gata);
         BuildInto(two.Path, gata);
 

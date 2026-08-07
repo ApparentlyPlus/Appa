@@ -26,7 +26,7 @@ public class MultiFileTests
     /// Program.RunFrontEnd does, minus the toolchain. The caller owns the directory, so it can go
     /// on to compile what was emitted and still get cleanup from a single 'using'.
     /// </summary>
-    private static BuildResult Build(MultiFileCase c, TempDir dir)
+    private static BuildResult Build(MultiFileCase c, Scratch dir)
     {
         var work = dir.Path;
         try
@@ -123,7 +123,7 @@ public class MultiFileTests
         var fails = new Failures();
         foreach (var c in MultiFileCorpus.All)
         {
-            using var work = TempDir.Create("appa-multifile-");
+            using var work = Scratch.Create("appa-multifile-");
             var r = Build(c, work);
             if (r.Crash != null) fails.Add($"[{c.Name}] {r.Crash}\n{Describe(c)}");
         }
@@ -138,7 +138,7 @@ public class MultiFileTests
         {
             if (c.Expect == Expect.Any) continue;
 
-            using var work = TempDir.Create("appa-multifile-");
+            using var work = Scratch.Create("appa-multifile-");
             var r = Build(c, work);
             if (r.Crash != null) continue; // owned by NoProjectCrashesCompiler
 
@@ -171,7 +171,7 @@ public class MultiFileTests
         var fails = new Failures();
         foreach (var c in MultiFileCorpus.All)
         {
-            using var work = TempDir.Create("appa-multifile-");
+            using var work = Scratch.Create("appa-multifile-");
             var r = Build(c, work);
             if (r.Crash != null) continue;
 
@@ -215,7 +215,7 @@ public class MultiFileTests
 
         foreach (var c in MultiFileCorpus.All)
         {
-            using var work = TempDir.Create("appa-multifile-");
+            using var work = Scratch.Create("appa-multifile-");
             var r = Build(c, work);
             if (r.Crash != null || r.Files == null) continue;
 
@@ -308,7 +308,7 @@ public class MultiFileTests
             var c = new MultiFileCase($"graph/{shape}/seed{seed}", [.. files],
                                       acyclic ? Expect.Accepted : Expect.Any);
 
-            using var work = TempDir.Create("appa-multifile-");
+            using var work = Scratch.Create("appa-multifile-");
             var r = Build(c, work);
 
             if (r.Crash != null) { fails.Add($"[{c.Name}] {r.Crash}\n{Describe(c)}"); continue; }
@@ -350,7 +350,7 @@ public class MultiFileTests
         };
 
         var c = new MultiFileCase($"shadow/{shape}", [files.Item1, files.Item2], Expect.Any);
-        using var work = TempDir.Create("appa-multifile-");
+        using var work = Scratch.Create("appa-multifile-");
         var r = Build(c, work);
 
         Assert.Null(r.Crash);
@@ -377,7 +377,7 @@ public class MultiFileTests
                            $"realm userspace {{ {mark}int func Helper() {{ return 2; }} entry func Main() {{ }} }}\n"),
         ], Expect.Any);
 
-        using var work = TempDir.Create("appa-multifile-");
+        using var work = Scratch.Create("appa-multifile-");
         var r = Build(c, work);
 
         Assert.Null(r.Crash);
@@ -398,10 +398,127 @@ public class MultiFileTests
                            "realm userspace { int func Solo() { return 2; } entry func Main() { } }\n"),
         ], Expect.Any);
 
-        using var work = TempDir.Create("appa-multifile-");
+        using var work = Scratch.Create("appa-multifile-");
         var r = Build(c, work);
 
         Assert.Null(r.Crash);
         Assert.DoesNotContain(r.Diag!.All, d => d.Code == Codes.UnmarkedShadow);
     }
+
+    #region A file-local function displacing an imported one
+
+    /// <summary>
+    /// Runs a two-file project and hands back its diagnostics.
+    /// </summary>
+    private static IReadOnlyList<Diagnostic> Diagnose(string lib, string main)
+    {
+        var c = new MultiFileCase("shadow/private",
+        [
+            ("src/lib.g", lib),
+            ("src/main.g", main),
+        ], Expect.Any);
+
+        using var work = Scratch.Create("appa-multifile-");
+        var r = Build(c, work);
+        Assert.Null(r.Crash);
+        return r.Diag!.All;
+    }
+
+    /// <summary>
+    /// A file-local function takes the name away from every call in its own file, so the name means
+    /// one thing here and another in the file it was imported from. 
+    /// </summary>
+    [Fact]
+    public void PrivateShadowingAnImportIsReported()
+    {
+        var d = Assert.Single(Diagnose(
+            "int func Clamp(int v) { return v; }",
+            "import \"src/lib.g\";\nprivate int func Clamp(int v) { return v + 1; }\n" +
+            "realm userspace { entry func Main() { let int a = Clamp(1); } }\n"),
+            x => x.Code == Codes.ShadowedFunction);
+
+        Assert.Equal(Severity.Warning, d.Severity);
+        Assert.Contains("'Clamp' shadows the 'Clamp' declared in 'lib'", d.Message);
+        Assert.Contains(d.Hints, h => h.Contains("lib.Clamp(...)", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// It is reported where the name is claimed, not where it is used, so a helper called from
+    /// forty places says it once.
+    /// </summary>
+    [Fact]
+    public void ReportedAtTheDeclaration()
+    {
+        var all = Diagnose(
+            "int func Clamp(int v) { return v; }",
+            "import \"src/lib.g\";\nprivate int func Clamp(int v) { return v + 1; }\n" +
+            "realm userspace { entry func Main() { let int a = Clamp(1) + Clamp(2) + Clamp(3); } }\n");
+
+        var d = Assert.Single(all, x => x.Code == Codes.ShadowedFunction);
+        Assert.EndsWith("main.g", d.Loc.File, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A set of overloads claims one name once.
+    /// </summary>
+    [Fact]
+    public void OverloadsReportOnce()
+    {
+        var all = Diagnose(
+            "int func Clamp(int v) { return v; }",
+            "import \"src/lib.g\";\n" +
+            "private int func Clamp(int v) { return v; }\n" +
+            "private int func Clamp(int v, int w) { return v + w; }\n" +
+            "realm userspace { entry func Main() { let int a = Clamp(1); } }\n");
+
+        Assert.Single(all, d => d.Code == Codes.ShadowedFunction);
+    }
+
+    /// <summary>
+    /// '@shadows' means the same thing here it means inside a realm: the displacement was written
+    /// down on purpose. And the imported name stays reachable through its file.
+    /// </summary>
+    [Fact]
+    public void ShadowsAnnotationSettlesIt()
+    {
+        var all = Diagnose(
+            "int func Clamp(int v) { return v; }",
+            "import \"src/lib.g\";\n@shadows\nprivate int func Clamp(int v) { return v + 1; }\n" +
+            "realm userspace { entry func Main() { let int a = Clamp(1); let int b = lib.Clamp(2); } }\n");
+
+        Assert.DoesNotContain(all, d => d.Code == Codes.ShadowedFunction);
+        Assert.DoesNotContain(all, d => d.Severity == Severity.Error);
+    }
+
+    /// <summary>
+    /// Marking one that displaces nothing is still the error it is everywhere else.
+    /// </summary>
+    [Fact]
+    public void ShadowsAnnotationDisplacingNothingRejected()
+    {
+        var all = Diagnose(
+            "int func Other() { return 1; }",
+            "import \"src/lib.g\";\n@shadows\nprivate int func Solo(int v) { return v; }\n" +
+            "realm userspace { entry func Main() { let int a = Solo(1); } }\n");
+
+        Assert.Contains(all, d => d.Code == Codes.UnmarkedShadow && d.Severity == Severity.Error);
+    }
+
+    /// <summary>
+    /// Nothing is displaced when the two files never meet: a name is only taken from a file that
+    /// could have read it.
+    /// </summary>
+    [Theory]
+    [InlineData("import \"src/lib.g\";\nprivate int func Solo(int v) { return v; }\n", false)]
+    [InlineData("private int func Clamp(int v) { return v; }\n", false)]
+    public void NoWarningWithoutADisplacement(string prelude, bool expected)
+    {
+        var all = Diagnose(
+            "int func Clamp(int v) { return v; }",
+            prelude + "realm userspace { entry func Main() { } }\n");
+
+        Assert.Equal(expected, all.Any(d => d.Code == Codes.ShadowedFunction));
+    }
+
+    #endregion
 }

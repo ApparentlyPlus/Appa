@@ -23,7 +23,7 @@ internal sealed class Densifier(IrModule m)
     {
         int v = _seq++;
         const string D = "0123456789abcdefghijklmnopqrstuvwxyz";
-        if (v == 0) return "_g0";
+        if (v == 0) return "__g0";
         Span<char> buffer = stackalloc char[18];
         int pos = 18;
         while (v > 0)
@@ -31,9 +31,10 @@ internal sealed class Densifier(IrModule m)
             buffer[--pos] = D[v % 36];
             v /= 36;
         }
+        buffer[pos - 3] = '_';
         buffer[pos - 2] = '_';
         buffer[pos - 1] = 'g';
-        return new string(buffer[(pos - 2)..]);
+        return new string(buffer[(pos - 3)..]);
     }
 
     /// <summary>

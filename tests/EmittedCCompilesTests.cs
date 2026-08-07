@@ -69,7 +69,7 @@ public class EmittedCCompilesTests
             return;
         }
 
-        using var work = TempDir.Create("appa-torture-c-");
+        using var work = Scratch.Create("appa-torture-c-");
         var failures = new List<string>();
         int compiled = 0;
 

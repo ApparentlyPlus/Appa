@@ -198,7 +198,7 @@ public class ScopeFuzzTests
     public void ScopedProgramsLink()
     {
         var cc = FindCompiler();
-        using var work = TempDir.Create("appa-scopefuzz-");
+        using var work = Scratch.Create("appa-scopefuzz-");
         var failures = new List<string>();
         var cov = new Coverage();
         int linked = 0;

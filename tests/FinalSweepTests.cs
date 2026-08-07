@@ -318,7 +318,7 @@ public class FinalSweepTests
     [Fact]
     public void LibraryPathsNotSiblings()
     {
-        using var root = TempDir.Create("appa-libpred-");
+        using var root = Scratch.Create("appa-libpred-");
         string lib = Path.Combine(root.Path, "libgata");
         string sibling = Path.Combine(root.Path, "libgata-extra");
         Directory.CreateDirectory(lib);

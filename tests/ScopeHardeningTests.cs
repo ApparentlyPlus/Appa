@@ -58,9 +58,10 @@ public class ScopeHardeningTests
     /// </summary>
     [Theory]
     [InlineData("int func F(int a) { return a; } int func F(bool b) { return 1; } realm kernel { entry func Main() { } }")]
-    [InlineData("realm kernel { foreground process A { class C { public int a; } } " +
-                "foreground process B { class C { public int b; } } entry func Main() { } }")]
-    [InlineData("realm kernel { foreground process P { } entry func Main() { } } realm userspace { foreground process P { } }")]
+    [InlineData("realm kernel { foreground process A { class C { public int a; } thread T { entry func R() { } } } " +
+                "foreground process B { class C { public int b; } thread T { entry func R() { } } } entry func Main() { } }")]
+    [InlineData("realm kernel { foreground process P { thread T { entry func R() { } } } entry func Main() { } } " +
+                "realm userspace { foreground process P { thread T { entry func R() { } } } }")]
     public void DistinctScopesOk(string src)
     {
         Assert.Empty(Errors(src));
@@ -133,8 +134,10 @@ public class ScopeHardeningTests
     [Fact]
     public void DuplicateProcessVsRoot()
     {
-        var errors = Errors("class A { public int r; } realm kernel { foreground process P { } " +
-                            "foreground process P { class A { public int y; } } entry func Main() { } }");
+        var errors = Errors("class A { public int r; } realm kernel { " +
+                            "foreground process P { thread T { entry func R() { } } } " +
+                            "foreground process P { class A { public int y; } thread U { entry func R() { } } } " +
+                            "entry func Main() { } }");
         Assert.Single(errors);
         Assert.Contains("process 'P' is already declared", errors[0], StringComparison.Ordinal);
     }
@@ -244,14 +247,14 @@ public class ScopeHardeningTests
     }
 
     /// <summary>
-    /// It is still unreachable, and still collides with another entry - which is one fixed C symbol
-    /// declared twice however the two are spelled.
+    /// It is still unreachable, and a realm still has exactly one.
     /// </summary>
     [Theory]
     [InlineData("realm kernel { entry func Main() { } void func F() { Main(); } }", Codes.CallToEntry)]
     [InlineData("realm kernel { entry func Main() { } void func F() { let func() -> void f = Main; } }", Codes.CallToEntry)]
     [InlineData("realm kernel { entry func Main() { } entry func Main() { } }", Codes.DuplicateName)]
-    [InlineData("realm kernel { entry func Main() { } entry func Other() { } }", Codes.DuplicateName)]
+    [InlineData("realm kernel { entry func Main() { } entry func Other() { } }", Codes.DuplicateEntry)]
+    [InlineData("realm kernel { entry func Main() { } } realm kernel { entry func Other() { } }", Codes.DuplicateEntry)]
     public void EntryFuncUnreachableAndUnique(string src, string code)
     {
         Assert.Contains(Errors(src), e => e.StartsWith(code, StringComparison.Ordinal));

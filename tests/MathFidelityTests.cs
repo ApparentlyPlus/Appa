@@ -147,7 +147,7 @@ public class MathFidelityTests
         var result = HostedRun.BuildAndRun(g.ToString(), gata, cc);
         HostedRun.AssertClean(result);
 
-        using var work = TempDir.Create("appa-libm-ref-");
+        using var work = Scratch.Create("appa-libm-ref-");
         File.WriteAllText(work.Combine("ref.c"), c.ToString());
         var (refCode, refOut) = HostedRun.Run(cc, "-std=c11 -O1 -o ref ref.c -lm", work.Path);
         Assert.True(refCode == 0, $"the libm reference program did not compile:\n{refOut}");

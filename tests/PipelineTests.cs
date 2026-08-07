@@ -79,8 +79,9 @@ public class PipelineTests
 
     [Theory]
     [InlineData("G002", "module M { }")]
-    [InlineData("G057", "realm kernel { entry func Main() { } } realm kernel { entry func Main2() { } }")]
+    [InlineData("G002", "realm kernel { int func A() { return 1; } } realm kernel { int func B() { return 2; } }")]
     [InlineData("G059", "realm kernel { entry func A() { } entry func B() { } }")]
+    [InlineData("G059", "realm kernel { entry func A() { } } realm kernel { entry func B() { } }")]
     public void StructureCode(string expectedCode, string src)
     {
         var prog = SingleFileCompile.Parse(src);
@@ -95,9 +96,10 @@ public class PipelineTests
     [Theory]
     [InlineData("G055", "realm kernel { entry func Main() { } } realm userspace { entry func Main() { } }")]
     [InlineData("G056", "class M { }")]
-    [InlineData("G057", "realm userspace { entry func A() { } } realm userspace { entry func B() { } }")]
     [InlineData("G058", "realm userspace { func f() { } }")]
+    [InlineData("G058", "realm userspace { func f() { } } realm userspace { func g() { } }")]
     [InlineData("G059", "realm userspace { entry func A() { } entry func B() { } }")]
+    [InlineData("G059", "realm userspace { entry func A() { } } realm userspace { entry func B() { } }")]
     public void HostedStructureCode(string expectedCode, string src)
     {
         var prog = SingleFileCompile.Parse(src);
@@ -120,6 +122,55 @@ public class PipelineTests
         var diag = new DiagnosticBag(sources);
         Pipeline.ValidateStructure(programs, Target.Hosted, diag);
         Assert.False(diag.HasErrors);
+    }
+
+    /// <summary>
+    /// A realm is one namespace however many blocks open it, in however many files.
+    /// </summary>
+    [Theory]
+    [InlineData(false, "realm kernel { entry func Main() { } }",
+                       "realm kernel { int func Helper() { return 1; } }")]
+    [InlineData(false, "realm kernel { entry func Main() { } }",
+                       "realm kernel { class Cfg { public int n; } }",
+                       "realm kernel { module M { public static int func F() { return 1; } } }")]
+    [InlineData(true, "realm userspace { entry func Main() { } }",
+                      "realm userspace { int func Helper() { return 1; } }")]
+    public void RealmSplitsAcrossFiles(bool hosted, params string[] files)
+    {
+        Target? target = hosted ? Target.Hosted : null;
+        var sources = new SourceSet();
+        var programs = new List<(string path, Appa.Program prog)>();
+        for (int i = 0; i < files.Length; i++)
+        {
+            string path = $"<f{i}>";
+            sources.Add(path, files[i]);
+            programs.Add((path, SingleFileCompile.Parse(files[i])));
+        }
+
+        var diag = new DiagnosticBag(sources);
+        Pipeline.ValidateStructure(programs, target, diag);
+        Assert.False(diag.HasErrors, string.Join(", ", diag.All.Select(d => d.Code + " " + d.Message)));
+    }
+
+    /// <summary>
+    /// The one entry point survives the split: two of them across two blocks is the same mistake as
+    /// two in one, and is reported as such rather than through the C name they would share.
+    /// </summary>
+    [Fact]
+    public void SplitRealmStillWantsOneEntry()
+    {
+        const string a = "realm kernel { entry func Main() { } }";
+        const string b = "realm kernel { entry func Other() { } }";
+        var sources = new SourceSet();
+        sources.Add("<a>", a);
+        sources.Add("<b>", b);
+        var diag = new DiagnosticBag(sources);
+        Pipeline.ValidateStructure(
+            [("<a>", SingleFileCompile.Parse(a)), ("<b>", SingleFileCompile.Parse(b))], null, diag);
+
+        var d = Assert.Single(diag.All);
+        Assert.Equal(Codes.DuplicateEntry, d.Code);
+        Assert.Equal("<b>", d.Loc.File);
     }
 
     /// <summary>

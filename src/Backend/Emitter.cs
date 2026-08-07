@@ -879,24 +879,24 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         string dtorArg = NeedsDtor(cls) ? Mangler.Dtor(cls.Name) : "0";
         using (w.Block($"{prefix}{AllocatorSig(cls)} {{"))
         {
-            w.Line($"{cls.CName}* _o = ({cls.CName}*){Intrinsic(Roles.Alloc)}(sizeof({cls.CName}));");
-            w.Line($"*_o = ({cls.CName}){{0}};");
-            w.Line($"{Intrinsic(Roles.ObjInit)}(_o, {dtorArg});");
+            w.Line($"{cls.CName}* __o = ({cls.CName}*){Intrinsic(Roles.Alloc)}(sizeof({cls.CName}));");
+            w.Line($"*__o = ({cls.CName}){{0}};");
+            w.Line($"{Intrinsic(Roles.ObjInit)}(__o, {dtorArg});");
             foreach (var f in cls.Fields)
                 if (cls.FieldInits.TryGetValue(f.Name, out var init))
                 {
                     using var line = w.Open();
-                    line.Buffer.Append("_o->").Append(f.Name).Append(" = ");
+                    line.Buffer.Append("__o->").Append(f.Name).Append(" = ");
                     Write(init, line.Buffer);
                     line.Buffer.Append(';');
                 }
             if (cls.HasInit && InitOf(cls) is { } ctor)
             {
-                var args = new StringBuilder("_o");
+                var args = new StringBuilder("__o");
                 foreach (var p in ctor.Params) args.Append(", ").Append(Mangler.Local(p.Name));
                 w.Line($"{ctor.CName}({args});");
             }
-            w.Line("return _o;");
+            w.Line("return __o;");
         }
         w.Blank();
     }

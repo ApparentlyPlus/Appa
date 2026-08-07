@@ -4,110 +4,296 @@ using System.Diagnostics;
 using System.IO.Compression;
 using System.Runtime.InteropServices;
 
-/// <summary>
-/// The 'appa setup' / 'appa update' installer: downloads the GatOS bundle and libgata, extracts the
-/// project template, installs the appa binary, and (optionally, elevated) puts it on PATH.
-/// </summary>
 internal static class Installer
 {
+    private static int _step, _steps;
 
     /// <summary>
-    /// Downloads and installs (or re-installs) the GatOS toolchain, libgata, template, and appa
+    /// Numbers a step label.
+    /// </summary>
+    private static string Tag(string label) => $"({++_step}/{_steps}) {label}";
+
+    /// <summary>
+    /// Downloads and installs (or re-installs) the GatOS toolchain, libgata, template, and Appa
     /// binary.
     /// </summary>
-    internal static async Task RunSetup(bool isUpdate)
+    internal static async Task RunSetup(bool isUpdate, bool? pathPref = null, bool force = false)
     {
-        Log.Info(isUpdate
-            ? "Updating appa toolchain, libgata, and template (overwriting existing)..."
-            : "Setting up appa toolchain and resources...");
-        Log.Info($"Installation directory: {AppaPaths.Root}");
-
-        // Re-running setup re-downloads everything. If already installed, confirm first
-        // (interactive only; `update` is always intentional).
-        if (!isUpdate && Directory.Exists(AppaPaths.ToolchainDir) && !Console.IsInputRedirected)
-        {
-            Console.Write($"{C.YELLOW}appa is already installed at {AppaPaths.Root}. Re-download and overwrite? [y/N]: {C.NC}");
-            if (Console.ReadLine()?.Trim().ToLowerInvariant() is not ("y" or "yes"))
-            { Log.Info("Setup cancelled - existing install left untouched."); return; }
-        }
-
         bool isWin = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
         bool isMac = RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
-
-        bool wantsPath = false;
-        if (!isUpdate && !Console.IsInputRedirected)
+        if (isUpdate)
         {
-            Console.Write($"{C.CYAN}Add appa to your PATH so you can run it from anywhere? [y/N]: {C.NC}");
-            wantsPath = Console.ReadLine()?.Trim().ToLowerInvariant() is "y" or "yes";
-            if (wantsPath && !Environment.IsPrivilegedProcess)
+            Console.WriteLine();
+            Console.WriteLine($"{Fmt.Indent}{C.EMBER}Updating Appa{C.NC} {C.DIM}{AppaVersion.Current}{C.NC}");
+            Console.WriteLine();
+        }
+        else Banner.Print(Fmt.Indent);
+
+        Fmt.Table([
+            ($"{C.DIM}into{C.NC}",       AppaPaths.Root),
+            ($"{C.DIM}components{C.NC}", "cross-toolchain, libgata, envs, GatOS template, compiler"
+                                         + (isUpdate ? " (all overwritten)" : "")),
+        ]);
+        if (!isUpdate && !force && Directory.Exists(AppaPaths.ToolchainDir) && !Console.IsInputRedirected)
+        {
+            Console.WriteLine();
+            if (!Ask($"Appa is already installed at {AppaPaths.Root}. Re-download and overwrite?", defaultYes: false))
             {
-                Log.Warn("Adding appa to PATH needs elevated privileges.");
-                Log.Info(isWin
-                    ? "Re-run 'appa setup' from an Administrator terminal."
-                    : "Re-run 'sudo appa setup'.");
-                Environment.Exit(1);
+                Out.Note($"{C.DIM}Install cancelled - the existing install was left untouched.{C.NC}");
+                Console.WriteLine();
+                return;
             }
         }
+
+        bool elevated = Environment.IsPrivilegedProcess;
+        bool wantsPath = pathPref ?? false;
+        if (!isUpdate && pathPref is null && !Console.IsInputRedirected)
+        {
+            RecommendPath(isWin);
+            wantsPath = Ask("Add Appa to your PATH?", defaultYes: true);
+        }
+
+        if (wantsPath && !elevated) Elevate(isWin);
+
+        bool linkPath = wantsPath;
+        string? sudoUser = isWin ? null : Environment.GetEnvironmentVariable("SUDO_USER");
+        bool restoreOwner = !isWin && !string.IsNullOrEmpty(sudoUser);
+
+        _step = 0;
+        _steps = 6 + (isWin ? 0 : 1) + (linkPath ? 1 : 0) + (restoreOwner ? 1 : 0);
 
         Directory.CreateDirectory(AppaPaths.ToolchainDir);
         Directory.CreateDirectory(AppaPaths.LibgataDir);
         Directory.CreateDirectory(AppaPaths.TemplateDir);
         Directory.CreateDirectory(AppaPaths.BinDir);
 
-        string tcZip = Path.Combine(Path.GetTempPath(), "appa_tc.zip");
-        DownloadWithProgress(Urls.Toolchain(), tcZip, "toolchain");
-        Log.Step("Extracting toolchain...");
-        ZipFile.ExtractToDirectory(tcZip, AppaPaths.ToolchainDir, true);
-        File.Delete(tcZip);
-        Log.Step("Fetching libgata and envs from GitHub...");
-        using (var ghClient = new HttpClient { Timeout = TimeSpan.FromMinutes(5) })
+        Console.WriteLine();
+        using var scratch = Scratch.Create("appa-install-");
+        bool onPath;
         {
-            var targets = new Dictionary<string, string>
-                { ["envs/"] = AppaPaths.EnvsDir, ["libgata/"] = AppaPaths.LibgataDir };
-            var written = await GitHubDirDownloader.DownloadDirectoriesAsync(
-                Urls.GataOwner, Urls.GataRepo, Urls.GataRef, targets, ghClient);
+            string tcZip = scratch.Combine("toolchain.zip");
+            DownloadWithProgress(Urls.Toolchain(), tcZip, Tag("Downloading cross-toolchain"));
+            Spin.While(Tag("Extracting cross-toolchain"),
+                () => ZipFile.ExtractToDirectory(tcZip, AppaPaths.ToolchainDir, true));
+            File.Delete(tcZip);
 
-            foreach (var (prefix, localDir) in targets)
-                PruneStale(localDir, written[prefix]);
-        }
-
-        string tmplZip = Path.Combine(Path.GetTempPath(), "appa_template.zip");
-        DownloadWithProgress(Urls.Template, tmplZip, "GatOS template");
-        Log.Step("Extracting GatOS template...");
-        ExtractTemplate(tmplZip, AppaPaths.TemplateDir);
-        File.Delete(tmplZip);
-
-        if (!isWin)
-        {
-            Log.Step("Setting executable permissions...");
-            Toolchain.Exec("chmod", $"-R +x \"{AppaPaths.PlatformToolchain}\"", null, silent: true);
-        }
-
-        if (isUpdate)
-            UpdateAppaBinary(isWin, isMac);
-        else
-            InstallSelf(isWin);
-
-        if (wantsPath && Environment.IsPrivilegedProcess)
-            AddToPath(isWin);
-
-        if (!isWin)
-        {
-            string? sudoUser = Environment.GetEnvironmentVariable("SUDO_USER");
-            if (!string.IsNullOrEmpty(sudoUser))
+            using (var ghClient = new HttpClient { Timeout = TimeSpan.FromMinutes(5) })
             {
-                Log.Step($"Restoring ownership of installation files to {sudoUser}...");
-                Toolchain.Exec("chown", $"-R {sudoUser}: \"{AppaPaths.Root}\"", null, silent: true);
+                var targets = new Dictionary<string, string>
+                    { ["envs/"] = AppaPaths.EnvsDir, ["libgata/"] = AppaPaths.LibgataDir };
+                var written = await Spin.While(Tag("Fetching libgata and envs"),
+                    GitHubDirDownloader.DownloadDirectoriesAsync(
+                        Urls.GataOwner, Urls.GataRepo, Urls.GataRef, targets, ghClient));
+
+                foreach (var (prefix, localDir) in targets)
+                    PruneStale(localDir, written[prefix]);
             }
+
+            string tmplZip = scratch.Combine("template.zip");
+            DownloadWithProgress(Urls.Template, tmplZip, Tag("Downloading GatOS template"));
+            Spin.While(Tag("Extracting GatOS template"),
+                () => ExtractTemplate(tmplZip, AppaPaths.TemplateDir));
+            File.Delete(tmplZip);
+
+            if (!isWin)
+                Spin.While(Tag("Setting executable permissions"),
+                    () => Toolchain.Exec("chmod", $"-R +x \"{AppaPaths.PlatformToolchain}\"", null, silent: true));
+
+            if (isUpdate) UpdateAppaBinary(isWin, isMac);
+            else InstallSelf(isWin);
+
+            onPath = linkPath && AddToPath(isWin);
+
+            if (restoreOwner)
+                Spin.While(Tag($"Restoring ownership to {sudoUser}"),
+                    () => Toolchain.Exec("chown", $"-R {sudoUser}: \"{AppaPaths.Root}\"", null, silent: true));
         }
 
-        Log.Ok(isUpdate
-            ? "Update complete. Toolchain, libgata, template, and appa are now up to date."
-            : "Setup complete. Run 'appa init <project>' to create a new project.");
+        Console.WriteLine();
+        Console.WriteLine(isUpdate
+            ? $"{C.EMBER}✓{C.NC} {C.BOLD}Up to date{C.NC} {C.DIM}- toolchain, libgata, template, and Appa{C.NC}"
+            : $"{C.EMBER}✓{C.NC} {C.BOLD}Installed{C.NC} {C.DIM}→{C.NC} {AppaPaths.Root}");
+
+        if (!isUpdate)
+        {
+            Fmt.Section("Next steps");
+            if (!onPath)
+            {
+                Fmt.Para($"{C.DIM}Appa is not on your PATH, so invoke it as:{C.NC}");
+                Out.Child(AppaPaths.AppaBin);
+                Console.WriteLine();
+            }
+            Out.Note("appa new myos");
+            Out.Note("cd myos && appa run");
+        }
+
+        string? stale = onPath ? StaleSelfCopy() : null;
+        if (stale is null) { Console.WriteLine(); return; }
+        OfferSelfDelete(isWin, stale);
     }
 
     /// <summary>
-    /// True for the failures 'appa setup' can hit through no fault of the compiler: the network, the
+    /// Asks a yes/no question with a visible default, styled like the rest of the installer. The
+    /// default is what a bare Enter (or an unreadable stdin) means.
+    /// </summary>
+    private static bool Ask(string question, bool defaultYes)
+    {
+        Console.Write($"  {C.GOLD}?{C.NC} {question} {C.DIM}[{(defaultYes ? "Y/n" : "y/N")}]{C.NC} ");
+        string answer = Console.ReadLine()?.Trim().ToLowerInvariant() ?? "";
+        return answer.Length == 0 ? defaultYes : answer is "y" or "yes";
+    }
+
+    /// <summary>
+    /// Explains what being on PATH buys before asking for it. Every command in the book is written
+    /// as a bare `appa ...`, so a reader who declines has to mentally rewrite all of them.
+    /// </summary>
+    private static void RecommendPath(bool isWin)
+    {
+        Fmt.Section("PATH", "(recommended)");
+        Fmt.Para($"{C.DIM}Putting Appa on your PATH lets you type {C.NC}appa run{C.DIM} in any project directory " +
+                 $"instead of the full path to it. That is how the docs, the book, and every message Appa " +
+                 $"prints assume you will invoke the compiler.{C.NC}");
+        Console.WriteLine();
+        Fmt.Para(isWin ? $"{C.DIM}It appends this directory to the machine PATH:{C.NC}"
+                       : $"{C.DIM}It creates this symlink:{C.NC}");
+        Out.Child(isWin ? AppaPaths.BinDir : $"/usr/local/bin/appa {C.DIM}→{C.NC} {AppaPaths.AppaBin}");
+        Console.WriteLine();
+    }
+
+    /// <summary>
+    /// Re-runs the whole install elevated and exits with whatever that run returns - `sudo` on Unix,
+    /// a UAC prompt on Windows. 
+    /// </summary>
+    [System.Diagnostics.CodeAnalysis.DoesNotReturn]
+    private static void Elevate(bool isWin)
+    {
+        Fmt.Section("Elevating");
+        Fmt.Para(isWin
+            ? $"{C.DIM}Adding Appa to PATH edits the machine PATH, which needs Administrator. Windows will ask you to confirm.{C.NC}"
+            : $"{C.DIM}Adding Appa to PATH writes to /usr/local/bin, which needs root. sudo may ask for your password.{C.NC}");
+        Console.WriteLine();
+        string exe = Environment.ProcessPath
+            ?? Cli.Fail<string>("could not determine the Appa executable to re-run",
+                                isWin ? "start an Administrator terminal and run 'appa install'"
+                                      : "run 'sudo appa install'");
+        var argv = new List<string>();
+        string entry = Environment.GetCommandLineArgs()[0];
+        if (Path.GetFileNameWithoutExtension(exe).Equals("dotnet", StringComparison.OrdinalIgnoreCase)
+            && entry.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+            argv.Add(entry);
+        argv.AddRange(["install", "--with-path", "--force"]);
+
+        try
+        {
+            var psi = new ProcessStartInfo();
+            if (isWin)
+            {
+                psi.FileName = exe;
+                psi.UseShellExecute = true;
+                psi.Verb = "runas";
+                foreach (var a in argv) psi.ArgumentList.Add(a);
+            }
+            else
+            {
+                psi.FileName = "sudo";
+                psi.UseShellExecute = false;
+                psi.ArgumentList.Add("--");
+                psi.ArgumentList.Add(exe);
+                foreach (var a in argv) psi.ArgumentList.Add(a);
+            }
+
+            Console.Clear();
+            using var proc = Process.Start(psi)
+                ?? throw new InvalidOperationException("the elevated process did not start");
+            proc.WaitForExit();
+            Environment.Exit(proc.ExitCode);
+        }
+        catch (Exception ex)
+        {
+            Cli.Fail($"could not re-run Appa with elevated privileges: {ex.Message}",
+                isWin ? "accept the Windows prompt, or start an Administrator terminal and run 'appa install'"
+                      : "run 'sudo appa install', or 'appa install --no-path' to install without touching PATH");
+        }
+
+        throw new UnreachableException();
+    }
+
+    /// <summary>
+    /// The binary this run was started from, when it is a duplicate left over in Downloads rather
+    /// than the copy that now lives in the install directory - and null when there is nothing to
+    /// clean up, or no one at the keyboard to ask.
+    /// </summary>
+    private static string? StaleSelfCopy()
+    {
+        if (Console.IsInputRedirected) return null;
+
+        string self = Environment.ProcessPath ?? "";
+        if (string.IsNullOrEmpty(self) || !File.Exists(self)) return null;
+        if (!Path.GetFileNameWithoutExtension(self).StartsWith("appa", StringComparison.OrdinalIgnoreCase)) return null;
+        string full = Path.GetFullPath(self);
+        string root = Path.GetFullPath(AppaPaths.Root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        return full.StartsWith(root, StringComparison.OrdinalIgnoreCase) ? null : full;
+    }
+
+    /// <summary>
+    /// Once Appa lives in its install directory and answers to its own name, the downloaded binary
+    /// the user ran this from is a stale duplicate sitting in Downloads.
+    /// </summary>
+    private static void OfferSelfDelete(bool isWin, string full)
+    {
+        Fmt.Section("Cleanup");
+        Fmt.Para($"{C.DIM}Appa now lives at {C.NC}{AppaPaths.AppaBin}{C.DIM} and is on your PATH, so the copy you ran " +
+                 $"this from is no longer needed:{C.NC}");
+        Out.Note(full);
+        Console.WriteLine();
+        if (!Ask("Delete it?", defaultYes: true)) { Console.WriteLine(); return; }
+
+        try
+        {
+            if (isWin)
+            {
+                DeferOnWindows($"Remove-Item -LiteralPath '{Escape(full)}' -Force -ErrorAction Stop");
+                Out.Note($"{C.EMBER}✓{C.NC} {C.DIM}Scheduled - removed as soon as this process exits.{C.NC}");
+            }
+            else
+            {
+                File.Delete(full);
+                Out.Note($"{C.EMBER}✓{C.NC} {C.DIM}Removed{C.NC} {full}");
+            }
+        }
+        catch (Exception ex) { Log.Warn($"Could not delete {full}: {ex.Message}"); }
+        Console.WriteLine();
+    }
+
+    /// <summary>
+    /// Single-quotes a path for embedding in a PowerShell literal.
+    /// </summary>
+    private static string Escape(string path) => path.Replace("'", "''");
+
+    /// <summary>
+    /// Runs a PowerShell fragment after this process has exited, on Windows, where a running image
+    /// can be neither deleted nor overwritten.
+    /// </summary>
+    private static void DeferOnWindows(string command)
+    {
+        string script =
+            $"$ErrorActionPreference='Stop';" +
+            $"try {{ Wait-Process -Id {Environment.ProcessId} -Timeout 120 -ErrorAction SilentlyContinue }} catch {{}};" +
+            $"for ($i = 0; $i -lt 20; $i++) {{ try {{ {command}; break }} catch {{ Start-Sleep -Milliseconds 250 }} }}";
+
+        var psi = new ProcessStartInfo("powershell.exe")
+        { UseShellExecute = false, CreateNoWindow = true };
+        psi.ArgumentList.Add("-NoProfile");
+        psi.ArgumentList.Add("-NonInteractive");
+        psi.ArgumentList.Add("-WindowStyle");
+        psi.ArgumentList.Add("Hidden");
+        psi.ArgumentList.Add("-Command");
+        psi.ArgumentList.Add(script);
+        Process.Start(psi);
+    }
+
+    /// <summary>
+    /// True for the failures 'appa install' can hit through no fault of the compiler: the network, the
     /// GitHub API, a corrupt download, or the filesystem it installs into.
     /// </summary>
     internal static bool IsExpectedSetupFailure(Exception ex) =>
@@ -125,14 +311,14 @@ internal static class Installer
     internal static string SetupFailureHint(Exception ex) => ex switch
     {
         HttpRequestException or TaskCanceledException =>
-            "check the network connection and run 'appa setup' again; the install is incomplete until it succeeds",
+            "check the network connection and run 'appa install' again; the install is incomplete until it succeeds",
         UnauthorizedAccessException =>
-            $"appa could not write to {AppaPaths.Root} - check its permissions, or remove it and run 'appa setup' again",
+            $"check the permissions on the path named above; if it is inside {AppaPaths.Root}, removing that directory and running 'appa install' again is the clean fix",
         InvalidDataException =>
-            "the download was corrupt; run 'appa setup' again to fetch it fresh",
+            "the download was corrupt; run 'appa install' again to fetch it fresh",
         InvalidOperationException when ex.Message.Contains("rate limit") =>
             "set GITHUB_TOKEN to a personal access token to raise the limit from 60 to 5000 requests an hour",
-        _ => "the install is incomplete; run 'appa setup' again once the cause is fixed",
+        _ => "the install is incomplete; run 'appa install' again once the cause is fixed",
     };
 
     /// <summary>
@@ -160,8 +346,10 @@ internal static class Installer
     /// Windows appends to the machine PATH variable. Requires elevated privileges (checked by
     /// caller).
     /// </summary>
-    internal static void AddToPath(bool isWin)
+    internal static bool AddToPath(bool isWin)
     {
+        string label = Tag("Adding Appa to PATH");
+        var sw = Stopwatch.StartNew();
         try
         {
             if (isWin)
@@ -170,44 +358,57 @@ internal static class Installer
                 string cur = Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.Machine) ?? "";
                 bool present = cur.Split(';', StringSplitOptions.RemoveEmptyEntries)
                                   .Any(p => string.Equals(p.TrimEnd('\\'), bin.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase));
-                if (present) { Log.Info("appa's bin directory is already on PATH."); return; }
-                Environment.SetEnvironmentVariable("PATH", cur.TrimEnd(';') + ";" + bin, EnvironmentVariableTarget.Machine);
-                Log.Ok($"Added {bin} to the system PATH. Open a new terminal for it to take effect.");
+                if (!present)
+                    Environment.SetEnvironmentVariable("PATH", cur.TrimEnd(';') + ";" + bin, EnvironmentVariableTarget.Machine);
+                Out.Step(label, sw.Elapsed);
+                Out.Child(present
+                    ? $"{C.DIM}{bin} was already there{C.NC}"
+                    : $"{C.DIM}{bin} - open a new terminal for it to take effect{C.NC}");
+                return true;
             }
-            else
+
+            const string link = "/usr/local/bin/appa";
+            var r = Toolchain.Exec("ln", $"-sf \"{AppaPaths.AppaBin}\" \"{link}\"", null, silent: true, capture: true);
+            if (r.ExitCode != 0)
             {
-                const string link = "/usr/local/bin/appa";
-                var r = Toolchain.Exec("ln", $"-sf \"{AppaPaths.AppaBin}\" \"{link}\"", null, silent: true, capture: true);
-                if (r.ExitCode == 0)
-                    Log.Ok($"Linked {link} → {AppaPaths.AppaBin}. 'appa' is now on your PATH.");
-                else
-                    Log.Warn($"Could not create symlink {link}: {r.Stderr.Trim()}");
+                Log.Warn($"Could not create symlink {link}: {r.Stderr.Trim()}");
+                return false;
             }
+            Out.Step(label, sw.Elapsed);
+            Out.Child($"{C.DIM}{link} → {AppaPaths.AppaBin}{C.NC}");
+            return true;
         }
-        catch (Exception ex) { Log.Warn($"Could not add appa to PATH: {ex.Message}"); }
+        catch (Exception ex) { Log.Warn($"Could not add Appa to PATH: {ex.Message}"); return false; }
     }
 
     /// <summary>
-    /// Copies the currently-running appa binary into the bin dir (used by `appa setup`).
+    /// Copies the currently-running appa binary into the bin dir (used by `appa install`).
     /// </summary>
     internal static void InstallSelf(bool isWin)
     {
+        string label = Tag("Installing the Appa compiler");
+        var sw = Stopwatch.StartNew();
+
         string self = Environment.ProcessPath ?? "";
         if (string.IsNullOrEmpty(self) || !File.Exists(self))
-        { Log.Warn("Could not locate the running appa binary to install."); return; }
+        { Log.Warn("Could not locate the running Appa binary to install."); return; }
 
         string target = AppaPaths.AppaBin;
         if (string.Equals(Path.GetFullPath(self), Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase))
+        {
+            Out.Step(label, sw.Elapsed);
+            Out.Child($"{C.DIM}already running from {target}{C.NC}");
             return;
+        }
 
         try
         {
-            Log.Step("Installing appa binary...");
             File.Copy(self, target, true);
             if (!isWin) Toolchain.Exec("chmod", $"+x \"{target}\"", null, silent: true);
-            Log.Info($"appa installed to {target}");
+            Out.Step(label, sw.Elapsed);
+            Out.Child($"{C.DIM}{target}{C.NC}");
         }
-        catch (Exception ex) { Log.Warn($"Could not install appa binary: {ex.Message}"); }
+        catch (Exception ex) { Log.Warn($"Could not install Appa binary: {ex.Message}"); }
     }
 
     /// <summary>
@@ -218,68 +419,67 @@ internal static class Installer
     internal static void UpdateAppaBinary(bool isWin, bool isMac)
     {
         string target = AppaPaths.AppaBin;
-        string newBin = Path.Combine(Path.GetTempPath(), isWin ? "appa_new.exe" : "appa_new");
-
-        try { DownloadWithProgress(Urls.AppaBinary(), newBin, "appa"); }
-        catch (Exception ex) { Log.Warn($"Could not download new appa binary: {ex.Message}"); return; }
-
-        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-
+        var stage = Scratch.Create("appa-update-");
+        bool deferred = false;
         try
         {
+            string newBin = stage.Combine(isWin ? "appa.exe" : "appa");
+            try { DownloadWithProgress(Urls.AppaBinary(), newBin, Tag("Downloading the latest Appa")); }
+            catch (Exception ex) { Log.Warn($"Could not download new Appa binary: {ex.Message}"); return; }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+
             if (isWin)
             {
-                var psi = new ProcessStartInfo("cmd.exe",
-                    $"/c timeout /t 2 /nobreak >nul & move /Y \"{newBin}\" \"{target}\"")
-                { UseShellExecute = false, CreateNoWindow = true };
-                Process.Start(psi);
+                DeferOnWindows(
+                    $"Move-Item -LiteralPath '{Escape(newBin)}' -Destination '{Escape(target)}' -Force -ErrorAction Stop;" +
+                    $"Remove-Item -LiteralPath '{Escape(stage.Path)}' -Recurse -Force -ErrorAction SilentlyContinue");
+                deferred = true;
+                Out.Child($"{C.DIM}it replaces {target} as soon as this process exits{C.NC}");
             }
             else
             {
-                string script = $"sleep 2; mv -f '{newBin}' '{target}'; chmod +x '{target}'; ";
-                if (isMac) script += $"xattr -d com.apple.quarantine '{target}' 2>/dev/null; ";
-                script += "true";
-                var psi = new ProcessStartInfo("/bin/sh") { UseShellExecute = false, CreateNoWindow = true };
-                psi.ArgumentList.Add("-c");
-                psi.ArgumentList.Add(script);
-                Process.Start(psi);
+                string staged = target + ".new";
+                File.Copy(newBin, staged, true);
+                Toolchain.Exec("chmod", $"+x \"{staged}\"", null, silent: true, capture: true);
+                if (isMac)
+                    try { Toolchain.Exec("xattr", $"-d com.apple.quarantine \"{staged}\"", null, silent: true, capture: true); }
+                    catch { /* no quarantine attribute to clear, or no xattr */ }
+                File.Move(staged, target, true);
+                Out.Child($"{C.DIM}{target}{C.NC}");
             }
-            Log.Info("Downloaded the latest appa; it will replace the installed binary momentarily.");
         }
-        catch (Exception ex) { Log.Warn($"Could not schedule appa self-update: {ex.Message}"); }
+        catch (Exception ex) { Log.Warn($"Could not install the new Appa binary: {ex.Message}"); }
+        finally { if (!deferred) stage.Dispose(); }
     }
 
     /// <summary>
-    /// Downloads a URL to a local file, printing a progress bar or byte counter while downloading.
+    /// Downloads a URL to a local file, spinning on one line with the progress in parentheses, then
+    /// leaving behind a single finished step line like every other stage of the install.
     /// </summary>
-    internal static void DownloadWithProgress(string url, string dest, string name)
+    internal static void DownloadWithProgress(string url, string dest, string label)
     {
-        using var client = new System.Net.Http.HttpClient();
-        client.Timeout = TimeSpan.FromMinutes(10);
-        using var response = client.GetAsync(url, System.Net.Http.HttpCompletionOption.ResponseHeadersRead).Result;
+        var sw = Stopwatch.StartNew();
+        using var client = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
+        using var response = client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead).Result;
         response.EnsureSuccessStatusCode();
         long? total = response.Content.Headers.ContentLength;
         using var stream = response.Content.ReadAsStream();
         using var outFile = File.Create(dest);
+
         var buffer = new byte[81920];
-        const string spin = @"|/-\";
         long downloaded = 0;
-        int read, ticks = 0;
+        int read;
         while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
         {
             outFile.Write(buffer, 0, read);
             downloaded += read;
-            if (total is > 0)
-            {
-                int pct = (int)(downloaded * 100 / total.Value);
-                int filled = pct * 40 / 100;
-                string bar = new string('=', filled) + new string(' ', 40 - filled);
-                Out.Redraw($"{name}  |{bar}| {pct}% ({downloaded/1048576.0:F1}/{total.Value/1048576.0:F1} MB)");
-            }
-            else
-                Out.Redraw($"{name}  {spin[ticks++ % 4]} {downloaded/1048576.0:F1} MB");
+            Spin.Tick(label, total is > 0
+                ? $"({downloaded / 1048576.0:F1}/{total.Value / 1048576.0:F1} MB, {downloaded * 100 / total.Value}%)"
+                : $"({downloaded / 1048576.0:F1} MB)");
         }
-        Console.WriteLine();
+        Spin.Stop();
+        Out.Step($"{label} {C.DIM}({downloaded / 1048576.0:F1} MB){C.NC}", sw.Elapsed);
     }
 
     /// <summary>
@@ -288,12 +488,11 @@ internal static class Installer
     /// </summary>
     internal static void ExtractTemplate(string zipPath, string destDir)
     {
-        string staging = Path.Combine(Path.GetTempPath(), $"appa-tmpl-stage-{Environment.ProcessId}");
-        if (Directory.Exists(staging)) Directory.Delete(staging, true);
-        ZipFile.ExtractToDirectory(zipPath, staging);
+        using var staging = Scratch.Create("appa-template-");
+        ZipFile.ExtractToDirectory(zipPath, staging.Path);
 
-        var entries = Directory.GetFileSystemEntries(staging);
-        string root = entries.Length == 1 && Directory.Exists(entries[0]) ? entries[0] : staging;
+        var entries = Directory.GetFileSystemEntries(staging.Path);
+        string root = entries.Length == 1 && Directory.Exists(entries[0]) ? entries[0] : staging.Path;
 
         if (Directory.Exists(destDir)) Directory.Delete(destDir, true);
         Directory.CreateDirectory(destDir);
@@ -303,7 +502,6 @@ internal static class Installer
             Directory.CreateDirectory(dst);
             Cli.CopyDirectory(dir, dst);
         }
-        Directory.Delete(staging, true);
     }
 
 }

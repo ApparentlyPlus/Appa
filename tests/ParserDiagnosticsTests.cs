@@ -94,26 +94,27 @@ public class ParserDiagnosticsTests
         SingleFileCompile.Parse(src);   // throws ParseException on failure
     }
 
-    [Fact]
-    public void ProcessColonNeedsMode()
+    /// <summary>
+    /// The mode is written before 'process' and nowhere else. ':' belongs to the conditional, so a
+    /// declaration that reaches for it is told where the mode goes rather than left to a syntax
+    /// error about the '{' that never arrived.
+    /// </summary>
+    [Theory]
+    [InlineData("realm userspace { process App : foreground { } }")]
+    [InlineData("realm userspace { process App : sideways { } }")]
+    [InlineData("realm userspace { foreground process App : background { } }")]
+    public void ColonModeRejected(string src)
     {
-        var ex = Parse("realm userspace { process App : sideways { } }");
-        Assert.Equal(Codes.BadDeclHeader, ex.Code);
-        Assert.Contains("'foreground' or 'background'", ex.Message);
-    }
-
-    [Fact]
-    public void DuplicateProcessModeRejected()
-    {
-        var ex = Parse("realm userspace { foreground process App : background { } }");
-        Assert.Equal(Codes.BadDeclHeader, ex.Code);
-        Assert.Contains("mode specified twice", ex.Message);
+        var ex = Parse(src);
+        Assert.Equal(Codes.MissingProcessMode, ex.Code);
+        Assert.Contains("the deployment mode is written before 'process'", ex.Message);
+        Assert.Contains("foreground process App", Assert.Single(ex.Hints));
     }
 
     /// <summary>
-    /// A process declaration without a foreground/background mode -- in either the leading or the
-    /// trailing colon spelling -- is rejected outright rather than silently defaulting, since the
-    /// mode is a real semantic choice (TTY/keyboard focus, scheduling visibility).
+    /// A process declaration without a foreground/background mode is rejected outright rather than
+    /// silently defaulting, since the mode is a real semantic choice (TTY/keyboard focus,
+    /// scheduling visibility).
     /// </summary>
     [Fact]
     public void ProcessNeedsMode()

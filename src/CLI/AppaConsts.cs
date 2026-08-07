@@ -4,20 +4,13 @@ using System.Runtime.InteropServices;
 
 #region Download URLs
 
-// Download URLs for `appa setup` / `appa update`.
 static class Urls
 {
     const string AppaRel = "https://github.com/ApparentlyPlus/Appa/releases/latest/download";
     const string Tc = "https://github.com/ApparentlyPlus/GatOS/releases/download/build-toolchain";
-
-    // libgata and envs are fetched live from the Gata repo (see GitHubDirDownloader),
-    // not from a release zip - this is the single source of truth, no duplication.
     public const string GataOwner = "ApparentlyPlus";
     public const string GataRepo = "Gata";
     public const string GataRef = "main";
-
-    // GitHub branch archive - wraps everything in a single top-level folder, which
-    // the extractor flattens away (see ExtractTemplate).
     public const string Template = "https://github.com/ApparentlyPlus/GatOS/archive/refs/heads/appa-template.zip";
 
     /// <summary>
@@ -145,30 +138,36 @@ static class AppaPaths
 static class C
 {
     public const string NC = "\x1b[0m";
-    public const string GREEN = "\x1b[1;32m";
-    public const string RED = "\x1b[1;31m";
-    public const string YELLOW = "\x1b[1;33m";
-    public const string BLUE = "\x1b[1;34m";
-    public const string CYAN = "\x1b[1;36m";
     public const string BOLD = "\x1b[1m";
     public const string DIM = "\x1b[2m";
+    public const string EMBER = "\x1b[1;38;5;209m";
+    public const string GOLD = "\x1b[1;38;5;221m";
+    public const string SAND = "\x1b[38;5;180m";
+    public const string CYAN = "\x1b[1;38;5;80m";
+    public const string YELLOW = "\x1b[1;38;5;214m";
+    public const string RED = "\x1b[1;38;5;203m";
 }
 
 static class Out
 {
-    const string Indent = "  ";
-    const int MsgWidth = 34;
+    const string Indent = Fmt.Indent;
 
     /// <summary>
-    /// Prints a finished step with elapsed time at a fixed column.
+    /// Prints a finished step with its elapsed time pinned to the right edge, so every step in a run
+    /// lines up however long its label runs.
     /// </summary>
     public static void Step(string message, TimeSpan elapsed) =>
-        Console.WriteLine($"{Indent}{message,-MsgWidth}{C.DIM}{Spin.Fmt(elapsed)}{C.NC}");
+        Fmt.Justify(message, $"{C.DIM}{Spin.Fmt(elapsed)}{C.NC}");
 
     /// <summary>
     /// Prints a plain indented fact with no timing.
     /// </summary>
     public static void Note(string message) => Console.WriteLine($"{Indent}{message}");
+
+    /// <summary>
+    /// Prints a paragraph, wrapped to the terminal at the standard indent.
+    /// </summary>
+    public static void Para(string message) => Fmt.Para(message);
 
     /// <summary>
     /// Redraws a single line in place by returning to column 0 and clearing to EOL.

@@ -85,7 +85,7 @@ internal static class Codes
     public const string CannotInfer           = "G054";
     public const string KernelBlockInHosted    = "G055";
     public const string MissingRealm           = "G056";
-    public const string DuplicateRealm         = "G057";
+    public const string ShadowedFunction       = "G057";
     public const string MissingEntry           = "G058";
     public const string DuplicateEntry         = "G059";
     public const string MissingProcessMode     = "G060";
@@ -307,7 +307,7 @@ internal sealed class DiagnosticBag(SourceSet sources)
             for (int i = 0; i < d.Hints.Length; i++)
                 sb.AppendLine()
                     .Append("  ")
-                    .Append(C.BLUE)
+                    .Append(C.SAND)
                     .Append('=')
                     .Append(C.NC)
                     .Append(' ')
@@ -348,12 +348,12 @@ internal sealed class DiagnosticBag(SourceSet sources)
         // Draw empty gutter line
         sb.Append(' ', gutterlen)
             .Append(' ')
-            .Append(C.BLUE)
+            .Append(C.SAND)
             .Append('|')
             .AppendLine(C.NC);
 
         // Draw source line with line number and gutter
-        sb.Append(C.BLUE)
+        sb.Append(C.SAND)
             .Append(line)
             .Append(" |")
             .Append(C.NC)
@@ -365,7 +365,7 @@ internal sealed class DiagnosticBag(SourceSet sources)
         int caretLen = Math.Max(1, Math.Min(d.Loc.Span.Length, Math.Max(0, tspn.Length - (col - 1))));
         sb.Append(' ', gutterlen)
             .Append(' ')
-            .Append(C.BLUE)
+            .Append(C.SAND)
             .Append('|')
             .Append(C.NC)
             .Append(' ');
@@ -383,7 +383,7 @@ internal sealed class DiagnosticBag(SourceSet sources)
             sb.AppendLine()
                 .Append(' ', gutterlen)
                 .Append(' ')
-                .Append(C.BLUE)
+                .Append(C.SAND)
                 .Append('|')
                 .Append(C.NC);
             for (int i = 0; i < d.Hints.Length; i++)
@@ -391,7 +391,7 @@ internal sealed class DiagnosticBag(SourceSet sources)
                 sb.AppendLine()
                     .Append(' ', gutterlen)
                     .Append(' ')
-                    .Append(C.BLUE)
+                    .Append(C.SAND)
                     .Append('=')
                     .Append(C.NC)
                     .Append(' ')

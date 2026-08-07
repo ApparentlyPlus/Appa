@@ -3,7 +3,7 @@ namespace Appa.Tests;
 using Appa;
 
 /// <summary>
-/// The parts of 'appa setup' / 'appa update' that can run without a network or a real install. The
+/// The parts of 'appa install' / 'appa update' that can run without a network or a real install. The
 /// installer had no tests at all, and it is the one piece of the product every user runs before any
 /// of the rest of it exists.
 /// </summary>
@@ -24,7 +24,7 @@ public class InstallerTests
     [Fact]
     public void StaleModulesPruned()
     {
-        using var root = TempDir.Create("appa-prune-");
+        using var root = Scratch.Create("appa-prune-");
         string dir = root.Combine("libgata");
         Write(dir, "String.g", "current");
         Write(dir, "Int.g", "current");
@@ -45,7 +45,7 @@ public class InstallerTests
     [Fact]
     public void NonGataFilesKept()
     {
-        using var root = TempDir.Create("appa-prune-");
+        using var root = Scratch.Create("appa-prune-");
         string dir = root.Combine("libgata");
         Write(dir, "String.g");
         Write(dir, "README.md");
@@ -64,7 +64,7 @@ public class InstallerTests
     [Fact]
     public void PruneHandlesNesting()
     {
-        using var root = TempDir.Create("appa-prune-");
+        using var root = Scratch.Create("appa-prune-");
         string dir = root.Combine("libgata");
         Write(dir, Path.Combine("sub", "Kept.g"));
         Write(dir, Path.Combine("sub", "Gone.g"));
@@ -84,7 +84,7 @@ public class InstallerTests
     [Fact]
     public void EmptySetRemovesAll()
     {
-        using var root = TempDir.Create("appa-prune-");
+        using var root = Scratch.Create("appa-prune-");
         string dir = root.Combine("libgata");
         Write(dir, "A.g");
         Write(dir, "B.g");
@@ -109,7 +109,7 @@ public class InstallerTests
         var ex = (Exception)Activator.CreateInstance(exceptionType)!;
         Assert.True(Installer.IsExpectedSetupFailure(ex), $"{exceptionType.Name} should not reach the internal-error net");
         Assert.Contains(expectedHint, Installer.SetupFailureHint(ex));
-        Assert.Contains("appa setup", Installer.SetupFailureHint(ex));
+        Assert.Contains("appa install", Installer.SetupFailureHint(ex));
     }
 
     /// <summary>
@@ -140,7 +140,7 @@ public class InstallerTests
     [Fact]
     public void ExtractFlattensWrapper()
     {
-        using var root = TempDir.Create("appa-tmpl-");
+        using var root = Scratch.Create("appa-tmpl-");
         string staging = root.Combine("make");
         Directory.CreateDirectory(Path.Combine(staging, "GatOS-appa-template", "src", "kernel"));
         Directory.CreateDirectory(Path.Combine(staging, "GatOS-appa-template", "targets"));
@@ -171,7 +171,7 @@ public class InstallerTests
     [Fact]
     public void ExtractAcceptsUnwrapped()
     {
-        using var root = TempDir.Create("appa-tmpl-");
+        using var root = Scratch.Create("appa-tmpl-");
         string staging = root.Combine("make");
         Directory.CreateDirectory(Path.Combine(staging, "src"));
         Directory.CreateDirectory(Path.Combine(staging, "targets"));
@@ -186,5 +186,45 @@ public class InstallerTests
 
         Assert.Equal("a", File.ReadAllText(Path.Combine(dest, "src", "a.c")));
         Assert.Equal("b", File.ReadAllText(Path.Combine(dest, "targets", "b.ld")));
+    }
+
+    /// <summary>
+    /// appa's staging directories used to be fixed names in the shared temp directory
+    /// (/tmp/appa_tc.zip). With fs.protected_regular - on by default - a file there owned by another
+    /// user cannot be re-created, root included, so installing as the user and then re-running under
+    /// sudo failed on the leftover the *user* owned, reported as a permissions problem in the
+    /// install directory. Every run must get its own directory, or that comes back.
+    /// </summary>
+    [Fact]
+    public void ScratchIsPrivatePerRun()
+    {
+        using var a = Scratch.Create("appa-test-");
+        using var b = Scratch.Create("appa-test-");
+
+        Assert.NotEqual(a.Path, b.Path);
+        foreach (var s in new[] { a, b })
+        {
+            Assert.True(Directory.Exists(s.Path));
+            Assert.StartsWith(Path.GetFullPath(Path.GetTempPath()), Path.GetFullPath(s.Path));
+            // Fresh, so nothing left by an earlier run (or another user) is in the way.
+            Assert.Empty(Directory.GetFileSystemEntries(s.Path));
+        }
+    }
+
+    /// <summary>
+    /// The point of the type: the directory is gone after the using, with everything staged in it.
+    /// Every temp path appa creates goes through this, so a leak here is a leak everywhere.
+    /// </summary>
+    [Fact]
+    public void ScratchDeletesItselfWithItsContents()
+    {
+        string path;
+        using (var s = Scratch.Create("appa-test-"))
+        {
+            path = s.Path;
+            Directory.CreateDirectory(s.Combine("nested", "deeper"));
+            File.WriteAllText(s.Combine("nested", "deeper", "big.o"), "object file");
+        }
+        Assert.False(Directory.Exists(path));
     }
 }

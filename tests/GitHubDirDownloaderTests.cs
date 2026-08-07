@@ -54,7 +54,7 @@ public class GitHubDirDownloaderTests
         handler.On(u => u.Contains("raw.githubusercontent.com") && u.EndsWith("String.g"), _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("string-content") });
 
         using var client = new HttpClient(handler);
-        using var root = TempDir.Create("appa-ghdl-");
+        using var root = Scratch.Create("appa-ghdl-");
         string envsDir = root.Combine("envs");
         string libgataDir = root.Combine("libgata");
 
@@ -83,7 +83,7 @@ public class GitHubDirDownloaderTests
         handler.On(u => u.Contains("raw.githubusercontent.com") && u.EndsWith("nested.g"), _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("nested") });
 
         using var client = new HttpClient(handler);
-        using var root = TempDir.Create("appa-ghdl-");
+        using var root = Scratch.Create("appa-ghdl-");
 
         await GitHubDirDownloader.DownloadDirectoriesAsync("Owner", "Repo", "main",
             new Dictionary<string, string> { ["envs/"] = root.Path }, client);
@@ -104,7 +104,7 @@ public class GitHubDirDownloaderTests
         handler.On(u => u.Contains("media.githubusercontent.com"), _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("real-binary-content") });
 
         using var client = new HttpClient(handler);
-        using var root = TempDir.Create("appa-ghdl-");
+        using var root = Scratch.Create("appa-ghdl-");
 
         await GitHubDirDownloader.DownloadDirectoriesAsync("Owner", "Repo", "main",
             new Dictionary<string, string> { ["envs/"] = root.Path }, client);
@@ -118,7 +118,7 @@ public class GitHubDirDownloaderTests
         var handler = new FakeGitHubHandler();
         handler.On(u => u.Contains("/git/trees/"), _ => new HttpResponseMessage(HttpStatusCode.NotFound) { Content = new StringContent("""{"message":"Not Found"}""") });
         using var client = new HttpClient(handler);
-        using var root = TempDir.Create("appa-ghdl-");
+        using var root = Scratch.Create("appa-ghdl-");
         string dest = root.Combine("envs");
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
@@ -134,7 +134,7 @@ public class GitHubDirDownloaderTests
         var handler = new FakeGitHubHandler();
         handler.On(u => u.Contains("/git/trees/"), _ => new HttpResponseMessage(HttpStatusCode.Unauthorized));
         using var client = new HttpClient(handler);
-        using var root = TempDir.Create("appa-ghdl-");
+        using var root = Scratch.Create("appa-ghdl-");
         string dest = root.Combine("envs");
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
@@ -159,7 +159,7 @@ public class GitHubDirDownloaderTests
             ]}
             """));
         using var client = new HttpClient(handler);
-        using var root = TempDir.Create("appa-ghdl-");
+        using var root = Scratch.Create("appa-ghdl-");
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             GitHubDirDownloader.DownloadDirectoriesAsync("Owner", "Repo", "main",
@@ -187,7 +187,7 @@ public class GitHubDirDownloaderTests
             _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("x") });
 
         using var client = new HttpClient(handler);
-        using var root = TempDir.Create("appa-ghdl-");
+        using var root = Scratch.Create("appa-ghdl-");
         var written = await GitHubDirDownloader.DownloadDirectoriesAsync("Owner", "Repo", "main",
             new Dictionary<string, string>
             { ["libgata/"] = root.Combine("libgata"), ["envs/"] = root.Combine("envs") }, client);

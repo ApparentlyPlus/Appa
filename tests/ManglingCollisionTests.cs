@@ -145,13 +145,10 @@ public class ManglingCollisionTests
     [InlineData("class Fn_void__void_p { public int n; } " +
                 "realm kernel { entry func Main() { let Fn_void__void_p f = new Fn_void__void_p(); } }", false)]
     [InlineData("native type Fn_void__void_p { int n; } realm kernel { entry func Main() { } }", false)]
-    [InlineData("@extern int func _g0(); @extern int func _g1(); @extern int func _g2(); " +
-                "realm kernel { class A { public int n; public int func M() { return 1; } } " +
-                "entry func Main() { let A a = new A(); let int q = a.M() + _g0() + _g1() + _g2(); } }", true)]
-    [InlineData("@keep class _g1 { public int n; } realm kernel { class A { public int n; } " +
-                "entry func Main() { let A a = new A(); let _g1 g = new _g1(); let int q = a.n + g.n; } }", true)]
-    [InlineData("enum _g2 { X } realm kernel { class A { public int n; } " +
-                "entry func Main() { let A a = new A(); let _g2 e = _g2.X; } }", true)]
+    [InlineData("@keep class __g1 { public int n; } realm kernel { class A { public int n; } " +
+                "entry func Main() { let A a = new A(); let __g1 g = new __g1(); let int q = a.n + g.n; } }", true)]
+    [InlineData("enum __g2 { X } realm kernel { class A { public int n; } " +
+                "entry func Main() { let A a = new A(); let __g2 e = __g2.X; } }", true)]
     public void GeneratedNamesNotHijacked(string body, bool accepted)
     {
         var cc = FindCompiler();
@@ -168,7 +165,7 @@ public class ManglingCollisionTests
 
         // Accepted means it has to compile: the token that gave way must not reappear elsewhere.
         var files = Layout.Compose(new Emitter(module!, diag).Build(), module!.Symbols);
-        using var work = TempDir.Create("appa-generated-");
+        using var work = Scratch.Create("appa-generated-");
         foreach (var f in files) File.WriteAllText(Path.Combine(work.Path, f.Name), f.Content);
         foreach (var tu in files.Where(f => f.Name.EndsWith(".c", StringComparison.Ordinal)))
         {
@@ -188,7 +185,7 @@ public class ManglingCollisionTests
         var cc = FindCompiler();
         if (cc == null) { Assert.Skip("no host C compiler found; skipping mangling-collision sweep"); return; }
 
-        using var work = TempDir.Create("appa-mangle-");
+        using var work = Scratch.Create("appa-mangle-");
         var failures = new List<string>();
         int accepted = 0, rejected = 0, unit = 0;
 

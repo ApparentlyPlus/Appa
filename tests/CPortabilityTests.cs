@@ -57,7 +57,7 @@ public class CPortabilityTests
         if (gata == null) return;
         if (HostedRun.FindCompiler() == null) return;
 
-        using var work = TempDir.Create("appa-portability-");
+        using var work = Scratch.Create("appa-portability-");
         Directory.CreateDirectory(work.Combine("src"));
         File.WriteAllText(work.Combine("src", "main.g"), Program);
         File.Copy(Path.Combine(gata, "envs", "env.hosted.g"), work.Combine("env.g"));
@@ -77,7 +77,7 @@ public class CPortabilityTests
 
         var outDir = work.Combine("transpilation");
         var (probe, _) = HostedRun.Run(cc, "--version", outDir);
-        if (probe != 0) return;
+        if (probe != 0) Assert.Skip($"{cc} is not installed; skipping the {cc} portability matrix");
 
         var (code, output) = HostedRun.Run(cc,
             $"-std={std} -I. {opt} {Warnings} -c program.c -o /dev/null", outDir);

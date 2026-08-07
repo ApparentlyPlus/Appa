@@ -300,4 +300,48 @@ public class HardeningTests
     }
 
     #endregion
+
+    #region The compiler's own names
+
+    /// <summary>
+    /// Every name lowering introduces into a body a user also writes in begins with two
+    /// underscores, so that prefix is the compiler's. One underscore is ordinary, which 
+    /// matters because it is also the convention for a binding meant to be ignored.
+    /// </summary>
+    [Theory]
+    [InlineData("_e0")]
+    [InlineData("_if1")]
+    [InlineData("_a2")]
+    [InlineData("_has_error")]
+    [InlineData("_o")]
+    [InlineData("_res_v")]
+    [InlineData("_sw0")]
+    [InlineData("_catch_0")]
+    [InlineData("_unused")]
+    [InlineData("_")]
+    public void SingleUnderscoreNamesAreTheAuthors(string name)
+    {
+        AssertClean($$"""
+            void func Sink(int v) { }
+            realm kernel { entry func Main() { let int {{name}} = 1; Sink({{name}}); } }
+            """);
+    }
+
+    /// <summary>
+    /// And the reserved prefix is rejected in both places a name is printed as written.
+    /// </summary>
+    [Theory]
+    [InlineData("realm kernel { entry func Main() { let int __g0 = 1; } }")]
+    [InlineData("realm kernel { entry func Main() { let int __anything = 1; } }")]
+    [InlineData("void func H(int __p) { } realm kernel { entry func Main() { H(1); } }")]
+    [InlineData("realm kernel { entry func Main() { for __i in [1, 2] { } } }")]
+    public void DoubleUnderscoreNamesAreReserved(string src)
+    {
+        var (diag, _) = SingleFileCompile.Check(src);
+        Assert.Contains(diag.All, d => d.Severity == Severity.Error
+                                       && d.Code == Codes.DuplicateName
+                                       && d.Message.Contains("cannot begin with '__'", StringComparison.Ordinal));
+    }
+
+    #endregion
 }

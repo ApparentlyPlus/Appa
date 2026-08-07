@@ -9,7 +9,7 @@ using Appa;
 /// </summary>
 public sealed class BootFixture : IAsyncLifetime
 {
-    private TempDir? _root;
+    private Scratch? _root;
 
     /// <summary>
     /// The downloaded envs/ directory, or null if the toolchain wasn't installed.
@@ -25,7 +25,7 @@ public sealed class BootFixture : IAsyncLifetime
     {
         if (!ToolchainProbe.HasGatOSToolchain()) return;
 
-        _root = TempDir.Create("appa-boot-fixture-");
+        _root = Scratch.Create("appa-boot-fixture-");
         EnvsDir = _root.Combine("envs");
         LibgataDir = _root.Combine("libgata");
 

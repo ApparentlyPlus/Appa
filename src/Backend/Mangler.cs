@@ -49,42 +49,12 @@ internal static class Mangler
         return CReserved.Contains(name) ? name + "_" : name;
     }
 
-    // Prefixes the compiler generates local names from: hoisting temps, scrutinee temps, Result
-    // temps and labels, the constructor's self parameter, dense function tokens. Each is followed
-    // by a sequence number, except the fixed names checked separately.
-    private static readonly string[] GeneratedPrefixes =
-    [
-        "_g", "_a", "_arr", "_asg", "_ci", "_col", "_e", "_fc", "_fi", "_first", "_if",
-        "_ixi", "_ixo", "_mt", "_res_", "_ret", "_sw", "_tern", "_wh", "_catch_", "_end_",
-    ];
-
-
-    // GeneratedPrefixes bucketed by their second character, derived from the list itself so the two
-    // cannot drift. A name is then tested against the two or three prefixes that could match.
-    private static readonly System.Collections.Frozen.FrozenDictionary<char, string[]> PrefixesByLetter =
-        System.Collections.Frozen.FrozenDictionary.ToFrozenDictionary(
-            GeneratedPrefixes.GroupBy(p => p[1]), g => g.Key, g => g.ToArray());
-
-
     /// <summary>
-    /// True if a user-written local would collide with a compiler temporary. Renaming the user's is
-    /// not an option - both go through this path, so any rule that moves one moves the other. Only
-    /// an exact generated shape matches, so '_unused' is fine.
+    /// True if a user-written local would collide with a compiler temporary.
     /// </summary>
     public static bool IsReservedLocal(string name)
     {
-        if (name is "_has_error" or "_o") return true;
-        if (name.Length < 2 || name[0] != '_') return false;
-        if (!PrefixesByLetter.TryGetValue(name[1], out var candidates)) return false;
-        foreach (var prefix in candidates)
-        {
-            if (name.Length <= prefix.Length || !name.StartsWith(prefix, StringComparison.Ordinal)) continue;
-            bool allDigits = true;
-            for (int i = prefix.Length; i < name.Length; i++)
-                if (!char.IsAsciiLetterOrDigit(name[i]) || char.IsAsciiLetterUpper(name[i])) { allDigits = false; break; }
-            if (allDigits) return true;
-        }
-        return false;
+        return name.StartsWith("__", StringComparison.Ordinal);
     }
 
     [field: ThreadStatic]
@@ -466,6 +436,7 @@ internal static class Mangler
             "-" => "sub",
             "*" => "mul",
             "/" => "div",
+            "%" => "mod",
             "==" => "eq",
             "!=" => "neq",
             "<" => "lt",

@@ -332,18 +332,15 @@ public class CatchCallTests
         Assert.Null(decl.Init);
 
         var res = Assert.IsType<IrDeclVar>(body[1]);
-        Assert.Equal("_res_a", res.Name);
+        Assert.Equal("__res_a", res.Name);
         Assert.IsType<IrResultType>(res.Type);
 
         var branch = Assert.IsType<IrIf>(body[2]);
         Assert.NotNull(branch.Else);
 
-        // Success arm restores the plain-throws behaviour: the call's value goes straight in.
         var ok = Assert.IsType<IrAssign>(branch.Else!.Stmts.Single());
         Assert.Equal("a", Assert.IsType<IrVar>(ok.Target).Name);
         Assert.Equal("value", Assert.IsType<IrFieldLoad>(ok.Value).Field);
-
-        // And the declaration that follows is a sibling, not nested inside the branch.
         Assert.Equal("b", Assert.IsType<IrDeclVar>(body[3]).Name);
     }
 
@@ -403,6 +400,66 @@ public class CatchCallTests
 
         // The failure arm holds the handler, and releases nothing.
         Assert.DoesNotContain(branch.Then.Stmts, st => st is IrExprStmt { Expr: IrStaticCall });
+    }
+
+    #endregion
+
+    #region A throwing call that produces nothing
+
+    /// <summary>
+    /// 'throws' with no return type says the same thing 'throws void' does: the call can fail, and
+    /// on success it hands back nothing.
+    /// </summary>
+    [Theory]
+    [InlineData("throws func F() { return; }")]
+    [InlineData("throws void func F() { return; }")]
+    [InlineData("throws func F() { throw; }")]
+    [InlineData("throws void func F() { throw; }")]
+    public void ValuelessThrowsSpellingsAgree(string decl)
+    {
+        AssertClean(decl + " realm kernel { entry func Main() { try { F(); } catch { } } }");
+    }
+
+    /// <summary>
+    /// Its handler is pure control flow, and needs no 'assign' to be complete.
+    /// </summary>
+    [Fact]
+    public void ValuelessHandlerNeedsNoAssign()
+    {
+        AssertClean("""
+            throws func F() { throw; }
+            void func Recover() { }
+            realm kernel { entry func Main() { F() catch { Recover(); }; } }
+            """);
+    }
+
+    /// <summary>
+    /// And an 'assign' in one is told what is actually wrong rather
+    /// than being measured against 'void' and reported as a type mismatch.
+    /// </summary>
+    [Fact]
+    public void AssignInValuelessHandlerExplained()
+    {
+        var (diag, _) = SingleFileCompile.Check(
+            "throws func F() { throw; } realm kernel { entry func Main() { F() catch { assign 0; }; } }");
+
+        var d = Assert.Single(diag.All, x => x.Severity == Severity.Error);
+        Assert.Equal(Codes.AssignOutsideCatch, d.Code);
+        Assert.Contains("produces no value", d.Message);
+    }
+
+    /// <summary>
+    /// The message about a discarded result still belongs to a call that has one.
+    /// </summary>
+    [Fact]
+    public void DiscardedValueStillReported()
+    {
+        var (diag, _) = SingleFileCompile.Check(
+            Throwing + "realm kernel { entry func Main() { P(1) catch { assign 0; }; } }");
+
+        var d = Assert.Single(diag.All, x => x.Severity == Severity.Error);
+        Assert.Equal(Codes.AssignOutsideCatch, d.Code);
+        Assert.Contains("result is discarded", d.Message);
     }
 
     #endregion

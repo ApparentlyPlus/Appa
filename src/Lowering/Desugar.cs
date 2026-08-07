@@ -35,7 +35,7 @@ internal sealed class Desugar(SymbolTable sym, DiagnosticBag diag) : IrRewriter
     private IrBlock LowerMatch(IrMatch ms)
     {
         var stmts = new List<IrStmt>();
-        string v = $"_mt{_seq++}";
+        string v = $"__mt{_seq++}";
         var vr = new IrVar(v, ms.Scrutinee.Type);
         stmts.Add(new IrDeclVar(v, ms.Scrutinee.Type, ms.Scrutinee));
 
@@ -89,7 +89,7 @@ internal sealed class Desugar(SymbolTable sym, DiagnosticBag diag) : IrRewriter
     private IrBlock LowerSwitch(IrSwitch sw)
     {
         var stmts = new List<IrStmt>();
-        string v = $"_sw{_seq++}";
+        string v = $"__sw{_seq++}";
         var vr = new IrVar(v, sw.Scrutinee.Type);
         stmts.Add(new IrDeclVar(v, sw.Scrutinee.Type, sw.Scrutinee));
 
