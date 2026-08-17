@@ -179,6 +179,62 @@ public class ManglingCollisionTests
         }
     }
 
+    /// <summary>
+    /// C's vocabulary is not Gata's, so 'inline' and 'register' are ordinary Gata identifiers.
+    /// </summary>
+    [Theory]
+    [InlineData("class K { public int inline; } realm kernel { " +
+                "entry func Main() { let K k = new K(); k.inline = 1; let int n = k.inline; } }")]
+    [InlineData("class K { public int register; public int volatile; public int const; } realm kernel { " +
+                "entry func Main() { let K k = new K(); k.register = 1; k.volatile = k.register; " +
+                "k.const = k.volatile; } }")]
+    [InlineData("union U { Empty, Wrapped(int extern) } realm kernel { entry func Main() { " +
+                "let U u = U.Wrapped(3); let int n = 0; " +
+                "match (u) { case Empty { } case Wrapped(extern) { n = extern; } } } }")]
+    [InlineData("union U { restrict, typedef(int goto) } realm kernel { entry func Main() { " +
+                "let U a = U.typedef(1); let U b = U.restrict(); let bool same = a == b; } }")]
+    [InlineData("class K { public int stdout; public int errno; } realm kernel { " +
+                "entry func Main() { let K k = new K(); k.stdout = 1; k.errno = k.stdout; } }")]
+    [InlineData("class K { public int inline; func _init() { self.inline = 7; } } realm kernel { " +
+                "entry func Main() { let K k = new K(); let int n = k.inline; } }")]
+    public void CReservedIdentifiersSurvive(string body)
+    {
+        var cc = FindCompiler();
+        if (cc == null) { Assert.Skip("no host C compiler found"); return; }
+
+        var (diag, module) = SingleFileCompile.Check(StubEnvironment + body);
+        Assert.False(diag.HasErrors, "expected acceptance, got: " +
+            string.Join("; ", diag.All.Where(d => d.Severity == Severity.Error).Select(d => $"{d.Code} {d.Message}")));
+
+        var files = Layout.Compose(new Emitter(module!, diag).Build(), module!.Symbols);
+        using var work = Scratch.Create("appa-creserved-");
+        foreach (var f in files) File.WriteAllText(Path.Combine(work.Path, f.Name), f.Content);
+        foreach (var tu in files.Where(f => f.Name.EndsWith(".c", StringComparison.Ordinal)))
+        {
+            var psi = new ProcessStartInfo(cc,
+                $"-c -std=c11 -I. -o {(OperatingSystem.IsWindows() ? "NUL" : "/dev/null")} {tu.Name}")
+            { WorkingDirectory = work.Path, RedirectStandardError = true, UseShellExecute = false };
+            using var p = Process.Start(psi)!;
+            string err = p.StandardError.ReadToEnd();
+            p.WaitForExit();
+            Assert.True(p.ExitCode == 0, $"{tu.Name} did not compile:\n{err}");
+        }
+    }
+
+    /// <summary>
+    /// The one name the compiler may not rename to rescue it. An '@extern' is emitted verbatim so
+    /// the linker can find it, so spelling one 'inline' is a program the compiler has to reject
+    /// rather than repair.
+    /// </summary>
+    [Theory]
+    [InlineData("@extern void func inline(); realm kernel { entry func Main() { } }")]
+    [InlineData("@extern int func stdout(int n); realm kernel { entry func Main() { let int q = stdout(1); } }")]
+    public void CReservedExternNamesRejected(string body)
+    {
+        var (diag, _) = SingleFileCompile.Check(StubEnvironment + body);
+        Assert.Contains(diag.All, d => d.Severity == Severity.Error && d.Code == Codes.CReservedCName);
+    }
+
     [Fact]
     public void NoCollisionsInC()
     {

@@ -221,7 +221,7 @@ internal static class Pipeline
         var probe = new EnvProbe(module.Symbols);
         probe.Run(module);
 
-        if (module.Processes.Count > 0 && module.HasKernelRealm && module.HasUserRealm)
+        if (module.Processes.Count > 0)
         {
             probe.Refs.Add(module.Symbols.FloorName(Roles.EnvProcCreate));
             probe.Refs.Add(module.Symbols.FloorName(Roles.EnvThreadSpawn));
@@ -292,7 +292,15 @@ internal static class Pipeline
         Claim(Layout.LauncherName, "the generated process launcher");
 
         foreach (var (name, cname) in module.Symbols.Externs())
+        {
             Claim(cname, $"'@extern' declaration of '{name}'");
+
+            if (Mangler.IsCReserved(cname))
+                diag.Error(Codes.CReservedCName, "<runtime>", TextSpan.None,
+                    $"'@extern' declaration of '{name}' is emitted as the C name '{cname}', which C reserves",
+                    ["rename the declaration; an '@extern' name is emitted verbatim so the linker " +
+                     "can find it, and so cannot be a C keyword or standard macro"]);
+        }
 
         foreach (var p in module.Processes)
         {
@@ -358,6 +366,16 @@ internal static class Pipeline
                 else if (item is ContextDecl u && u.Kind == Realm.User)
                     userBlocks.Add((path, u.Span, u.Items));
 
+        foreach (var (path, prog) in programs)
+            foreach (var item in prog.Items)
+                if (item is ContextDecl ctx)
+                    foreach (var inner in ctx.Items)
+                        if (inner is ProcessDecl { Threads.Length: 0 } pd && !Reported(diag, path, pd.Span))
+                            diag.Error(Codes.ProcessWithoutThreads, path, pd.Span,
+                                $"process '{pd.Name}' declares no threads",
+                                ["a process runs only through its threads, so this one would be created and never do anything",
+                                 $"give it one: 'thread Worker {{ entry func Run() {{ }} }}', or remove '{pd.Name}'"]);
+
         if (target == Target.Hosted)
         {
             foreach (var (file, span) in kernelBlocks)
@@ -386,15 +404,6 @@ internal static class Pipeline
                         "the userspace realm declares more than one 'entry func'");
             return;
         }
-        foreach (var (path, prog) in programs)
-            foreach (var item in prog.Items)
-                if (item is ContextDecl ctx)
-                    foreach (var inner in ctx.Items)
-                        if (inner is ProcessDecl { Threads.Length: 0 } pd && !Reported(diag, path, pd.Span))
-                            diag.Error(Codes.ProcessWithoutThreads, path, pd.Span,
-                                $"process '{pd.Name}' declares no threads",
-                                ["a process runs only through its threads, so this one would be created and never do anything",
-                                 $"give it one: 'thread Worker {{ entry func Run() {{ }} }}', or remove '{pd.Name}'"]);
 
         var kernelEntryFuncs = new List<(string file, TextSpan span)>();
         foreach (var (path, prog) in programs)

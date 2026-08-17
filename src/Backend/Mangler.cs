@@ -13,8 +13,8 @@ internal static class Mangler
     public const string KernelEntry = "gata_kernelspace_main";
 
     // C keywords and the standard macros that behave like them. None is a Gata keyword, so a
-    // program may use them all - and locals and parameters, the only names emitted verbatim, are
-    // therefore the only ones that can collide.
+    // program may use them all - and the names emitted verbatim (locals, parameters, and the
+    // members of a generated struct) are therefore the ones that can collide.
     private static readonly System.Collections.Frozen.FrozenSet<string> CReserved =
         System.Collections.Frozen.FrozenSet.ToFrozenSet(
         [
@@ -40,13 +40,32 @@ internal static class Mangler
         ], StringComparer.Ordinal);
 
     /// <summary>
-    /// Returns the C spelling of a local or parameter name. These are the only names printed as
-    /// written and so the only ones that can collide with C's vocabulary; those get a trailing
-    /// underscore. Apply at every site that prints the name.
+    /// Returns the C spelling of a local or parameter name. Names printed as written can collide
+    /// with C's vocabulary; those get a trailing underscore. Apply at every site that prints the
+    /// name.
     /// </summary>
     public static string Local(string name)
     {
         return CReserved.Contains(name) ? name + "_" : name;
+    }
+
+    /// <summary>
+    /// Returns the C spelling of a struct member: a class field, a union variant, or a variant's
+    /// payload field.
+    /// </summary>
+    public static string Member(string name)
+    {
+        return CReserved.Contains(name) ? name + "_" : name;
+    }
+
+    /// <summary>
+    /// True if the name is a C keyword or a standard macro behaving like one, and so cannot stand
+    /// as an identifier in emitted C. For the names this compiler cannot rename because the author
+    /// pinned them to C text of their own.
+    /// </summary>
+    public static bool IsCReserved(string name)
+    {
+        return CReserved.Contains(name);
     }
 
     /// <summary>

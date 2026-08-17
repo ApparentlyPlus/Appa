@@ -26,6 +26,22 @@ public class EmittedCCompilesTests
         static void gata_MISSING_release(void* p) { (void)p; }
         static void _env_dbg(const char* m) { (void)m; }
         static void _env_panic(const char* m) { (void)m; }
+        void* _env_proc_create(const char* name) { (void)name; return 0; }
+        void _env_proc_hide(void* proc) { (void)proc; }
+        void _env_thread_spawn(void* proc, const char* name, void (*entry)(void*), int is_user) {
+            (void)proc; (void)name; (void)entry; (void)is_user; }
+        }
+
+        @preamble(user) native {
+        #include <stdint.h>
+        #include <stddef.h>
+        #include <stdbool.h>
+        #include "shared.h"
+        typedef struct gata_String gata_String;
+        static void* gata_MISSING_retain(void* p) { return p; }
+        static void gata_MISSING_release(void* p) { (void)p; }
+        static void _env_dbg(const char* m) { (void)m; }
+        static void _env_panic(const char* m) { (void)m; }
         }
 
         """;

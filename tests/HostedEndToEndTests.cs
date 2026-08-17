@@ -213,6 +213,91 @@ public class HostedEndToEndTests
     }
 
     /// <summary>
+    /// A hosted program whose work is in threads rather than in the entry func. Every declaration
+    /// here used to compile and then do nothing: a user-only build emitted the thread bodies and
+    /// the process-variable gate but no launcher, so main() called the entry func and exited.
+    /// </summary>
+    private const string ProcessSource = """
+        import Console;
+        import Sync;
+
+        realm userspace {
+
+            entry func Main() {
+                Console.PrintLine("main");
+            }
+
+            foreground process Workers {
+                let AtomicInt done = new AtomicInt();
+
+                thread A {
+                    entry func Run() {
+                        done.Increment();
+                        Console.PrintLine("A ran");
+                    }
+                }
+
+                thread B {
+                    entry func Run() {
+                        done.Increment();
+                        Console.PrintLine("B ran");
+                    }
+                }
+            }
+        }
+        """;
+
+    /// <summary>
+    /// The launcher starts every declared thread, and the environment's atexit join means a
+    /// hosted main() returning does not cut the work short.
+    /// </summary>
+    [Fact]
+    public void HostedProcessThreadsRun()
+    {
+        var gata = FindGataCheckout();
+        if (gata == null) { Assert.Skip("no sibling Gata checkout found; skipping hosted end-to-end"); return; }
+
+        var cc = FindCompiler();
+        if (cc == null) { Assert.Skip("no host C compiler (cc/gcc/clang) found; skipping hosted end-to-end"); return; }
+
+        using var work = Scratch.Create("appa-hosted-proc-");
+        Directory.CreateDirectory(work.Combine("src"));
+        File.WriteAllText(work.Combine("src", "main.g"), ProcessSource);
+        File.Copy(Path.Combine(gata, "envs", "env.hosted.g"), work.Combine("env.g"));
+        File.WriteAllText(work.Combine("host.gconf"), """
+            <appa>
+                <ProjectName>host</ProjectName>
+                <TargetBackend>Hosted</TargetBackend>
+                <BuildMode>Debug</BuildMode>
+            </appa>
+            """);
+
+        var appaDll = Path.Combine(AppContext.BaseDirectory, "Appa.dll");
+        var (buildCode, buildOut) = Run("dotnet",
+            $"\"{appaDll}\" build \"{work.Path}\" --stdlib \"{Path.Combine(gata, "libgata")}\"", work.Path);
+        Assert.True(buildCode == 0, $"appa build failed:\n{buildOut}");
+
+        var outDir = work.Combine("transpilation");
+        var program = File.ReadAllText(Path.Combine(outDir, "program.c"));
+        Assert.Contains($"void {Layout.LauncherName}(void)", program, StringComparison.Ordinal);
+        Assert.Contains($"{Layout.LauncherName}();", program, StringComparison.Ordinal);
+
+        var exe = work.Combine("prog");
+        var (ccCode, ccOut) = Run(cc,
+            $"-std=c11 -I. -Wall -Wextra -Werror -Wno-unused-parameter -Wno-unused-function " +
+            $"-Wno-unused-variable -Wno-missing-field-initializers " +
+            $"-o \"{exe}\" program.c {HostedRun.MathLib(cc)} -pthread", outDir);
+        Assert.True(ccCode == 0, $"{cc} rejected the emitted C:\n{ccOut}");
+
+        var (runCode, runOut) = Run(exe, "", work.Path);
+        Assert.True(runCode == 0, $"the compiled program exited {runCode}:\n{runOut}");
+
+        var lines = runOut.Replace("\r\n", "\n").Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Array.Sort(lines, StringComparer.Ordinal);
+        Assert.Equal(["A ran", "B ran", "main"], lines);
+    }
+
+    /// <summary>
     /// Runs a process to completion, returning its exit code and combined output.
     /// </summary>
     private static (int Code, string Output) Run(string exe, string args, string cwd)
