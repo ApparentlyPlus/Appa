@@ -157,7 +157,7 @@ And the best part? You needn't worry about any of that stuff. Focus on writing y
 
 ### Diagnostics
 
-**102 diagnostic codes** (`G000`–`G101`), each with a stable identifier so they can be looked up rather than guessed at:
+**103 diagnostic codes** (`G000`–`G102`), each with a stable identifier so they can be looked up rather than guessed at:
 
 ```
 main.g:3:9: error[G007]: unknown type 'long'
