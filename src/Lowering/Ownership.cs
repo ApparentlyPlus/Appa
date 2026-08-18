@@ -279,7 +279,8 @@ internal sealed class Ownership(IrModule module)
         _frames.Push(frame);
         var outs = new List<IrStmt>();
         foreach (var s in b.Stmts) LowerStmt(s, outs);
-        ReleaseFrame(frame, outs);
+        bool alreadyExited = outs.Count > 0 && outs[^1] is IrReturn or IrBreak or IrContinue;
+        if (!alreadyExited) ReleaseFrame(frame, outs);
         _frames.Pop();
         return new IrBlock(outs) { Span = b.Span };
     }

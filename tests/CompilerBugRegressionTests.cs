@@ -1,9 +1,9 @@
 namespace Appa.Tests;
 
 /// <summary>
-/// Two miscompiles found while porting a Span[T]-shaped library to Gata, both confirmed against a
-/// real gcc compile of the emitted C (not just "appa accepted it") since both bugs let appa's own
-/// checks pass while producing C that either computed the wrong answer or didn't compile at all.
+/// Miscompiles and emission-quality defects found while porting a Span[T]-shaped library to Gata
+/// and scaffolding a self-hosting example, each confirmed against a real gcc compile of the
+/// emitted C (not just "appa accepted it").
 /// </summary>
 public class CompilerBugRegressionTests
 {
@@ -140,5 +140,48 @@ public class CompilerBugRegressionTests
         var r = HostedRun.BuildAndRun(src, gata, cc);
         HostedRun.AssertClean(r);
         Assert.Equal("total=6\n", r.Output);
+    }
+
+    /// <summary>
+    /// A function with several early-exit `if { return ...; }` branches, where the final branch
+    /// also returns a freshly-built managed value (a generic union payload here), got a second,
+    /// unreachable copy of that value's release appended after ITS return too.
+    /// </summary>
+    [Fact]
+    public void NoDeadReleaseAfterReturnInMultiBranchFunction()
+    {
+        var (gata, cc) = Environment();
+        if (gata == null || cc == null) return;
+
+        const string src = """
+            import Console;
+            import String;
+
+            union Res[T, E] { Ok(T v), Err(E e) }
+
+            Res[String, String] func Parse(String s) {
+                if (s == null) { return Res[String, String].Err("null"); }
+                if (s.Length() == 0) { return Res[String, String].Err("empty"); }
+                let String v = s + "!";
+                return Res[String, String].Ok(v);
+            }
+
+            realm userspace {
+                entry func Main() {
+                    match (Parse("hi")) {
+                        case Ok(v)  { Console.PrintLine("ok=" + v); }
+                        case Err(e) { Console.PrintLine("err=" + e); }
+                    }
+                    match (Parse("")) {
+                        case Ok(v)  { Console.PrintLine("ok=" + v); }
+                        case Err(e) { Console.PrintLine("err=" + e); }
+                    }
+                }
+            }
+            """;
+
+        var r = HostedRun.BuildAndRun(src, gata, cc);
+        HostedRun.AssertClean(r);
+        Assert.Equal("ok=hi!\nerr=empty\n", r.Output);
     }
 }
