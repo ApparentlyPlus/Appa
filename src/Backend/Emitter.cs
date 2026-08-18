@@ -226,9 +226,9 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
                         for (int k = 0; k < fields.Length; k++)
                         {
                             var f = fields[k];
-                            sb.Append(f.Type.ToCType()).Append(' ').Append(f.Name).Append("; ");
+                            sb.Append(f.Type.ToCType()).Append(' ').Append(Mangler.Member(f.Name)).Append("; ");
                         }
-                        sb.Append("} ").Append(v.Name).Append(';');
+                        sb.Append("} ").Append(Mangler.Member(v.Name)).Append(';');
                         _sharedH.Line(sb.ToString());
                     }
                 }
@@ -432,7 +432,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
                     sb.Append("case ").Append(i).Append(": ");
                     foreach (var f in managedFields)
                     {
-                        string operand = $"_v.payload.{v.Name}.{f.Name}";
+                        string operand = $"_v.payload.{Mangler.Member(v.Name)}.{Mangler.Member(f.Name)}";
                         sb.Append(retain ? RetainCall(f.Type, operand) : ReleaseCall(f.Type, operand)).Append(' ');
                     }
                     sb.Append("break;");
@@ -518,7 +518,8 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
                     var terms = new List<string>(v.Fields.Count);
                     foreach (var f in v.Fields)
                         terms.Add(EqTerm(f.Type,
-                            $"_a.payload.{v.Name}.{f.Name}", $"_b.payload.{v.Name}.{f.Name}"));
+                            $"_a.payload.{Mangler.Member(v.Name)}.{Mangler.Member(f.Name)}",
+                            $"_b.payload.{Mangler.Member(v.Name)}.{Mangler.Member(f.Name)}"));
 
                     w.Line($"case {i}: return {string.Join(" && ", terms)};");
                 }
@@ -721,7 +722,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
                 EmitObjHeader(types);
                 foreach (var rf in cls.RawFields) types.Line(TrimC(rf.C));
                 foreach (var f in cls.Fields)
-                    types.Line($"{f.Type.ToCType()} {f.Name}; /* field */");
+                    types.Line($"{f.Type.ToCType()} {Mangler.Member(f.Name)}; /* field */");
             }
             types.Blank();
         }
@@ -777,7 +778,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
                 EmitObjHeader(w);
                 foreach (var rf in cls.RawFields) w.Line(rf.C);
                 foreach (var f in cls.Fields)
-                    w.Line($"{f.Type.ToCType()} {f.Name}; /* field */");
+                    w.Line($"{f.Type.ToCType()} {Mangler.Member(f.Name)}; /* field */");
             }
             w.Blank();
         }
@@ -886,7 +887,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
                 if (cls.FieldInits.TryGetValue(f.Name, out var init))
                 {
                     using var line = w.Open();
-                    line.Buffer.Append("__o->").Append(f.Name).Append(" = ");
+                    line.Buffer.Append("__o->").Append(Mangler.Member(f.Name)).Append(" = ");
                     Write(init, line.Buffer);
                     line.Buffer.Append(';');
                 }
@@ -914,7 +915,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             w.Line($"{cls.CName}* self = ({cls.CName}*)_vp;");
             if (DeinitOf(cls) != null) w.Line($"{DeinitOf(cls)!.CName}(self);");
             foreach (var f in cls.Fields)
-                if (IsManaged(f.Type)) w.Line(ReleaseCall(f.Type, $"self->{f.Name}"));
+                if (IsManaged(f.Type)) w.Line(ReleaseCall(f.Type, $"self->{Mangler.Member(f.Name)}"));
         }
         w.Blank();
     }
@@ -1206,12 +1207,15 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     private static string EnterName(IrProcess proc) => $"{proc.StateInit!.CName}_enter";
 
     /// <summary>
-    /// Emits the entry function for a thread into its realm writer.
+    /// Emits the entry function for a thread into its realm writer, with a forward declaration
+    /// alongside it.
     /// </summary>
     private void EmitThread(IrThread t, IrProcess owner)
     {
         if (t.EntryFunc is not { } entry) return;
-        var w = entry.Vis == Visibility.Kernel ? _kFuncs : _uFunc;
+        bool kernel = entry.Vis == Visibility.Kernel;
+        (kernel ? _kFwd : _uFwd).Line($"void {entry.CName}(void* arg);");
+        var w = kernel ? _kFuncs : _uFunc;
         w.Line($"void {entry.CName}(void* arg)");
         using (w.Braces())
         {
@@ -1438,7 +1442,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
 
             case IrFieldLoad fl:
                 Write(fl.Obj, sb);
-                sb.Append(fl.Obj.Type is IrUnionType or IrResultType ? "." : "->").Append(fl.Field);
+                sb.Append(fl.Obj.Type is IrUnionType or IrResultType ? "." : "->").Append(Mangler.Member(fl.Field));
                 break;
 
             case IrIndex ix:
@@ -1569,7 +1573,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             case IrUnionField uf:
                 Write(uf.Union, sb);
                 sb.Append(".payload.").Append(UnionVariantName(uf.Union.Type, uf.VariantIndex))
-                  .Append('.').Append(uf.Field);
+                  .Append('.').Append(Mangler.Member(uf.Field));
                 break;
 
             default:
@@ -1618,12 +1622,12 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         sb.Append('(').Append(uc.T.ToCType()).Append("){ .__tag = ").Append(uc.VariantIndex);
         if (variant.Fields.Count == 0) { sb.Append(" }"); return; }
 
-        sb.Append(", .payload.").Append(variant.Name).Append(" = { ");
+        sb.Append(", .payload.").Append(Mangler.Member(variant.Name)).Append(" = { ");
         int n = Math.Min(variant.Fields.Count, uc.Args.Count);
         for (int i = 0; i < n; i++)
         {
             if (i > 0) sb.Append(", ");
-            sb.Append('.').Append(variant.Fields[i].Name).Append(" = ");
+            sb.Append('.').Append(Mangler.Member(variant.Fields[i].Name)).Append(" = ");
             Write(uc.Args[i], sb);
         }
         sb.Append(" } }");
@@ -1634,7 +1638,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// </summary>
     private string UnionVariantName(IrType unionType, int idx)
     {
-        return unionType is IrUnionType ut ? module.UnionNamed(ut.Name).Variants[idx].Name : "?";
+        return unionType is IrUnionType ut ? Mangler.Member(module.UnionNamed(ut.Name).Variants[idx].Name) : "?";
     }
 
     #endregion

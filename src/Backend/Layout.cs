@@ -13,43 +13,59 @@ internal record OutputFile(string Name, string Content);
 internal static class Layout
 {
     /// <summary>
-    /// The C function umain.c generates to create every process and spawn its threads. Named here
-    /// so the collision check can reserve it against a declaration that would take it over.
+    /// The C function generated to create every process and spawn its threads. Named here so the
+    /// collision check can reserve it against a declaration that would take it over.
     /// </summary>
     public const string LauncherName = "uapps";
 
     /// <summary>
     /// Composes the emitter output into the set of translation-unit files for the build.
     /// Kernel-only builds produce kmain.c; user-only produce program.c; both produce kmain.c,
-    /// uproc.c, uproc.h, and umain.c with a generated process launcher.
-    /// </summary>
+    /// uproc.c, uproc.h, and umain.c.
     public static IReadOnlyList<OutputFile> Compose(EmitOutput o, SymbolTable sym)
     {
         // Seed the header generator with a static hash of the content
         Finesse.Seed(ContentSeed(o));
         var files = new List<OutputFile> { new("shared.h", SharedHeader(o)) };
+        bool launch = o.Processes.Count > 0;
 
         if (o.HasKernelRealm && o.HasUserRealm)
         {
             files.Add(new("kmain.c", Concat("kmain.c", o.KernelPreamble, o.KernelTypes, o.KernelFwd, o.KernelFuncs, o.KernelBoot)));
             files.Add(new("uproc.c", Concat("uproc.c", o.UserPreamble, o.UserTypes, o.UserFwd, o.UserFuncs)));
             files.Add(new("uproc.h", UprocHeader(o.Processes)));
-            files.Add(new("umain.c", Launcher(o.Processes, sym)));
+            files.Add(new("umain.c", Launcher(o.Processes, sym, ownUnit: true)));
         }
         else if (o.HasUserRealm)
         {
-            // Hosted (user-only) builds get a generated main() calling the single validated
-            // user-realm entry func, so program.c is actually invocable.
-            string main = o.UserEntryCName is { } cname
-                ? $"int main(void) {{\n    {cname}();\n    return 0;\n}}\n"
-                : "";
-            files.Add(new("program.c", Concat("program.c", o.UserPreamble, o.UserTypes, o.UserFwd, o.UserFuncs, main)));
+            files.Add(new("program.c", Concat("program.c", o.UserPreamble, o.UserTypes, o.UserFwd, o.UserFuncs,
+                launch ? Launcher(o.Processes, sym, ownUnit: false) : "",
+                HostedMain(o.UserEntryCName, launch))));
         }
         else if (o.HasKernelRealm)
         {
-            files.Add(new("kmain.c", Concat("kmain.c", o.KernelPreamble, o.KernelTypes, o.KernelFwd, o.KernelFuncs, o.KernelBoot)));
+            files.Add(new("kmain.c", Concat("kmain.c", o.KernelPreamble, o.KernelTypes, o.KernelFwd, o.KernelFuncs,
+                launch ? Launcher(o.Processes, sym, ownUnit: false) : "", o.KernelBoot)));
         }
         return files;
+    }
+
+    /// <summary>
+    /// The generated main() for a hosted build: the launcher first, so a thread is running by the
+    /// time the entry func does anything, then the entry func itself. Empty when the build has
+    /// neither, which only a module that failed validation can reach.
+    /// </summary>
+    private static string HostedMain(string? entryCName, bool launch)
+    {
+        if (entryCName == null && !launch) return "";
+        var w = new CodeWriter();
+        using (w.Block("int main(void) {"))
+        {
+            if (launch) w.Line($"{LauncherName}();");
+            if (entryCName != null) w.Line($"{entryCName}();");
+            w.Line("return 0;");
+        }
+        return w.ToString();
     }
 
     /// <summary>
@@ -112,10 +128,12 @@ internal static class Layout
     }
 
     /// <summary>
-    /// Concatenates non-empty sections into a single translation unit string with a file header
-    /// comment.
+    /// Concatenates sections into a single translation unit string with a file header comment. The
+    /// first four are the unit's skeleton and are written whether or not they carry text; anything
+    /// after them is optional and an empty one contributes nothing, not even a blank line.
     /// </summary>
-    private static string Concat(string name, string s1, string s2, string s3, string s4, string s5 = "")
+    private static string Concat(string name, string s1, string s2, string s3, string s4,
+                                 params ReadOnlySpan<string> rest)
     {
         var sb = new System.Text.StringBuilder();
         sb.Append(Finesse.GenerateKewlHeader(name)).Append('\n')
@@ -123,9 +141,9 @@ internal static class Layout
           .Append(s2).Append('\n')
           .Append(s3).Append('\n')
           .Append(s4);
-        if (s5.Length > 0)
+        foreach (var section in rest)
         {
-            sb.Append('\n').Append(s5);
+            if (section.Length > 0) sb.Append('\n').Append(section);
         }
         return sb.ToString();
     }
@@ -157,22 +175,25 @@ internal static class Layout
     /// environment bindings, so porting the OS is an edit to env.*.g and never to this file. No C
     /// name is hardcoded here; they come from whatever @intrinsic binds.
     /// </summary>
-    private static string Launcher(IReadOnlyList<IrProcess> procs, SymbolTable sym)
+    private static string Launcher(IReadOnlyList<IrProcess> procs, SymbolTable sym, bool ownUnit)
     {
         string procCreate = sym.FloorName(Roles.EnvProcCreate);
         string procHide = sym.FloorName(Roles.EnvProcHide);
         string threadSpawn = sym.FloorName(Roles.EnvThreadSpawn);
 
         var w = new CodeWriter();
-        w.Lines(
-            Finesse.GenerateKewlHeader("umain.c"),
-            "#include \"uproc.h\"",
-            "",
-            "// Topology floor provided by the environment (env.*.g).",
-            $"extern void* {procCreate}(const char* name);",
-            $"extern void  {procHide}(void* proc);",
-            $"extern void  {threadSpawn}(void* proc, const char* name, void (*entry)(void*), int is_user);",
-            "");
+        if (ownUnit)
+        {
+            w.Lines(
+                Finesse.GenerateKewlHeader("umain.c"),
+                "#include \"uproc.h\"",
+                "",
+                "// Topology floor provided by the environment (env.*.g).",
+                $"extern void* {procCreate}(const char* name);",
+                $"extern void  {procHide}(void* proc);",
+                $"extern void  {threadSpawn}(void* proc, const char* name, void (*entry)(void*), int is_user);",
+                "");
+        }
         using (w.Block($"void {LauncherName}(void) {{"))
         {
             for (int i = 0; i < procs.Count; i++)

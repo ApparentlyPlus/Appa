@@ -107,8 +107,8 @@ internal static class Toolchain
     }
 
     /// <summary>
-    /// Stages the GatOS template, compiles and links the kernel, builds the ISO, copies it to the
-    /// project build dir, and optionally runs QEMU.
+    /// Stages the GatOS template, compiles and links the kernel, builds the ISO, copies it and the
+    /// kernel binary to the project build dir under the project's name, and optionally runs QEMU.
     /// </summary>
     internal static void BuildGatOSImage(IReadOnlyList<OutputFile> output, Manifest manifest,
                                 string projectRoot, List<string> defines, string capsNote,
@@ -148,14 +148,19 @@ internal static class Toolchain
             LinkKernel(objFiles, kernelBin, targetsDir);
 
             string isoPath = MakeIso(kernelBin, isoDir, distDir);
-
             string projectBuildDir = Path.Combine(projectRoot, "build");
             Directory.CreateDirectory(projectBuildDir);
-            string outIso = Path.Combine(projectBuildDir, Path.GetFileName(isoPath));
+            string stem = ArtifactStem(manifest.ProjectName);
+            string outIso = Path.Combine(projectBuildDir, stem + ".iso");
+            string outBin = Path.Combine(projectBuildDir, stem + ".bin");
             File.Copy(isoPath, outIso, true);
+            File.Copy(kernelBin, outBin, true);
             Out.Note(capsNote);
             Console.WriteLine();
-            Console.WriteLine($"{C.EMBER}✓{C.NC} {C.BOLD}Finished{C.NC} {C.DIM}in {Spin.Fmt(total.Elapsed)} →{C.NC} {outIso}");
+            Console.WriteLine($"{C.EMBER}✓{C.NC} {C.BOLD}Finished{C.NC} {C.DIM}in {Spin.Fmt(total.Elapsed)} →{C.NC} " +
+                              $"{projectBuildDir}{Path.DirectorySeparatorChar}");
+            Out.Child($"{C.DIM}{Path.Combine("build", Path.GetFileName(outIso))}{C.NC}");
+            Out.Child($"{C.DIM}{Path.Combine("build", Path.GetFileName(outBin))}{C.NC}");
 
             if (doRun)
             {
@@ -164,6 +169,22 @@ internal static class Toolchain
                 RunQemu(outIso, artifactsDir, headless, timeout);
             }
         }
+    }
+
+    /// <summary>
+    /// The name a build's artifacts are filed under, from the project name.
+    /// </summary>
+    internal static string ArtifactStem(string projectName)
+    {
+        var sb = new System.Text.StringBuilder(projectName.Length);
+        foreach (char c in projectName)
+        {
+            if (char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.') sb.Append(c);
+            else if (sb.Length > 0 && sb[^1] != '_') sb.Append('_');
+        }
+        
+        string stem = sb.ToString().Trim('_', '.');
+        return stem.Length == 0 ? "image" : stem;
     }
 
     /// <summary>

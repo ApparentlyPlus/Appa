@@ -77,11 +77,10 @@ public partial class BookSamplesTests
         var failures = new List<string>();
         foreach (var (line, sample) in samples)
         {
-            if (Parses(sample, out _)) continue;
-            var parts = Split(sample);
-            if (parts.Count > 1 && parts.All(p => Parses(p, out _))) continue;
+            if (Accepts(sample, out string? why)) continue;
+            var written = WithoutErrorLines(sample);
+            if (written != sample && (written.Trim().Length == 0 || Accepts(written, out _))) continue;
 
-            Parses(sample, out string? why);
             failures.Add($"book line {line}: {why}\n{sample}");
         }
 
@@ -90,6 +89,30 @@ public partial class BookSamplesTests
         var more = failures.Count > 10 ? $"\n\n... and {failures.Count - 10} more" : "";
         Assert.Fail($"{failures.Count} of {samples.Count} book samples no longer parse:\n\n{shown}{more}");
     }
+
+    /// <summary>
+    /// True when a sample is sound: it parses whole, or it is several snippets run together and
+    /// each of them parses.
+    /// </summary>
+    private static bool Accepts(string sample, out string? why)
+    {
+        if (Parses(sample, out why)) return true;
+        var parts = Split(sample);
+        if (parts.Count > 1 && parts.All(p => Parses(p, out _))) { why = null; return true; }
+        return false;
+    }
+
+    /// <summary>
+    /// The line the book is pointing at when it says "this does not compile".
+    /// </summary>
+    [GeneratedRegex(@"//\s*error\b", RegexOptions.IgnoreCase)]
+    private static partial Regex ErrorMarker();
+
+    /// <summary>
+    /// The sample with every error-marked line dropped.
+    /// </summary>
+    private static string WithoutErrorLines(string sample) =>
+        string.Join("\n", sample.Split('\n').Where(l => !ErrorMarker().IsMatch(l)));
 
     /// <summary>
     /// Splits a sample into the snippets it is really made of: blank-line separated, but only at

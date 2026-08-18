@@ -2007,6 +2007,7 @@ public static class TortureCorpus
             "native { #include <string.h>\n } @extern usize func strlen(char* s); " +
             "realm kernel { entry func Main() { } }", Expect.Accepted);
         yield return new("extern/reached-from-the-user-realm-only",
+            "native { int ext_probe(int n); } " +
             "@extern int func ext_probe(int n); realm kernel { entry func Main() { } } " +
             "realm userspace { foreground process P { thread T { entry func R() { let int a = ext_probe(1); } } } }",
             Expect.Accepted);

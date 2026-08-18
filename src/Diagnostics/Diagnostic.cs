@@ -130,6 +130,7 @@ internal static class Codes
     public const string DiscardedRetain            = "G099";
     public const string UninitialisedProcessVar    = "G100";
     public const string ReferenceCycle             = "G101";
+    public const string CReservedCName             = "G102";
 }
 
 internal static class Suggest

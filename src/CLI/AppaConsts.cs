@@ -41,7 +41,7 @@ static class Urls
 
 static class AppaVersion
 {
-    public const string Current = "2.0.0";
+    public const string Current = "2.1.0";
 }
 
 #endregion

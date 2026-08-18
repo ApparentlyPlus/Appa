@@ -10,7 +10,7 @@
   <a href="https://github.com/ApparentlyPlus/Appa/actions/workflows/macos-arm.yml"><img src="https://github.com/ApparentlyPlus/Appa/actions/workflows/macos-arm.yml/badge.svg" alt="Appa macOS ARM"></a>
   <a href="https://github.com/ApparentlyPlus/Appa/actions/workflows/macos-intel.yml"><img src="https://github.com/ApparentlyPlus/Appa/actions/workflows/macos-intel.yml/badge.svg" alt="Appa macOS Intel"></a>
   <a href="#license"><img src="https://img.shields.io/badge/License-Custom-red.svg" alt="License: Custom"></a>
-  <img src="https://img.shields.io/badge/appa-v2.0.0-fe7648" alt="Appa v2.0.0">
+  <img src="https://img.shields.io/badge/appa-v2.1.0-fe7648" alt="Appa v2.1.0">
   <img src="https://img.shields.io/badge/runtime-.NET%2010%20AOT-ffd35c" alt=".NET 10 AOT">
 </p>
 
@@ -57,8 +57,8 @@ The whole toolchain is comprised of 3 components:
 | Component | Description | Status |
 |-----------|-------------|--------|
 | **[GatOS](https://github.com/ApparentlyPlus/GatOS)** | A modular kernel forming the core of PawStack, exposing APIs and syscalls for core OS functionality. | **Feature Complete** |
-| **[Gata](https://github.com/ApparentlyPlus/Gata)** | A custom high-level programming language for writing operating systems. It *feels* like a modern language, but is built with features that make low-level development simpler and more approachable. | **Usable, Stabilizing** |
-| **Appa** | The current project. The compiler for Gata. It takes in Gata source code and transpiles it into C code that calls GatOS's APIs, constructing the kernel based on the code's logic by leveraging the modularity of GatOS's design. | **Usable** |
+| **[Gata](https://github.com/ApparentlyPlus/Gata)** | A custom high-level programming language for writing operating systems. It *feels* like a modern language, but is built with features that make low-level development simpler and more approachable. | **Feature Complete** |
+| **Appa** | The current project. The compiler for Gata. It takes in Gata source code and transpiles it into C code that calls GatOS's APIs, constructing the kernel based on the code's logic by leveraging the modularity of GatOS's design. | **Feature Complete** |
 
 > [!TIP]
 > Appa ships everything it needs. `appa install` pulls down the bundled GCC cross-toolchain, GRUB, QEMU, xorriso and mtools, plus the GatOS template and the [`libgata`](https://github.com/ApparentlyPlus/Gata/tree/main/libgata) standard library. There is no separate "set up your cross compiler" afternoon.
@@ -157,7 +157,7 @@ And the best part? You needn't worry about any of that stuff. Focus on writing y
 
 ### Diagnostics
 
-**102 diagnostic codes** (`G000`–`G101`), each with a stable identifier so they can be looked up rather than guessed at:
+**103 diagnostic codes** (`G000`–`G102`), each with a stable identifier so they can be looked up rather than guessed at:
 
 ```
 main.g:3:9: error[G007]: unknown type 'long'

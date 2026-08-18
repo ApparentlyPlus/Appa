@@ -24,8 +24,8 @@ internal static class MultiFileCorpus
 {
     /// <summary>
     /// The environment every case shares unless it supplies its own. Declares a user realm so
-    /// Layout emits a real translation unit, and provides the headers and ARC roles that a project
-    /// with no libgata would otherwise lack.
+    /// Layout emits a real translation unit, and provides the headers, ARC roles and topology
+    /// floor that a project with no libgata would otherwise lack.
     /// </summary>
     public const string DefaultEnv = """
         @environment
@@ -36,6 +36,11 @@ internal static class MultiFileCorpus
         #include <stdbool.h>
         #include <stdlib.h>
         #include "shared.h"
+        void* _env_proc_create(const char* name) { (void)name; return 0; }
+        void _env_proc_hide(void* proc) { (void)proc; }
+        void _env_thread_spawn(void* proc, const char* name, void (*entry)(void*), int is_user) {
+            (void)proc; (void)name; (void)entry; (void)is_user;
+        }
         }
 
         @intrinsic(obj_header)
@@ -75,6 +80,11 @@ internal static class MultiFileCorpus
         #include <stdbool.h>
         #include <stdlib.h>
         #include "shared.h"
+        void* _env_proc_create(const char* name) { (void)name; return 0; }
+        void _env_proc_hide(void* proc) { (void)proc; }
+        void _env_thread_spawn(void* proc, const char* name, void (*entry)(void*), int is_user) {
+            (void)proc; (void)name; (void)entry; (void)is_user;
+        }
         }
 
         @preamble(user) native {

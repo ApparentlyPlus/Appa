@@ -17,7 +17,7 @@ internal static class SingleFileCompile
     /// Pipeline.Transpile's disk-based import resolution entirely. A parse failure is folded into
     /// the returned diagnostic bag rather than thrown.
     /// </summary>
-    public static (DiagnosticBag Diag, IrModule? Module) Check(string src, string path = "<test>")
+    public static (DiagnosticBag Diag, IrModule? Module) Check(string src, string path = "<test>", Target? target = null)
     {
         var sources = new SourceSet();
         sources.Add(path, src);
@@ -31,7 +31,7 @@ internal static class SingleFileCompile
         var programs = new List<(string path, Program prog)> { (path, prog) };
         var visible = new Dictionary<string, HashSet<string>> { [path] = [path] };
         var (module, _, _) = Pipeline.BuildModule(programs, visible, Mode.Debug, diag);
-        Pipeline.ValidateStructure(programs, target: null, diag);
+        Pipeline.ValidateStructure(programs, target, diag);
         return (diag, module);
     }
 
@@ -39,9 +39,9 @@ internal static class SingleFileCompile
     /// Runs Check and, if error-free, emits the final C output. Returns an empty list if the source
     /// failed to parse or check.
     /// </summary>
-    public static IReadOnlyList<OutputFile> Emit(string src, string path = "<test>")
+    public static IReadOnlyList<OutputFile> Emit(string src, string path = "<test>", Target? target = null)
     {
-        var (diag, module) = Check(src, path);
+        var (diag, module) = Check(src, path, target);
         if (diag.HasErrors || module == null) return [];
         return Layout.Compose(new Emitter(module, diag).Build(), module.Symbols);
     }

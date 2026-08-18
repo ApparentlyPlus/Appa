@@ -56,4 +56,29 @@ public class ToolchainFlagsTests
         }
         Assert.DoesNotContain(Toolchain.GeneratedUserTu, GatosFlags.InterruptPath);
     }
+
+    /// <summary>
+    /// A build's artifacts are filed under the project's name, so the name has to be usable as one
+    /// path component - and a .gconf is a text file anyone can edit.
+    /// </summary>
+    [Theory]
+    [InlineData("myos", "myos")]
+    [InlineData("MyOS_2", "MyOS_2")]
+    [InlineData("my os", "my_os")]
+    [InlineData("my   os", "my_os")]
+    [InlineData("a/b", "a_b")]
+    [InlineData("../../etc/passwd", "etc_passwd")]
+    [InlineData("C:\\os", "C_os")]
+    [InlineData("  spaced  ", "spaced")]
+    [InlineData("kernel.v2", "kernel.v2")]
+    [InlineData("..", "image")]
+    [InlineData("///", "image")]
+    [InlineData("", "image")]
+    public void ArtifactStemIsAFilename(string projectName, string expected)
+    {
+        string stem = Toolchain.ArtifactStem(projectName);
+        Assert.Equal(expected, stem);
+        Assert.Equal(stem, Path.GetFileName(stem));
+        Assert.Equal(-1, stem.IndexOfAny(Path.GetInvalidFileNameChars()));
+    }
 }
