@@ -10,7 +10,7 @@
   <a href="https://github.com/ApparentlyPlus/Appa/actions/workflows/macos-arm.yml"><img src="https://github.com/ApparentlyPlus/Appa/actions/workflows/macos-arm.yml/badge.svg" alt="Appa macOS ARM"></a>
   <a href="https://github.com/ApparentlyPlus/Appa/actions/workflows/macos-intel.yml"><img src="https://github.com/ApparentlyPlus/Appa/actions/workflows/macos-intel.yml/badge.svg" alt="Appa macOS Intel"></a>
   <a href="#license"><img src="https://img.shields.io/badge/License-Custom-red.svg" alt="License: Custom"></a>
-  <img src="https://img.shields.io/badge/appa-v2.1.0-fe7648" alt="Appa v2.1.0">
+  <img src="https://img.shields.io/badge/appa-v2.2.0-fe7648" alt="Appa v2.2.0">
   <img src="https://img.shields.io/badge/runtime-.NET%2010%20AOT-ffd35c" alt=".NET 10 AOT">
 </p>
 

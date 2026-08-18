@@ -1957,6 +1957,12 @@ internal sealed class TypeResolver(
         };
     }
 
+    /// <summary>
+    /// Extracts the class name from a class-reference type only - unlike ClassNameOf, this does not
+    /// follow pointer indirection.
+    /// </summary>
+    private static string? DirectClassNameOf(IrType t) => t is IrClassRef cr ? cr.ClassName : null;
+
     #endregion
 
     #region Scope stack
@@ -2993,38 +2999,41 @@ internal sealed class TypeResolver(
     /// </summary>
     private void DrainGenericInstancesCore(IrModule module)
     {
-        while (_genericQueue.Count > 0)
+        while (_genericQueue.Count > 0 || _genericMethodQueue.Count > 0)
         {
-            var (fd, file, realm, binds, mangled, requestScope) = _genericQueue.Dequeue();
-            var cMap = binds.ToDictionary(kv => kv.Key, kv => Monomorphizer.CTypeOf(kv.Value));
-            var instRet = Monomorphizer.SubType(fd.ReturnType, binds);
-            if (fd.Throws) sym.RegisterThrows(instRet);
-            var inst = new FuncDecl(fd.Modifiers, fd.Annotations,
-                instRet, mangled, [],
-                [..Monomorphizer.SubParams(fd.Params, binds)], fd.IsEntry, fd.Throws,
-                Monomorphizer.SubBody(fd.Body, binds, cMap), fd.Span);
-            _scope = InstanceScope(file, requestScope);
-            var ctx = new ResolveCtx(file, realm, "", null, false, false, false, false, "", 0, new ScopeStack());
-            module.FreeFunctions.Add(ResolveFreeFunc(inst, ctx));
-        }
+            while (_genericQueue.Count > 0)
+            {
+                var (fd, file, realm, binds, mangled, requestScope) = _genericQueue.Dequeue();
+                var cMap = binds.ToDictionary(kv => kv.Key, kv => Monomorphizer.CTypeOf(kv.Value));
+                var instRet = Monomorphizer.SubType(fd.ReturnType, binds);
+                if (fd.Throws) sym.RegisterThrows(instRet);
+                var inst = new FuncDecl(fd.Modifiers, fd.Annotations,
+                    instRet, mangled, [],
+                    [..Monomorphizer.SubParams(fd.Params, binds)], fd.IsEntry, fd.Throws,
+                    Monomorphizer.SubBody(fd.Body, binds, cMap), fd.Span);
+                _scope = InstanceScope(file, requestScope);
+                var ctx = new ResolveCtx(file, realm, "", null, false, false, false, false, "", 0, new ScopeStack());
+                module.FreeFunctions.Add(ResolveFreeFunc(inst, ctx));
+            }
 
-        while (_genericMethodQueue.Count > 0)
-        {
-            var (md, owner, file, realm, binds, mangled, requestScope) = _genericMethodQueue.Dequeue();
-            var cMap = binds.ToDictionary(kv => kv.Key, kv => Monomorphizer.CTypeOf(kv.Value));
-            var instMethodRet = Monomorphizer.SubType(md.ReturnType, binds);
-            if (md.Throws) sym.RegisterThrows(instMethodRet);
-            var inst = new MethodDecl(md.Modifiers, md.Annotations,
-                instMethodRet, mangled, [],
-                [..Monomorphizer.SubParams(md.Params, binds)], md.IsEntry, md.Throws,
-                Monomorphizer.SubBody(md.Body, binds, cMap), md.Span);
-            _scope = InstanceScope(file, requestScope);
-            bool isModule = sym.Modules.Contains(owner);
-            var ctx = new ResolveCtx(file, realm, "", null, false, false, false, false, "", 0, new ScopeStack());
-            var lib = realm == Realm.None;
-            var fn = ResolveMethod(owner, inst, ctx.WithClass(owner), lib, VisOf(realm), isModule);
-            var cls = module.Classes.Find(c => c.Name == owner);
-            cls?.Methods.Add(fn);
+            while (_genericMethodQueue.Count > 0)
+            {
+                var (md, owner, file, realm, binds, mangled, requestScope) = _genericMethodQueue.Dequeue();
+                var cMap = binds.ToDictionary(kv => kv.Key, kv => Monomorphizer.CTypeOf(kv.Value));
+                var instMethodRet = Monomorphizer.SubType(md.ReturnType, binds);
+                if (md.Throws) sym.RegisterThrows(instMethodRet);
+                var inst = new MethodDecl(md.Modifiers, md.Annotations,
+                    instMethodRet, mangled, [],
+                    [..Monomorphizer.SubParams(md.Params, binds)], md.IsEntry, md.Throws,
+                    Monomorphizer.SubBody(md.Body, binds, cMap), md.Span);
+                _scope = InstanceScope(file, requestScope);
+                bool isModule = sym.Modules.Contains(owner);
+                var ctx = new ResolveCtx(file, realm, "", null, false, false, false, false, "", 0, new ScopeStack());
+                var lib = realm == Realm.None;
+                var fn = ResolveMethod(owner, inst, ctx.WithClass(owner), lib, VisOf(realm), isModule);
+                var cls = module.Classes.Find(c => c.Name == owner);
+                cls?.Methods.Add(fn);
+            }
         }
     }
 
@@ -3421,7 +3430,7 @@ internal sealed class TypeResolver(
                 }
                 ForbidThrowsInAssignForm(value, $"a '{asgn.Op.Sym()}' compound assignment", ctx);
                 string baseOp = asgn.Op.BaseOp()!.Value.Sym();
-                string? lhsClass = ClassNameOf(target.Type);
+                string? lhsClass = DirectClassNameOf(target.Type);
                 if (lhsClass != null && sym.LookupOperator(lhsClass, baseOp, 1) is { } opSym)
                 {
                     CheckOperatorAccess(lhsClass, baseOp, ctx, asgn.Span);
@@ -3982,7 +3991,7 @@ internal sealed class TypeResolver(
                 var inner = ResolveExpr(ce.Value, ctx);
                 var to = ResolveType(ce.TargetType);
 
-                if (inner.Type != to && ClassNameOf(to) is { } destCls
+                if (inner.Type != to && DirectClassNameOf(to) is { } destCls
                     && FindAsOperator(destCls, inner.Type) is { } asOp)
                 {
                     CheckOperatorAccess(destCls, "as", ctx, ce.Span);
@@ -3995,7 +4004,7 @@ internal sealed class TypeResolver(
             {
                 var opnd = ResolveExpr(pf.Operand, ctx);
 
-                if (ClassNameOf(opnd.Type) is { } pfCls && sym.LookupOperator(pfCls, pf.Op.Sym(), 0) is { } pfOp)
+                if (DirectClassNameOf(opnd.Type) is { } pfCls && sym.LookupOperator(pfCls, pf.Op.Sym(), 0) is { } pfOp)
                 {
                     CheckOperatorAccess(pfCls, pf.Op.Sym(), ctx, pf.Span);
                     return new IrStaticCall(pfOp.CName, IrType.Void, [opnd]) { Span = pf.Span };
@@ -4096,7 +4105,7 @@ internal sealed class TypeResolver(
     {
         var operand = ResolveExpr(un.Operand, ctx);
         if (operand.Type.IsError) return Poison(un.Span);
-        if (ClassNameOf(operand.Type) is { } opCls && sym.LookupOperator(opCls, un.Op.Sym(), 0) is { } uop)
+        if (DirectClassNameOf(operand.Type) is { } opCls && sym.LookupOperator(opCls, un.Op.Sym(), 0) is { } uop)
         {
             CheckOperatorAccess(opCls, un.Op.Sym(), ctx, un.Span);
             return new IrStaticCall(uop.CName, ResolveType(uop.Type), [operand]);
@@ -4160,7 +4169,7 @@ internal sealed class TypeResolver(
             return new IrBinOp(be.Op, left, right, IrType.Bool);
         }
 
-        string? lhsClass = ClassNameOf(left.Type);
+        string? lhsClass = DirectClassNameOf(left.Type);
         if (lhsClass != null && sym.LookupOperator(lhsClass, be.Op.Sym(), 1) is { } op)
         {
             CheckOperatorAccess(lhsClass, be.Op.Sym(), ctx, be.Span);
@@ -4952,7 +4961,7 @@ internal sealed class TypeResolver(
             }
             var rhs = ResolveExpr(asgn.Value, ctx);
             BinOp baseOp = asgn.Op.BaseOp()!.Value;
-            string? elemClass = ClassNameOf(current.Type);
+            string? elemClass = DirectClassNameOf(current.Type);
             IrExpr combined;
             if (elemClass != null && sym.LookupOperator(elemClass, baseOp.Sym(), 1) is { } elemOp)
             {
@@ -5000,7 +5009,7 @@ internal sealed class TypeResolver(
             return new IrAssign(target, AssignOp.Assign, val);
         }
         string elemBaseOp = asgn.Op.BaseOp()!.Value.Sym();
-        if (ClassNameOf(elem) is { } elemClass2 && sym.LookupOperator(elemClass2, elemBaseOp, 1) is { } elemOp2)
+        if (DirectClassNameOf(elem) is { } elemClass2 && sym.LookupOperator(elemClass2, elemBaseOp, 1) is { } elemOp2)
         {
             CheckOperatorAccess(elemClass2, elemBaseOp, ctx, asgn.Span);
             val = CheckOpArg(elemOp2, val, ctx);
