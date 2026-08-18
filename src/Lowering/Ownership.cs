@@ -253,6 +253,8 @@ internal sealed class Ownership(IrModule module)
         var prev = (_inThrowsFunc, _resultType);
         if (f.IsThrows) { _inThrowsFunc = true; _resultType = IrTypes.Result(f.ReturnType); }
         var body = LowerBlock(f.Body);
+        if (f.IsThrows && (body.Stmts.Count == 0 || body.Stmts[^1] is not IrReturn))
+            body = body with { Stmts = [.. body.Stmts, new IrReturn(OkResult(null))] };
         (_inThrowsFunc, _resultType) = prev;
         return f with { Body = body };
     }
