@@ -51,16 +51,17 @@ internal static class Layout
     }
 
     /// <summary>
-    /// The generated main() for a hosted build: the launcher first, so a thread is running by the
-    /// time the entry func does anything, then the entry func itself. Empty when the build has
-    /// neither, which only a module that failed validation can reach.
+    /// The generated main() for a hosted build: stashes argc/argv into the gata_argc/gata_argv
+    /// globals an environment's _env_argc/_env_argv can read, then calls the user entry function and/or the launcher.
     /// </summary>
     private static string HostedMain(string? entryCName, bool launch)
     {
         if (entryCName == null && !launch) return "";
         var w = new CodeWriter();
-        using (w.Block("int main(void) {"))
+        using (w.Block("int main(int argc, char** argv) {"))
         {
+            w.Line("gata_argc = argc;");
+            w.Line("gata_argv = argv;");
             if (launch) w.Line($"{LauncherName}();");
             if (entryCName != null) w.Line($"{entryCName}();");
             w.Line("return 0;");
