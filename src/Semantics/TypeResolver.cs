@@ -1719,9 +1719,18 @@ internal sealed class TypeResolver(
 
         protected override void WalkExpr(IrExpr e)
         {
-            if (e is IrStaticCall sc && (sc.CName == retain || sc.CName == release)) HandManaged = true;
+            if (e is IrStaticCall sc && IsArcCall(sc)) HandManaged = true;
             if (Found == null && !ReferenceEquals(e, _owned) && Allocates(e) && isManaged(e.Type)) Found = e;
             base.WalkExpr(e);
+        }
+
+        /// <summary>
+        /// True for a call to the retain/release intrinsics.
+        private bool IsArcCall(IrStaticCall sc)
+        {
+            if (sc.CName == retain || sc.CName == release) return true;
+            return sc.Args.Count == 1 && sc.Args[0].Type is IrUnionType ut
+                && (sc.CName == Mangler.UnionRetain(ut.Name) || sc.CName == Mangler.UnionRelease(ut.Name));
         }
 
         private static bool Allocates(IrExpr e) =>
