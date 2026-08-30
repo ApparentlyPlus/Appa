@@ -1,0 +1,16 @@
+# GitHub Linguist overrides.
+#
+# The Gata test fixtures under tests/Fixtures are *.g, which Linguist maps to
+# GAP (see languages.yml), so without this the repo reports a GAP slice next to
+# the C#. Gata is not a Linguist-recognised language; these settings borrow a
+# grammar for highlighting and keep the fixtures out of the language statistics.
+# Kept in sync with the same block in the Gata repository.
+#
+# linguist-language  -> picks the TextMate grammar used to highlight blobs/diffs
+# linguist-detectable -> whether the files count toward the language bar
+#
+# Swift is the closest grammar by keyword overlap with Gata: func, let, self,
+# class, public, import, as, while, else, return, if, plus // and /* */
+# comments.
+*.g linguist-language=Swift
+*.g linguist-detectable=false
