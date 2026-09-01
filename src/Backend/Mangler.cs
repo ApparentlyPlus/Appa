@@ -37,6 +37,9 @@ internal static class Mangler
             "HUGE_VAL", "HUGE_VALF", "INFINITY", "NAN", "M_PI", "M_E",
             "DBL_MAX", "DBL_MIN", "DBL_EPSILON", "FLT_MAX", "FLT_MIN", "FLT_EPSILON",
             "SIZE_MAX", "PTRDIFF_MAX", "INTPTR_MAX", "UINTPTR_MAX",
+            "cdecl", "near", "far", "pascal", "winapi", "WINAPI", "CALLBACK", "APIENTRY",
+            "IN", "OUT", "OPTIONAL", "CONST", "VOID", "min", "max",
+            "TRUE", "FALSE", "INVALID_HANDLE_VALUE", "ERROR", "interface",
         ], StringComparer.Ordinal);
 
     /// <summary>

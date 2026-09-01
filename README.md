@@ -10,7 +10,7 @@
   <a href="https://github.com/ApparentlyPlus/Appa/actions/workflows/macos-arm.yml"><img src="https://github.com/ApparentlyPlus/Appa/actions/workflows/macos-arm.yml/badge.svg" alt="Appa macOS ARM"></a>
   <a href="https://github.com/ApparentlyPlus/Appa/actions/workflows/macos-intel.yml"><img src="https://github.com/ApparentlyPlus/Appa/actions/workflows/macos-intel.yml/badge.svg" alt="Appa macOS Intel"></a>
   <a href="#license"><img src="https://img.shields.io/badge/License-Custom-red.svg" alt="License: Custom"></a>
-  <img src="https://img.shields.io/badge/appa-v2.1.0-fe7648" alt="Appa v2.1.0">
+  <img src="https://img.shields.io/badge/appa-v2.2.0-fe7648" alt="Appa v2.2.0">
   <img src="https://img.shields.io/badge/runtime-.NET%2010%20AOT-ffd35c" alt=".NET 10 AOT">
 </p>
 
@@ -18,15 +18,34 @@ Appa is the compiler for [the Gata programming language](https://github.com/Appa
 
 The interesting part is not that it emits C. It's that it *reads your program to decide what kind of operating system you need*. Write a program that never allocates, and the heap doesn't get built. Never spawn a thread, and the scheduler doesn't ship. [What's Inside the Compiler](#whats-inside-the-compiler) has the full house tour.
 
-And getting from nothing to a booting OS really is three commands. Check [Getting Started](#getting-started) if you want to run it without reading the rest.
+And getting from nothing to a booting OS really is four steps. They are immediately below, if you want to run it without reading the rest, and [Getting Started](#getting-started) has the same thing with the commands explained.
 
 > [!NOTE]
 > This is a student project, written solo as an undergraduate thesis, so expect the occasional rough edge and the odd bug. That said, the compiler has a real frontend, a real IR and a real backend, and it is tested rather harder than most things I have written.
+
+## Start Here
+
+If you are here to *write* an operating system rather than to read about how one gets built, this is the whole path. Four steps, about five minutes:
+
+1. **Install [VS Code](https://code.visualstudio.com/).**
+2. **Install the Gata extension.** Grab the `.vsix` from the [Gata releases](https://github.com/ApparentlyPlus/Gata/releases/latest). In VS Code, open the Extensions tab (`Ctrl + Shift + X`), click the three dots at the top right of the tab and pick **Install from VSIX**. Dragging the file onto that tab works too.
+3. **Install `appa`.** Grab the binary for your platform from the [Appa releases](https://github.com/ApparentlyPlus/Appa/releases/latest), then run `appa install`, which pulls down the toolchain, the standard library and the environment files.
+4. **Code away.**
+
+    ```bash
+    appa new myos && cd myos
+    appa run
+    ```
+
+That's it. You now have an operating system.
+
+That is this repository doing the work in step 4. Everything below is how it decides what kind of operating system your program needs.
 
 The first section of this README focuses on providing some insight as to the vision of this project. If you'd rather skip the philosophy, the technical part starts at [What's Inside the Compiler](#whats-inside-the-compiler).
 
 ## Table of Contents
 
+- [Start Here](#start-here)
 - [Project Overview & Background](#project-overview--background)
 - [What's Inside the Compiler](#whats-inside-the-compiler)
 - [What's *not* Inside the Compiler](#whats-not-inside-the-compiler)
@@ -198,7 +217,7 @@ Same deal as GatOS: better you hear it from me now than discover it yourself.
 
 ## Getting Started
 
-If you have nothing installed, grab a copy of appa for your platform from the [Releases](https://github.com/ApparentlyPlus/Appa/releases/latest), and execute:
+This is steps 3 and 4 of [Start Here](#start-here), spelled out. If you have nothing installed, grab a copy of appa for your platform from the [Releases](https://github.com/ApparentlyPlus/Appa/releases/latest), and execute:
 
 ```bash
 # Install appa, the toolchain, the template and the stdlib

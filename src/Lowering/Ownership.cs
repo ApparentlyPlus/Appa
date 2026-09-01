@@ -87,6 +87,9 @@ internal sealed class Ownership(IrModule module)
     private bool _inThrowsFunc;
     private IrResultType? _resultType;
 
+    // The declared return type of the function being lowered.
+    private IrType _returnType = IrType.Void;
+
     // The storage an `assign` inside the current catch handler writes to
     private IrExpr? _assignTarget;
 
@@ -250,10 +253,13 @@ internal sealed class Ownership(IrModule module)
     private IrFunction LowerFunction(IrFunction f)
     {
         if (f.Body == null) return f;
-        var prev = (_inThrowsFunc, _resultType);
+        var prev = (_inThrowsFunc, _resultType, _returnType);
+        _returnType = f.ReturnType;
         if (f.IsThrows) { _inThrowsFunc = true; _resultType = IrTypes.Result(f.ReturnType); }
         var body = LowerBlock(f.Body);
-        (_inThrowsFunc, _resultType) = prev;
+        if (f.IsThrows && (body.Stmts.Count == 0 || body.Stmts[^1] is not IrReturn))
+            body = body with { Stmts = [.. body.Stmts, new IrReturn(OkResult(null))] };
+        (_inThrowsFunc, _resultType, _returnType) = prev;
         return f with { Body = body };
     }
 
@@ -279,7 +285,8 @@ internal sealed class Ownership(IrModule module)
         _frames.Push(frame);
         var outs = new List<IrStmt>();
         foreach (var s in b.Stmts) LowerStmt(s, outs);
-        ReleaseFrame(frame, outs);
+        bool alreadyExited = outs.Count > 0 && outs[^1] is IrReturn or IrBreak or IrContinue;
+        if (!alreadyExited) ReleaseFrame(frame, outs);
         _frames.Pop();
         return new IrBlock(outs) { Span = b.Span };
     }
@@ -777,8 +784,9 @@ internal sealed class Ownership(IrModule module)
             outs.Add(_pre[i]);
         _pre.RemoveRange(pStart, _pre.Count - pStart);
 
+        IrType retType = rs.Value.Type.IsVoid ? _returnType : rs.Value.Type;
         string tmp = Tmp("__ret");
-        outs.Add(new IrDeclVar(tmp, rs.Value.Type, val));
+        outs.Add(new IrDeclVar(tmp, retType, val));
 
         int cCount = _cl.Count - cStart;
         for (int i = 0; i < cCount; i++)
@@ -786,7 +794,7 @@ internal sealed class Ownership(IrModule module)
         _cl.RemoveRange(cStart, cCount);
 
         ReleaseForExit(outs, _ => false);
-        var retVar = new IrVar(tmp, rs.Value.Type);
+        var retVar = new IrVar(tmp, retType);
         outs.Add(new IrReturn(_inThrowsFunc ? OkResult(retVar) : retVar));
     }
 

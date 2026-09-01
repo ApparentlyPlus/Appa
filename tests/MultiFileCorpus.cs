@@ -36,6 +36,8 @@ internal static class MultiFileCorpus
         #include <stdbool.h>
         #include <stdlib.h>
         #include "shared.h"
+        int gata_argc = 0;
+        char** gata_argv = 0;
         void* _env_proc_create(const char* name) { (void)name; return 0; }
         void _env_proc_hide(void* proc) { (void)proc; }
         void _env_thread_spawn(void* proc, const char* name, void (*entry)(void*), int is_user) {
