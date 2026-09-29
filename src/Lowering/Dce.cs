@@ -4,9 +4,9 @@ internal sealed class Dce(IrModule m) : IrWalker
 {
     private readonly record struct UnitKey(string Name, bool IsFunction);
 
-    private readonly Dictionary<string, UnitKey> _unitOf = new(GetUnitOfCapacity(m));
-    private readonly Dictionary<string, IrClass> _classes = new(m.Classes.Count);
-    private readonly Dictionary<string, IrFunction> _funcs = new(m.FreeFunctions.Count);
+    private readonly Dictionary<string, UnitKey> _unitOf = new();
+    private readonly Dictionary<string, IrClass> _classes = new();
+    private readonly Dictionary<string, IrFunction> _funcs = new();
     private readonly HashSet<UnitKey> _live = [];
     private readonly Queue<UnitKey> _work = new();
 
@@ -15,16 +15,17 @@ internal sealed class Dce(IrModule m) : IrWalker
     // dropped functions. Only the live ones get their C typedef emitted.
     private readonly HashSet<string> _liveComposites = [];
 
-    private static int GetUnitOfCapacity(IrModule m)
+    private void Root(UnitKey unit)
     {
-        int count = m.FreeFunctions.Count;
-        for (int i = 0; i < m.Classes.Count; i++)
-            count += m.Classes[i].Methods.Count + m.Classes[i].Operators.Count;
-        return count;
+        if (_live.Add(unit))
+            _work.Enqueue(unit);
     }
 
-    private void Root(UnitKey unit) { if (_live.Add(unit)) _work.Enqueue(unit); }
-    private void Ref(string cname) { if (_unitOf.TryGetValue(cname, out var u)) Root(u); }
+    private void Ref(string cname)
+    {
+        if (_unitOf.TryGetValue(cname, out var u))
+            Root(u);
+    }
 
     /// <summary>
     /// Runs the DCE pass and returns a new IrModule containing only reachable classes and free
@@ -32,12 +33,13 @@ internal sealed class Dce(IrModule m) : IrWalker
     /// </summary>
     public IrModule Run()
     {
+        // a method's unit is its class, so calling one method keeps the whole class
         foreach (var c in m.Classes)
         {
             _classes[c.Name] = c;
-            var classKey = new UnitKey(c.Name, false);
-            foreach (var mm in c.Methods) _unitOf[mm.CName] = classKey;
-            foreach (var o in c.Operators) _unitOf[o.CName] = classKey;
+            var key = new UnitKey(c.Name, false);
+            foreach (var mm in c.Methods) _unitOf[mm.CName] = key;
+            foreach (var o in c.Operators) _unitOf[o.CName] = key;
         }
         foreach (var f in m.FreeFunctions)
         {
@@ -45,30 +47,53 @@ internal sealed class Dce(IrModule m) : IrWalker
             _funcs[f.CName] = f;
         }
 
-        foreach (var f in m.FreeFunctions) if (f.IsEntry) Root(new UnitKey(f.CName, true));
+        foreach (var f in m.FreeFunctions)
+        {
+            if (f.IsEntry)
+                Root(new UnitKey(f.CName, true));
+        }
+
         foreach (var p in m.Processes)
         {
             if (p.StateInit is { } si) MarkFunc(si);
             foreach (var v in p.State) MarkType(v.Type);
+
             foreach (var t in p.Threads)
+            {
                 if (t.EntryFunc is { } e) MarkFunc(e);
+            }
         }
+
         foreach (var role in new[] { Roles.Alloc, Roles.Retain, Roles.Release, Roles.ObjInit })
+        {
             if (m.Symbols.IntrinsicOrNull(role) is { } cn) Ref(cn);
+        }
 
         // Unions are emitted whole and never pruned, so every type stored in a variant is
         // live by definition. Without this the payload struct still names, say, an
         // Arr_int_4 whose typedef was dropped for having no reference from live code.
         foreach (var u in m.Unions)
+        {
             foreach (var v in u.Variants)
+            {
                 foreach (var f in v.Fields)
                     MarkType(f.Type);
+            }
+        }
 
-        // @keep is the explicit escape hatch for symbols reachable only through native text.
-        foreach (var c in m.Classes) if (c.Keep) Root(new UnitKey(c.Name, false));
-        foreach (var f in m.FreeFunctions) if (f.Annotations.Any(a => a is KeepAnnotation)) Root(new UnitKey(f.CName, true));
+        // @keep is the escape hatch for symbols only native text reaches
+        foreach (var c in m.Classes)
+        {
+            if (c.Keep) Root(new UnitKey(c.Name, false));
+        }
+        foreach (var f in m.FreeFunctions)
+        {
+            if (f.Annotations.Any(a => a is KeepAnnotation))
+                Root(new UnitKey(f.CName, true));
+        }
 
-        while (_work.Count > 0) ScanUnit(_work.Dequeue());
+        while (_work.Count > 0)
+            ScanUnit(_work.Dequeue());
 
         return m with
         {
@@ -84,8 +109,14 @@ internal sealed class Dce(IrModule m) : IrWalker
     /// </summary>
     private void ScanUnit(UnitKey unit)
     {
-        if (unit.IsFunction) { if (_funcs.TryGetValue(unit.Name, out var f)) MarkFunc(f); return; }
-        if (_classes.TryGetValue(unit.Name, out var c)) MarkClass(c);
+        if (unit.IsFunction)
+        {
+            if (_funcs.TryGetValue(unit.Name, out var f)) MarkFunc(f);
+            return;
+        }
+
+        if (_classes.TryGetValue(unit.Name, out var c))
+            MarkClass(c);
     }
 
     /// <summary>
@@ -127,14 +158,23 @@ internal sealed class Dce(IrModule m) : IrWalker
     {
         switch (t)
         {
-            case IrClassRef cr: Root(new UnitKey(cr.ClassName, false)); break;
-            case IrPtrType p: MarkType(p.Inner); break;
-            case IrArrayType a: _liveComposites.Add(a.MangledName); MarkType(a.Elem); break;
-            case IrResultType r: MarkType(r.Inner); break;
-            case IrFuncPtrType f:
-                _liveComposites.Add(f.MangledName);
-                MarkType(f.Ret);
-                foreach (var p2 in f.Params) MarkType(p2);
+            case IrClassRef cr:
+                Root(new UnitKey(cr.ClassName, false));
+                break;
+            case IrPtrType p:
+                MarkType(p.Inner);
+                break;
+            case IrArrayType a:
+                _liveComposites.Add(a.MangledName);
+                MarkType(a.Elem);
+                break;
+            case IrResultType r:
+                MarkType(r.Inner);
+                break;
+            case IrFuncPtrType fp:
+                _liveComposites.Add(fp.MangledName);
+                MarkType(fp.Ret);
+                foreach (var pt in fp.Params) MarkType(pt);
                 break;
         }
     }
@@ -146,8 +186,14 @@ internal sealed class Dce(IrModule m) : IrWalker
     {
         switch (s)
         {
-            case IrDeclVar d: MarkType(d.Type); break;
-            case IrForIn fi: Ref(fi.LenCName); Ref(fi.GetCName); MarkType(fi.ElemType); break;
+            case IrDeclVar d:
+                MarkType(d.Type);
+                break;
+            case IrForIn fi:
+                Ref(fi.LenCName);
+                Ref(fi.GetCName);
+                MarkType(fi.ElemType);
+                break;
         }
         base.WalkStmt(s);
     }
@@ -164,11 +210,15 @@ internal sealed class Dce(IrModule m) : IrWalker
             case IrThrowsCall tc: Ref(tc.CName); break;
             case IrThrowsInstanceCall ti: Ref(ti.CName); break;
             case IrNew n: Root(new UnitKey(n.ClassName, false)); break;
-            case IrNewInit ni: Root(new UnitKey(ni.ClassName, false)); Ref(ni.AddCName); break;
+            case IrNewInit ni:
+                Root(new UnitKey(ni.ClassName, false));
+                Ref(ni.AddCName);
+                break;
             case IrCast c: MarkType(c.To); break;
             case IrArrayLit al: MarkType(al.ArrType); break;
             case IrSizeof so: MarkType(so.Of); break;
             case IrDefault df: MarkType(df.Of); break;
+
             // A function used only as a value must still be kept so DCE does not drop
             // a symbol that a callback registration hands out as a pointer.
             case IrFuncRef fr: Ref(fr.CName); break;

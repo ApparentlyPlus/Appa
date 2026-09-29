@@ -596,7 +596,7 @@ public class SemanticFidelityTests
 
     /// <summary>
     /// A 'return' inside raw C is not visible to the missing-return check, and conceding it would
-    /// excuse every function containing a native block. The rejection stands; the hint names the
+    /// excuse every function containing a native block. The rejection stands. The hint names the
     /// whole-body native form instead of leaving the author to guess.
     /// </summary>
     [Fact]

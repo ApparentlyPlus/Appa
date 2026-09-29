@@ -303,7 +303,7 @@ internal sealed class ScopeBinder(DiagnosticBag diag)
 
     /// <summary>
     /// Reports a name given two different meanings in one scope. Two functions are overloads and two
-    /// types a plain duplicate, both owned elsewhere; every other pairing is nobody's, and leaves a
+    /// types a plain duplicate, both owned elsewhere. Every other pairing is nobody's, and leaves a
     /// name whose meaning depends on the position it is read in.
     /// </summary>
     private void CheckOneMeaningPerName(ScopeTree tree)
@@ -543,7 +543,7 @@ internal sealed class ScopeBinder(DiagnosticBag diag)
             scope = realm;
         }
 
-        // Every segment but the last may still be a scope; the last can only be the name
+        // Every segment but the last may still be a scope. The last can only be the name
         int i = 0;
         while (i < sn.Path.Length - 1 && tree.Child(scope, sn.Path[i]) is { } child)
         {
@@ -797,7 +797,7 @@ internal sealed class ScopeBinder(DiagnosticBag diag)
 
     /// <summary>
     /// The declaration's internal name after its base is qualified. A non-generic declaration is
-    /// just its base; a generic one recomposes through the same function every other pass uses to
+    /// just its base. A generic one recomposes through the same function every other pass uses to
     /// spell an instantiation, so the template and its stamps agree by construction.
     /// </summary>
     private static string Requalify(string name, string baseName, string qualBase, string[] generics)

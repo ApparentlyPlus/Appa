@@ -203,7 +203,7 @@ public class ScopeQualifierTests
     #region Boundaries
 
     /// <summary>
-    /// The qualifier reaches past a displacement; it never excuses declaring one. '@shadows' says
+    /// The qualifier reaches past a displacement. It never excuses declaring one. '@shadows' says
     /// the displacement is deliberate, and that is a separate statement from reaching past it.
     /// </summary>
     [Fact]

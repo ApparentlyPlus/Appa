@@ -67,7 +67,7 @@ internal static class Pipeline
     /// <summary>
     /// How many times the front end may re-run to create generic instantiations discovered during
     /// resolution. Each round can only add instantiations, and a program needing more than a couple
-    /// of levels is asking for an infinite family; the cap turns that into the resolver's diagnostic
+    /// of levels is asking for an infinite family. The cap turns that into the resolver's diagnostic
     /// rather than a hang.
     /// </summary>
     private const int MaxMonomorphizationRounds = 6;

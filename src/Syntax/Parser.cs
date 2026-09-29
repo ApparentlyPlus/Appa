@@ -6,8 +6,7 @@ namespace Appa;
 /// </summary>
 internal sealed class Parser(IReadOnlyList<Token> tokens)
 {
-    // Materialize to an array upfront so every indexed access is O(1) with no virtual dispatch.
-    private readonly Token[] _tokens = tokens as Token[] ?? Enumerable.ToArray(tokens);
+    private readonly Token[] _tokens = [.. tokens];
 
     // current position in the token array
     private int _pp;
@@ -23,7 +22,10 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     /// Increments the recursion depth counter and throws if it exceeds MaxDepth. Always call
     /// ExitDepth in a finally block.
     /// </summary>
-    private void EnterDepth() { if (++_depth > MaxDepth) Fail("nested too deeply"); }
+    private void EnterDepth()
+    {
+        if (++_depth > MaxDepth) Fail("nested too deeply");
+    }
 
     /// <summary>
     /// Decrements the recursion depth counter. Always call in a finally block paired with
@@ -145,10 +147,15 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Consumes the current token and returns true if it matches the given kind; otherwise returns
+    /// Consumes the current token and returns true if it matches the given kind. Otherwise returns
     /// false without consuming.
     /// </summary>
-    private bool Try(TK k) { if (At(k)) { Advance(); return true; } return false; }
+    private bool Try(TK k)
+    {
+        if (!At(k)) return false;
+        Advance();
+        return true;
+    }
 
     /// <summary>
     /// Returns true if the current token is TK.Punct with the given value. Only for operator tokens
@@ -201,22 +208,26 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     #region Annotations
 
     /// <summary>
-    /// Parses zero or more leading annotations. Uses null-lazy allocation so the common path (no
-    /// annotations) returns a static empty array without any heap allocation.
+    /// Parses zero or more leading annotations.
     /// </summary>
     private Annotation[] ParseAnnotations()
     {
-        List<Annotation>? anns = null;
+        var anns = new List<Annotation>();
         while (true)
         {
-            if (At(TK.AtIntrinsic)) { var t = Advance(); anns ??= []; anns.Add(new IntrinsicAnnotation(t.Value, t.Span)); }
-            else if (At(TK.AtPreamble)) { var t = Advance(); anns ??= []; anns.Add(new PreambleAnnotation(t.Value, t.Span)); }
-            else if (At(TK.AtKeep)) { var t = Advance(); anns ??= []; anns.Add(new KeepAnnotation(t.Span)); }
-            else if (At(TK.AtBuiltin)) { var t = Advance(); anns ??= []; anns.Add(new BuiltinAnnotation(t.Value, t.Span)); }
-            else if (At(TK.AtShadows)) { var t = Advance(); anns ??= []; anns.Add(new ShadowsAnnotation(t.Span)); }
+            var t = Cur;
+            Annotation a;
+            if (t.Kind == TK.AtIntrinsic) a = new IntrinsicAnnotation(t.Value, t.Span);
+            else if (t.Kind == TK.AtPreamble) a = new PreambleAnnotation(t.Value, t.Span);
+            else if (t.Kind == TK.AtKeep) a = new KeepAnnotation(t.Span);
+            else if (t.Kind == TK.AtBuiltin) a = new BuiltinAnnotation(t.Value, t.Span);
+            else if (t.Kind == TK.AtShadows) a = new ShadowsAnnotation(t.Span);
             else break;
+
+            Advance();
+            anns.Add(a);
         }
-        return anns?.ToArray() ?? [];
+        return anns.Count == 0 ? [] : anns.ToArray();
     }
 
     /// <summary>
@@ -287,7 +298,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         Expect(TK.Func);
         var name = Expect(TK.Ident).Value;
         var generics = ParseGenericParamList();
-        Expect(TK.LParen); var parms = ParseParamList(); Expect(TK.RParen);
+        var parms = ParseParenParams();
         if (At(TK.Arrow)) Fail($"'{name}': return type goes before 'func', not after the parameter list", Codes.BadDeclHeader);
         return new FuncDecl(mods, anns, ret, name, generics, parms, isEntry, isThrow, ParseMethodBody(), To(s));
     }
@@ -324,7 +335,12 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     private TopLevel ParseTopLevel()
     {
         if (At(TK.Import)) return ParseImport();
-        if (At(TK.AtEnvironment)) { int es = Cur.Span.Start; Advance(); return new EnvironmentDecl(To(es)); }
+        if (At(TK.AtEnvironment))
+        {
+            int es = Cur.Span.Start;
+            Advance();
+            return new EnvironmentDecl(To(es));
+        }
         int s = Cur.Span.Start;
         var anns = ParseAnnotations();
         if (At(TK.Import)) RejectAnns(anns, "an import", allowShadows: false);
@@ -333,10 +349,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
 
         // The order of these checks matters. Class and module keywords are valid type names,
         // so they must be checked after the native decls but before the free function decl.
-        if (At(TK.Enum)) { RejectAnns(anns, "an enum"); return ParseEnumDecl(anns, s); }
-        if (At(TK.Union)) { RejectAnns(anns, "a union"); return ParseUnionDecl(anns, s); }
-        if (At(TK.Class)) { RejectAnns(anns, "a class", allowKeep: true, allowBuiltin: true); return ParseClassDecl(anns, s); }
-        if (At(TK.Module)) { RejectAnns(anns, "a module", allowKeep: true); return ParseModuleDecl(anns, s); }
+        if (TryParseTypeDecl(anns, s) is { } typeDecl) return typeDecl;
         if (At(TK.Realm)) { RejectAnns(anns, "a realm", allowShadows: false); return ParseRealmDecl(); }
         if (At(TK.Kernel)) RequireRealmKeyword();
         if (AtProcessStart())
@@ -350,7 +363,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
 
     /// <summary>
     /// Reports a visibility or 'static' modifier written on a top-level type declaration. Only a
-    /// free function takes one there; without this the modifier is read as the start of a function
+    /// free function takes one there. Without this the modifier is read as the start of a function
     /// and the error lands on the 'class' keyword, naming the wrong thing entirely.
     /// </summary>
     private void RejectModifierOnType()
@@ -375,7 +388,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Parses an import declaration. A string literal import is a filesystem path; a bare
+    /// Parses an import declaration. A string literal import is a filesystem path. A bare
     /// identifier is a module name.
     /// </summary>
     private ImportDecl ParseImport()
@@ -422,7 +435,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         TypeSpec? ret = ParseOptionalReturnType();
         Expect(TK.Func);
         var name = Expect(TK.Ident).Value;
-        Expect(TK.LParen); var parms = ParseParamList(); Expect(TK.RParen);
+        var parms = ParseParenParams();
         if (At(TK.Arrow)) Fail($"'{name}': return type goes before 'func', not after the parameter list", Codes.BadDeclHeader);
         Expect(TK.Semi);
         return new ExternFuncDecl(ret, name, parms, To(s), anns);
@@ -438,12 +451,23 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         int s = Cur.Span.Start;
         Advance(); // 'realm'
         Realm kind = Realm.None;
-        if (At(TK.Kernel)) { kind = Realm.Kernel; Advance(); }
-        else if (At(TK.Userspace)) { kind = Realm.User; Advance(); }
+        if (At(TK.Kernel))
+        {
+            kind = Realm.Kernel;
+            Advance();
+        }
+        else if (At(TK.Userspace))
+        {
+            kind = Realm.User;
+            Advance();
+        }
         else
+        {
             Fail($"unknown realm {Found()}; the only realms are 'kernel' and 'userspace'",
                  Codes.UnknownRealm,
                  Cur.Kind == TK.Ident ? Suggest.Hints(Cur.Value, ["kernel", "userspace"]) : []);
+        }
+
         Expect(TK.LBrace);
         List<TopLevel> items = [];
         while (!At(TK.RBrace) && !At(TK.EOF)) items.Add(ParseContextItem());
@@ -472,20 +496,61 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         RejectStrayImport();
         RejectStrayThread();
         int s = Cur.Span.Start;
-        if (At(TK.AtEnvironment)) { Advance(); return new EnvironmentDecl(To(s)); }
+        if (At(TK.AtEnvironment))
+        {
+            Advance();
+            return new EnvironmentDecl(To(s));
+        }
+
         var anns = ParseAnnotations();
         RejectStrayImport();
         RejectStrayThread();
         if (At(TK.NativeContent)) return new NativeBlock(ParseNativeBody(Advance()), To(s), anns);
         if (At(TK.NativeTypeDecl)) return ParseNativeType(anns, s);
         if (At(TK.AtExtern)) return ParseExternDecl(anns, s);
-        if (At(TK.Enum)) { RejectAnns(anns, "an enum"); return ParseEnumDecl(anns, s); }
-        if (At(TK.Union)) { RejectAnns(anns, "a union"); return ParseUnionDecl(anns, s); }
-        if (At(TK.Class)) { RejectAnns(anns, "a class", allowKeep: true, allowBuiltin: true); return ParseClassDecl(anns, s); }
-        if (At(TK.Module)) { RejectAnns(anns, "a module", allowKeep: true); return ParseModuleDecl(anns, s); }
+        if (TryParseTypeDecl(anns, s) is { } typeDecl) return typeDecl;
         if (AtProcessStart())
-            { RejectAnns(anns, "a process", allowShadows: false); return ParseProcessDeclTop(); }
+        {
+            RejectAnns(anns, "a process", allowShadows: false);
+            return ParseProcessDeclTop();
+        }
         return ParseFreeFuncDecl(anns, s);
+    }
+
+    /// <summary>
+    /// Parses an enum, union, class or module if one starts here, or returns null. Shared by the
+    /// file, realm and process levels, which all allow the same type declarations.
+    /// </summary>
+    private TopLevel? TryParseTypeDecl(Annotation[] anns, int s)
+    {
+        switch (Cur.Kind)
+        {
+            case TK.Enum:
+                RejectAnns(anns, "an enum");
+                return ParseEnumDecl(anns, s);
+            case TK.Union:
+                RejectAnns(anns, "a union");
+                return ParseUnionDecl(anns, s);
+            case TK.Class:
+                RejectAnns(anns, "a class", allowKeep: true, allowBuiltin: true);
+                return ParseClassDecl(anns, s);
+            case TK.Module:
+                RejectAnns(anns, "a module", allowKeep: true);
+                return ParseModuleDecl(anns, s);
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>
+    /// Parses a parenthesised parameter list.
+    /// </summary>
+    private Param[] ParseParenParams()
+    {
+        Expect(TK.LParen);
+        var ps = ParseParamList();
+        Expect(TK.RParen);
+        return ps;
     }
 
     #endregion
@@ -501,29 +566,31 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     {
         Expect(TK.Class);
         int ns = Cur.Span.Start;
-        var name = ParseSimpleTypeName();
-        string baseName = name;
-        List<string> generics = [];
-        if (At(TK.LBrack))
-        {
-            Advance();
-            generics.Add(ExpectBareGenericParam());
-            while (Try(TK.Comma)) generics.Add(ExpectBareGenericParam());
-            Expect(TK.RBrack);
-            var genericsArray = generics.ToArray();
-            _gu.Add(new GenericUse(name, genericsArray, To(ns)));
-            name = Mangler.GenericInstance(name, genericsArray);
-        }
+        string baseName = ParseSimpleTypeName();
+        var generics = ParseGenericParamList();
+        string name = GenericDeclName(baseName, generics, ns);
+
         Expect(TK.LBrace);
         List<ClassMember> members = [];
         while (!At(TK.RBrace) && !At(TK.EOF)) members.Add(ParseClassMember());
         Expect(TK.RBrace);
-        return new ClassDecl(name, [.. generics], anns, [.. members], To(s)) { BaseName = baseName };
+        return new ClassDecl(name, generics, anns, [.. members], To(s)) { BaseName = baseName };
+    }
+
+    /// <summary>
+    /// The name a generic class or union is stored under ("List_T" for 'class List[T]'), registering
+    /// the template use so the Monomorphizer can find it. Non-generic names pass through.
+    /// </summary>
+    private string GenericDeclName(string baseName, string[] generics, int ns)
+    {
+        if (generics.Length == 0) return baseName;
+        _gu.Add(new GenericUse(baseName, generics, To(ns)));
+        return Mangler.GenericInstance(baseName, generics);
     }
 
     /// <summary>
     /// Reads a single bare identifier as a generic parameter name. Type arguments at use sites may
-    /// nest (List[Map[K,V]]); class parameter declarations may not (class Foo[Bar[Baz]] is
+    /// nest (List[Map[K,V]]). Class parameter declarations may not (class Foo[Bar[Baz]] is
     /// rejected).
     /// </summary>
     private string ExpectBareGenericParam()
@@ -553,7 +620,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     #region Enum and union
 
     /// <summary>
-    /// Parses an enum declaration. Members may carry explicit integer values; if absent the C
+    /// Parses an enum declaration. Members may carry explicit integer values. If absent the C
     /// compiler applies the usual increment rule. A trailing comma after the last member is a hard
     /// error.
     /// </summary>
@@ -562,21 +629,19 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         Expect(TK.Enum);
         var name = Expect(TK.Ident).Value;
         Expect(TK.LBrace);
-        List<EnumMember>? members = null;
+        var members = new List<EnumMember>();
         if (!At(TK.RBrace) && !At(TK.EOF))
         {
-            members = [];
-            int ms = Cur.Span.Start;
-            members.Add(new EnumMember(Expect(TK.Ident).Value, Try(TK.Eq) ? ParseExpr() : null, To(ms)));
-            while (Try(TK.Comma))
+            do
             {
-                if (At(TK.RBrace)) Fail("trailing comma not allowed after the last enum member; remove it", Codes.TrailingComma);
-                ms = Cur.Span.Start;
+                if (members.Count > 0 && At(TK.RBrace))
+                    Fail("trailing comma not allowed after the last enum member; remove it", Codes.TrailingComma);
+                int ms = Cur.Span.Start;
                 members.Add(new EnumMember(Expect(TK.Ident).Value, Try(TK.Eq) ? ParseExpr() : null, To(ms)));
-            }
+            } while (Try(TK.Comma));
         }
         Expect(TK.RBrace);
-        return new EnumDecl(name, members?.ToArray() ?? [], To(s), anns);
+        return new EnumDecl(name, [.. members], To(s), anns);
     }
 
     /// <summary>
@@ -588,44 +653,28 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     {
         Expect(TK.Union);
         int ns = Cur.Span.Start;
-        var name = Expect(TK.Ident).Value;
-        string baseName = name;
+        string baseName = Expect(TK.Ident).Value;
 
-        // Type parameters, registered and mangled exactly as ParseClassDecl does, so the
-        // Monomorphizer discovers the template through the same GenericUse channel.
-        List<string> generics = [];
-        if (At(TK.LBrack))
-        {
-            Advance();
-            generics.Add(ExpectBareGenericParam());
-            while (Try(TK.Comma)) generics.Add(ExpectBareGenericParam());
-            Expect(TK.RBrack);
-
-            var genericsArray = generics.ToArray();
-            _gu.Add(new GenericUse(name, genericsArray, To(ns)));
-            name = Mangler.GenericInstance(name, genericsArray);
-        }
+        // same generic handling as a class, so the Monomorphizer finds both the same way
+        var generics = ParseGenericParamList();
+        string name = GenericDeclName(baseName, generics, ns);
 
         Expect(TK.LBrace);
-        List<UnionVariant>? variants = null;
+        var variants = new List<UnionVariant>();
         if (!At(TK.RBrace) && !At(TK.EOF))
         {
-            variants = [];
-            int vs = Cur.Span.Start;
-            var vname = Expect(TK.Ident).Value;
-            Param[] fields = At(TK.LParen) ? ParseUnionFieldList() : [];
-            variants.Add(new UnionVariant(vname, fields, To(vs)));
-            while (Try(TK.Comma))
+            do
             {
-                if (At(TK.RBrace)) Fail("trailing comma not allowed after the last union variant; remove it", Codes.TrailingComma);
-                vs = Cur.Span.Start;
-                vname = Expect(TK.Ident).Value;
-                fields = At(TK.LParen) ? ParseUnionFieldList() : [];
+                if (variants.Count > 0 && At(TK.RBrace))
+                    Fail("trailing comma not allowed after the last union variant; remove it", Codes.TrailingComma);
+                int vs = Cur.Span.Start;
+                var vname = Expect(TK.Ident).Value;
+                Param[] fields = At(TK.LParen) ? ParseUnionFieldList() : [];
                 variants.Add(new UnionVariant(vname, fields, To(vs)));
-            }
+            } while (Try(TK.Comma));
         }
         Expect(TK.RBrace);
-        return new UnionDecl(name, [.. generics], variants?.ToArray() ?? [], To(s), anns) { BaseName = baseName };
+        return new UnionDecl(name, generics, [.. variants], To(s), anns) { BaseName = baseName };
     }
 
     /// <summary>
@@ -636,7 +685,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     private Param[] ParseUnionFieldList()
     {
         Advance(); // opening (
-        if (At(TK.RParen)) { Advance(); return []; }
+        if (Try(TK.RParen)) return [];
         List<Param> fields = [ParseParam()];
         while (Try(TK.Comma))
         {
@@ -670,7 +719,10 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         if (scope != null)
         {
             var path = new List<string>();
-            do { path.Add(ExpectIdent("a scope or type name")); } while (Try(TK.Dot));
+            do
+            {
+                path.Add(ExpectIdent("a scope or type name"));
+            } while (Try(TK.Dot));
             scope = [.. scope, .. path[..^1]];
             return FinishTypeName(path[^1], scope, s);
         }
@@ -690,8 +742,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         if (!At(TK.RBrack)) Fail($"invalid type argument in '{name}[...]', found {Found()}");
         Expect(TK.RBrack);
         var spec = new NamedSpec(name, [.. args], To(s)) { Scope = scope };
-        var mangledArgs = new string[args.Count];
-        for (int i = 0; i < args.Count; i++) mangledArgs[i] = args[i].Mangled;
+        string[] mangledArgs = [.. args.Select(a => a.Mangled)];
         _gu.Add(new GenericUse(name, mangledArgs, To(s), [.. args]) { Scope = scope });
         return spec;
     }
@@ -702,7 +753,11 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     /// </summary>
     private string[]? ParseScopeQualifier()
     {
-        if (Try(TK.ColonColon)) { _scopedRef = true; return []; }
+        if (Try(TK.ColonColon))
+        {
+            _scopedRef = true;
+            return [];
+        }
         if (!At(TK.Kernel) && !At(TK.Userspace)) return null;
         if (Peek().Kind != TK.Dot) return null;
         string realm = Advance().Value;
@@ -764,7 +819,11 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         }
         if (At(TK.Func)) return ParseFuncTypeSpec();
         TypeSpec spec = ParseTypeName();
-        while (AtP("*")) { Advance(); spec = new PtrSpec(spec, To(s)); }
+        while (AtP("*"))
+        {
+            Advance();
+            spec = new PtrSpec(spec, To(s));
+        }
         return spec;
     }
 
@@ -850,7 +909,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
             TypeSpec? ret = At(TK.Func) && Peek().Kind != TK.LParen ? null : ParseTypeSpec();
             Expect(TK.Func);
             string op = ParseOperatorSymbol();
-            Expect(TK.LParen); var parms = ParseParamList(); Expect(TK.RParen);
+            var parms = ParseParenParams();
             if (At(TK.Arrow)) Fail($"'{op}': return type goes after 'operator', not after the parameter list", Codes.BadDeclHeader);
             return new OperatorDecl(mods, op, parms, ret, ParseMethodBody(), To(s));
         }
@@ -864,7 +923,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
             Expect(TK.Func);
             var name = Expect(TK.Ident).Value;
             var generics = ParseGenericParamList();
-            Expect(TK.LParen); var parms = ParseParamList(); Expect(TK.RParen);
+            var parms = ParseParenParams();
             if (At(TK.Arrow)) Fail($"'{name}': return type goes before 'func', not after the parameter list", Codes.BadDeclHeader);
             return new MethodDecl(mods, anns, ret, name, generics, parms, isEntry, isThrow, ParseMethodBody(), To(s));
         }
@@ -905,8 +964,12 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         if (AtP("&") || AtP("|") || AtP("^") || At(TK.Shl) || At(TK.Shr)) return Advance().Value;
         if (AtP("!") || AtP("~")) return Advance().Value;
         if (At(TK.Inc) || At(TK.Dec)) return Advance().Value;
-        if (At(TK.LBrack)) { Advance(); Expect(TK.RBrack); return Try(TK.Eq) ? "[]=" : "[]"; }
-        if (At(TK.As)) { Advance(); return "as"; }
+        if (Try(TK.LBrack))
+        {
+            Expect(TK.RBrack);
+            return Try(TK.Eq) ? "[]=" : "[]";
+        }
+        if (Try(TK.As)) return "as";
         Fail($"expected an operator symbol, found {Found()}");
         return "+";
     }
@@ -914,7 +977,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Returns true if the current position looks like the start of a method declaration. 'func
     /// Name' with no return type is a method; 'func(' starts a func-pointer type (a field).
-    /// Speculatively parses the type spec and checks what follows; restores position either way.
+    /// Speculatively parses the type spec and checks what follows. Restores position either way.
     /// </summary>
     private bool LooksLikeMethod()
     {
@@ -980,8 +1043,12 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         int s = Cur.Span.Start;
         string mode = "foreground";
         bool modeExplicit = false;
-        if (At(TK.Foreground)) { mode = "foreground"; modeExplicit = true; Advance(); }
-        else if (At(TK.Background)) { mode = "background"; modeExplicit = true; Advance(); }
+        if (At(TK.Foreground) || At(TK.Background))
+        {
+            mode = At(TK.Foreground) ? "foreground" : "background";
+            modeExplicit = true;
+            Advance();
+        }
         if (!AtValue("process")) Fail($"expected 'process', found {Found()}", Codes.BadDeclHeader);
         Advance();
         var name = Expect(TK.Ident).Value;
@@ -1061,18 +1128,24 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         RejectStrayImport();
 
         int s = Cur.Span.Start;
-        if (At(TK.AtEnvironment)) { Advance(); return new EnvironmentDecl(To(s)); }
+        if (At(TK.AtEnvironment))
+        {
+            Advance();
+            return new EnvironmentDecl(To(s));
+        }
+
         var anns = ParseAnnotations();
         RejectStrayImport();
         if (AtValue("thread")) RejectAnns(anns, "a thread", allowShadows: false);
         if (At(TK.NativeContent)) return new NativeBlock(ParseNativeBody(Advance()), To(s), anns);
         if (At(TK.NativeTypeDecl)) return ParseNativeType(anns, s);
         if (At(TK.AtExtern)) return ParseExternDecl(anns, s);
-        if (At(TK.Enum)) { RejectAnns(anns, "an enum"); return ParseEnumDecl(anns, s); }
-        if (At(TK.Union)) { RejectAnns(anns, "a union"); return ParseUnionDecl(anns, s); }
-        if (At(TK.Class)) { RejectAnns(anns, "a class", allowKeep: true, allowBuiltin: true); return ParseClassDecl(anns, s); }
-        if (At(TK.Module)) { RejectAnns(anns, "a module", allowKeep: true); return ParseModuleDecl(anns, s); }
-        if (At(TK.Let)) { RejectAnns(anns, "a process variable", allowShadows: false); return ParseProcessVarDecl(s); }
+        if (TryParseTypeDecl(anns, s) is { } typeDecl) return typeDecl;
+        if (At(TK.Let))
+        {
+            RejectAnns(anns, "a process variable", allowShadows: false);
+            return ParseProcessVarDecl(s);
+        }
         return ParseFreeFuncDecl(anns, s);
     }
 
@@ -1085,13 +1158,13 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         var type = ParseTypeSpec();
         var name = Expect(TK.Ident).Value;
 
-        Expr? init = null;
-        if (Try(TK.Eq)) init = ParseExpr();
-        else
+        if (!At(TK.Eq))
             Fail($"process variable '{name}' has no initial value", Codes.UninitialisedProcessVar,
                  [$"write 'let <type> {name} = <value>;'",
                   "every thread of the process shares this one variable, so there is no point later " +
                   "in the program where a first assignment could be known to have run before a read"]);
+        Advance();
+        var init = ParseExpr();
 
         Expect(TK.Semi);
         return new ProcessVarDecl(name, type, init, To(s));
@@ -1099,15 +1172,15 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
 
     /// <summary>
     /// Parses a thread declaration inside a process body. A foreground or background keyword before
-    /// 'thread' is syntactically accepted and captured in Mode; the type resolver rejects it as
+    /// 'thread' is syntactically accepted and captured in Mode. The type resolver rejects it as
     /// G043, since threads don't have their own deployment mode, only the process does.
     /// </summary>
     private ThreadDecl ParseThreadDecl()
     {
         int s = Cur.Span.Start;
         string? mode = null;
-        if (At(TK.Foreground)) { mode = "foreground"; Advance(); }
-        else if (At(TK.Background)) { mode = "background"; Advance(); }
+        if (At(TK.Foreground) || At(TK.Background))
+            mode = Advance().Value;
         if (!AtValue("thread"))
             Fail($"expected 'thread' after '{mode}', found {Found()}", Codes.BadDeclHeader,
                  ["a process body may contain classes, modules, enums, unions, functions, and threads"]);
@@ -1138,8 +1211,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
                  ["handle failure inside the thread: 'let T x = f() catch { assign <fallback>; };'"]);
         TypeSpec? ret = At(TK.Func) && Peek().Kind == TK.Ident ? null : ParseTypeSpec();
         Expect(TK.Func);
-        if (At(TK.Ident)) Advance(); // entry name is documentation only; the thread is what names it
-        Expect(TK.LParen); var parms = ParseParamList(); Expect(TK.RParen);
+        if (At(TK.Ident)) Advance(); // entry name is documentation only. The thread is what names it
+        var parms = ParseParenParams();
         if (ret != null) Fail("a thread entry has no return value; remove the return type", Codes.BadDeclHeader);
         if (mods != Modifiers.None) Fail("access/storage modifiers have no meaning on a thread entry", Codes.BadDeclHeader);
         if (parms.Length > 0)
@@ -1217,9 +1290,25 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         if (At(TK.Try)) return ParseTryCatchStmt(s);
         if (At(TK.Unsafe)) return ParseUnsafeBlock(s);
         if (At(TK.Defer)) return ParseDeferStmt(s);
-        if (At(TK.Return)) { Advance(); Expr? v = At(TK.Semi) ? null : ParseExpr(); Expect(TK.Semi); return new ReturnStmt(v, To(s)); }
-        if (At(TK.Break)) { Advance(); Expect(TK.Semi); return new BreakStmt(To(s)); }
-        if (At(TK.Continue)) { Advance(); Expect(TK.Semi); return new ContinueStmt(To(s)); }
+        if (At(TK.Return))
+        {
+            Advance();
+            Expr? v = At(TK.Semi) ? null : ParseExpr();
+            Expect(TK.Semi);
+            return new ReturnStmt(v, To(s));
+        }
+        if (At(TK.Break))
+        {
+            Advance();
+            Expect(TK.Semi);
+            return new BreakStmt(To(s));
+        }
+        if (At(TK.Continue))
+        {
+            Advance();
+            Expect(TK.Semi);
+            return new ContinueStmt(To(s));
+        }
 
         // Throw and debug statements are not expressions, so they must be handled here instead of
         // in ParseExprOrAssign.
@@ -1237,23 +1326,9 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
             Expect(TK.Semi);
             return new AssignValueStmt(value, To(s));
         }
-        if (At(TK.Debug)) {
-            Advance();
-            if (!At(TK.StrLit)) Fail("'debug' takes a string literal", hints: ["e.g. debug \"message\";"]);
-            var raw = Advance().Value;
-            Expect(TK.Semi);
-            return new DebugStmt(raw, To(s));
-        }
-
-        // Panic is a statement, not an expression, so it must be handled here instead of in
-        // ParseExprOrAssign.
-        if (At(TK.Panic)) {
-            Advance();
-            if (!At(TK.StrLit)) Fail("'panic' takes a string literal", hints: ["e.g. panic \"message\";"]);
-            var raw = Advance().Value;
-            Expect(TK.Semi);
-            return new PanicStmt(raw, To(s));
-        }
+        // debug and panic take a literal and nothing else, so they're statements too
+        if (At(TK.Debug)) return new DebugStmt(ParseLiteralStmt("debug"), To(s));
+        if (At(TK.Panic)) return new PanicStmt(ParseLiteralStmt("panic"), To(s));
         if (LooksLikeMissingLet())
             Fail("expected a statement", Codes.MissingLet,
                 At(TK.Ident)
@@ -1263,7 +1338,19 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Parses a let declaration. The type is optional; LooksLikeTypeAndIdent is the single
+    /// Parses the rest of a 'debug' or 'panic' statement and returns its string literal.
+    /// </summary>
+    private string ParseLiteralStmt(string keyword)
+    {
+        Advance();
+        if (!At(TK.StrLit)) Fail($"'{keyword}' takes a string literal", hints: [$"e.g. {keyword} \"message\";"]);
+        var raw = Advance().Value;
+        Expect(TK.Semi);
+        return raw;
+    }
+
+    /// <summary>
+    /// Parses a let declaration. The type is optional. LooksLikeTypeAndIdent is the single
     /// lookahead deciding whether a declared type precedes the name, shared with the for-init form
     /// so the two positions can never disagree.
     /// </summary>
@@ -1351,7 +1438,11 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
             if (Peek(n).Kind != TK.Ident) return -1;
             n++;
             while (Peek(n).Kind == TK.Dot && Peek(n + 1).Kind == TK.Ident) n += 2;
-            if (Peek(n).Kind == TK.LBrack) { n = SkipBrackets(n); if (n < 0) return -1; }
+            if (Peek(n).Kind == TK.LBrack)
+            {
+                n = SkipBrackets(n);
+                if (n < 0) return -1;
+            }
         }
         else return -1;
         while (Peek(n).Kind == TK.Punct && Peek(n).Value == "*") n++;
@@ -1361,7 +1452,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Returns true if the current position looks like a type spec immediately followed by an
     /// identifier, which is always a missing 'let' and never valid expression syntax. Pure
-    /// lookahead; never consumes tokens.
+    /// lookahead. Never consumes tokens.
     /// </summary>
     private bool LooksLikeMissingLet()
     {
@@ -1407,7 +1498,9 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     /// </summary>
     private IfStmt ParseIfStmt(int s)
     {
-        Expect(TK.If); Expect(TK.LParen); var cond = ParseExpr();
+        Expect(TK.If);
+        Expect(TK.LParen);
+        var cond = ParseExpr();
         NoAssignHere("an 'if' condition", At(TK.Eq) ? "did you mean '=='?" : "assign before the 'if' instead");
         Expect(TK.RParen);
         var then = ParseStmt();
@@ -1416,11 +1509,13 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Parses a while loop. The condition is parenthesised; the body is a full statement.
+    /// Parses a while loop. The condition is parenthesised. The body is a full statement.
     /// </summary>
     private WhileStmt ParseWhileStmt(int s)
     {
-        Expect(TK.While); Expect(TK.LParen); var cond = ParseExpr();
+        Expect(TK.While);
+        Expect(TK.LParen);
+        var cond = ParseExpr();
         NoAssignHere("a 'while' condition", At(TK.Eq) ? "did you mean '=='?" : "move the update into the loop body");
         Expect(TK.RParen);
         return new WhileStmt(cond, ParseStmt(), To(s));
@@ -1480,7 +1575,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         var lhs = ParseExpr();
         if (IsAssignTk(Cur.Kind))
         {
-            var op = AssignOpOf(Cur.Kind); Advance();
+            var op = AssignOpOf(Advance().Kind);
             return new AssignStmt(lhs, op, ParseExpr(), To(es));
         }
         return new ExprStmt(lhs, To(es));
@@ -1498,7 +1593,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     /// <summary>
-    /// Parses an unsafe block. Pointer operations inside are permitted; the type checker rejects
+    /// Parses an unsafe block. Pointer operations inside are permitted. The type checker rejects
     /// them everywhere else.
     /// </summary>
     private UnsafeBlock ParseUnsafeBlock(int s)
@@ -1520,14 +1615,14 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
 
     /// <summary>
     /// Parses an expression statement or assignment. After parsing the left-hand expression, any
-    /// assignment operator promotes the result to an AssignStmt; otherwise it's an ExprStmt.
+    /// assignment operator promotes the result to an AssignStmt. Otherwise it's an ExprStmt.
     /// </summary>
     private Stmt ParseExprOrAssign(int s)
     {
         var expr = ParseExpr();
         if (IsAssignTk(Cur.Kind))
         {
-            var op = AssignOpOf(Cur.Kind); Advance();
+            var op = AssignOpOf(Advance().Kind);
             var val = ParseExpr();
             Expect(TK.Semi);
             return new AssignStmt(expr, op, val, To(s));
@@ -1730,7 +1825,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
 
     /// <summary>
     /// Parses 'expr as Type' casts. Tighter than '*' so 'x * y as T' means 'x * (y as T)'.
-    /// User-defined type casts use 'as'; primitive casts use the C-style '(PrimType)' form.
+    /// User-defined type casts use 'as'. Primitive casts use the C-style '(PrimType)' form.
     /// </summary>
     private Expr ParseAs()
     {
@@ -1742,7 +1837,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
 
     /// <summary>
     /// Parses prefix unary operators. '&amp;' and '*' are only legal inside unsafe blocks but are
-    /// accepted here; the type checker enforces the restriction.
+    /// accepted here. The type checker enforces the restriction.
     /// </summary>
     private Expr ParseUnary()
     {
@@ -1776,7 +1871,13 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
             else if (At(TK.Dec)) { Advance(); expr = new PostfixExpr(PostfixOp.Dec, expr, To(s)); }
             else if (At(TK.Dot)) { Advance(); expr = new MemberAccessExpr(expr, Expect(TK.Ident).Value, To(s)); }
             else if (At(TK.LBrack)) { expr = ParseBracketed(expr, s); }
-            else if (At(TK.LParen)) { Advance(); var args = ParseArgList(); Expect(TK.RParen); expr = new CallExpr(expr, args, To(s)); }
+            else if (At(TK.LParen))
+            {
+                Advance();
+                var args = ParseArgList();
+                Expect(TK.RParen);
+                expr = new CallExpr(expr, args, To(s));
+            }
             else if (At(TK.Catch))
             {
                 if (expr is not CallExpr)
@@ -1834,15 +1935,14 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         {
             Advance();
             var idx = ParseExpr();
-            if (At(TK.RBrack)) { Advance(); indexForm = idx; }
+            if (Try(TK.RBrack)) indexForm = idx;
         }
         catch (ParseException) { /* not an expression */ }
 
         Rewind(typeEnd with { Uses = start.Uses });
         _gu.AddRange(typeUses);
 
-        var outerArgs = new string[typeArgs.Length];
-        for (int i = 0; i < typeArgs.Length; i++) outerArgs[i] = typeArgs[i].Mangled;
+        string[] outerArgs = [.. typeArgs.Select(a => a.Mangled)];
         _gu.Add(new GenericUse(id.Name, outerArgs, To(s), typeArgs));
 
         return new GenericTypeRefExpr(id.Name, typeArgs, indexForm, To(s));
@@ -1962,14 +2062,12 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         if (ParseScopeQualifier() is { } scope)
         {
             List<string> path = [ExpectIdent("a scope or declaration name")];
-            while (At(TK.Dot) && Peek().Kind == TK.Ident) { Advance(); path.Add(Advance().Value); }
+            path.AddRange(ParseDottedNames());
 
             if (At(TK.LBrack))
             {
                 var spec = FinishTypeName(path[^1], [.. scope, .. path[..^1]], s);
-                List<string> members = [];
-                while (At(TK.Dot) && Peek().Kind == TK.Ident) { Advance(); members.Add(Advance().Value); }
-                return new ScopedNameExpr(scope, [.. members], To(s), spec);
+                return new ScopedNameExpr(scope, [.. ParseDottedNames()], To(s), spec);
             }
             return new ScopedNameExpr(scope, [.. path], To(s));
         }
@@ -1985,20 +2083,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
 
         // sizeof(Type) and default(Type) are special forms that take a type specifier in
         // parentheses.
-        if (At(TK.Sizeof))
-        {
-            Advance(); Expect(TK.LParen);
-            var t = ParseTypeSpec();
-            Expect(TK.RParen);
-            return new SizeofExpr(t, To(s));
-        }
-        if (At(TK.Default))
-        {
-            Advance(); Expect(TK.LParen);
-            var t = ParseTypeSpec();
-            Expect(TK.RParen);
-            return new DefaultExpr(t, To(s));
-        }
+        if (Try(TK.Sizeof)) return new SizeofExpr(ParseParenType(), To(s));
+        if (Try(TK.Default)) return new DefaultExpr(ParseParenType(), To(s));
 
         // 'new Type(...)' or 'new Type[...]' or 'new Type' for fixed-size arrays.
         if (At(TK.New)) return ParseNewExpr(s);
@@ -2007,7 +2093,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         if (At(TK.LBrack))
         {
             Advance();
-            if (At(TK.RBrack)) { Advance(); return new ArrayLitExpr([], To(s)); }
+            if (Try(TK.RBrack)) return new ArrayLitExpr([], To(s));
             List<Expr> elems = [ParseExpr()];
             while (Try(TK.Comma)) elems.Add(ParseExpr());
             Expect(TK.RBrack);
@@ -2048,17 +2134,55 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         List<Expr> parts = [];
         while (!At(TK.InterpStrEnd) && !At(TK.EOF))
         {
-            if (At(TK.StrLit)) { var t = Advance(); parts.Add(new StrLitExpr(t.Value, t.Span)); }
-            else if (AtP("{")) { Advance(); parts.Add(ParseExpr()); if (!AtP("}")) Fail($"expected '}}' to close the interpolated expression, found {Found()}"); Advance(); }
-            else break;
+            if (At(TK.StrLit))
+            {
+                var t = Advance();
+                parts.Add(new StrLitExpr(t.Value, t.Span));
+            }
+            else if (AtP("{"))
+            {
+                Advance();
+                parts.Add(ParseExpr());
+                if (!AtP("}")) Fail($"expected '}}' to close the interpolated expression, found {Found()}");
+                Advance();
+            }
+            else
+            {
+                break;
+            }
         }
         Expect(TK.InterpStrEnd);
         return new InterpStrExpr([.. parts], To(s));
     }
 
     /// <summary>
+    /// '(Type)', as sizeof and default take it.
+    /// </summary>
+    private TypeSpec ParseParenType()
+    {
+        Expect(TK.LParen);
+        var t = ParseTypeSpec();
+        Expect(TK.RParen);
+        return t;
+    }
+
+    /// <summary>
+    /// Consumes any '.name' run and returns the names.
+    /// </summary>
+    private List<string> ParseDottedNames()
+    {
+        var names = new List<string>();
+        while (At(TK.Dot) && Peek().Kind == TK.Ident)
+        {
+            Advance();
+            names.Add(Advance().Value);
+        }
+        return names;
+    }
+
+    /// <summary>
     /// Parses a 'new' expression. An optional constructor arg list and an optional collection
-    /// initializer may each follow the type spec, independently. A bare 'new Type' parses too; the
+    /// initializer may each follow the type spec, independently. A bare 'new Type' parses too. The
     /// resolver rejects it with NewOnNonClass for anything but a class.
     /// </summary>
     private NewExpr ParseNewExpr(int s)
@@ -2066,9 +2190,10 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         Expect(TK.New);
         TypeSpec type = ParseTypeSpec();
         Expr[] args = [];
-        if (At(TK.LParen))
+        if (Try(TK.LParen))
         {
-            Advance(); args = ParseArgList(); Expect(TK.RParen);
+            args = ParseArgList();
+            Expect(TK.RParen);
         }
         if (At(TK.LBrace)) return new NewExpr(type, args, ParseCollectionInit(TK.RBrace), To(s));
         if (At(TK.LBrack)) return new NewExpr(type, args, ParseCollectionInit(TK.RBrack), To(s));
@@ -2082,7 +2207,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     private Expr[] ParseCollectionInit(TK close)
     {
         Advance(); // opening delimiter
-        if (At(close)) { Advance(); return []; }
+        if (Try(close)) return [];
         List<Expr> elems = [ParseExpr()];
         while (Try(TK.Comma)) elems.Add(ParseExpr());
         Expect(close);
@@ -2099,7 +2224,10 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     /// </summary>
     private SwitchStmt ParseSwitchStmt(int s)
     {
-        Expect(TK.Switch); Expect(TK.LParen); var scrut = ParseExpr(); Expect(TK.RParen);
+        Expect(TK.Switch);
+        Expect(TK.LParen);
+        var scrut = ParseExpr();
+        Expect(TK.RParen);
         Expect(TK.LBrace);
         List<SwitchCase> cases = [];
         Block? def = null;
@@ -2128,7 +2256,10 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     /// </summary>
     private MatchStmt ParseMatchStmt(int s)
     {
-        Expect(TK.Match); Expect(TK.LParen); var scrut = ParseExpr(); Expect(TK.RParen);
+        Expect(TK.Match);
+        Expect(TK.LParen);
+        var scrut = ParseExpr();
+        Expect(TK.RParen);
         Expect(TK.LBrace);
         List<MatchCase> cases = [];
         Block? def = null;

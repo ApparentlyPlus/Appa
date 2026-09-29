@@ -5,7 +5,7 @@ using System.Text;
 
 /// <summary>
 /// Grammar-directed fuzzer over union <i>shapes</i>, which everything unions grew is generated
-/// from. Programs are valid by construction, so a rejection fails too; the oracle is a real gcc
+/// from. Programs are valid by construction, so a rejection fails too. The oracle is a real gcc
 /// compile with -Werror=return-type, and seeds are fixed.
 /// </summary>
 public class UnionFuzzTests

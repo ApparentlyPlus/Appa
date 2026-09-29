@@ -124,7 +124,7 @@ public class BootTests(BootFixture fixture)
         AssertMarkers(KernelMarkers, "[DEBUG] ", log, "COM1/stdio", log, userLog);
         AssertMarkers(UserMarkers, "[USER DEBUG] ", userLog, "COM3/user-debug.log", log, userLog);
 
-        // Markers prove the code ran; these prove it computed the right thing.
+        // Markers prove the code ran. These prove it computed the right thing.
         foreach (var expected in ExpectedOutput)
             Assert.True(log.Contains(expected),
                 $"expected output line not found: '{expected}'{Logs(log, userLog)}");

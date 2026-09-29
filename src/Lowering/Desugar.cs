@@ -45,22 +45,28 @@ internal sealed class Desugar(SymbolTable sym, DiagnosticBag diag) : IrRewriter
         for (int i = ms.Cases.Count - 1; i >= 0; i--)
         {
             var c = ms.Cases[i];
+
+            // the arm's bindings become locals read straight out of the payload
             var bodyStmts = new List<IrStmt>();
             foreach (var b in c.Binds)
-                bodyStmts.Add(new IrDeclVar(b.BindName, b.Type, new IrUnionField(vr, c.VariantIndex, b.FieldName, b.Type)));
+            {
+                var field = new IrUnionField(vr, c.VariantIndex, b.FieldName, b.Type);
+                bodyStmts.Add(new IrDeclVar(b.BindName, b.Type, field));
+            }
             bodyStmts.AddRange(c.Body.Stmts);
 
+            // an exhaustive match doesn't need to test the last tag, it's the only one left
             if (closeLastArm && i == ms.Cases.Count - 1)
             {
                 chain = new IrBlock(bodyStmts);
                 continue;
             }
 
-            IrExpr cond = new IrBinOp(BinOp.Eq,
-                new IrFieldLoad(vr, "__tag", IrType.Int), new IrLitInt(c.VariantIndex), IrType.Bool);
-            IrBlock? elseBlk = chain switch { null => null, IrBlock b2 => b2, var x => new IrBlock([x]) };
-            chain = new IrIf(cond, new IrBlock(bodyStmts), elseBlk);
+            var tag = new IrFieldLoad(vr, "__tag", IrType.Int);
+            var cond = new IrBinOp(BinOp.Eq, tag, new IrLitInt(c.VariantIndex), IrType.Bool);
+            chain = new IrIf(cond, new IrBlock(bodyStmts), AsBlock(chain));
         }
+
         if (chain != null) stmts.Add(chain);
         return new IrBlock(stmts);
     }
@@ -72,19 +78,21 @@ internal sealed class Desugar(SymbolTable sym, DiagnosticBag diag) : IrRewriter
     /// </summary>
     private bool IsExhaustive(IrMatch ms)
     {
-        if (sym.UnionDef(ms.UnionT.Name) is not { } variants) return false;
-        if (ms.Cases.Count != variants.Count) return false;
+        var variants = sym.UnionDef(ms.UnionT.Name);
+        if (variants == null || ms.Cases.Count != variants.Count) return false;
 
-        var seen = new HashSet<int>(ms.Cases.Count);
+        var seen = new HashSet<int>();
         foreach (var c in ms.Cases)
-            if (c.VariantIndex < 0 || c.VariantIndex >= variants.Count || !seen.Add(c.VariantIndex))
-                return false;
+        {
+            int vi = c.VariantIndex;
+            if (vi < 0 || vi >= variants.Count || !seen.Add(vi)) return false;
+        }
         return true;
     }
 
     /// <summary>
     /// Lowers a switch to a single-eval scrutinee temp followed by an if/else-if equality chain. No
-    /// fallthrough; break and continue inside a case reach the enclosing loop.
+    /// fallthrough. Break and continue inside a case reach the enclosing loop.
     /// </summary>
     private IrBlock LowerSwitch(IrSwitch sw)
     {
@@ -97,16 +105,26 @@ internal sealed class Desugar(SymbolTable sym, DiagnosticBag diag) : IrRewriter
         for (int i = sw.Cases.Count - 1; i >= 0; i--)
         {
             var c = sw.Cases[i];
+
+            // case 1, 2, 3: becomes v == 1 || v == 2 || v == 3
             IrExpr cond = new IrBinOp(BinOp.Eq, vr, c.Labels[0], IrType.Bool);
             for (int j = 1; j < c.Labels.Count; j++)
             {
-                cond = new IrBinOp(BinOp.Or, cond, new IrBinOp(BinOp.Eq, vr, c.Labels[j], IrType.Bool), IrType.Bool);
+                var eq = new IrBinOp(BinOp.Eq, vr, c.Labels[j], IrType.Bool);
+                cond = new IrBinOp(BinOp.Or, cond, eq, IrType.Bool);
             }
-            IrBlock? elseBlk = chain switch { null => null, IrBlock b => b, var x => new IrBlock([x]) };
-            chain = new IrIf(cond, c.Body, elseBlk);
+
+            chain = new IrIf(cond, c.Body, AsBlock(chain));
         }
+
         if (chain != null) stmts.Add(chain);
         return new IrBlock(stmts);
+    }
+
+    private static IrBlock? AsBlock(IrStmt? s)
+    {
+        if (s == null) return null;
+        return s as IrBlock ?? new IrBlock([s]);
     }
 
     /// <summary>
@@ -117,15 +135,18 @@ internal sealed class Desugar(SymbolTable sym, DiagnosticBag diag) : IrRewriter
     private IrExpr LowerInterp(IrInterp ip)
     {
         if (ip.Parts.Count == 0) return new IrLitString("\"\"") { Span = ip.Span };
+
         if (ip.Parts.Count >= 3 && sym.Builtins.TryGetValue(BuiltinTypes.StringBuilder, out var sbClass)
             && sym.LookupMethod(sbClass, "Put") is { } put
             && sym.LookupMethod(sbClass, "ToString") is { } toStr)
         {
+            // new StringBuilder().Put(a).Put(b).Put(c).ToString()
             IrExpr sb = new IrNew(sbClass, []) { Span = ip.Span };
             foreach (var part in ip.Parts)
                 sb = new IrInstanceCall(sb, put.CName, IrTypes.ClassRef(sbClass), [part]) { Span = ip.Span };
             return new IrInstanceCall(sb, toStr.CName, IrType.String, []) { Span = ip.Span };
         }
+
         var acc = ip.Parts[0];
         for (int i = 1; i < ip.Parts.Count; i++)
             acc = new IrStaticCall(Concat(ip.Span), IrType.String, [acc, ip.Parts[i]]) { Span = ip.Span };

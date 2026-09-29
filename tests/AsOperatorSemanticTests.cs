@@ -5,7 +5,7 @@ using Appa;
 /// <summary>
 /// Semantic and codegen coverage for 'as' - user-defined explicit conversions written like a
 /// built-in cast. Always a static factory on the class converted TO, so it only ever converts INTO
-/// itself; the other direction is a named method's job.
+/// itself. The other direction is a named method's job.
 /// </summary>
 public class AsOperatorSemanticTests
 {
@@ -175,7 +175,7 @@ public class AsOperatorSemanticTests
 
     /// <summary>
     /// 'as' always takes exactly one parameter - the source value being converted. There is no
-    /// zero-parameter form; a class can never declare how it converts itself OUT to something else
+    /// zero-parameter form. A class can never declare how it converts itself OUT to something else
     /// via 'as', only how another type converts IN to it.
     /// </summary>
     [Fact]
@@ -283,7 +283,7 @@ public class AsOperatorSemanticTests
 
     /// <summary>
     /// A class converting itself to a primitive has no 'as' path at all - not "check the source,
-    /// find nothing"; there's structurally nowhere on the primitive side an 'as' could ever be
+    /// find nothing". There's structurally nowhere on the primitive side an 'as' could ever be
     /// declared, so this fails identically whether or not the class declares anything.
     /// </summary>
     [Fact]

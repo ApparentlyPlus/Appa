@@ -214,7 +214,7 @@ internal record IrErrorType : IrType
 }
 
 /// <summary>
-/// A primitive scalar type. CName is the canonical token; ToCType lowers it to the corresponding
+/// A primitive scalar type. CName is the canonical token. ToCType lowers it to the corresponding
 /// fixed-width C type.
 /// </summary>
 internal record IrPrimType(string CName) : IrType
@@ -393,7 +393,7 @@ internal record IrUnionType(string Name) : IrType
 internal abstract record IrExpr(IrType Type) { public TextSpan Span { get; init; } = TextSpan.None; }
 
 /// <summary>
-/// An integer literal. Value is the 64-bit bit pattern; CText overrides the emitted text when set.
+/// An integer literal. Value is the 64-bit bit pattern. CText overrides the emitted text when set.
 /// </summary>
 internal record IrLitInt(long Value, IrType? T = null, string? CText = null) : IrExpr(T ?? IrType.Int);
 
@@ -673,7 +673,7 @@ internal record IrForIn(string Var, IrType ElemType, string LenCName, string Get
 internal record IrTryCatch(IrBlock Try, IrBlock Catch, int Seq) : IrStmt;
 
 /// <summary>
-/// A switch statement. Lowered to an if/else-if chain by Desugar; never reaches the backend.
+/// A switch statement. Lowered to an if/else-if chain by Desugar. Never reaches the backend.
 /// </summary>
 internal record IrSwitch(IrExpr Scrutinee, List<IrSwitchCase> Cases, IrBlock? Default) : IrStmt;
 
@@ -683,7 +683,7 @@ internal record IrSwitch(IrExpr Scrutinee, List<IrSwitchCase> Cases, IrBlock? De
 internal record IrSwitchCase(List<IrExpr> Labels, IrBlock Body);
 
 /// <summary>
-/// A match statement over a union type. Lowered to an if/else-if chain by Desugar; never reaches
+/// A match statement over a union type. Lowered to an if/else-if chain by Desugar. Never reaches
 /// the backend.
 /// </summary>
 internal record IrMatch(IrExpr Scrutinee, IrUnionType UnionT, List<IrMatchCase> Cases, IrBlock? Default) : IrStmt;
@@ -704,12 +704,12 @@ internal record IrMatchCase(int VariantIndex, List<IrMatchBind> Binds, IrBlock B
 internal record IrUnsafeBlock(IrBlock Body) : IrStmt;
 
 /// <summary>
-/// A defer statement. Lowered by the Ownership pass; never reaches the backend.
+/// A defer statement. Lowered by the Ownership pass. Never reaches the backend.
 /// </summary>
 internal record IrDefer(IrStmt Action) : IrStmt;
 
 /// <summary>
-/// A throw statement. Lowered by the Ownership pass; never reaches the backend.
+/// A throw statement. Lowered by the Ownership pass. Never reaches the backend.
 /// </summary>
 internal record IrThrow() : IrStmt;
 
@@ -774,7 +774,7 @@ internal record IrField(string Name, IrType Type, IrExpr? Init);
 internal record RawFieldBlock(string C);
 
 /// <summary>
-/// An operator overload on a class; Body is null for native ones, which carry C text. IsStatic is
+/// An operator overload on a class. Body is null for native ones, which carry C text. IsStatic is
 /// true only for one-parameter 'as', a factory converting its parameter to self - every other
 /// operator, zero-parameter 'as' included, is an instance operator.
 /// </summary>
@@ -836,7 +836,7 @@ internal record IrProcessVar(string Name, string CName, IrType Type);
 
 /// <summary>
 /// A single thread within a process, with a fully-qualified name and optional entry function.
-/// Deployment mode lives on the owning process; threads have none of their own.
+/// Deployment mode lives on the owning process. Threads have none of their own.
 /// </summary>
 internal record IrThread(string Name, string FullName, IrFunction? EntryFunc);
 

@@ -265,7 +265,7 @@ public partial class TortureTests
 
     /// <summary>
     /// A process body means the same thing in either realm, so every declaration probe must get the
-    /// same verdict in each. The realm picks a translation unit and nothing else; it must never
+    /// same verdict in each. The realm picks a translation unit and nothing else. It must never
     /// decide whether a declaration is legal, so asymmetry is a bug in the rule, not the input.
     /// </summary>
     [Fact]
@@ -372,7 +372,7 @@ public partial class TortureTests
     /// <summary>
     /// The same structural check with a realm forced on. Units come from the environment's
     /// @preamble targets and a single-file case declares none, so Layout.Compose emits only
-    /// shared.h; a kernel preamble puts the real emitted code under the same assertions.
+    /// shared.h. A kernel preamble puts the real emitted code under the same assertions.
     /// </summary>
     [Fact]
     public void EmittedCValidWithRealm()

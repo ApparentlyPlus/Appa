@@ -47,7 +47,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
 
         /// <summary>
         /// Resolves an explicitly qualified type or name against the scope tree. Set only by scope
-        /// binding; a resolution here is terminal, since the name it produces is already the one the
+        /// binding. A resolution here is terminal, since the name it produces is already the one the
         /// author asked for and must not then be re-mapped by SpecMap.
         /// </summary>
         public Func<NamedSpec, NamedSpec>? ScopedType { get; init; }
@@ -82,30 +82,23 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
         /// True when a local binding, not a declaration in some scope, owns this name here.
         /// </summary>
         public bool IsBound(string name) => _bound.Contains(name);
-        private static readonly System.Buffers.SearchValues<char> AsciiWord =
-            System.Buffers.SearchValues.Create(
-                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_");
 
         /// <summary>
         /// True when a character is part of a word substitution may replace.
         /// </summary>
-        private static bool IsWordChar(char c) => char.IsAscii(c) ? AsciiWord.Contains(c) : char.IsLetterOrDigit(c);
+        private static bool IsWordChar(char c) => char.IsLetterOrDigit(c) || c == '_';
 
         /// <summary>
         /// Substitutes type parameters in raw native C text, replacing whole words that match a
         /// type parameter with its concrete C type. Native bodies are the one place where
-        /// substitution is genuinely textual. Everything else is rewritten structurally.
+        /// substitution is textual. Everything else is rewritten structurally.
         /// </summary>
         public string SubWords(string text)
         {
-            bool containsParam = false;
-            foreach (var key in CMap.Keys)
-            {
-                if (text.Contains(key, StringComparison.Ordinal)) { containsParam = true; break; }
-            }
-            if (!containsParam) return text;
+            // most native bodies never mention a type parameter
+            if (!CMap.Keys.Any(k => text.Contains(k, StringComparison.Ordinal))) return text;
 
-            var sb = new System.Text.StringBuilder(text.Length);
+            var sb = new System.Text.StringBuilder();
             int idx = 0;
             while (idx < text.Length)
             {
@@ -138,37 +131,17 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
                 case NamedSpec { Scope: not null } q when ScopedType != null:
                 {
                     var resolved = ScopedType(q);
-                    NamedSpec[]? qArgs = null;
-                    for (int i = 0; i < resolved.Args.Length; i++)
-                    {
-                        var na = SubArg(resolved.Args[i]);
-                        if (!ReferenceEquals(na, resolved.Args[i]) && qArgs == null)
-                        {
-                            qArgs = new NamedSpec[resolved.Args.Length];
-                            Array.Copy(resolved.Args, qArgs, i);
-                        }
-                        qArgs?[i] = na;
-                    }
-                    return qArgs == null ? resolved : resolved with { Args = qArgs };
+                    var args = MapArray(resolved.Args, SubArg);
+                    return ReferenceEquals(args, resolved.Args) ? resolved : resolved with { Args = args };
                 }
                 case NamedSpec { Args.Length: 0 } n:
                     return SpecMap.TryGetValue(n.Name, out var bound) ? bound : t;
                 case NamedSpec n:
                 {
-                    NamedSpec[]? newArgs = null;
-                    for (int i = 0; i < n.Args.Length; i++)
-                    {
-                        var na = SubArg(n.Args[i]);
-                        if (!ReferenceEquals(na, n.Args[i]) && newArgs == null)
-                        {
-                            newArgs = new NamedSpec[n.Args.Length];
-                            Array.Copy(n.Args, newArgs, i);
-                        }
-                        newArgs?[i] = na;
-                    }
-                    string newName = NameMap.GetValueOrDefault(n.Name, n.Name);
-                    if (newArgs == null && newName == n.Name) return t;
-                    return n with { Name = newName, Args = newArgs ?? n.Args };
+                    var args = MapArray(n.Args, SubArg);
+                    string name = NameMap.GetValueOrDefault(n.Name, n.Name);
+                    if (ReferenceEquals(args, n.Args) && name == n.Name) return t;
+                    return n with { Name = name, Args = args };
                 }
                 case PtrSpec p:
                 {
@@ -182,20 +155,10 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
                 }
                 case FuncSpec f:
                 {
-                    TypeSpec[]? newPs = null;
-                    for (int i = 0; i < f.Params.Length; i++)
-                    {
-                        var np = SubType(f.Params[i])!;
-                        if (!ReferenceEquals(np, f.Params[i]) && newPs == null)
-                        {
-                            newPs = new TypeSpec[f.Params.Length];
-                            Array.Copy(f.Params, newPs, i);
-                        }
-                        newPs?[i] = np;
-                    }
-                    var nr = SubType(f.Ret)!;
-                    if (newPs == null && ReferenceEquals(nr, f.Ret)) return t;
-                    return f with { Params = newPs ?? f.Params, Ret = nr };
+                    var ps = MapArray(f.Params, p => SubType(p)!);
+                    var ret = SubType(f.Ret)!;
+                    if (ReferenceEquals(ps, f.Params) && ReferenceEquals(ret, f.Ret)) return t;
+                    return f with { Params = ps, Ret = ret };
                 }
                 default:
                     return t;
@@ -209,12 +172,29 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
         /// </summary>
         private NamedSpec SubArg(NamedSpec a)
         {
-            return SubType(a) switch
-            {
-                NamedSpec ns => ns,
-                var sub => new NamedSpec(SanitizeTypeName(sub!), a.Span)
-            };
+            var sub = SubType(a)!;
+            return sub as NamedSpec ?? new NamedSpec(SanitizeTypeName(sub), a.Span);
         }
+    }
+
+    /// <summary>
+    /// Applies f to every element, handing back the original array when f changed nothing so
+    /// callers can tell a no-op apart by reference.
+    /// </summary>
+    internal static T[] MapArray<T>(T[] xs, Func<T, T> f) where T : class
+    {
+        T[]? result = null;
+        for (int i = 0; i < xs.Length; i++)
+        {
+            var y = f(xs[i]);
+            if (result == null && !ReferenceEquals(y, xs[i]))
+            {
+                result = new T[xs.Length];
+                Array.Copy(xs, result, i);
+            }
+            if (result != null) result[i] = y;
+        }
+        return result ?? xs;
     }
 
     /// <summary>
@@ -250,30 +230,43 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
         var templates = new Dictionary<string, Template>();
         var tmplNames = new HashSet<string>();
         foreach (var (path, prog) in programs)
+        {
             foreach (var item in EachDecl(prog.Items))
             {
-                var (declName, genericParams) = item switch
+                string baseName;
+                string[] genericParams;
+                if (item is ClassDecl { GenericParams.Length: > 0 } cd)
                 {
-                    ClassDecl cd when cd.GenericParams.Length > 0 => (cd.BaseName, cd.GenericParams),
-                    UnionDecl ud when ud.GenericParams.Length > 0 => (ud.BaseName, ud.GenericParams),
-                    _ => ((string?)null, (string[]?)null),
-                };
-                if (declName == null) continue;
+                    baseName = cd.BaseName;
+                    genericParams = cd.GenericParams;
+                }
+                else if (item is UnionDecl { GenericParams.Length: > 0 } ud)
+                {
+                    baseName = ud.BaseName;
+                    genericParams = ud.GenericParams;
+                }
+                else
+                {
+                    continue;
+                }
 
-                string baseName = declName;
-                var seenParams = new HashSet<string>(genericParams!.Length);
-                foreach (var gp in genericParams!)
+                var seenParams = new HashSet<string>();
+                foreach (var gp in genericParams)
+                {
                     if (!seenParams.Add(gp))
                         diag.Error(Codes.DuplicateName, path, item.Span,
                             $"generic type '{Mangler.DisplayName(baseName)}' declares the type parameter '{gp}' twice");
+                }
 
                 if (templates.ContainsKey(baseName))
                     diag.Error(Codes.DuplicateName, path, item.Span,
                         $"generic type '{Mangler.DisplayName(baseName)}' is already declared");
-                templates[baseName] = new Template(item, genericParams!, baseName);
+
+                templates[baseName] = new Template(item, genericParams, baseName);
                 Mangler.RegisterGenericTemplate(baseName);
-                tmplNames.Add(Mangler.GenericInstance(baseName, genericParams!));
+                tmplNames.Add(Mangler.GenericInstance(baseName, genericParams));
             }
+        }
 
         if (templates.Count == 0) return [];
 
@@ -296,13 +289,15 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
                     t.BaseName != use.Base &&
                     use.Span.Start >= t.Decl.Span.Start && use.Span.End <= t.Decl.Span.End &&
                     MentionsParam(use, t.Params));
-                if (owner != null)
+                if (owner == null)
                 {
-                    if (!deferredByOwner.TryGetValue(owner.BaseName, out var l))
-                        deferredByOwner[owner.BaseName] = l = [];
-                    l.Add((use, path));
+                    directUses.Add((use, path));
+                    continue;
                 }
-                else directUses.Add((use, path));
+
+                // replayed once the owner is stamped and T means something
+                if (!deferredByOwner.ContainsKey(owner.BaseName)) deferredByOwner[owner.BaseName] = [];
+                deferredByOwner[owner.BaseName].Add((use, path));
             }
         }
 
@@ -319,9 +314,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
             return true;
         }
         foreach (var (use, file) in directUses) AddRequest(use.Base, use.Args, use.Span, file, file);
-        
-        if (seeds != null)
-            foreach (var s in seeds) AddRequest(s.Base, s.Args, s.Span, s.File, s.File);
+        foreach (var s in seeds ?? []) AddRequest(s.Base, s.Args, s.Span, s.File, s.File);
 
         var instancesByBase = new Dictionary<string, List<TopLevel>>();
         var requestedFrom = new Dictionary<string, string>();
@@ -354,17 +347,16 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
             Mangler.RegisterGenericInstance(mangled);
             string requester = scopeRequester.GetValueOrDefault(mangled, file);
             requestedFrom[mangled] = requester;
-            if (!instancesByBase.TryGetValue(baseName, out var list))
-                instancesByBase[baseName] = list = [];
-            list.Add(concrete);
+            if (!instancesByBase.ContainsKey(baseName)) instancesByBase[baseName] = [];
+            instancesByBase[baseName].Add(concrete);
 
-            if (deferredByOwner.TryGetValue(baseName, out var deferred))
-                foreach (var (du, dfile) in deferred)
-                {
-                    var concreteArgs = SubstituteArgs(du, binds);
-                    if (AddRequest(du.Base, concreteArgs, du.Span, dfile, requester))
-                        pending.Enqueue(Mangler.GenericInstance(du.Base, concreteArgs));
-                }
+            if (!deferredByOwner.TryGetValue(baseName, out var deferred)) continue;
+            foreach (var (du, dfile) in deferred)
+            {
+                var concreteArgs = SubstituteArgs(du, binds);
+                if (AddRequest(du.Base, concreteArgs, du.Span, dfile, requester))
+                    pending.Enqueue(Mangler.GenericInstance(du.Base, concreteArgs));
+            }
         }
 
         for (int i = 0; i < programs.Count; i++)
@@ -375,7 +367,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
 
             TopLevel[] Strip(TopLevel[] items)
             {
-                var kept = new List<TopLevel>(items.Length);
+                var kept = new List<TopLevel>();
                 foreach (var item in items)
                 {
                     string? tmplBase = item switch
@@ -423,7 +415,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     /// <summary>
     /// True if any type argument mentions one of the given parameters, at any depth. Testing
     /// whether an argument *is* one caught 'List[T]' in 'Foo[T]' but not 'List[Node[T]]' in
-    /// 'Node[T]'; requiring *every* argument to be one missed 'Pair[T, int]'.
+    /// 'Node[T]'. Requiring *every* argument to be one missed 'Pair[T, int]'.
     /// </summary>
     private static bool MentionsParam(GenericUse use, string[] parameters)
     {
@@ -431,17 +423,10 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
         if (use.ArgSpecs is not { } specs || specs.Length != use.Args.Length)
             return use.Args.Any(a => Array.IndexOf(parameters, a) >= 0);
 
-        foreach (var spec in specs)
-            if (Mentions(spec)) return true;
-        return false;
+        return specs.Any(Mentions);
 
-        bool Mentions(NamedSpec s)
-        {
-            if (s.Args.Length == 0) return Array.IndexOf(parameters, s.Name) >= 0;
-            foreach (var a in s.Args)
-                if (Mentions(a)) return true;
-            return false;
-        }
+        bool Mentions(NamedSpec s) =>
+            s.Args.Length == 0 ? parameters.Contains(s.Name) : s.Args.Any(Mentions);
     }
 
     /// <summary>
@@ -454,7 +439,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
         if (du.ArgSpecs is not { } specs || specs.Length != du.Args.Length)
             return [.. du.Args.Select(a => binds.GetValueOrDefault(a, a))];
 
-        var specMap = new Dictionary<string, TypeSpec>(binds.Count);
+        var specMap = new Dictionary<string, TypeSpec>();
         foreach (var (param, concrete) in binds) specMap[param] = new NamedSpec(concrete);
         var ctx = new SubstitutionContext(specMap, null);
 
@@ -471,9 +456,9 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     private (TopLevel Concrete, Dictionary<string, string> Binds) Instantiate(
         Template tmpl, string[] args, string mangled)
     {
-        var gataMap = new Dictionary<string, string>(tmpl.Params.Length);
-        var specMap = new Dictionary<string, TypeSpec>(tmpl.Params.Length);
-        var cMap = new Dictionary<string, string>(tmpl.Params.Length);
+        var gataMap = new Dictionary<string, string>();
+        var specMap = new Dictionary<string, TypeSpec>();
+        var cMap = new Dictionary<string, string>();
         for (int i = 0; i < tmpl.Params.Length; i++)
         {
             string p = tmpl.Params[i];
@@ -527,18 +512,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     /// </summary>
     internal static ClassMember[] SubMembers(ClassMember[] members, SubstitutionContext ctx)
     {
-        ClassMember[]? result = null;
-        for (int i = 0; i < members.Length; i++)
-        {
-            var sm = SubMember(members[i], ctx);
-            if (!ReferenceEquals(sm, members[i]) && result == null)
-            {
-                result = new ClassMember[members.Length];
-                Array.Copy(members, result, i);
-            }
-            result?[i] = sm;
-        }
-        return result ?? members;
+        return MapArray(members, m => SubMember(m, ctx));
     }
 
     /// <summary>
@@ -623,22 +597,11 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
 
     internal static Param[] SubParams(Param[] ps, SubstitutionContext ctx)
     {
-        Param[]? newParams = null;
-        for (int i = 0; i < ps.Length; i++)
+        return MapArray(ps, p =>
         {
-            var p = ps[i];
-            var newType = ctx.SubType(p.Type);
-            if (!ReferenceEquals(newType, p.Type))
-            {
-                if (newParams == null)
-                {
-                    newParams = new Param[ps.Length];
-                    Array.Copy(ps, newParams, i);
-                }
-            }
-            newParams?[i] = new Param(newType!, p.Name, p.Span, p.IsRef);
-        }
-        return newParams ?? ps;
+            var type = ctx.SubType(p.Type);
+            return ReferenceEquals(type, p.Type) ? p : new Param(type!, p.Name, p.Span, p.IsRef);
+        });
     }
 
     /// <summary>
@@ -726,25 +689,16 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     internal static Block SubBlock(Block b, SubstitutionContext ctx)
     {
         int mark = ctx.Mark();
-        Stmt[]? newStmts = null;
-        for (int i = 0; i < b.Stmts.Length; i++)
+        var stmts = MapArray(b.Stmts, s =>
         {
-            var s = b.Stmts[i];
             var ns = SubStmt(s, ctx);
+            // a let is in scope for the statements after it, not its own initializer
             if (s is LetStmt let) ctx.Bind(let.Name);
-            if (!ReferenceEquals(s, ns))
-            {
-                if (newStmts == null)
-                {
-                    newStmts = new Stmt[b.Stmts.Length];
-                    Array.Copy(b.Stmts, newStmts, i);
-                }
-            }
-            newStmts?[i] = ns;
-        }
+            return ns;
+        });
         ctx.Release(mark);
-        if (newStmts == null) return b;
-        return new Block(newStmts, b.Span);
+
+        return ReferenceEquals(stmts, b.Stmts) ? b : new Block(stmts, b.Span);
     }
 
     /// <summary>
@@ -840,93 +794,41 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
                 return new DeferStmt(newDAction, dfr.Span) { Span = s.Span };
 
             case UnsafeBlock ub:
-                Stmt[]? newUbStmts = null;
-                for (int i = 0; i < ub.Stmts.Length; i++)
-                {
-                    var x = ub.Stmts[i];
-                    var nx = SubStmt(x, ctx);
-                    if (!ReferenceEquals(x, nx))
-                    {
-                        if (newUbStmts == null)
-                        {
-                            newUbStmts = new Stmt[ub.Stmts.Length];
-                            Array.Copy(ub.Stmts, newUbStmts, i);
-                        }
-                    }
-                    newUbStmts?[i] = nx;
-                }
-                if (newUbStmts == null) return s;
-                return new UnsafeBlock(newUbStmts, ub.Span) { Span = s.Span };
+                var ubStmts = MapArray(ub.Stmts, x => SubStmt(x, ctx));
+                if (ReferenceEquals(ubStmts, ub.Stmts)) return s;
+                return new UnsafeBlock(ubStmts, ub.Span) { Span = s.Span };
 
             case SwitchStmt sw:
                 var newSwScrut = SubExpr(sw.Scrutinee, ctx);
-                SwitchCase[]? newSwCases = null;
-                for (int i = 0; i < sw.Cases.Length; i++)
+                var newSwCases = MapArray(sw.Cases, c =>
                 {
-                    var c = sw.Cases[i];
-                    Expr[]? newSwLabels = null;
-                    for (int j = 0; j < c.Labels.Length; j++)
-                    {
-                        var l = c.Labels[j];
-                        var nl = SubExpr(l, ctx);
-                        if (!ReferenceEquals(l, nl))
-                        {
-                            if (newSwLabels == null)
-                            {
-                                newSwLabels = new Expr[c.Labels.Length];
-                                Array.Copy(c.Labels, newSwLabels, j);
-                            }
-                        }
-                        newSwLabels?[j] = nl;
-                    }
-                    var newSwBody = SubBlock(c.Body, ctx);
-                    if (newSwLabels != null || !ReferenceEquals(newSwBody, c.Body))
-                    {
-                        if (newSwCases == null)
-                        {
-                            newSwCases = new SwitchCase[sw.Cases.Length];
-                            Array.Copy(sw.Cases, newSwCases, i);
-                        }
-                        newSwCases[i] = new SwitchCase(newSwLabels ?? c.Labels, newSwBody, c.Span);
-                    }
-                    else
-                    {
-                        newSwCases?[i] = c;
-                    }
-                }
+                    var labels = MapArray(c.Labels, l => SubExpr(l, ctx));
+                    var body = SubBlock(c.Body, ctx);
+                    if (ReferenceEquals(labels, c.Labels) && ReferenceEquals(body, c.Body)) return c;
+                    return new SwitchCase(labels, body, c.Span);
+                });
                 var newSwDefault = sw.Default is null ? null : SubBlock(sw.Default, ctx);
-                if (ReferenceEquals(newSwScrut, sw.Scrutinee) && newSwCases == null && ReferenceEquals(newSwDefault, sw.Default))
+                if (ReferenceEquals(newSwScrut, sw.Scrutinee) && ReferenceEquals(newSwCases, sw.Cases) &&
+                    ReferenceEquals(newSwDefault, sw.Default))
                     return s;
-                return new SwitchStmt(newSwScrut, newSwCases ?? sw.Cases, newSwDefault, sw.Span) { Span = s.Span };
+                return new SwitchStmt(newSwScrut, newSwCases, newSwDefault, sw.Span) { Span = s.Span };
 
             case MatchStmt ms:
                 var newMsScrut = SubExpr(ms.Scrutinee, ctx);
-                MatchCase[]? newMsCases = null;
-                for (int i = 0; i < ms.Cases.Length; i++)
+                var newMsCases = MapArray(ms.Cases, c =>
                 {
-                    var c = ms.Cases[i];
+                    // the case's bindings shadow anything the substitution would otherwise rewrite
                     int caseMark = ctx.Mark();
                     ctx.Bind(c.Bindings);
-                    var newMsBody = SubBlock(c.Body, ctx);
+                    var body = SubBlock(c.Body, ctx);
                     ctx.Release(caseMark);
-                    if (!ReferenceEquals(newMsBody, c.Body))
-                    {
-                        if (newMsCases == null)
-                        {
-                            newMsCases = new MatchCase[ms.Cases.Length];
-                            Array.Copy(ms.Cases, newMsCases, i);
-                        }
-                        newMsCases[i] = c with { Body = newMsBody };
-                    }
-                    else
-                    {
-                        newMsCases?[i] = c;
-                    }
-                }
+                    return ReferenceEquals(body, c.Body) ? c : c with { Body = body };
+                });
                 var newMsDefault = ms.Default is null ? null : SubBlock(ms.Default, ctx);
-                if (ReferenceEquals(newMsScrut, ms.Scrutinee) && newMsCases == null && ReferenceEquals(newMsDefault, ms.Default))
+                if (ReferenceEquals(newMsScrut, ms.Scrutinee) && ReferenceEquals(newMsCases, ms.Cases) &&
+                    ReferenceEquals(newMsDefault, ms.Default))
                     return s;
-                return new MatchStmt(newMsScrut, newMsCases ?? ms.Cases, newMsDefault, ms.Span) { Span = s.Span };
+                return new MatchStmt(newMsScrut, newMsCases, newMsDefault, ms.Span) { Span = s.Span };
 
             default:
                 // NativeStmt, BreakStmt, ContinueStmt, ThrowStmt, DebugStmt, PanicStmt - nothing
@@ -986,59 +888,17 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
 
             case NewExpr ne:
                 var newNeType = ctx.SubType(ne.Type);
-                Expr[]? newNeArgs = null;
-                for (int i = 0; i < ne.Args.Length; i++)
-                {
-                    var a = ne.Args[i];
-                    var na = SubExpr(a, ctx);
-                    if (!ReferenceEquals(a, na))
-                    {
-                        if (newNeArgs == null)
-                        {
-                            newNeArgs = new Expr[ne.Args.Length];
-                            Array.Copy(ne.Args, newNeArgs, i);
-                        }
-                    }
-                    newNeArgs?[i] = na;
-                }
-                Expr[]? newNeColl = null;
-                for (int i = 0; i < ne.CollectionInit.Length; i++)
-                {
-                    var a = ne.CollectionInit[i];
-                    var na = SubExpr(a, ctx);
-                    if (!ReferenceEquals(a, na))
-                    {
-                        if (newNeColl == null)
-                        {
-                            newNeColl = new Expr[ne.CollectionInit.Length];
-                            Array.Copy(ne.CollectionInit, newNeColl, i);
-                        }
-                    }
-                    newNeColl?[i] = na;
-                }
-                if (ReferenceEquals(newNeType, ne.Type) && newNeArgs == null && newNeColl == null)
+                var newNeArgs = MapArray(ne.Args, a => SubExpr(a, ctx));
+                var newNeColl = MapArray(ne.CollectionInit, a => SubExpr(a, ctx));
+                if (ReferenceEquals(newNeType, ne.Type) && ReferenceEquals(newNeArgs, ne.Args) &&
+                    ReferenceEquals(newNeColl, ne.CollectionInit))
                     return e;
-                return new NewExpr(newNeType!, newNeArgs ?? ne.Args, newNeColl ?? ne.CollectionInit, ne.Span) { Span = e.Span };
+                return new NewExpr(newNeType!, newNeArgs, newNeColl, ne.Span) { Span = e.Span };
 
             case ArrayLitExpr al:
-                Expr[]? newAlElems = null;
-                for (int i = 0; i < al.Elems.Length; i++)
-                {
-                    var a = al.Elems[i];
-                    var na = SubExpr(a, ctx);
-                    if (!ReferenceEquals(a, na))
-                    {
-                        if (newAlElems == null)
-                        {
-                            newAlElems = new Expr[al.Elems.Length];
-                            Array.Copy(al.Elems, newAlElems, i);
-                        }
-                    }
-                    newAlElems?[i] = na;
-                }
-                if (newAlElems == null) return e;
+                var newAlElems = MapArray(al.Elems, a => SubExpr(a, ctx));
+                if (ReferenceEquals(newAlElems, al.Elems)) return e;
                 return new ArrayLitExpr(newAlElems, al.Span) { Span = e.Span };
-
 
             case CatchCallExpr cc:
                 var newCcCall = SubExpr(cc.Call, ctx);
@@ -1048,24 +908,10 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
 
             case CallExpr cx:
                 var newCallee = SubExpr(cx.Callee, ctx);
-                Expr[]? newCxArgs = null;
-                for (int i = 0; i < cx.Args.Length; i++)
-                {
-                    var a = cx.Args[i];
-                    var na = SubExpr(a, ctx);
-                    if (!ReferenceEquals(a, na))
-                    {
-                        if (newCxArgs == null)
-                        {
-                            newCxArgs = new Expr[cx.Args.Length];
-                            Array.Copy(cx.Args, newCxArgs, i);
-                        }
-                    }
-                    newCxArgs?[i] = na;
-                }
-                if (ReferenceEquals(newCallee, cx.Callee) && newCxArgs == null)
+                var newCxArgs = MapArray(cx.Args, a => SubExpr(a, ctx));
+                if (ReferenceEquals(newCallee, cx.Callee) && ReferenceEquals(newCxArgs, cx.Args))
                     return e;
-                return new CallExpr(newCallee, newCxArgs ?? cx.Args, cx.Span) { Span = e.Span };
+                return new CallExpr(newCallee, newCxArgs, cx.Span) { Span = e.Span };
 
             case MemberAccessExpr ma:
                 var newMaObj = SubExpr(ma.Object, ctx);
@@ -1112,22 +958,8 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
                 return new RefArgExpr(newRaTarget, ra.Span) { Span = e.Span };
 
             case InterpStrExpr ip:
-                Expr[]? newIpParts = null;
-                for (int i = 0; i < ip.Parts.Length; i++)
-                {
-                    var a = ip.Parts[i];
-                    var na = SubExpr(a, ctx);
-                    if (!ReferenceEquals(a, na))
-                    {
-                        if (newIpParts == null)
-                        {
-                            newIpParts = new Expr[ip.Parts.Length];
-                            Array.Copy(ip.Parts, newIpParts, i);
-                        }
-                    }
-                    newIpParts?[i] = na;
-                }
-                if (newIpParts == null) return e;
+                var newIpParts = MapArray(ip.Parts, a => SubExpr(a, ctx));
+                if (ReferenceEquals(newIpParts, ip.Parts)) return e;
                 return new InterpStrExpr(newIpParts, ip.Span) { Span = e.Span };
 
             case SizeofExpr so:
@@ -1223,7 +1055,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
 
     /// <summary>
     /// Reduces a type name to a valid C-identifier fragment for use in mangled generic names.
-    /// Pointer stars become "_p"; all other non-identifier characters are dropped.
+    /// Pointer stars become "_p". All other non-identifier characters are dropped.
     /// </summary>
     internal static string SanitizeTypeName(TypeSpec t)
     {
@@ -1243,7 +1075,11 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
         {
             case NamedSpec n:
                 AppendIdentifierChars(sb, n.Name);
-                foreach (var a in n.Args) { sb.Append('_'); AppendSanitized(sb, a); }
+                foreach (var a in n.Args)
+                {
+                    sb.Append('_');
+                    AppendSanitized(sb, a);
+                }
                 break;
             case PtrSpec p:
                 AppendSanitized(sb, p.Inner);
@@ -1267,7 +1103,9 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     private static void AppendIdentifierChars(System.Text.StringBuilder sb, string s)
     {
         foreach (char ch in s)
+        {
             if (char.IsLetterOrDigit(ch) || ch == '_') sb.Append(ch);
+        }
     }
 
     #endregion

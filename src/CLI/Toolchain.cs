@@ -5,7 +5,6 @@ using System.Runtime.InteropServices;
 
 internal static class Toolchain
 {
-
     /// <summary>
     /// Runs an external process, optionally capturing its output and animating a spinner. Reads
     /// must drain async before waiting to avoid a full-pipe deadlock.
@@ -41,7 +40,11 @@ internal static class Toolchain
     internal static (bool Mem, bool Input, bool Threads, bool Time, bool Discover) ResolveCaps(CapabilityScan caps, Manifest m)
     {
         bool discover = m.CapabilityDiscovery == CapabilityDiscovery.On;
-        bool mem = !discover || caps.Mem, input = !discover || caps.Input, threads = !discover || caps.Threads;
+
+        // discovery off = assume everything
+        bool mem = !discover || caps.Mem;
+        bool input = !discover || caps.Input;
+        bool threads = !discover || caps.Threads;
         bool time = !discover || caps.Time;
 
         // Threads pull in the whole multitasking stack, which allocates internally.
@@ -55,11 +58,15 @@ internal static class Toolchain
         if (m.Keyboard == Keyboard.Hotplug) threads = true;
 
         // xHCI device enumeration allocates heap structures even for a one-time scan.
-        if (m.Keyboard is Keyboard.External or Keyboard.Hotplug) { mem = true; input = true; }
+        if (m.Keyboard is Keyboard.External or Keyboard.Hotplug)
+        {
+            mem = true;
+            input = true;
+        }
 
         // ACPI/APIC/timer tick are needed whenever the scheduler (THREADS) or keyboard
-        // (INPUT) needs IRQ routing; all three map tables/MMIO through the VMM.
-        if (threads || input) mem = mem || threads || input;
+        // (INPUT) needs IRQ routing. All three map tables/MMIO through the VMM.
+        if (threads || input) mem = true;
 
         // The time source (get_uptime_ns) is the timer subsystem, which only ticks when
         // the interrupt subsystem is up - TIME implies the same ACPI/APIC/heap floor.
@@ -70,7 +77,7 @@ internal static class Toolchain
 
     /// <summary>
     /// Returns the -D macros for the GatOS gcc build, representing the resolved capability set.
-    /// MEM/INPUT/THREADS are inferred; FRAMEBUFFER and keyboard level come from the manifest.
+    /// MEM/INPUT/THREADS are inferred. FRAMEBUFFER and keyboard level come from the manifest.
     /// </summary>
     internal static List<string> CapabilityDefines(CapabilityScan caps, Manifest m)
     {
@@ -79,7 +86,11 @@ internal static class Toolchain
         var d = new List<string>();
         if (r.Mem) d.Add("-DGATA_CAP_MEM");
         if (r.Input) d.Add("-DGATA_CAP_INPUT");
-        if (r.Threads) { d.Add("-DGATA_CAP_THREADS"); d.Add("-DGATA_RC_ATOMIC=1"); }
+        if (r.Threads)
+        {
+            d.Add("-DGATA_CAP_THREADS");
+            d.Add("-DGATA_RC_ATOMIC=1");     // refcounts get touched from more than one thread
+        }
         if (r.Time) d.Add("-DGATA_CAP_TIME");
         d.Add(m.Output == Output.Serial ? "-DGATA_OUTPUT_SERIAL" : "-DGATA_CAP_FRAMEBUFFER");
         d.Add(m.Keyboard switch
@@ -100,7 +111,10 @@ internal static class Toolchain
         var r = ResolveCaps(caps, m);
 
         var on = new List<string>();
-        if (r.Mem) on.Add("mem"); if (r.Input) on.Add("input"); if (r.Threads) on.Add("threads"); if (r.Time) on.Add("time");
+        if (r.Mem) on.Add("mem");
+        if (r.Input) on.Add("input");
+        if (r.Threads) on.Add("threads");
+        if (r.Time) on.Add("time");
         on.Add(m.Output == Output.Serial ? "serial" : "framebuffer");
         string suffix = r.Discover ? "" : " (discovery off: assumed, not inferred)";
         return $"Capabilities: {string.Join(" ", on)}{suffix} (keyboard={m.Keyboard.ToString().ToLowerInvariant()})";
@@ -254,13 +268,26 @@ internal static class Toolchain
         Parallel.ForEach(jobs, new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount },
             (job, state) =>
             {
-                if (failure != null) { state.Stop(); return; }
+                if (failure != null)
+                {
+                    state.Stop();
+                    return;
+                }
+
                 Directory.CreateDirectory(Path.GetDirectoryName(job.obj)!);
-                var result = Exec(AppaPaths.Gcc(), $"-c {string.Join(' ', job.flags.Select(f => $"\"{f}\""))} \"{job.src}\" -o \"{job.obj}\"", null, silent: true, capture: true);
+                string flags = string.Join(' ', job.flags.Select(f => $"\"{f}\""));
+                var result = Exec(AppaPaths.Gcc(), $"-c {flags} \"{job.src}\" -o \"{job.obj}\"", null, silent: true, capture: true);
                 string name = Path.GetFileName(job.src);
+
                 lock (gate)
                 {
-                    if (failure != null) { state.Stop(); return; }
+                    // someone else already failed while we were compiling
+                    if (failure != null)
+                    {
+                        state.Stop();
+                        return;
+                    }
+
                     if (result.ExitCode != 0)
                     {
                         failure = (name, result.Stderr.TrimEnd());
@@ -289,7 +316,7 @@ internal static class Toolchain
 
     /// <summary>
     /// Links all object files into a kernel.bin using the cross-gcc linker script. macOS links with
-    /// ld directly (no LTO); every other host links through cross-gcc with LTO.
+    /// ld directly (no LTO). Every other host links through cross-gcc with LTO.
     /// </summary>
     internal static void LinkKernel(List<string> objFiles, string kernelBin, string targetsDir)
     {
@@ -304,7 +331,7 @@ internal static class Toolchain
             : Exec(AppaPaths.Gcc(),
                 $"-nostdlib -flto -g -Wl,-n,--gc-sections,--no-relax,-T\"{linkerScript}\" -o \"{kernelBin}\" {objList}",
                 null, capture: true, spinner: "Linking kernel.bin");
-        if (r.ExitCode != 0) { Log.Error($"Link failed:\n{r.Stderr}"); Environment.Exit(1); }
+        if (r.ExitCode != 0) Die($"Link failed:\n{r.Stderr}");
 
         Exec(AppaPaths.Gcc("x86_64-elf-strip"), $"\"{kernelBin}\"", null, capture: true);
         Spin.Done("Linked kernel.bin", sw.Elapsed);
@@ -330,7 +357,7 @@ internal static class Toolchain
             $"--directory=\"{Path.Combine(AppaPaths.GrubDir, "x86_64-efi")}\" " +
             $"--format=x86_64-efi --output=\"{uefiGrub}\" --locales= --fonts= " +
             $"\"boot/grub/grub.cfg={grubCfg}\"", null, capture: true, spinner: "Creating ISO image");
-        if (r1.ExitCode != 0) { Log.Error($"grub-mkstandalone failed:\n{r1.Stderr}"); Environment.Exit(1); }
+        if (r1.ExitCode != 0) Die($"grub-mkstandalone failed:\n{r1.Stderr}");
 
         string isoOut = Path.Combine(distDir, "GatOS.iso");
         string mkrescueArgs =
@@ -338,7 +365,7 @@ internal static class Toolchain
 
         var r2 = Exec(AppaPaths.GrubTool("grub-mkrescue"), mkrescueArgs,
             AppaPaths.GrubDir, capture: true, spinner: "Creating ISO image");
-        if (r2.ExitCode != 0) { Log.Error($"grub-mkrescue failed:\n{r2.Stderr}"); Environment.Exit(1); }
+        if (r2.ExitCode != 0) Die($"grub-mkrescue failed:\n{r2.Stderr}");
 
         Spin.Done("Created ISO image", sw.Elapsed);
         return isoOut;
@@ -375,13 +402,22 @@ internal static class Toolchain
             RedirectStandardError = false
         };
         using var proc = Process.Start(psi)!;
-        if (timeout.HasValue)
+        if (!timeout.HasValue)
         {
-            bool exited = proc.WaitForExit(timeout.Value * 1000);
-            if (!exited) { try { proc.Kill(entireProcessTree: true); } catch { } }
-            Log.Info("QEMU session ended.");
+            proc.WaitForExit();
+            return;
         }
-        else proc.WaitForExit();
+
+        if (!proc.WaitForExit(timeout.Value * 1000))
+        {
+            try { proc.Kill(entireProcessTree: true); } catch { }
+        }
+        Log.Info("QEMU session ended.");
     }
 
+    private static void Die(string msg)
+    {
+        Log.Error(msg);
+        Environment.Exit(1);
+    }
 }

@@ -185,7 +185,7 @@ public class ProcessStateTests
     }
 
     /// <summary>
-    /// Two processes may use the same name; each gets its own storage. This is the case that would
+    /// Two processes may use the same name. Each gets its own storage. This is the case that would
     /// have collided in C had the name not carried the process.
     /// </summary>
     [Fact]
@@ -369,7 +369,7 @@ public class ProcessStateTests
     }
 
     /// <summary>
-    /// 'throw' is the give-up path in a throws function; the generated initialiser is not one, so
+    /// 'throw' is the give-up path in a throws function. The generated initialiser is not one, so
     /// there is nowhere to propagate to.
     /// </summary>
     [Fact]

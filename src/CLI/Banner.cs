@@ -81,22 +81,36 @@ static class Banner
     {
         var (w, h) = Viewport();
         w -= indent.Length;
-        string[]? art =
-            w >= FullWidth && h >= Full.Length + 6 ? Full :
-            w >= TextWidth ? AppaText :
-            null;
+
+        // cat + wordmark if it fits, just the wordmark if that fits, otherwise text only
+        string[]? art = null;
+        int width = 0;
+        if (w >= FullWidth && h >= Full.Length + 6)
+        {
+            art = Full;
+            width = FullWidth;
+        }
+        else if (w >= TextWidth)
+        {
+            art = AppaText;
+            width = TextWidth;
+        }
 
         Console.WriteLine();
-        int width = art is null ? 0 : ReferenceEquals(art, Full) ? FullWidth : TextWidth;
-        if (art is not null)
+        if (art != null)
         {
             for (int y = 0; y < art.Length; y++)
                 Console.WriteLine(indent + Paint(art[y].TrimEnd(), (double)y / (art.Length - 1), width));
             Console.WriteLine();
         }
 
-        string top = $"Welcome to Appa v{AppaVersion.Current}", bottom = "The Gata Compiler";
-        if (Visible(Spaced(top)) <= w) { top = Spaced(top); bottom = Spaced(bottom); }
+        string top = $"Welcome to Appa v{AppaVersion.Current}";
+        string bottom = "The Gata Compiler";
+        if (Visible(Spaced(top)) <= w)
+        {
+            top = Spaced(top);
+            bottom = Spaced(bottom);
+        }
 
         int over = Math.Max(width, Visible(top));
         Console.WriteLine(indent + Centred(top, over, 0.55, C.BOLD));
@@ -108,9 +122,13 @@ static class Banner
     /// Letterspaces a line - one space between letters, three between words - so a short string reads
     /// as a masthead rather than as a sentence.
     /// </summary>
-    private static string Spaced(string s) =>
-        string.Join("   ", s.Split(' ', StringSplitOptions.RemoveEmptyEntries)
-                            .Select(word => string.Join(' ', word.Select(ch => ch))));
+    private static string Spaced(string s)
+    {
+        var words = s.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        for (int i = 0; i < words.Length; i++)
+            words[i] = string.Join(' ', words[i].ToCharArray());
+        return string.Join("   ", words);
+    }
 
     /// <summary>
     /// Centres a line in the terminal and paints it at the given point down the gradient.
@@ -133,7 +151,11 @@ static class Banner
         {
             double across = width > 1 ? (double)col / (width - 1) : 0;
             int step = (int)Math.Round(Steps * Math.Clamp(0.5 * across + 0.5 * rowT, 0, 1));
-            if (step != last) { sb.Append(Code((double)step / Steps)); last = step; }
+            if (step != last)
+            {
+                sb.Append(Code((double)step / Steps));
+                last = step;
+            }
             sb.Append(rune.ToString());
             col++;
         }
@@ -153,9 +175,14 @@ static class Banner
         return $"\x1b[38;2;{Mix(Start.R, End.R)};{Mix(Start.G, End.G)};{Mix(Start.B, End.B)}m";
     }
 
-    private static bool TrueColor =>
-        Environment.GetEnvironmentVariable("COLORTERM") is string c
-        && (c.Contains("truecolor", StringComparison.Ordinal) || c.Contains("24bit", StringComparison.Ordinal));
+    private static bool TrueColor
+    {
+        get
+        {
+            string? ct = Environment.GetEnvironmentVariable("COLORTERM");
+            return ct != null && (ct.Contains("truecolor") || ct.Contains("24bit"));
+        }
+    }
 
     /// <summary>
     /// The number of columns a string occupies.
@@ -176,7 +203,10 @@ static class Banner
         {
             return Console.IsOutputRedirected ? (80, 24) : (Console.WindowWidth, Console.WindowHeight);
         }
-        catch (IOException) { return (80, 24); }
+        catch (IOException)
+        {
+            return (80, 24);
+        }
     }
 }
 

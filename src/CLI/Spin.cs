@@ -32,8 +32,11 @@ static class Spin
         long now = _clock.ElapsedMilliseconds;
         if (now - _drawnAt < _frameMs) return;
 
-        string line = $"  {C.EMBER}{Frames[(int)(now / _frameMs) % Frames.Length]}{C.NC} " +
-                      $"{label}{C.DIM}{(detail is null ? "..." : " " + detail)}{C.NC}";
+        char frame = Frames[(int)(now / _frameMs) % Frames.Length];
+        string tail = detail is null ? "..." : " " + detail;
+        string line = $"  {C.EMBER}{frame}{C.NC} {label}{C.DIM}{tail}{C.NC}";
+
+        // redrawing an identical line still flickers, so skip it
         _drawnAt = now;
         if (line == _drawn) return;
         _drawn = line;
@@ -82,8 +85,14 @@ static class Spin
     /// </summary>
     public static void WhileRunning(Process proc, string label)
     {
-        if (!Tty) { Out.Note($"{label}..."); return; }
-        while (!proc.WaitForExit(_frameMs)) Tick(label);
+        if (!Tty)
+        {
+            Out.Note($"{label}...");
+            return;
+        }
+
+        while (!proc.WaitForExit(_frameMs))
+            Tick(label);
         Stop();
     }
 
@@ -113,9 +122,15 @@ static class Spin
         var task = Task.Run(work);
         if (Tty)
         {
-            while (!task.IsCompleted) { Tick(label); Thread.Sleep(_frameMs / 2); }
+            while (!task.IsCompleted)
+            {
+                Tick(label);
+                Thread.Sleep(_frameMs / 2);
+            }
             Stop();
         }
+
+        // GetResult rather than .Result so an exception comes out as itself, not an AggregateException
         T result = task.GetAwaiter().GetResult();
         Done(label, sw.Elapsed);
         return result;
@@ -130,7 +145,11 @@ static class Spin
         var sw = Stopwatch.StartNew();
         if (Tty)
         {
-            while (!task.IsCompleted) { Tick(label); await Task.Delay(_frameMs / 2); }
+            while (!task.IsCompleted)
+            {
+                Tick(label);
+                await Task.Delay(_frameMs / 2);
+            }
             Stop();
         }
         T result = await task;

@@ -294,7 +294,7 @@ public class LexerTests
     }
 
     /// <summary>
-    /// A native { ... } block is captured verbatim as one NativeContent token; braces inside a
+    /// A native { ... } block is captured verbatim as one NativeContent token. Braces inside a
     /// string or comment within the block do not affect the balance count.
     /// </summary>
     [Fact]

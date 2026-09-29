@@ -70,7 +70,7 @@ public class IntrinsicValidationTests
     }
 
     /// <summary>
-    /// Some roles bound and some not is a genuinely incomplete standard library, and the hint says
+    /// Some roles bound and some not is a truly incomplete standard library, and the hint says
     /// so - that is the case the reader cannot fix from their own file.
     /// </summary>
     [Fact]
@@ -123,7 +123,7 @@ public class IntrinsicValidationTests
 
     /// <summary>
     /// A partially-bound standard library is the case this check exists for: binding some of the
-    /// set is not partially working. Only the genuinely absent roles are named, so the message
+    /// set is not partially working. Only the roles that are really absent are named, so the message
     /// points at what to add rather than restating the whole contract as missing.
     /// </summary>
     [Fact]

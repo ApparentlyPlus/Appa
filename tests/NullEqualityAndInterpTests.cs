@@ -3,9 +3,9 @@ namespace Appa.Tests;
 using Appa;
 
 /// <summary>
-/// Two lowerings that pick a cheaper or safer shape than the source's surface form: null equality
-/// always compiling to a pointer check, so a class's own '==' cannot recurse through its null
-/// guards; and interpolation past two parts going through a StringBuilder.
+/// Two lowerings that pick a cheaper or safer shape than the source's surface form. Null equality
+/// always compiles to a pointer check, so a class's own '==' cannot recurse through its null
+/// guards, and interpolation past two parts goes through a StringBuilder.
 /// </summary>
 public class NullEqualityAndInterpTests
 {

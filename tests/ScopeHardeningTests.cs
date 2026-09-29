@@ -18,7 +18,7 @@ public class ScopeHardeningTests
 
     /// <summary>
     /// A scope holds one meaning per name. Two functions are overloads and two types a plain
-    /// duplicate; every other pairing leaves a name whose meaning depends on where it is read, and
+    /// duplicate. Every other pairing leaves a name whose meaning depends on where it is read, and
     /// each was silently accepted.
     /// </summary>
     [Theory]

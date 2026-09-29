@@ -47,7 +47,7 @@ public class MathFidelityTests
     /// <summary>
     /// The values worth testing: IEEE special cases, the exact thresholds fdlibm's own branch
     /// structure keys on, and both sides of every one of them. A uniform random sample would
-    /// essentially never land on these, and they are where the branch selection goes wrong.
+    /// almost never land on these, and they are where the branch selection goes wrong.
     /// </summary>
     private static double[] Inputs()
     {
@@ -216,7 +216,7 @@ public class MathFidelityTests
 
     /// <summary>
     /// Distance in representable steps. Bit patterns are mapped to a monotone integer first so
-    /// that the distance is a subtraction even across zero; NaN compares equal only to NaN.
+    /// that the distance is a subtraction even across zero. NaN compares equal only to NaN.
     /// </summary>
     private static long Ulps(ulong a, ulong b)
     {

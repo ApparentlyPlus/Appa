@@ -541,7 +541,7 @@ public class WarningDiagnosticsTests
     }
 
     /// <summary>
-    /// Declaring such a union is fine; only comparing one is worth a word. A union nobody compares
+    /// Declaring such a union is fine. Only comparing one is worth a word. A union nobody compares
     /// behaves exactly as before and must stay silent.
     /// </summary>
     [Fact]

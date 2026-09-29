@@ -1,8 +1,5 @@
 namespace Appa;
 
-using System.Collections.Frozen;
-using System.Runtime.CompilerServices;
-
 /// <summary>
 /// Thrown by the lexer or parser when source text cannot be tokenized or parsed. Caught at every
 /// call site so it never escapes as an unhandled exception.
@@ -25,7 +22,7 @@ internal sealed class Lexer(string src)
 
     private readonly List<Token> _tokens = [];
 
-    private static readonly FrozenDictionary<string, TK> kw = new Dictionary<string, TK>
+    private static readonly Dictionary<string, TK> Keywords = new()
     {
         ["import"]      = TK.Import,
         ["realm"]       = TK.Realm,
@@ -38,7 +35,7 @@ internal sealed class Lexer(string src)
         ["module"]      = TK.Module,
         ["func"]        = TK.Func,
         ["static"]      = TK.Static,
-        ["public"]      = TK.Public,    
+        ["public"]      = TK.Public,
         ["private"]     = TK.Private,
         ["entry"]       = TK.Entry,
         ["throws"]      = TK.Throws,
@@ -50,37 +47,36 @@ internal sealed class Lexer(string src)
         ["if"]          = TK.If,
         ["else"]        = TK.Else,
         ["while"]       = TK.While,
-        ["for"]         = TK.For,       
+        ["for"]         = TK.For,
         ["in"]          = TK.In,
-        ["switch"]      = TK.Switch,    
+        ["switch"]      = TK.Switch,
         ["case"]        = TK.Case,
-        ["break"]       = TK.Break,     
+        ["break"]       = TK.Break,
         ["continue"]    = TK.Continue,
-        ["debug"]       = TK.Debug,     
+        ["debug"]       = TK.Debug,
         ["panic"]       = TK.Panic,
         ["try"]         = TK.Try,
-        ["catch"]       = TK.Catch,     
+        ["catch"]       = TK.Catch,
         ["new"]         = TK.New,
-        ["let"]         = TK.Let,       
+        ["let"]         = TK.Let,
         ["null"]        = TK.Null,
-        ["unsafe"]      = TK.Unsafe,    
+        ["unsafe"]      = TK.Unsafe,
         ["throw"]       = TK.Throw,
-        ["sizeof"]      = TK.Sizeof,    
+        ["sizeof"]      = TK.Sizeof,
         ["default"]     = TK.Default,
-        ["defer"]       = TK.Defer,     
+        ["defer"]       = TK.Defer,
         ["match"]       = TK.Match,
         ["union"]       = TK.Union,
         ["assign"]      = TK.Assign,
-        ["bool"]        = TK.TBool,     
+        ["bool"]        = TK.TBool,
         ["int"]         = TK.TInt,
-        ["char"]        = TK.TChar,     
+        ["char"]        = TK.TChar,
         ["float"]       = TK.TFloat,
-        ["double"]      = TK.TDouble,   
+        ["double"]      = TK.TDouble,
         ["short"]       = TK.TShort,
         ["void"]        = TK.TVoid,
 
-        // Width explicit family
-
+        // width-explicit family
         ["int64"]       = TK.TPrim,
         ["uint"]        = TK.TPrim,
         ["uint64"]      = TK.TPrim,
@@ -91,29 +87,7 @@ internal sealed class Lexer(string src)
         ["uintptr"]     = TK.TPrim,
         ["true"]        = TK.BoolLit,
         ["false"]       = TK.BoolLit,
-    }.ToFrozenDictionary();
-
-    private static readonly FrozenDictionary<string, TK>.AlternateLookup<ReadOnlySpan<char>> KeywordsLookup = 
-        kw.GetAlternateLookup<ReadOnlySpan<char>>();
-
-    private static readonly string[] kwstr;
-    private static readonly string[] chrstrs;
-    private static readonly string[] punctstrs;
-
-    static Lexer()
-    {
-        kwstr = new string[Enum.GetValues<TK>().Length];
-        foreach (var kvp in kw)
-        {
-            kwstr[(int)kvp.Value] = kvp.Key;
-        }
-
-        chrstrs = new string[256];
-        for (int i = 0; i < 256; i++) chrstrs[i] = i.ToString();
-
-        punctstrs = new string[128];
-        for (int i = 0; i < 128; i++) punctstrs[i] = ((char)i).ToString();
-    }
+    };
 
     /// <summary>
     /// Tokenizes the whole source, ending with an EOF token the parser can look at safely.
@@ -126,38 +100,30 @@ internal sealed class Lexer(string src)
     }
 
     private char Cur => _pp < src.Length ? src[_pp] : '\0';
-    private char Peek(int n = 1)
-    {
-        return (_pp + n) < src.Length ? src[_pp + n] : '\0';
-    }
+    private char Peek(int n = 1) => _pp + n < src.Length ? src[_pp + n] : '\0';
+    private void Advance(int n = 1) => _pp += n;
 
-    private void Advance(int n = 1)
-    {
-        _pp += n;
-    }
-
-    private void Emit(TK kind, string value)
-    {
+    private void Emit(TK kind, string value) =>
         _tokens.Add(new Token(kind, value, new TextSpan(_ts, _pp - _ts)));
-    }
 
-    private void Fail(string m, string code = Codes.Syntax, string[]? hints = null)
-    {
+    private void Fail(string m, string code = Codes.Syntax, string[]? hints = null) =>
         throw new ParseException(new TextSpan(_ts, Math.Max(1, _pp - _ts)), m, code, hints);
-    }
 
     /// <summary>
     /// Reads the next token from the source string and adds it to the token list.
     /// </summary>
     private void ReadOne()
     {
-        // Whitespace
-        if (IsWhiteSpace(Cur)) { Advance(); return; }
+        if (IsWhiteSpace(Cur))
+        {
+            Advance();
+            return;
+        }
 
-        if (Cur == '/' && Peek() == '/') 
+        if (Cur == '/' && Peek() == '/')
         {
             while (_pp < src.Length && Cur != '\n')
-                Advance(); 
+                Advance();
             return;
         }
 
@@ -205,15 +171,23 @@ internal sealed class Lexer(string src)
         // native { }  or  native type Name { }
         if (MatchKw("native"))
         {
-            int start = _pp; Advance(6); SkipWS();
-            if (Cur == '{') { Emit(TK.NativeContent, ReadBalanced()); return; }
+            int start = _pp;
+            Advance(6);
+            SkipWS();
+            if (Cur == '{')
+            {
+                Emit(TK.NativeContent, ReadBalanced());
+                return;
+            }
 
             if (MatchKw("type"))
             {
-                Advance(4); SkipWS();
+                Advance(4);
+                SkipWS();
                 int ns = _pp;
                 while (_pp < src.Length && IsIdentPart(Cur)) Advance();
-                string tname = src[ns.._pp]; SkipWS();
+                string tname = src[ns.._pp];
+                SkipWS();
                 if (Cur == '{' && !string.IsNullOrEmpty(tname))
                 {
                     string body = ReadBalanced();
@@ -222,6 +196,7 @@ internal sealed class Lexer(string src)
                 }
             }
 
+            // just an identifier that happens to be called native
             _pp = start;
             ReadID();
             return;
@@ -230,8 +205,16 @@ internal sealed class Lexer(string src)
         // fields { }
         if (MatchKw("fields"))
         {
-            int start = _pp; Advance(6); SkipWS();
-            if (Cur != '{') { _pp = start; ReadID(); return; }
+            int start = _pp;
+            Advance(6);
+            SkipWS();
+            if (Cur != '{')
+            {
+                _pp = start;
+                ReadID();
+                return;
+            }
+
             Emit(TK.Fields, ReadBalanced());
             return;
         }
@@ -302,8 +285,9 @@ internal sealed class Lexer(string src)
                 break;
         }
 
-        // Single character punctuation fallthrough
-        char c = Cur; Advance();
+        // everything else is a single character
+        char c = Cur;
+        Advance();
         Emit(c switch
         {
             '(' => TK.LParen,
@@ -317,7 +301,7 @@ internal sealed class Lexer(string src)
             ':' => TK.Colon,
             '.' => TK.Dot,
             _ => TK.Punct
-        }, c < 128 ? punctstrs[c] : c.ToString());
+        }, c.ToString());
     }
 
     /// <summary>
@@ -335,7 +319,10 @@ internal sealed class Lexer(string src)
     /// <summary>
     /// Consumes whitespace characters starting from the current position in the source string.
     /// </summary>
-    private void SkipWS() { while (_pp < src.Length && IsWhiteSpace(Cur)) Advance(); }
+    private void SkipWS()
+    {
+        while (_pp < src.Length && IsWhiteSpace(Cur)) Advance();
+    }
 
     /// <summary>
     /// Reads the required (identifier) argument after an annotation keyword, like
@@ -386,7 +373,7 @@ internal sealed class Lexer(string src)
             }
             else if (cur == '"' || cur == '\'')
             {
-                char quote = cur; 
+                char quote = cur;
                 Advance();
                 while (_pp < src.Length && Cur != quote)
                 {
@@ -395,9 +382,12 @@ internal sealed class Lexer(string src)
                 }
                 if (_pp < src.Length) Advance();
             }
-            else if (cur == '{') { depth++; Advance(); }
-            else if (cur == '}') { depth--; Advance(); }
-            else { Advance(); }
+            else
+            {
+                if (cur == '{') depth++;
+                if (cur == '}') depth--;
+                Advance();
+            }
         }
 
         if (depth > 0) Fail("Unterminated native block, missing closing '}'", Codes.UnterminatedLiteral);
@@ -411,17 +401,12 @@ internal sealed class Lexer(string src)
     {
         int start = _pp;
         while (_pp < src.Length && IsIdentPart(Cur)) Advance();
-        ReadOnlySpan<char> span = src.AsSpan(start, _pp - start);
+        string word = src[start.._pp];
 
-        if (KeywordsLookup.TryGetValue(span, out var kw))
-        {
-            string canonical = kwstr[(int)kw];
-            Emit(kw, span.Equals(canonical, StringComparison.Ordinal) ? canonical : new string(span));
-        }
+        if (Keywords.TryGetValue(word, out var kw))
+            Emit(kw, word);
         else
-        {
-            Emit(TK.Ident, new string(span));
-        }
+            Emit(TK.Ident, word);
     }
 
     /// <summary>
@@ -520,7 +505,8 @@ internal sealed class Lexer(string src)
         {
             if (Cur == '{' && Peek() != '{')
             {
-                _ts = _pp; Advance();
+                _ts = _pp;
+                Advance();
                 Emit(TK.Punct, "{");
 
                 int brdepth = 1;
@@ -540,7 +526,8 @@ internal sealed class Lexer(string src)
 
                 if (brdepth > 0) Fail("unterminated '{' in interpolated string", Codes.UnterminatedLiteral);
 
-                _ts = _pp; Advance();
+                _ts = _pp;
+                Advance();
                 Emit(TK.Punct, "}");
             }
             else
@@ -550,8 +537,14 @@ internal sealed class Lexer(string src)
                 var sb = new System.Text.StringBuilder();
                 while (_pp < src.Length && Cur != '"' && Cur != '\n' && !(Cur == '{' && Peek() != '{'))
                 {
-                    if (Cur == '{' && Peek() == '{') { sb.Append(src, start, _pp - start); Advance(2); sb.Append('{'); start = _pp; }
-                    else if (Cur == '}' && Peek() == '}') { sb.Append(src, start, _pp - start); Advance(2); sb.Append('}'); start = _pp; }
+                    // {{ and }} are literal braces
+                    if ((Cur == '{' && Peek() == '{') || (Cur == '}' && Peek() == '}'))
+                    {
+                        sb.Append(src, start, _pp - start);
+                        sb.Append(Cur);
+                        Advance(2);
+                        start = _pp;
+                    }
                     else if (Cur == '\\')
                     {
                         Advance();
@@ -568,7 +561,8 @@ internal sealed class Lexer(string src)
 
         if (Cur != '"') Fail("unterminated interpolated string", Codes.UnterminatedLiteral);
 
-        _ts = _pp; Advance();
+        _ts = _pp;
+        Advance();
         Emit(TK.InterpStrEnd, "\"");
     }
 
@@ -609,38 +603,45 @@ internal sealed class Lexer(string src)
         {
             Advance();
             if (!TryEscape(Cur, out char e)) Fail($"unrecognized escape '\\{Cur}' in char literal", Codes.BadEscape);
-            val = e; Advance();
+            val = e;
+            Advance();
         }
-        else if (Cur == '\'') Fail("empty char literal", Codes.UnterminatedLiteral);
-        else if (Cur == '\n' || _pp >= src.Length) Fail("unterminated char literal", Codes.UnterminatedLiteral);
-        else { val = Cur; Advance(); }
+        else if (Cur == '\'')
+        {
+            Fail("empty char literal", Codes.UnterminatedLiteral);
+        }
+        else if (Cur == '\n' || _pp >= src.Length)
+        {
+            Fail("unterminated char literal", Codes.UnterminatedLiteral);
+        }
+        else
+        {
+            val = Cur;
+            Advance();
+        }
 
         if (Cur != '\'') Fail("char literal must hold exactly one character", Codes.UnterminatedLiteral);
         Advance(); // closing '
-        
-        string vstr = (val >= 0 && val < 256) ? chrstrs[val] : val.ToString();
-        Emit(TK.CharLit, vstr);
+
+        // char literals carry their numeric value, not the character
+        Emit(TK.CharLit, val.ToString());
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool IsWhiteSpace(char c)
     {
         return c == ' ' || (c >= '\t' && c <= '\r');
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool IsIDStart(char c)
     {
         return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool IsIdentPart(char c)
     {
         return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool IsHexDigit(char c)
     {
         return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');

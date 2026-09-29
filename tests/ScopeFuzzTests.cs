@@ -6,7 +6,7 @@ using System.Text;
 /// <summary>
 /// Grammar-directed fuzzer over scope <i>shapes</i>: the same names at root, in each realm and in
 /// each process, used from every level that sees them. Valid by construction, so a rejection fails
-/// too; the oracle is a real link, since a name collision only shows up once the objects meet.
+/// too. The oracle is a real link, since a name collision only shows up once the objects meet.
 /// </summary>
 public class ScopeFuzzTests
 {

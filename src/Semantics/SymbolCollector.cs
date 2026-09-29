@@ -1,5 +1,3 @@
-using System.Runtime.InteropServices;
-
 namespace Appa;
 
 internal record CollectionResult(SymbolTable Sym, HashSet<string> HasInit, HashSet<string> PreDefinedStructs,
@@ -28,10 +26,8 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
     /// </summary>
     public CollectionResult Collect(List<(string path, Program prog)> programs)
     {
-        var span = CollectionsMarshal.AsSpan(programs);
-        for (int i = 0; i < span.Length; i++)
+        foreach (var (path, prog) in programs)
         {
-            var (path, prog) = span[i];
             foreach (var item in prog.Items) P1Top(item, path);
         }
         _sym.AssignCNames();

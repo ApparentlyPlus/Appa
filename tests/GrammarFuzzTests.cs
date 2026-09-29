@@ -11,7 +11,7 @@ using System.Text;
 public class GrammarFuzzTests
 {
     /// <summary>
-    /// How many programs to generate. Kept modest so the suite stays fast; the generator is
+    /// How many programs to generate. Kept modest so the suite stays fast. The generator is
     /// deterministic, so raising this locally explores strictly more without losing what the
     /// committed range already covers.
     /// </summary>

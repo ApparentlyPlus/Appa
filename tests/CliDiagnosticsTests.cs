@@ -41,7 +41,7 @@ public class CliDiagnosticsTests
     }
 
     /// <summary>
-    /// Both flags, but to 'build', where they additionally need --pure-transpile. Telling the reader
+    /// Both flags, but to 'build', where they also need --pure-transpile. Telling the reader
     /// to pass --env and --entry here would be telling them to do what they did.
     /// </summary>
     [Fact]
@@ -115,7 +115,7 @@ public class CliDiagnosticsTests
     /// The project 'appa new' writes has to compile. It did not: the starter main.g still used the
     /// pre-realm 'kernel { }' and 'user { }' block syntax, so the very first thing a new user runs
     /// after creating a project was a syntax error in code they had not written. The book was swept
-    /// for that spelling; the template it was generated alongside was not.
+    /// for that spelling. The template it was generated alongside was not.
     /// </summary>
     [Fact]
     public void FreshProjectChecksClean()

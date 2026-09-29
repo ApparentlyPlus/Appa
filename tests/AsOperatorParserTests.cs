@@ -4,7 +4,7 @@ using Appa;
 
 /// <summary>
 /// Parser coverage for 'operator Target func as(Source s)'. Arity is a semantic concern (see
-/// AsOperatorSemanticTests); this covers that 'as' is accepted as an operator symbol at all, and
+/// AsOperatorSemanticTests). This covers that 'as' is accepted as an operator symbol at all, and
 /// that its declaration parses like any other operator's.
 /// </summary>
 public class AsOperatorParserTests

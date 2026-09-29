@@ -162,7 +162,7 @@ public class MultiFileTests
 
     /// <summary>
     /// Every diagnostic must point at a file that took part in the build, with a span inside it. A
-    /// single-file case cannot catch a wrong Loc.File because there is only one file to name; with
+    /// single-file case cannot catch a wrong Loc.File because there is only one file to name. With
     /// several, a pass reporting against the wrong one puts the caret under unrelated source.
     /// </summary>
     [Fact]
@@ -360,7 +360,7 @@ public class MultiFileTests
     /// <summary>
     /// What a scoped name displaces is whichever declaration the shadowing file can see, not the
     /// first parsed. Only one file per name was kept, so a file-local homonym claimed the slot and
-    /// hid the imported declaration genuinely being displaced.
+    /// hid the imported declaration really being displaced.
     /// </summary>
     [Theory]
     [InlineData("unmarked", true)]

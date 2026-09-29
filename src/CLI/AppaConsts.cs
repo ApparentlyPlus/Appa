@@ -26,13 +26,15 @@ static class Urls
     /// the latest GitHub release via the "releases/latest/download" alias. Mac distinguishes Apple
     /// Silicon (amac) from Intel (imac).
     /// </summary>
-    public static string AppaBinary() =>
-        RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? AppaRel + "/appa-win.exe" :
-        RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
-            ? (RuntimeInformation.OSArchitecture == Architecture.Arm64
-                ? AppaRel + "/appa-amac"
-                : AppaRel + "/appa-imac")
-            : AppaRel + "/appa-linux";
+    public static string AppaBinary()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return AppaRel + "/appa-win.exe";
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.OSX)) return AppaRel + "/appa-linux";
+
+        return RuntimeInformation.OSArchitecture == Architecture.Arm64
+            ? AppaRel + "/appa-amac"
+            : AppaRel + "/appa-imac";
+    }
 }
 
 #endregion
@@ -58,11 +60,9 @@ static class AppaPaths
             {
                 foreach (var line in File.ReadLines("/etc/passwd"))
                 {
+                    // name:pw:uid:gid:gecos:home:shell
                     var parts = line.Split(':');
-                    if (parts.Length >= 6 && parts[0] == username)
-                    {
-                        return parts[5];
-                    }
+                    if (parts.Length >= 6 && parts[0] == username) return parts[5];
                 }
             }
         }
@@ -89,8 +89,7 @@ static class AppaPaths
         return Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
     }
 
-    public static readonly string Root = Path.Combine(
-        GetLocalSharePath(), "appa");
+    public static readonly string Root = Path.Combine(GetLocalSharePath(), "appa");
 
     public static string ToolchainDir => Path.Combine(Root, "toolchain");
     public static string LibgataDir => Path.Combine(Root, "libgata");

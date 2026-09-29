@@ -40,7 +40,7 @@ public class ArithmeticFidelityFuzzTests
     private static Prim Result(Prim a, Prim b) => a.Rank >= b.Rank ? a : b;
 
     /// <summary>
-    /// C truncates division toward zero; BigInteger.Divide already does.
+    /// C truncates division toward zero. BigInteger.Divide already does.
     /// </summary>
     private static BigInteger CDiv(BigInteger a, BigInteger b) => BigInteger.Divide(a, b);
 
@@ -94,7 +94,7 @@ public class ArithmeticFidelityFuzzTests
             {
                 case "/" or "%":
                     if (rv == 0) continue;
-                    if (t.Signed && lv == Lo(t) && rv == -1) continue;  // overflows; C leaves it undefined
+                    if (t.Signed && lv == Lo(t) && rv == -1) continue;  // overflows. C leaves it undefined
                     v = op == "/" ? CDiv(lv, rv) : lv - CDiv(lv, rv) * rv;
                     break;
                 case "<<" or ">>":
@@ -181,7 +181,7 @@ public class ArithmeticFidelityFuzzTests
     /// <summary>
     /// Generated arithmetic must give the reference answer at every optimisation level and under every
     /// available compiler. A level-dependent answer means the emitted C relies on something C does not
-    /// define; a level-independent wrong answer means the emitter and the type checker disagree, which
+    /// define. A level-independent wrong answer means the emitter and the type checker disagree, which
     /// is what the promotion and signedness defects were.
     /// </summary>
     [Fact]

@@ -58,7 +58,7 @@ static class Fmt
 
     /// <summary>
     /// Greedy word wrap at a visible width. Explicit newlines in the input are honoured as
-    /// paragraph breaks; everything else is free to reflow.
+    /// paragraph breaks. Everything else is free to reflow.
     /// </summary>
     public static List<string> Wrap(string text, int width)
     {
@@ -70,8 +70,18 @@ static class Fmt
             foreach (var word in paragraph.Split(' ', StringSplitOptions.RemoveEmptyEntries))
             {
                 int w = Visible(word);
-                if (len > 0 && len + 1 + w > width) { lines.Add(sb.ToString()); sb.Clear(); len = 0; }
-                if (len > 0) { sb.Append(' '); len++; }
+                if (len > 0 && len + 1 + w > width)
+                {
+                    lines.Add(sb.ToString());
+                    sb.Clear();
+                    len = 0;
+                }
+
+                if (len > 0)
+                {
+                    sb.Append(' ');
+                    len++;
+                }
                 sb.Append(word);
                 len += w;
             }
@@ -96,13 +106,25 @@ static class Fmt
     public static void Table(IReadOnlyList<(string Left, string Right)> rows, string indent = Indent)
     {
         if (rows.Count == 0) return;
-        int left = rows.Where(r => r.Right.Length > 0).Select(r => Visible(r.Left)).DefaultIfEmpty(0).Max();
+
+        // rows with no description are paragraphs, so they don't widen the left column
+        int left = 0;
+        foreach (var (l, r) in rows)
+        {
+            if (r.Length > 0) left = Math.Max(left, Visible(l));
+        }
+
         int right = Math.Max(MinWidth / 2, Width - indent.Length - left - Gutter);
         string hang = indent + new string(' ', left + Gutter);
 
         foreach (var (l, r) in rows)
         {
-            if (r.Length == 0) { Para(l, indent); continue; }
+            if (r.Length == 0)
+            {
+                Para(l, indent);
+                continue;
+            }
+
             var wrapped = Wrap(r, right);
             Console.WriteLine($"{indent}{Pad(l, left)}{new string(' ', Gutter)}{wrapped[0]}");
             for (int i = 1; i < wrapped.Count; i++) Console.WriteLine(hang + wrapped[i]);
@@ -123,9 +145,12 @@ static class Fmt
         string last = lines[^1];
         int lastW = Visible(last);
         if (lastW + 2 + rw <= avail)
+        {
             Console.WriteLine(indent + last + new string(' ', avail - lastW - rw) + right);
+        }
         else
         {
+            // doesn't fit next to the text, so it goes on a line of its own
             Console.WriteLine(indent + last);
             Console.WriteLine(indent + new string(' ', Math.Max(0, avail - rw)) + right);
         }

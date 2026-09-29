@@ -18,7 +18,7 @@ public enum Expect
     Accepted,
 
     /// <summary>
-    /// Either outcome is defensible; only the no-crash / well-formed-output properties are
+    /// Either outcome is defensible. Only the no-crash / well-formed-output properties are
     /// asserted. Used for machine-generated combinations whose legality depends on context.
     /// </summary>
     Any
@@ -374,7 +374,7 @@ public static class TortureCorpus
 
     /// <summary>
     /// Every binary operator crossed with operand pairs covering each type family. Most
-    /// combinations are type errors; the invariant is that each is either rejected or emits valid
+    /// combinations are type errors. The invariant is that each is either rejected or emits valid
     /// C, never silently lowered to a C operator meaning something else.
     /// </summary>
     private static IEnumerable<TortureCase> BinaryOperatorMatrix()
@@ -496,7 +496,7 @@ public static class TortureCorpus
 
     /// <summary>
     /// Awkward identifiers in every kind of declaration. Locals and parameters are the only names
-    /// printed as written, so the only ones that can collide; everything else is safe by
+    /// printed as written, so the only ones that can collide. Everything else is safe by
     /// construction, which is what stops being true when someone changes the mangler.
     /// </summary>
     private static IEnumerable<TortureCase> IdentifierMatrix()

@@ -165,14 +165,13 @@ internal static class Suggest
     }
 
     /// <summary>
-    /// Classic iterative Levenshtein edit distance between two strings. Identifiers are short, so
-    /// the two work rows live on the stack. Absurdly long names fall back to heap.
+    /// Classic iterative Levenshtein edit distance between two strings, keeping two rows.
     /// </summary>
     private static int Distance(string a, string b)
     {
         int w = b.Length + 1;
-        Span<int> prev = w <= 128 ? stackalloc int[w] : new int[w];
-        Span<int> cur = w <= 128 ? stackalloc int[w] : new int[w];
+        var prev = new int[w];
+        var cur = new int[w];
         for (int j = 0; j < w; j++) prev[j] = j;
 
         for (int i = 1; i <= a.Length; i++)
@@ -183,7 +182,7 @@ internal static class Suggest
                 int cost = a[i - 1] == b[j - 1] ? 0 : 1;
                 cur[j] = Math.Min(Math.Min(cur[j - 1] + 1, prev[j] + 1), prev[j - 1] + cost);
             }
-            var tmp = prev; prev = cur; cur = tmp;
+            (prev, cur) = (cur, prev);
         }
         return prev[b.Length];
     }

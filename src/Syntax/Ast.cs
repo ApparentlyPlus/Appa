@@ -19,7 +19,7 @@ internal record Program(TopLevel[] Items)
 
 /// <summary>
 /// A generic instantiation site found during parsing, telling the Monomorphizer which concrete
-/// copies to stamp. Args is mangled ("int"); ArgSpecs keeps the same arguments unflattened, so
+/// copies to stamp. Args is mangled ("int"). ArgSpecs keeps the same arguments unflattened, so
 /// substituting inside them is structural rather than string surgery.
 /// </summary>
 internal record GenericUse(string Base, string[] Args, TextSpan Span, NamedSpec[]? ArgSpecs = null)
@@ -72,16 +72,16 @@ internal record ClassDecl(string Name, string[] GenericParams, Annotation[] Anno
 internal record ContextDecl(Realm Kind, TopLevel[] Items, TextSpan Span) : TopLevel(Span);
 
 /// <summary>
-/// A free function declaration. GenericParams empty = ordinary function; non-empty = generic
+/// A free function declaration. GenericParams empty = ordinary function. Non-empty = generic
 /// template monomorphized per call site with type arguments inferred from the argument types.
-/// IsEntry marks it as a thread entry point; Throws means it may propagate a Result error.
+/// IsEntry marks it as a thread entry point. Throws means it may propagate a Result error.
 /// </summary>
 internal record FuncDecl(Modifiers Modifiers, Annotation[] Annotations, TypeSpec? ReturnType,
                 string Name, string[] GenericParams, Param[] Params,
                 bool IsEntry, bool Throws, MethodBody Body, TextSpan Span) : TopLevel(Span);
 
 /// <summary>
-/// A process declaration is pure deployment topology. A process is a named bag of threads; it holds
+/// A process declaration is pure deployment topology. A process is a named bag of threads. It holds
 /// no logic of its own. Mode is the deployment mode ("foreground" or "background").
 /// </summary>
 internal record ProcessDecl(string Name, string Mode, ThreadDecl[] Threads, TextSpan Span) : TopLevel(Span)
@@ -105,13 +105,13 @@ internal record ExternFuncDecl(TypeSpec? ReturnType, string Name, Param[] Params
 
 /// <summary>
 /// native type Name { C body }. It registers a C struct as a named Gata type. The CBody is emitted
-/// verbatim as a typedef; the name becomes resolvable in type positions.
+/// verbatim as a typedef. The name becomes resolvable in type positions.
 /// </summary>
 internal record NativeTypeDecl(string Name, string CBody, TextSpan Span, Annotation[]? Annotations = null) : TopLevel(Span);
 
 /// <summary>
 /// enum Name { A, B = 2, C } is a distinct integer-backed type with named members. Members may
-/// carry explicit integer values; unspecified members follow C's increment rule.
+/// carry explicit integer values. Unspecified members follow C's increment rule.
 /// </summary>
 internal record EnumDecl(string Name, EnumMember[] Members, TextSpan Span, Annotation[]? Annotations = null) : TopLevel(Span);
 
@@ -121,7 +121,7 @@ internal record EnumDecl(string Name, EnumMember[] Members, TextSpan Span, Annot
 internal record EnumMember(string Name, Expr? Value, TextSpan Span);
 
 /// <summary>
-/// A tagged union; each variant carries named fields or no payload, lowered to a tag enum plus a C
+/// A tagged union. Each variant carries named fields or no payload, lowered to a tag enum plus a C
 /// union. GenericParams is non-empty for a template, which the Monomorphizer replaces with one
 /// stamped UnionDecl per instantiation.
 /// </summary>
@@ -198,15 +198,15 @@ internal abstract record ClassMember(TextSpan Span);
 internal record FieldsBlock(NativeBody Body, TextSpan Span) : ClassMember(Span);
 
 /// <summary>
-/// A Gata field declaration. Init is the optional initializer expression; Type is null when
+/// A Gata field declaration. Init is the optional initializer expression. Type is null when
 /// inferred.
 /// </summary>
 internal record FieldDecl(Modifiers Modifiers, TypeSpec? Type, string Name, TextSpan Span, Expr? Init = null) : ClassMember(Span);
 
 /// <summary>
-/// A method declaration inside a class or module. IsEntry marks it as a thread entry point; Throws
+/// A method declaration inside a class or module. IsEntry marks it as a thread entry point. Throws
 /// means it participates in the Result error-propagation protocol. GenericParams empty = ordinary
-/// method; non-empty = generic, monomorphized per call site like a generic free function.
+/// method. Non-empty = generic, monomorphized per call site like a generic free function.
 /// </summary>
 internal record MethodDecl(Modifiers Modifiers, Annotation[] Annotations, TypeSpec? ReturnType,
                   string Name, string[] GenericParams, Param[] Params, bool IsEntry, bool Throws,
@@ -258,7 +258,7 @@ internal record EntryFuncDecl(Modifiers Modifiers, TypeSpec? ReturnType, Param[]
 #region Type specifiers
 
 /// <summary>
-/// Structured type specifier. The parser builds it once; every later pass walks it structurally.
+/// Structured type specifier. The parser builds it once. Every later pass walks it structurally.
 /// ToSpecString() reproduces the legacy flat spelling used for mangling and duplicate-signature
 /// keys, so emitted C names stay byte identical.
 /// </summary>
@@ -363,7 +363,7 @@ internal sealed record FuncSpec(TypeSpec[] Params, TypeSpec Ret, TextSpan Span) 
 #region Parameters
 
 /// <summary>
-/// A function or method parameter. IsRef = true means the argument is passed by reference; the call
+/// A function or method parameter. IsRef = true means the argument is passed by reference. The call
 /// site must supply an lvalue prefixed with ref.
 /// </summary>
 internal record Param(TypeSpec Type, string Name, TextSpan Span, bool IsRef = false);
@@ -399,7 +399,7 @@ internal enum UnOp { Not, BitNot, Neg }
 internal enum PostfixOp { Inc, Dec }
 
 /// <summary>
-/// The kind of an assignment operator. Assign is plain '='; the rest are compound forms that
+/// The kind of an assignment operator. Assign is plain '=', and the rest are compound forms that
 /// combine a BinOp with the store, eg. AddAssign for '+='.
 /// </summary>
 internal enum AssignOp { Assign, AddAssign, SubAssign, MulAssign, DivAssign, ModAssign, AndAssign, OrAssign, XorAssign, ShlAssign, ShrAssign }
@@ -699,7 +699,7 @@ internal record UnaryExpr(UnOp Op, Expr Operand, TextSpan Span) : Expr(Span);
 internal record PostfixExpr(PostfixOp Op, Expr Operand, TextSpan Span) : Expr(Span);
 
 /// <summary>
-/// Object construction. Args holds constructor arguments for class instantiation; CollectionInit
+/// Object construction. Args holds constructor arguments for class instantiation. CollectionInit
 /// holds the bracketed element list for collection construction.
 /// </summary>
 internal record NewExpr(TypeSpec Type, Expr[] Args, Expr[] CollectionInit, TextSpan Span) : Expr(Span);
@@ -804,7 +804,7 @@ internal record ContinueStmt(TextSpan Span) : Stmt(Span);
 internal record TryCatchStmt(Block Try, Block Catch, TextSpan Span) : Stmt(Span);
 
 /// <summary>
-/// A switch statement. Cases is the list of arms; Default is the optional fallback block. There is
+/// A switch statement. Cases is the list of arms. Default is the optional fallback block. There is
 /// no fallthrough: break and continue inside a case target the enclosing loop.
 /// </summary>
 internal record SwitchStmt(Expr Scrutinee, SwitchCase[] Cases, Block? Default, TextSpan Span) : Stmt(Span);
@@ -821,7 +821,7 @@ internal record SwitchCase(Expr[] Labels, Block Body, TextSpan Span);
 internal record MatchStmt(Expr Scrutinee, MatchCase[] Cases, Block? Default, TextSpan Span) : Stmt(Span);
 
 /// <summary>
-/// One arm of a match statement. Variant is the union variant name; Bindings are the local names
+/// One arm of a match statement. Variant is the union variant name. Bindings are the local names
 /// bound to the variant's fields in source order.
 /// </summary>
 internal record MatchCase(string Variant, string[] Bindings, Block Body, TextSpan Span);

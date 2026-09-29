@@ -265,7 +265,7 @@ internal static class HostedRun
 
     /// <summary>
     /// The exit code for a command that does not exist, borrowed from the shells. A caller probing
-    /// for an optional tool reads the exit code; Process.Start reports a missing binary by throwing
+    /// for an optional tool reads the exit code. Process.Start reports a missing binary by throwing
     /// instead, so every one of those probes used to sail past its guard and fail later as a crash.
     /// </summary>
     public const int NotFound = 127;

@@ -7,32 +7,10 @@ internal sealed class CapabilityScan(IrModule m) : IrWalker
     public bool Threads;
     public bool Time;
 
-    private readonly Dictionary<string, IrFunction> _funcs = new(GetFuncsCapacity(m));
-    private readonly Dictionary<string, IrOperator> _ops = new(GetOpsCapacity(m));
+    private readonly Dictionary<string, IrFunction> _funcs = new();
+    private readonly Dictionary<string, IrOperator> _ops = new();
     private readonly HashSet<string> _seen = [];
     private readonly Queue<IrStmt> _work = new();
-
-    /// <summary>
-    /// Calculates the number of functions in the module to preallocate the dictionary.
-    /// </summary>
-    private static int GetFuncsCapacity(IrModule m)
-    {
-        int methodCount = 0;
-        for (int i = 0; i < m.Classes.Count; i++)
-            methodCount += m.Classes[i].Methods.Count;
-        return methodCount + m.FreeFunctions.Count;
-    }
-
-    /// <summary>
-    /// Calculates the number of operators in the module to preallocate the dictionary.
-    /// </summary>
-    private static int GetOpsCapacity(IrModule m)
-    {
-        int opCount = 0;
-        for (int i = 0; i < m.Classes.Count; i++)
-            opCount += m.Classes[i].Operators.Count;
-        return opCount;
-    }
 
     /// <summary>
     /// Runs the capability scan from all entry points and returns this instance with flags
@@ -49,19 +27,32 @@ internal sealed class CapabilityScan(IrModule m) : IrWalker
 
         Threads = m.Processes.Count > 0;
 
-        foreach (var f in m.FreeFunctions) if (f.IsEntry) Enter(f.CName, f.Body);
+        foreach (var f in m.FreeFunctions)
+        {
+            if (f.IsEntry) Enter(f.CName, f.Body);
+        }
+
         foreach (var p in m.Processes)
         {
             if (p.StateInit is { } si) Enter(si.CName, si.Body);
             foreach (var t in p.Threads)
+            {
                 if (t.EntryFunc is { } e) Enter(e.CName, e.Body);
+            }
         }
-                
-        foreach (var c in m.Classes)
-            foreach (var mm in c.Methods)
-                if (mm.Name == Lifecycle.Deinit) Enter(mm.CName, mm.Body);
 
-        while (_work.Count > 0) WalkStmt(_work.Dequeue());
+        // destructors run whenever a count hits zero, so nothing "calls" them
+        foreach (var c in m.Classes)
+        {
+            foreach (var mm in c.Methods)
+            {
+                if (mm.Name == Lifecycle.Deinit) Enter(mm.CName, mm.Body);
+            }
+        }
+
+        while (_work.Count > 0)
+            WalkStmt(_work.Dequeue());
+
         return this;
     }
 
@@ -92,7 +83,11 @@ internal sealed class CapabilityScan(IrModule m) : IrWalker
     /// </summary>
     protected override void WalkStmt(IrStmt s)
     {
-        if (s is IrForIn fi) { Call(fi.LenCName); Call(fi.GetCName); }
+        if (s is IrForIn fi)
+        {
+            Call(fi.LenCName);
+            Call(fi.GetCName);
+        }
         base.WalkStmt(s);
     }
 
@@ -105,7 +100,10 @@ internal sealed class CapabilityScan(IrModule m) : IrWalker
         switch (e)
         {
             case IrNew: Mem = true; break;
-            case IrNewInit ni: Mem = true; Call(ni.AddCName); break;
+            case IrNewInit ni:
+                Mem = true;
+                Call(ni.AddCName);
+                break;
             case IrStaticCall sc: Call(sc.CName); break;
             case IrInstanceCall ic: Call(ic.CName); break;
             case IrThrowsCall tc: Call(tc.CName); break;

@@ -15,26 +15,11 @@ internal sealed class Densifier(IrModule m)
     private string Next()
     {
         string t;
-        do { t = NextRaw(); } while (_taken != null && _taken.Contains(t));
-        return t;
-    }
-
-    private string NextRaw()
-    {
-        int v = _seq++;
-        const string D = "0123456789abcdefghijklmnopqrstuvwxyz";
-        if (v == 0) return "__g0";
-        Span<char> buffer = stackalloc char[18];
-        int pos = 18;
-        while (v > 0)
+        do
         {
-            buffer[--pos] = D[v % 36];
-            v /= 36;
-        }
-        buffer[pos - 3] = '_';
-        buffer[pos - 2] = '_';
-        buffer[pos - 1] = 'g';
-        return new string(buffer[(pos - 3)..]);
+            t = "__g" + Base36(_seq++);
+        } while (_taken != null && _taken.Contains(t));
+        return t;
     }
 
     /// <summary>
@@ -42,16 +27,16 @@ internal sealed class Densifier(IrModule m)
     /// </summary>
     private static string Base36(int v)
     {
-        const string D = "0123456789abcdefghijklmnopqrstuvwxyz";
+        const string digits = "0123456789abcdefghijklmnopqrstuvwxyz";
         if (v == 0) return "0";
-        Span<char> buffer = stackalloc char[16];
-        int pos = 16;
+
+        string s = "";
         while (v > 0)
         {
-            buffer[--pos] = D[v % 36];
+            s = digits[v % 36] + s;
             v /= 36;
         }
-        return new string(buffer[pos..]);
+        return s;
     }
 
     /// <summary>
@@ -60,17 +45,17 @@ internal sealed class Densifier(IrModule m)
     /// </summary>
     public (IrModule Module, IReadOnlyDictionary<string, string> Sourcemap) Run()
     {
-        int classCount = m.Classes.Count;
-        int totalMembers = 0;
-        for (int i = 0; i < classCount; i++)
-            totalMembers += m.Classes[i].Methods.Count + m.Classes[i].Operators.Count;
-        int fnCapacity = m.FreeFunctions.Count + totalMembers;
-
+        // every name that has to survive as written
         _taken = [];
         foreach (var (_, cname) in m.Symbols.Externs()) _taken.Add(cname);
         foreach (var f in m.FreeFunctions)
-            if (f.IsEntry || f.Annotations.Any(a => a is KeepAnnotation)) _taken.Add(f.CName);
-        foreach (var c in m.Classes) if (c.Keep) _taken.Add(c.CName);
+        {
+            if (f.IsEntry || IsKept(f)) _taken.Add(f.CName);
+        }
+        foreach (var c in m.Classes)
+        {
+            if (c.Keep) _taken.Add(c.CName);
+        }
         foreach (var e in m.Enums) _taken.Add(e.CName);
         foreach (var u in m.Unions) _taken.Add(u.CName);
         foreach (var n in m.NativeTypes) _taken.Add(n.CName);
@@ -80,21 +65,25 @@ internal sealed class Densifier(IrModule m)
             foreach (var v in p.State) _taken.Add(v.CName);
         }
 
-        var fn = new Dictionary<string, string>(fnCapacity);
-        var classTok = new Dictionary<string, string>(classCount);
-        var src = new Dictionary<string, string>(fnCapacity + classCount);
+        var fn = new Dictionary<string, string>();          // old C name -> dense token
+        var classTok = new Dictionary<string, string>();
+        var src = new Dictionary<string, string>();         // dense token -> readable, for the sourcemap
 
         void MapFn(string old, string readable)
         {
             if (fn.ContainsKey(old)) return;
-            string d = Next(); fn[old] = d; src[d] = readable;
+            string d = Next();
+            fn[old] = d;
+            src[d] = readable;
         }
 
         // Internal free functions and all methods/operators get dense names.
         // Entries and @keep free functions keep their readable names.
         foreach (var f in m.FreeFunctions)
-            if (!f.IsEntry && !f.Annotations.Any(a => a is KeepAnnotation))
+        {
+            if (!f.IsEntry && !IsKept(f))
                 MapFn(f.CName, Mangler.DisplayName(f.Name));
+        }
         foreach (var c in m.Classes)
         {
             string owner = Mangler.DisplayName(c.Name);
@@ -106,30 +95,27 @@ internal sealed class Densifier(IrModule m)
         // them by the readable gata_<Name> form continues to resolve correctly.
         foreach (var c in m.Classes)
         {
-            if (c.Keep) { classTok[c.Name] = c.CName; src[c.CName] = Mangler.DisplayName(c.Name); continue; }
-            string d = Next(); classTok[c.Name] = d; src[d] = Mangler.DisplayName(c.Name);
+            string tok = c.Keep ? c.CName : Next();
+            classTok[c.Name] = tok;
+            src[tok] = Mangler.DisplayName(c.Name);
         }
 
         var renamed = new CallRenamer(fn).Run(m);
 
-        var freeFunctions = new List<IrFunction>(renamed.FreeFunctions.Count);
-        for (int i = 0; i < renamed.FreeFunctions.Count; i++)
-            freeFunctions.Add(Rename(renamed.FreeFunctions[i], fn));
+        var freeFunctions = new List<IrFunction>();
+        foreach (var f in renamed.FreeFunctions)
+            freeFunctions.Add(Rename(f, fn));
 
-        var classes = new List<IrClass>(renamed.Classes.Count);
-        for (int i = 0; i < renamed.Classes.Count; i++)
+        var classes = new List<IrClass>();
+        foreach (var c in renamed.Classes)
         {
-            var c = renamed.Classes[i];
-            var methods = new List<IrFunction>(c.Methods.Count);
-            for (int j = 0; j < c.Methods.Count; j++)
-                methods.Add(Rename(c.Methods[j], fn));
+            var methods = new List<IrFunction>();
+            foreach (var mm in c.Methods)
+                methods.Add(Rename(mm, fn));
 
-            var operators = new List<IrOperator>(c.Operators.Count);
-            for (int j = 0; j < c.Operators.Count; j++)
-            {
-                var o = c.Operators[j];
+            var operators = new List<IrOperator>();
+            foreach (var o in c.Operators)
                 operators.Add(fn.TryGetValue(o.CName, out var d) ? o with { CName = d } : o);
-            }
 
             classes.Add(c with
             {
@@ -145,21 +131,24 @@ internal sealed class Densifier(IrModule m)
             Classes = classes
         };
 
-        foreach (var role in module.Symbols.Intrinsics.Keys.ToList())
-            if (fn.TryGetValue(module.Symbols.Intrinsics[role], out var d))
-                module.Symbols.Intrinsics[role] = d;
+        // intrinsics are looked up by role later, so point them at the new names too
+        var intrinsics = module.Symbols.Intrinsics;
+        foreach (var role in intrinsics.Keys.ToList())
+        {
+            if (fn.TryGetValue(intrinsics[role], out var d)) intrinsics[role] = d;
+        }
 
         Mangler.SetDense(classTok);
         return (module, src);
     }
 
+    private static bool IsKept(IrFunction f) => f.Annotations.Any(a => a is KeepAnnotation);
+
     /// <summary>
     /// Returns a renamed function if the CName has a dense mapping, otherwise returns the original.
     /// </summary>
-    private static IrFunction Rename(IrFunction f, Dictionary<string, string> fn)
-    {
-        return fn.TryGetValue(f.CName, out var d) ? f with { CName = d } : f;
-    }
+    private static IrFunction Rename(IrFunction f, Dictionary<string, string> fn) =>
+        fn.TryGetValue(f.CName, out var d) ? f with { CName = d } : f;
 
     /// <summary>
     /// Rewrites every call site, for-in reference, and func-ref through the old-to-dense name map.
