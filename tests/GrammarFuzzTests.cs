@@ -231,8 +231,7 @@ public class GrammarFuzzTests
                 Pipeline.ValidateStructure(programs, null, diag);
                 if (diag.HasErrors)
                 {
-                    var errs = diag.All.Where(d => d.Severity == Severity.Error)
-                                       .Select(d => $"{d.Code} {d.Message}");
+                    var errs = diag.All.Where(d => d.Severity == Severity.Error).Select(d => $"{d.Code} {d.Message}");
                     failures.Add($"[seed {seed}] rejected a valid program: {string.Join("; ", errs)}\n{src}");
                     continue;
                 }
@@ -261,8 +260,7 @@ public class GrammarFuzzTests
             foreach (var unit in files.Where(f => f.Name.EndsWith(".c", StringComparison.Ordinal)))
             {
                 string devNull = OperatingSystem.IsWindows() ? "NUL" : "/dev/null";
-                var psi = new ProcessStartInfo(cc,
-                    $"-c -std=c11 -Werror=return-type -I. -o {devNull} {unit.Name}")
+                var psi = new ProcessStartInfo(cc, $"-c -std=c11 -Werror=return-type -I. -o {devNull} {unit.Name}")
                 { WorkingDirectory = dir, RedirectStandardError = true, UseShellExecute = false };
                 using var p = Process.Start(psi)!;
                 var err = p.StandardError.ReadToEnd();

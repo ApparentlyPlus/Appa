@@ -3,7 +3,7 @@ namespace Appa.Tests;
 /// <summary>
 /// Execution tests for union equality: same variant, and its fields equal by whatever '==' already
 /// means for each. These run the program because every interesting way it can be wrong still
-/// produces valid C returning a bool - only running it tells them apart.
+/// produces valid C returning a bool, only running it tells them apart.
 /// </summary>
 public class UnionEqualityTests
 {
@@ -108,7 +108,7 @@ public class UnionEqualityTests
                     let bool byValue = U.V(new Valued(5)) == U.V(new Valued(5));
                     let bool byValueDiff = U.V(new Valued(5)) == U.V(new Valued(6));
 
-                    // Plain declares none, so its references compare by address - exactly as a
+                    // Plain declares none, so its references compare by address, exactly as a
                     // bare '==' on two Plain references would.
                     let Plain shared = new Plain(5);
                     let bool sameObject = U.P(shared) == U.P(shared);
@@ -125,7 +125,7 @@ public class UnionEqualityTests
 
     /// <summary>
     /// A nested union recurses into its own generated equality rather than comparing the inner
-    /// struct bit for bit - which would compare the inner payload's dead variants too.
+    /// struct bit for bit, which would compare the inner payload's dead variants too.
     /// </summary>
     [Fact]
     public void NestedUnionsCompareStructurally()
@@ -246,7 +246,7 @@ public class UnionEqualityTests
 
     /// <summary>
     /// A generated equality goes only into realms declaring the operators it calls. A class inside
-    /// 'realm userspace { }' is emitted into uproc.c alone, so a kmain.c copy calls an undeclared function - a
+    /// 'realm userspace { }' is emitted into uproc.c alone, so a kmain.c copy calls an undeclared function, a
     /// warning on the pinned gcc 7, fatal on anything newer.
     /// </summary>
     [Fact]
@@ -258,7 +258,7 @@ public class UnionEqualityTests
             realm userspace {
                 // Both the payload class and the union naming it live in the realm. A realm-scoped
                 // declaration is not visible from an enclosing scope, so a top-level union could
-                // not name Key at all - which is the encapsulation working, not a limitation.
+                // not name Key at all, which is the encapsulation working, not a limitation.
                 class Key {
                     public int id;
                     func _init() { self.id = 0; }

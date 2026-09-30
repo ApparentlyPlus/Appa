@@ -5,7 +5,7 @@ using System.Diagnostics;
 /// <summary>
 /// One invariant, swept: a program the compiler accepts must emit C that compiles. Every readable
 /// C name joins its parts with '_', which is also legal inside each part, so names that split
-/// differently can spell one symbol - 'class A_B { M }' and 'class A { B_M }' are both 'gata_A_B_M'.
+/// differently can spell one symbol. 'class A_B { M }' and 'class A { B_M }' are both 'gata_A_B_M'.
 /// The names here are chosen to make that happen, so each program is either rejected or compiles.
 /// </summary>
 public class ManglingCollisionTests
@@ -72,9 +72,7 @@ public class ManglingCollisionTests
             $"enum {x} {{ {y} }} int func {x}_{y}() {{ return 1; }} " +
             "realm kernel { entry func Main() { } }");
 
-        yield return ("enum/enum",
-            $"enum {x} {{ {y} }} enum {x}_{y} {{ {x} }} " +
-            "realm kernel { entry func Main() { } }");
+        yield return ("enum/enum", $"enum {x} {{ {y} }} enum {x}_{y} {{ {x} }} " + "realm kernel { entry func Main() { } }");
 
         yield return ("type/type",
             $"class {x}_{y} {{ public int n; }} class {x} {{ public int n; }} " +
@@ -133,7 +131,7 @@ public class ManglingCollisionTests
     /// <summary>
     /// The names the compiler emits without the program declaring them: the launcher, the entry
     /// symbol, thread entries, synthesised function-pointer typedefs, and the dense tokens. A
-    /// declaration that spells one of these either has to be rejected or has to survive - and
+    /// declaration that spells one of these either has to be rejected or has to survive, and
     /// several used to link silently, binding a call to a body the author never wrote.
     /// </summary>
     [Theory]

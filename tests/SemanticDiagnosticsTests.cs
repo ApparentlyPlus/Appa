@@ -44,17 +44,14 @@ public class SemanticDiagnosticsTests
     [Fact]
     public void PostfixOnNonNumeric()
     {
-        AssertError(Codes.TypeMismatch,
-            "realm kernel { entry func Main() { let bool b = true; b++; } }");
+        AssertError(Codes.TypeMismatch, "realm kernel { entry func Main() { let bool b = true; b++; } }");
     }
 
     [Fact]
     public void PointerPostfixRequiresUnsafe()
     {
-        AssertError(Codes.UnsafeRequired,
-            "realm kernel { entry func Main() { let int* p = null; p++; } }");
-        AssertClean(
-            "realm kernel { entry func Main() { unsafe { let int x = 1; let int* p = &x; p++; } } }");
+        AssertError(Codes.UnsafeRequired, "realm kernel { entry func Main() { let int* p = null; p++; } }");
+        AssertClean("realm kernel { entry func Main() { unsafe { let int x = 1; let int* p = &x; p++; } } }");
     }
 
     [Fact]
@@ -89,8 +86,7 @@ public class SemanticDiagnosticsTests
     [Fact]
     public void LetFromVoidCall()
     {
-        AssertError(Codes.CannotInfer,
-            "void func V() { } realm kernel { entry func Main() { let x = V(); } }");
+        AssertError(Codes.CannotInfer, "void func V() { } realm kernel { entry func Main() { let x = V(); } }");
     }
 
     [Fact]
@@ -190,22 +186,19 @@ public class SemanticDiagnosticsTests
     [Fact]
     public void NonConstEnumValueAgain()
     {
-        AssertError(Codes.TypeMismatch,
-            "enum E { A = \"str\" } realm kernel { entry func Main() { } }");
+        AssertError(Codes.TypeMismatch, "enum E { A = \"str\" } realm kernel { entry func Main() { } }");
     }
 
     [Fact]
     public void DuplicateEnumMember()
     {
-        AssertError(Codes.DuplicateName,
-            "enum E { A, B, A } realm kernel { entry func Main() { } }");
+        AssertError(Codes.DuplicateName, "enum E { A, B, A } realm kernel { entry func Main() { } }");
     }
 
     [Fact]
     public void DuplicateUnionVariant()
     {
-        AssertError(Codes.DuplicateName,
-            "union U { A(int x), B, A } realm kernel { entry func Main() { } }");
+        AssertError(Codes.DuplicateName, "union U { A(int x), B, A } realm kernel { entry func Main() { } }");
     }
 
     /// <summary>
@@ -454,7 +447,7 @@ public class SemanticDiagnosticsTests
 
     /// <summary>
     /// An undefined-method "did you mean" suggestion is carried in the diagnostic's separate Hints
-    /// array (rendered on its own "= help:" line), never spliced into the message text itself - the
+    /// array (rendered on its own "= help:" line), never spliced into the message text itself. The
     /// message states the problem outright, the hint is a distinct, optional line.
     /// </summary>
     [Fact]
@@ -486,8 +479,8 @@ public class SemanticDiagnosticsTests
 
     /// <summary>
     /// A field indexed without 'self.' still gets the diagnostic that names the fix. 'items[i].x'
-    /// also parses as a type reference, and reading it that way reports "'items_i' is a type" - a
-    /// mangled name nobody wrote - instead of the line saying what to do.
+    /// also parses as a type reference, and reading it that way reports "'items_i' is a type" (a
+    /// mangled name nobody wrote) instead of the line saying what to do.
     /// </summary>
     [Fact]
     public void IndexedFieldNamesTheFix()
@@ -526,7 +519,7 @@ public class SemanticDiagnosticsTests
 
     /// <summary>
     /// Scope only decides between the two readings when both are possible. 'Opt[bool]' has no index
-    /// reading, so a local called Opt cannot turn it into one - even though it does shadow the type
+    /// reading, so a local called Opt cannot turn it into one, even though it does shadow the type
     /// wherever the brackets could go either way.
     /// </summary>
     [Fact]
@@ -549,10 +542,8 @@ public class SemanticDiagnosticsTests
     /// naming a type nobody wrote and, for two of them, the wrong problem.
     /// </summary>
     [Theory]
-    [InlineData("realm kernel { entry func Main() { let int n = Nope[int].A(); } }",
-                "unknown generic type 'Nope'")]
-    [InlineData("union U { A(int v), B } realm kernel { entry func Main() { let U x = U[int].A(1); } }",
-                "'U' is not generic")]
+    [InlineData("realm kernel { entry func Main() { let int n = Nope[int].A(); } }", "unknown generic type 'Nope'")]
+    [InlineData("union U { A(int v), B } realm kernel { entry func Main() { let U x = U[int].A(1); } }", "'U' is not generic")]
     [InlineData("class Box[T] { public T v; func _init() { } } " +
                 "realm kernel { entry func Main() { let Box[int] b = new Box[int](); let int n = Box[int].Nope(); } }",
                 "'Box[int]' has no method 'Nope'")]
@@ -625,7 +616,7 @@ public class SemanticDiagnosticsTests
 
     /// <summary>
     /// 'retain' hands back the reference it counted. Called as a statement it adds the count to a
-    /// temporary the same scope then releases, so it compiles to nothing - which is never what
+    /// temporary the same scope then releases, so it compiles to nothing, which is never what
     /// someone reaching for it wanted.
     /// </summary>
     [Theory]
@@ -642,8 +633,8 @@ public class SemanticDiagnosticsTests
     }
 
     /// <summary>
-    /// The forms that keep the reference stay legal - this is how libgata hands values to storage
-    /// reference counting cannot see - and 'release' returns nothing, so discarding it is the only
+    /// The forms that keep the reference stay legal. This is how libgata hands values to storage
+    /// reference counting cannot see, and 'release' returns nothing, so discarding it is the only
     /// way to call it. A rule that rejected these would break the standard library.
     /// </summary>
     [Theory]

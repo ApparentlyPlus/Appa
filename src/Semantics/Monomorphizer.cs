@@ -13,7 +13,7 @@ internal readonly record struct GenericSeed(string Base, string[] Args, TextSpan
     /// <summary>
     /// The module scope in force where the instantiation was discovered. Carried rather than
     /// recovered from File, because the discovery happens while resolving a stamped generic body,
-    /// whose file is the template's - the type argument came from somewhere that file need never
+    /// whose file is the template's. The type argument came from somewhere that file need never
     /// import. The stamped instance is resolved under this.
     /// </summary>
     public string[] Scope { get; init; } = [];
@@ -22,8 +22,8 @@ internal readonly record struct GenericSeed(string Base, string[] Args, TextSpan
 internal sealed class Monomorphizer(DiagnosticBag diag)
 {
     // A generic template, either a class or a union. Both are stamped through the same
-    // worklist so one can reach for the other - a union variant holding a List[T], a class
-    // field holding a Maybe[T] - and so the two share one namespace for duplicate detection.
+    // worklist so one can reach for the other (a union variant holding a List[T], a class
+    // field holding a Maybe[T]) and so the two share one namespace for duplicate detection.
     private sealed record Template(TopLevel Decl, string[] Params, string BaseName);
 
     internal sealed class SubstitutionContext(Dictionary<string, TypeSpec> g, Dictionary<string, string>? c)
@@ -39,7 +39,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
         public Dictionary<string, string> NameMap { get; init; } = [];
 
         /// <summary>
-        /// Also rewrite bare identifiers naming a substituted type, not just type positions. Off
+        /// Also rewrite bare identifiers naming a substituted type, beyond type positions. Off
         /// for monomorphization, where an identifier spelled like a type parameter is a variable;
         /// on for scope binding, where 'Tagged.Ident(...)' has to follow 'let Tagged x'.
         /// </summary>
@@ -56,7 +56,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
 
         // Names a local binding owns at the point being rewritten. Only RewriteTypeNames needs it:
         // rewriting bare identifiers is otherwise blind, so 'let int Cfg' would go on reading as
-        // the scoped type - a variable losing to a type name, which never happens at file scope.
+        // the scoped type, a variable losing to a type name, which never happens at file scope.
         private readonly List<string> _bound = [];
 
         /// <summary>
@@ -276,9 +276,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
         {
             var declsInFile = new HashSet<TopLevel>(EachDecl(prog.Items));
             var ownersInFile = templates.Values.Where(t => declsInFile.Contains(t.Decl)).ToList();
-            var funcOwners = EachDecl(prog.Items).OfType<FuncDecl>()
-                                                 .Where(f => f.GenericParams.Length > 0)
-                                                 .ToList();
+            var funcOwners = EachDecl(prog.Items).OfType<FuncDecl>().Where(f => f.GenericParams.Length > 0).ToList();
             foreach (var use in prog.GenericUses)
             {
                 if (funcOwners.Any(fd =>
@@ -316,7 +314,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
         foreach (var (use, file) in directUses) AddRequest(use.Base, use.Args, use.Span, file, file);
         foreach (var s in seeds ?? []) AddRequest(s.Base, s.Args, s.Span, s.File, s.File);
 
-        var instancesByBase = new Dictionary<string, List<TopLevel>>();
+        var byBase = new Dictionary<string, List<TopLevel>>();
         var requestedFrom = new Dictionary<string, string>();
         var pending = new Queue<string>(requests.Keys);
         var done = new HashSet<string>();
@@ -337,8 +335,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
             }
             if (Array.Exists(args, a => a.Trim() == "void"))
             {
-                diag.Error(Codes.UndefinedType, file, span,
-                    $"'void' is not a valid type argument to '{baseName}'");
+                diag.Error(Codes.UndefinedType, file, span, $"'void' is not a valid type argument to '{baseName}'");
                 Mangler.RegisterGenericInstance(mangled);
                 Mangler.MarkGenericFailed(mangled);
                 continue;
@@ -347,8 +344,8 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
             Mangler.RegisterGenericInstance(mangled);
             string requester = scopeRequester.GetValueOrDefault(mangled, file);
             requestedFrom[mangled] = requester;
-            if (!instancesByBase.ContainsKey(baseName)) instancesByBase[baseName] = [];
-            instancesByBase[baseName].Add(concrete);
+            if (!byBase.ContainsKey(baseName)) byBase[baseName] = [];
+            byBase[baseName].Add(concrete);
 
             if (!deferredByOwner.TryGetValue(baseName, out var deferred)) continue;
             foreach (var (du, dfile) in deferred)
@@ -379,7 +376,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
                     if (tmplBase != null)
                     {
                         changed = true;
-                        if (instancesByBase.TryGetValue(tmplBase, out var instances))
+                        if (byBase.TryGetValue(tmplBase, out var instances))
                             hoisted.AddRange(instances);
                         continue;
                     }
@@ -425,8 +422,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
 
         return specs.Any(Mentions);
 
-        bool Mentions(NamedSpec s) =>
-            s.Args.Length == 0 ? parameters.Contains(s.Name) : s.Args.Any(Mentions);
+        bool Mentions(NamedSpec s) => s.Args.Length == 0 ? parameters.Contains(s.Name) : s.Args.Any(Mentions);
     }
 
     /// <summary>
@@ -453,8 +449,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     /// Clones a generic class template with concrete type arguments, substituting type parameters
     /// throughout signatures, native fields, and statement bodies.
     /// </summary>
-    private (TopLevel Concrete, Dictionary<string, string> Binds) Instantiate(
-        Template tmpl, string[] args, string mangled)
+    private (TopLevel Concrete, Dictionary<string, string> Binds) Instantiate(Template tmpl, string[] args, string mangled)
     {
         var gataMap = new Dictionary<string, string>();
         var specMap = new Dictionary<string, TypeSpec>();
@@ -469,7 +464,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
         }
         var ctx = new SubstitutionContext(specMap, cMap);
 
-        // A union has no members, only variants, and a variant's fields are plain params - so
+        // A union has no members, only variants, and a variant's fields are plain params, so
         // stamping one is just substituting every field's type spec.
         if (tmpl.Decl is UnionDecl utd)
         {
@@ -607,8 +602,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     /// <summary>
     /// Substitutes type parameters in a method body, dispatching to the native or block form.
     /// </summary>
-    internal static MethodBody SubBody(
-        MethodBody b, Dictionary<string, TypeSpec> g, Dictionary<string, string> c)
+    internal static MethodBody SubBody(MethodBody b, Dictionary<string, TypeSpec> g, Dictionary<string, string> c)
     {
         var ctx = new SubstitutionContext(g, c);
         return SubBody(b, ctx);
@@ -831,7 +825,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
                 return new MatchStmt(newMsScrut, newMsCases, newMsDefault, ms.Span) { Span = s.Span };
 
             default:
-                // NativeStmt, BreakStmt, ContinueStmt, ThrowStmt, DebugStmt, PanicStmt - nothing
+                // NativeStmt, BreakStmt, ContinueStmt, ThrowStmt, DebugStmt, PanicStmt: nothing
                 // to substitute.
                 NodeCoverage.AssertInertAstStmt(s);
                 return s;
@@ -973,7 +967,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
                 return new DefaultExpr(newDeType!, de.Span) { Span = e.Span };
 
             default:
-                // Literals, IdentExpr, NullExpr - nothing to substitute.
+                // Literals, IdentExpr, NullExpr: nothing to substitute.
                 NodeCoverage.AssertInertAstExpr(e);
                 return e;
         }
@@ -984,8 +978,7 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     /// <summary>
     /// Tries to bind a type parameter inferred from one argument position.
     /// </summary>
-    internal static bool UnifyParam(TypeSpec paramType, IrType argType,
-        string[] gparams, Dictionary<string, TypeSpec> binds)
+    internal static bool UnifyParam(TypeSpec paramType, IrType argType, string[] gparams, Dictionary<string, TypeSpec> binds)
     {
         switch (paramType)
         {
@@ -1013,8 +1006,8 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     }
 
     /// <summary>
-    /// Returns the declared name of a type that could be a stamped generic instance - a class
-    /// reference or a union - or null for anything that could not be one.
+    /// Returns the declared name of a type that could be a stamped generic instance (a class
+    /// reference or a union) or null for anything that could not be one.
     /// </summary>
     private static string? NameOfInstance(IrType t)
     {

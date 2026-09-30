@@ -61,8 +61,7 @@ public class CompilationIndependenceTests
     /// </summary>
     private static readonly (string Name, string Source)[] Diagnosing =
     [
-        ("undefined-type",
-            "realm kernel { entry func Main() { let Widget w; } }"),
+        ("undefined-type", "realm kernel { entry func Main() { let Widget w; } }"),
         ("wrong-argument",
             "class Widget { public int n; } int func Take(Widget w) { return w.n; } " +
             "realm kernel { entry func Main() { let int v = Take(1); } }"),
@@ -118,11 +117,10 @@ public class CompilationIndependenceTests
     /// <summary>
     /// Returns the named program's source.
     /// </summary>
-    private static string Find((string Name, string Source)[] set, string name) =>
-        set.First(p => p.Name == name).Source;
+    private static string Find((string Name, string Source)[] set, string name) => set.First(p => p.Name == name).Source;
 
     /// <summary>
-    /// Runs the front end and returns every diagnostic as one string, tolerating rejection - these
+    /// Runs the front end and returns every diagnostic as one string, tolerating rejection. These
     /// programs are meant to be rejected.
     /// </summary>
     private static string Diagnose(string source)

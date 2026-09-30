@@ -37,8 +37,7 @@ public class WarningDiagnosticsTests
     private static void AssertNoWarn(string code, string src)
     {
         var hits = Of(code, src);
-        Assert.True(hits.Length == 0,
-            $"expected no {code}, got: " + string.Join("; ", hits.Select(h => h.Message)));
+        Assert.True(hits.Length == 0, $"expected no {code}, got: " + string.Join("; ", hits.Select(h => h.Message)));
     }
 
     /// <summary>
@@ -70,10 +69,8 @@ public class WarningDiagnosticsTests
     {
         AssertNoWarn(Codes.ShadowedVariable,
             "realm kernel { entry func Main() { { let x = 1; let a = x; } { let x = 2; let b = x; } } }");
-        AssertError(Codes.DuplicateName,
-            "realm kernel { entry func Main() { let x = 1; let x = 2; } }");
-        AssertNoWarn(Codes.ShadowedVariable,
-            "realm kernel { entry func Main() { let x = 1; let x = 2; } }");
+        AssertError(Codes.DuplicateName, "realm kernel { entry func Main() { let x = 1; let x = 2; } }");
+        AssertNoWarn(Codes.ShadowedVariable, "realm kernel { entry func Main() { let x = 1; let x = 2; } }");
     }
 
     #endregion
@@ -83,10 +80,8 @@ public class WarningDiagnosticsTests
     [Fact]
     public void SelfAssignmentWarns()
     {
-        AssertWarns(Codes.SelfAssignment,
-            "realm kernel { entry func Main() { let x = 1; x = x; } }");
-        AssertNoWarn(Codes.SelfAssignment,
-            "realm kernel { entry func Main() { let x = 1; let y = 2; x = y; } }");
+        AssertWarns(Codes.SelfAssignment, "realm kernel { entry func Main() { let x = 1; x = x; } }");
+        AssertNoWarn(Codes.SelfAssignment, "realm kernel { entry func Main() { let x = 1; let y = 2; x = y; } }");
     }
 
     [Fact]
@@ -123,23 +118,20 @@ public class WarningDiagnosticsTests
     [Fact]
     public void ComparisonStatementHintsAssign()
     {
-        var d = AssertWarns(Codes.NoEffect,
-            "realm kernel { entry func Main() { let a = 1; let b = 2; a == b; } }");
+        var d = AssertWarns(Codes.NoEffect, "realm kernel { entry func Main() { let a = 1; let b = 2; a == b; } }");
         Assert.Contains(d.Hints, h => h.Contains("'='"));
     }
 
     [Fact]
     public void DiscardedCallSilent()
     {
-        AssertNoWarn(Codes.NoEffect,
-            "int func F() { return 1; } realm kernel { entry func Main() { F(); } }");
+        AssertNoWarn(Codes.NoEffect, "int func F() { return 1; } realm kernel { entry func Main() { F(); } }");
     }
 
     [Fact]
     public void MutatingStatementsSilent()
     {
-        AssertNoWarn(Codes.NoEffect,
-            "realm kernel { entry func Main() { let a = 1; a = 2; a++; let b = a; } }");
+        AssertNoWarn(Codes.NoEffect, "realm kernel { entry func Main() { let a = 1; a = 2; a++; let b = a; } }");
     }
 
     #endregion
@@ -161,10 +153,8 @@ public class WarningDiagnosticsTests
     [Fact]
     public void InfiniteLoopFormsSilent()
     {
-        AssertNoWarn(Codes.ConstantCondition,
-            "realm kernel { entry func Main() { while (true) { break; } } }");
-        AssertNoWarn(Codes.ConstantCondition,
-            "realm kernel { entry func Main() { for (let i = 0; ; i = i + 1) { break; } } }");
+        AssertNoWarn(Codes.ConstantCondition, "realm kernel { entry func Main() { while (true) { break; } } }");
+        AssertNoWarn(Codes.ConstantCondition, "realm kernel { entry func Main() { for (let i = 0; ; i = i + 1) { break; } } }");
     }
 
     [Fact]
@@ -172,8 +162,7 @@ public class WarningDiagnosticsTests
     {
         AssertWarns(Codes.SelfComparison,
             "realm kernel { entry func Main() { let a = 1; if (a == a) { let b = 1; let c = b; } } }");
-        AssertWarns(Codes.SelfComparison,
-            "realm kernel { entry func Main() { let a = 1; while (a < a) { break; } } }");
+        AssertWarns(Codes.SelfComparison, "realm kernel { entry func Main() { let a = 1; while (a < a) { break; } } }");
         AssertNoWarn(Codes.SelfComparison,
             "realm kernel { entry func Main() { let a = 1; let b = 2; if (a == b) { let c = 1; let d = c; } } }");
     }
@@ -185,8 +174,7 @@ public class WarningDiagnosticsTests
     [Fact]
     public void SameTypeCastWarns()
     {
-        AssertWarns(Codes.RedundantCast,
-            "realm kernel { entry func Main() { let int a = 1; let b = (a as int); } }");
+        AssertWarns(Codes.RedundantCast, "realm kernel { entry func Main() { let int a = 1; let b = (a as int); } }");
     }
 
     /// <summary>
@@ -196,15 +184,13 @@ public class WarningDiagnosticsTests
     [Fact]
     public void SameTypeCastOnLiteralExempt()
     {
-        AssertNoWarn(Codes.RedundantCast,
-            "realm kernel { entry func Main() { let a = (0x00100000 as int); let b = a; } }");
+        AssertNoWarn(Codes.RedundantCast, "realm kernel { entry func Main() { let a = (0x00100000 as int); let b = a; } }");
     }
 
     [Fact]
     public void WideningCastSilent()
     {
-        AssertNoWarn(Codes.RedundantCast,
-            "realm kernel { entry func Main() { let int a = 1; let b = (a as int64); } }");
+        AssertNoWarn(Codes.RedundantCast, "realm kernel { entry func Main() { let int a = 1; let b = (a as int64); } }");
     }
 
     #endregion
@@ -226,10 +212,8 @@ public class WarningDiagnosticsTests
     [Fact]
     public void FloatDivisorsSilent()
     {
-        AssertNoWarn(Codes.DivisionByZero,
-            "realm kernel { entry func Main() { let double a = 1.0; let b = a / 0.0; } }");
-        AssertNoWarn(Codes.DivisionByZero,
-            "realm kernel { entry func Main() { let a = 1; let z = 0; let b = a / z; } }");
+        AssertNoWarn(Codes.DivisionByZero, "realm kernel { entry func Main() { let double a = 1.0; let b = a / 0.0; } }");
+        AssertNoWarn(Codes.DivisionByZero, "realm kernel { entry func Main() { let a = 1; let z = 0; let b = a / z; } }");
     }
 
     #endregion
@@ -251,8 +235,7 @@ public class WarningDiagnosticsTests
         AssertNoWarn(Codes.UnusedParameter,
             "int func F(int a, int _b) { return a; } " +
             "realm kernel { entry func Main() { let r = F(1, 2); } }");
-        AssertNoWarn(Codes.UnusedVariable,
-            "realm kernel { entry func Main() { let _scratch = 1; } }");
+        AssertNoWarn(Codes.UnusedVariable, "realm kernel { entry func Main() { let _scratch = 1; } }");
     }
 
     [Fact]
@@ -317,12 +300,9 @@ public class WarningDiagnosticsTests
     [Fact]
     public void ShiftBoundFollowsOperandWidth()
     {
-        AssertNoWarn(Codes.BadShiftCount,
-            "realm kernel { entry func Main() { let int64 a = 1; let b = a << 32; } }");
-        AssertNoWarn(Codes.BadShiftCount,
-            "realm kernel { entry func Main() { let int a = 1; let b = a << 31; } }");
-        AssertNoWarn(Codes.BadShiftCount,
-            "realm kernel { entry func Main() { let int a = 1; let n = 40; let b = a << n; } }");
+        AssertNoWarn(Codes.BadShiftCount, "realm kernel { entry func Main() { let int64 a = 1; let b = a << 32; } }");
+        AssertNoWarn(Codes.BadShiftCount, "realm kernel { entry func Main() { let int a = 1; let b = a << 31; } }");
+        AssertNoWarn(Codes.BadShiftCount, "realm kernel { entry func Main() { let int a = 1; let n = 40; let b = a << n; } }");
     }
 
     #endregion
@@ -340,8 +320,7 @@ public class WarningDiagnosticsTests
     [Fact]
     public void NonInterpBracesSilent()
     {
-        AssertNoWarn(Codes.MissingInterpolation,
-            "realm kernel { entry func Main() { let s = \"{notAVariable}\"; let t = s; } }");
+        AssertNoWarn(Codes.MissingInterpolation, "realm kernel { entry func Main() { let s = \"{notAVariable}\"; let t = s; } }");
         AssertNoWarn(Codes.MissingInterpolation,
             "realm kernel { entry func Main() { let count = 1; let s = $\"n={count}\"; let t = s; } }");
         AssertNoWarn(Codes.MissingInterpolation,
@@ -355,8 +334,7 @@ public class WarningDiagnosticsTests
     [Fact]
     public void HintsRenderBelowTheCaret()
     {
-        var (diag, _) = SingleFileCompile.Check(
-            "realm kernel { entry func Main() { let a = 1; let b = a / 0; } }");
+        var (diag, _) = SingleFileCompile.Check("realm kernel { entry func Main() { let a = 1; let b = a / 0; } }");
         var d = Assert.Single(diag.All.Where(x => x.Code == Codes.DivisionByZero));
         Assert.NotEmpty(d.Hints);
         foreach (var h in d.Hints) Assert.DoesNotContain(h, d.Message);
@@ -390,16 +368,14 @@ public class WarningDiagnosticsTests
         string plainCaret = Plain(caretRow), plainSource = Plain(sourceRow);
         int caretAt = plainCaret.IndexOf('^');
         int tokenAt = plainSource.IndexOf("wrong", StringComparison.Ordinal);
-        Assert.True(caretAt == tokenAt,
-            $"caret at {caretAt} but 'wrong' at {tokenAt}:\n{plainSource}\n{plainCaret}");
+        Assert.True(caretAt == tokenAt, $"caret at {caretAt} but 'wrong' at {tokenAt}:\n{plainSource}\n{plainCaret}");
         Assert.Equal("wrong".Length, plainCaret.Count(c => c == '^'));
     }
 
     /// <summary>
     /// Strips ANSI colour escapes, which take up bytes but no terminal columns.
     /// </summary>
-    private static string Plain(string s) =>
-        System.Text.RegularExpressions.Regex.Replace(s, "\\[[0-9;]*m", "");
+    private static string Plain(string s) => System.Text.RegularExpressions.Regex.Replace(s, "\\[[0-9;]*m", "");
 
     [Fact]
     public void MultipleHintsOwnLines()
@@ -407,8 +383,7 @@ public class WarningDiagnosticsTests
         var bag = new DiagnosticBag(new SourceSet());
         var sources = bag.Sources;
         sources.Add("t.g", "let x = 1;\n");
-        bag.Error(Codes.Syntax, "t.g", new TextSpan(0, 3), "something went wrong",
-            ["first suggestion", "second suggestion"]);
+        bag.Error(Codes.Syntax, "t.g", new TextSpan(0, 3), "something went wrong", ["first suggestion", "second suggestion"]);
         var lines = bag.Render(bag.All[0]).Split('\n');
         Assert.Equal(2, lines.Count(l => l.Contains("help")));
         Assert.Contains(lines, l => l.Contains("first suggestion") && !l.Contains("second"));
@@ -461,13 +436,12 @@ public class WarningDiagnosticsTests
     /// <summary>
     /// The lowered form of an ARC 'release' on an unmanaged value is a bare '(void)x' discard,
     /// which is structurally pure. The user still wrote a call, so it must not be reported as a
-    /// no-effect statement - this shape appears throughout libgata's containers.
+    /// no-effect statement. This shape appears throughout libgata's containers.
     /// </summary>
     [Fact]
     public void UnmanagedReleaseHasEffect()
     {
-        AssertNoWarn(Codes.NoEffect,
-            "realm kernel { entry func Main() { unsafe { let int x = 1; release(x); } } }");
+        AssertNoWarn(Codes.NoEffect, "realm kernel { entry func Main() { unsafe { let int x = 1; release(x); } } }");
     }
 
     #endregion
@@ -506,7 +480,7 @@ public class WarningDiagnosticsTests
     /// <summary>
     /// A generic instantiation as a payload must not warn, however it is reached. This is the shape
     /// of a recursive sum type, and putting one in a List stamps an IndexOf that made the warning
-    /// fire inside List.g - where nothing the author writes can silence it.
+    /// fire inside List.g, where nothing the author writes can silence it.
     /// </summary>
     [Fact]
     public void GenericPayloadSilent()
@@ -517,7 +491,7 @@ public class WarningDiagnosticsTests
     }
 
     /// <summary>
-    /// The exemption above is for generic instantiations only - an ordinary class payload with no
+    /// The exemption above is for generic instantiations only. An ordinary class payload with no
     /// '==' is still actionable, and still reported, even alongside an exempt one.
     /// </summary>
     [Fact]
@@ -623,15 +597,13 @@ public class WarningDiagnosticsTests
     [Fact]
     public void SelfUnionComparisonWarns()
     {
-        AssertWarns(Codes.SelfComparison,
-            SmallUnion + "realm kernel { entry func Main() { let U u = U.B(); if (u == u) { } } }");
+        AssertWarns(Codes.SelfComparison, SmallUnion + "realm kernel { entry func Main() { let U u = U.B(); if (u == u) { } } }");
     }
 
     [Fact]
     public void SelfUnionNotEqualsWarns()
     {
-        AssertWarns(Codes.SelfComparison,
-            SmallUnion + "realm kernel { entry func Main() { let U u = U.B(); if (u != u) { } } }");
+        AssertWarns(Codes.SelfComparison, SmallUnion + "realm kernel { entry func Main() { let U u = U.B(); if (u != u) { } } }");
     }
 
     [Fact]

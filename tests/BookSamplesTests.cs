@@ -5,7 +5,7 @@ using Appa;
 
 /// <summary>
 /// The book's Gata samples, run through the real parser. A language reference drifts silently -
-/// nothing else in the tree reads it - and the two things that had already gone stale were a block
+/// nothing else in the tree reads it, and the two things that had already gone stale were a block
 /// syntax that stopped being valid and a modifier the grammar never accepted.
 /// </summary>
 public partial class BookSamplesTests

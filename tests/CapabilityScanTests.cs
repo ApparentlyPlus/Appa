@@ -3,7 +3,7 @@ namespace Appa.Tests;
 using Appa;
 
 /// <summary>
-/// What the GatOS image is built to carry. A capability the scan misses is not a build error - the
+/// What the GatOS image is built to carry. A capability the scan misses is not a build error. The
 /// subsystem is simply left out, and the call that needed it answers whatever the stub answers. That
 /// makes an under-declaration a silent wrong result on the real target and nowhere else, which is
 /// the hardest kind to notice and the reason this is checked here rather than only by booting.
@@ -42,7 +42,7 @@ public class CapabilityScanTests
 
     /// <summary>
     /// The defect. A destructor runs wherever an owner leaves scope, and the emitter synthesises that
-    /// call - so no IR expression names it and the walk from the entry points never arrived. The same
+    /// call, so no IR expression names it and the walk from the entry points never arrived. The same
     /// clock read moved into a '_deinit' left GATA_CAP_TIME out of the image, and the call then
     /// answered 0 instead of the uptime, booting cleanly the whole time.
     /// </summary>
@@ -147,8 +147,7 @@ public class CapabilityScanTests
     {
         var withThreads = Scan(
             "realm kernel { background process P { thread T { entry func Run() { } } } entry func Main() { } }");
-        var manifest = new Manifest(".", "t", Target.GatOS, Mode.Debug, Output.Serial,
-                                    Keyboard.Default, CapabilityDiscovery.On);
+        var manifest = new Manifest(".", "t", Target.GatOS, Mode.Debug, Output.Serial, Keyboard.Default, CapabilityDiscovery.On);
 
         var defines = Toolchain.CapabilityDefines(withThreads, manifest);
         Assert.Contains("-DGATA_CAP_THREADS", defines);

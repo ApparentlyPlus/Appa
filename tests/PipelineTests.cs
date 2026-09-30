@@ -128,13 +128,11 @@ public class PipelineTests
     /// A realm is one namespace however many blocks open it, in however many files.
     /// </summary>
     [Theory]
-    [InlineData(false, "realm kernel { entry func Main() { } }",
-                       "realm kernel { int func Helper() { return 1; } }")]
+    [InlineData(false, "realm kernel { entry func Main() { } }", "realm kernel { int func Helper() { return 1; } }")]
     [InlineData(false, "realm kernel { entry func Main() { } }",
                        "realm kernel { class Cfg { public int n; } }",
                        "realm kernel { module M { public static int func F() { return 1; } } }")]
-    [InlineData(true, "realm userspace { entry func Main() { } }",
-                      "realm userspace { int func Helper() { return 1; } }")]
+    [InlineData(true, "realm userspace { entry func Main() { } }", "realm userspace { int func Helper() { return 1; } }")]
     public void RealmSplitsAcrossFiles(bool hosted, params string[] files)
     {
         Target? target = hosted ? Target.Hosted : null;
@@ -165,8 +163,7 @@ public class PipelineTests
         sources.Add("<a>", a);
         sources.Add("<b>", b);
         var diag = new DiagnosticBag(sources);
-        Pipeline.ValidateStructure(
-            [("<a>", SingleFileCompile.Parse(a)), ("<b>", SingleFileCompile.Parse(b))], null, diag);
+        Pipeline.ValidateStructure([("<a>", SingleFileCompile.Parse(a)), ("<b>", SingleFileCompile.Parse(b))], null, diag);
 
         var d = Assert.Single(diag.All);
         Assert.Equal(Codes.DuplicateEntry, d.Code);

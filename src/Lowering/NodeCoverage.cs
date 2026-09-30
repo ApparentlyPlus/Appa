@@ -23,8 +23,7 @@ internal static class NodeCoverage
     [Conditional("DEBUG")]
     public static void AssertInertAstExpr(Expr e)
     {
-        if (e is IntLitExpr or FloatLitExpr or StrLitExpr or CharLitExpr or BoolLitExpr
-                or NullExpr or IdentExpr) return;
+        if (e is IntLitExpr or FloatLitExpr or StrLitExpr or CharLitExpr or BoolLitExpr or NullExpr or IdentExpr) return;
         throw new UnreachableException(Message("Monomorphizer.SubExpr", e.GetType().Name,
             "its type arguments will not be substituted when a generic is stamped"));
     }
@@ -49,22 +48,20 @@ internal static class NodeCoverage
     [Conditional("DEBUG")]
     public static void AssertInertIrStmt(IrStmt s, string where)
     {
-        if (s is IrNativeStmt or IrGoto or IrLabel or IrBreak or IrContinue or IrThrow
-                or IrDebug or IrPanic) return;
+        if (s is IrNativeStmt or IrGoto or IrLabel or IrBreak or IrContinue or IrThrow or IrDebug or IrPanic) return;
         throw new UnreachableException(Message(where, s.GetType().Name,
             "its child nodes will be skipped by every pass built on this traversal"));
     }
     
     /// <summary>
-    /// Asserts that a statement reaching the default arm of a control-flow analysis - the hand-rolled
-    /// switches in DefinitelyReturns and HasLoopBreak - carries nothing those analyses would need to
+    /// Asserts that a statement reaching the default arm of a control-flow analysis (the hand-rolled
+    /// switches in DefinitelyReturns and HasLoopBreak) carries nothing those analyses would need to
     /// look inside.
     /// </summary>
     [Conditional("DEBUG")]
     public static void AssertNoNestedFlow(IrStmt s, string where)
     {
-        if (s is IrGoto or IrLabel or IrBreak or IrContinue or IrThrow or IrDebug or IrPanic
-                or IrReturn or IrAssignValue) return;
+        if (s is IrGoto or IrLabel or IrBreak or IrContinue or IrThrow or IrDebug or IrPanic or IrReturn or IrAssignValue) return;
         throw new UnreachableException(Message(where, s.GetType().Name,
             "the control flow inside it is invisible to this analysis"));
     }

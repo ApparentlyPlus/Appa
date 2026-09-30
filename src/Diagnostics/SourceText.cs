@@ -2,14 +2,8 @@ namespace Appa;
 
 internal sealed class SourceText
 {
-    /// <summary>
-    /// The absolute path of the source file
-    /// </summary>
     public string Path { get; }
 
-    /// <summary>
-    /// The full text of the source file
-    /// </summary>
     public string Text { get; }
 
     /// <summary>

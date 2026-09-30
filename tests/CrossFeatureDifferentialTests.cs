@@ -8,11 +8,7 @@ using System.Text;
 /// </summary>
 public class CrossFeatureDifferentialTests
 {
-    private sealed record Frag(
-        string Name,
-        string Decls,
-        Func<string, string> Apply,
-        Func<int, int> Eval);
+    private sealed record Frag(string Name, string Decls, Func<string, string> Apply, Func<int, int> Eval);
 
     private static List<Frag> Frags() =>
     [
@@ -123,8 +119,7 @@ public class CrossFeatureDifferentialTests
         if (gata == null || cc == null) { Assert.Skip("no checkout/compiler"); return; }
 
         var cases = Generate(count: 600, depth: 5, seed: 20260731);
-        var decls = new HashSet<string>(
-            cases.SelectMany(c => c.Chain).Select(f => f.Decls).Where(s => s.Length > 0));
+        var decls = new HashSet<string>(cases.SelectMany(c => c.Chain).Select(f => f.Decls).Where(s => s.Length > 0));
         var sb = new StringBuilder();
         sb.AppendLine(Helpers);
         foreach (var d in decls) sb.AppendLine(d);

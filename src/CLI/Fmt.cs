@@ -132,7 +132,7 @@ static class Fmt
     }
 
     /// <summary>
-    /// Writes a line with something pinned to the right edge - a label and its elapsed time.
+    /// Writes a line with something pinned to the right edge, a label and its elapsed time.
     /// </summary>
     public static void Justify(string left, string right, string indent = Indent)
     {

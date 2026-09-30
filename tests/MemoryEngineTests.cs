@@ -131,7 +131,7 @@ public class MemoryEngineTests
     /// <summary>
     /// And under the flag set that made the aliasing violation matter. A Release build is where a
     /// compiler is entitled to act on "these two loops cannot touch the same memory", so a
-    /// regression here would show up at -O3 while Debug stayed green - the shape that reaches a
+    /// regression here would show up at -O3 while Debug stayed green, the shape that reaches a
     /// shipped image and nothing else.
     /// </summary>
     [Fact]

@@ -86,7 +86,7 @@ public static class TortureCorpus
 
     /// <summary>
     /// Statements that are legal somewhere and nonsense elsewhere. Each must be either accepted or
-    /// rejected with a diagnostic in every position above -- never crash, never fall through into
+    /// rejected with a diagnostic in every position above: never crash, never fall through into
     /// the emitter.
     /// </summary>
     private static readonly (string Name, string Stmt)[] StmtProbes =
@@ -363,8 +363,7 @@ public static class TortureCorpus
             foreach (var (tn, type) in TypeProbes)
             {
                 if (pn == "generic-arg" && type.StartsWith("Box")) continue;
-                yield return new TortureCase($"type/{pn}/{tn}",
-                    prelude + tpl.Replace("%T%", type), Expect.Any);
+                yield return new TortureCase($"type/{pn}/{tn}", prelude + tpl.Replace("%T%", type), Expect.Any);
             }
     }
 
@@ -379,8 +378,7 @@ public static class TortureCorpus
     /// </summary>
     private static IEnumerable<TortureCase> BinaryOperatorMatrix()
     {
-        string[] ops = ["+", "-", "*", "/", "%", "&", "|", "^", "<<", ">>",
-                        "==", "!=", "<", ">", "<=", ">=", "&&", "||"];
+        string[] ops = ["+", "-", "*", "/", "%", "&", "|", "^", "<<", ">>", "==", "!=", "<", ">", "<=", ">=", "&&", "||"];
         (string Name, string Expr)[] operands =
         [
             ("int", "1"), ("double", "1.5"), ("bool", "true"), ("char", "'c'"),
@@ -590,8 +588,7 @@ public static class TortureCorpus
         #region try/catch
         yield return new("try/catch-missing",
             "throws void func T() { throw; } realm kernel { entry func Main() { try { T(); } } }", Expect.Rejected);
-        yield return new("try/empty-both",
-            "realm kernel { entry func Main() { try { } catch { } } }", Expect.Any);
+        yield return new("try/empty-both", "realm kernel { entry func Main() { try { } catch { } } }", Expect.Any);
         yield return new("try/return-in-catch",
             "throws void func T() { throw; } int func H() { try { T(); return 1; } catch { return 0; } } realm kernel { entry func Main() { H(); } }",
             Expect.Accepted);
@@ -684,8 +681,7 @@ public static class TortureCorpus
             Expect.Rejected, Codes.TypeMismatch);
         yield return new("procvar/in-realm",
             "realm kernel { let int n = 1; entry func Main() { } }", Expect.Rejected, Codes.Syntax);
-        yield return new("throws/on-entry",
-            "realm kernel { entry throws func Main() { throw; } }", Expect.Rejected);
+        yield return new("throws/on-entry", "realm kernel { entry throws func Main() { throw; } }", Expect.Rejected);
         yield return new("throw/outside-throws-func",
             "void func H() { throw; } realm kernel { entry func Main() { H(); } }", Expect.Rejected);
 
@@ -711,10 +707,8 @@ public static class TortureCorpus
         #region switch
         yield return new("switch/dup-label",
             "realm kernel { entry func Main() { switch (1) { case 1 { } case 1 { } } } }", Expect.Rejected);
-        yield return new("switch/no-cases",
-            "realm kernel { entry func Main() { switch (1) { } } }", Expect.Any);
-        yield return new("switch/only-default",
-            "realm kernel { entry func Main() { switch (1) { default { } } } }", Expect.Any);
+        yield return new("switch/no-cases", "realm kernel { entry func Main() { switch (1) { } } }", Expect.Any);
+        yield return new("switch/only-default", "realm kernel { entry func Main() { switch (1) { default { } } } }", Expect.Any);
         yield return new("switch/non-constant-label",
             "realm kernel { entry func Main() { let int n = 1; switch (n) { case n { } } } }", Expect.Any);
         yield return new("switch/string-scrutinee",
@@ -727,8 +721,7 @@ public static class TortureCorpus
         #endregion
 
         #region match
-        yield return new("match/non-union",
-            "realm kernel { entry func Main() { match (1) { case A { } } } }", Expect.Rejected);
+        yield return new("match/non-union", "realm kernel { entry func Main() { match (1) { case A { } } } }", Expect.Rejected);
         yield return new("match/unknown-variant",
             "union U { A } realm kernel { entry func Main() { let U u = U.A(); match (u) { case Zzz { } } } }", Expect.Rejected);
         yield return new("match/non-exhaustive",
@@ -765,8 +758,7 @@ public static class TortureCorpus
             Expect.Accepted);
         yield return new("union/managed-payload-in-class-field",
             "union U { A(String s) } class C { U u; } realm kernel { entry func Main() { } }", Expect.Accepted);
-        yield return new("union/self-payload", "union U { A(U u) } realm kernel { entry func Main() { } }",
-            Expect.Rejected);
+        yield return new("union/self-payload", "union U { A(U u) } realm kernel { entry func Main() { } }", Expect.Rejected);
         yield return new("union/mutual-payload",
             "union A { X(B b) } union B { Y(A a) } realm kernel { entry func Main() { } }", Expect.Rejected);
         yield return new("union/dup-field", "union U { A(int x, int x) } realm kernel { entry func Main() { } }", Expect.Rejected);
@@ -954,8 +946,7 @@ public static class TortureCorpus
             "realm kernel { entry func Main() { if (1) { } } }", Expect.Rejected, Codes.ConditionNotBool);
         yield return new("cf/infinite-for-missing-cond",
             "realm kernel { entry func Main() { for (;;) { break; } } }", Expect.Any);
-        yield return new("cf/entry-call",
-            "realm kernel { entry func Main() { Main(); } }", Expect.Rejected, Codes.CallToEntry);
+        yield return new("cf/entry-call", "realm kernel { entry func Main() { Main(); } }", Expect.Rejected, Codes.CallToEntry);
 
         #endregion
 
@@ -1003,7 +994,7 @@ public static class TortureCorpus
         yield return new("scope/realm-shadows-top-level", """
             class Config { public int narrow; }
             realm kernel {
-                // Displaces the top-level Config, and says so. The inner one wins here; the outer
+                // Displaces the top-level Config, and says so. The inner one wins here. The outer
                 // one stays what it was everywhere else.
                 @shadows class Config { public int wide; }
                 void func Use(Config c) { let int v = c.wide; }
@@ -1624,15 +1615,12 @@ public static class TortureCorpus
 
         #region realms / structure
         yield return new("struct/no-entry", "void func H() { }", Expect.Rejected);
-        yield return new("struct/two-entries",
-            "realm kernel { entry func A() { } entry func B() { } }", Expect.Rejected);
+        yield return new("struct/two-entries", "realm kernel { entry func A() { } entry func B() { } }", Expect.Rejected);
         yield return new("struct/nested-kernel", "realm kernel { realm kernel { } }", Expect.Rejected);
-        yield return new("struct/split-kernel",
-            "realm kernel { entry func Main() { } } realm kernel { }", Expect.Accepted);
+        yield return new("struct/split-kernel", "realm kernel { entry func Main() { } } realm kernel { }", Expect.Accepted);
         yield return new("struct/split-kernel-two-entries",
             "realm kernel { entry func Main() { } } realm kernel { entry func Other() { } }", Expect.Rejected);
-        yield return new("struct/entry-outside-kernel",
-            "entry func Main() { }", Expect.Rejected);
+        yield return new("struct/entry-outside-kernel", "entry func Main() { }", Expect.Rejected);
         yield return new("struct/panic-in-user",
             "realm kernel { entry func Main() { } } realm userspace { void func H() { panic \"x\"; } }", Expect.Any);
 
@@ -1662,8 +1650,7 @@ public static class TortureCorpus
             Expect.Rejected, Codes.UnsafeRequired);
         yield return new("unsafe/addrof-outside",
             "realm kernel { entry func Main() { let int n = 1; let int* p = &n; } }", Expect.Any);
-        yield return new("unsafe/nested",
-            "realm kernel { entry func Main() { unsafe { unsafe { } } } }", Expect.Any);
+        yield return new("unsafe/nested", "realm kernel { entry func Main() { unsafe { unsafe { } } } }", Expect.Any);
         yield return new("unsafe/deref-int",
             "realm kernel { entry func Main() { unsafe { let int n = 1; let int v = *n; } } }", Expect.Rejected);
         yield return new("unsafe/addrof-literal",
@@ -1737,8 +1724,7 @@ public static class TortureCorpus
         yield return new("ann/on-field", "class C { @keep int n; } realm kernel { entry func Main() { } }", Expect.Rejected);
         yield return new("ann/unknown-intrinsic",
             "@intrinsic(not_a_real_role) native { } realm kernel { entry func Main() { } }", Expect.Any);
-        yield return new("ann/env-misplaced",
-            "realm kernel { entry func Main() { } @environment }", Expect.Rejected);
+        yield return new("ann/env-misplaced", "realm kernel { entry func Main() { } @environment }", Expect.Rejected);
 
         #endregion
 
@@ -1848,16 +1834,14 @@ public static class TortureCorpus
             "void func H() { } realm kernel { entry func Main() { let s = $\"{H()}\"; } }", Expect.Rejected);
         yield return new("interp/array-operand",
             "realm kernel { entry func Main() { let a = [1, 2]; let s = $\"{a}\"; } }", Expect.Any);
-        yield return new("interp/nested-interp",
-            "realm kernel { entry func Main() { let s = $\"{$\"{1}\"}\"; } }", Expect.Any);
+        yield return new("interp/nested-interp", "realm kernel { entry func Main() { let s = $\"{$\"{1}\"}\"; } }", Expect.Any);
         yield return new("interp/assign-inside",
             "realm kernel { entry func Main() { let int v = 0; let s = $\"{v = 1}\"; } }", Expect.Rejected);
         yield return new("interp/throws-inside",
             "throws int func T() { throw; } realm kernel { entry func Main() { let s = $\"{T()}\"; } }", Expect.Rejected);
         yield return new("interp/many-parts",
             "realm kernel { entry func Main() { let s = $\"a{1}b{2}c{3}d{4}e\"; } }", Expect.Any);
-        yield return new("interp/plain-string-no-dollar",
-            "realm kernel { entry func Main() { let s = \"{1}\"; } }", Expect.Any);
+        yield return new("interp/plain-string-no-dollar", "realm kernel { entry func Main() { let s = \"{1}\"; } }", Expect.Any);
 
         #endregion
 
@@ -1870,8 +1854,7 @@ public static class TortureCorpus
             "class C { public void func M() { let int self = 1; } } realm kernel { entry func Main() { } }", Expect.Any);
         yield return new("scope/use-before-decl",
             "realm kernel { entry func Main() { let int a = b; let int b = 1; } }", Expect.Rejected);
-        yield return new("scope/self-referential-init",
-            "realm kernel { entry func Main() { let int a = a; } }", Expect.Rejected);
+        yield return new("scope/self-referential-init", "realm kernel { entry func Main() { let int a = a; } }", Expect.Rejected);
         yield return new("scope/leak-from-if",
             "realm kernel { entry func Main() { if (true) { let int a = 1; } let int b = a; } }", Expect.Rejected);
         yield return new("scope/leak-from-for",
@@ -1994,8 +1977,7 @@ public static class TortureCorpus
             "class C { public int func M() native { return 1; } } realm kernel { entry func Main() { } }", Expect.Any);
         yield return new("native/fields-block",
             "class C { fields { int raw; } } realm kernel { entry func Main() { let C c = new C(); } }", Expect.Any);
-        yield return new("native/statement",
-            "realm kernel { entry func Main() { native { int local = 1; } } }", Expect.Any);
+        yield return new("native/statement", "realm kernel { entry func Main() { native { int local = 1; } } }", Expect.Any);
         yield return new("native/unbalanced-brace",
             "realm kernel { entry func Main() { } } native { if (1) { }", Expect.Rejected);
         yield return new("native/empty", "native { } realm kernel { entry func Main() { } }", Expect.Any);
@@ -2035,23 +2017,17 @@ public static class TortureCorpus
             "realm kernel { entry func Main() { let double d = 1.5; let v = d & 1; } }", Expect.Rejected);
         yield return new("num/mod-on-double",
             "realm kernel { entry func Main() { let double d = 1.5; let v = d % 2.0; } }", Expect.Any);
-        yield return new("num/shift-negative",
-            "realm kernel { entry func Main() { let v = 1 << -1; } }", Expect.Any);
-        yield return new("num/not-on-int",
-            "realm kernel { entry func Main() { let v = !1; } }", Expect.Rejected);
-        yield return new("num/bitnot-on-bool",
-            "realm kernel { entry func Main() { let v = ~true; } }", Expect.Rejected);
-        yield return new("num/neg-on-bool",
-            "realm kernel { entry func Main() { let v = -true; } }", Expect.Rejected);
-        yield return new("num/neg-on-string",
-            "realm kernel { entry func Main() { let v = -\"s\"; } }", Expect.Rejected);
+        yield return new("num/shift-negative", "realm kernel { entry func Main() { let v = 1 << -1; } }", Expect.Any);
+        yield return new("num/not-on-int", "realm kernel { entry func Main() { let v = !1; } }", Expect.Rejected);
+        yield return new("num/bitnot-on-bool", "realm kernel { entry func Main() { let v = ~true; } }", Expect.Rejected);
+        yield return new("num/neg-on-bool", "realm kernel { entry func Main() { let v = -true; } }", Expect.Rejected);
+        yield return new("num/neg-on-string", "realm kernel { entry func Main() { let v = -\"s\"; } }", Expect.Rejected);
         yield return new("num/double-negate", "realm kernel { entry func Main() { let v = -(-1); } }", Expect.Any);
         yield return new("num/triple-negate", "realm kernel { entry func Main() { let int n = 1; let v = -(-(-n)); } }", Expect.Any);
         yield return new("num/negate-postfix", "realm kernel { entry func Main() { let int n = 1; let v = -(n++); } }", Expect.Any);
         yield return new("num/double-bitnot", "realm kernel { entry func Main() { let v = ~(~1); } }", Expect.Any);
         yield return new("num/double-not", "realm kernel { entry func Main() { let v = !(!true); } }", Expect.Any);
-        yield return new("num/int-div-zero-const",
-            "realm kernel { entry func Main() { let v = 1 / 0; } }", Expect.Any);
+        yield return new("num/int-div-zero-const", "realm kernel { entry func Main() { let v = 1 / 0; } }", Expect.Any);
 
         #endregion
 

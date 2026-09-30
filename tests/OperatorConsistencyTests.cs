@@ -39,8 +39,8 @@ public class OperatorConsistencyTests
     #region '!=' / '==' derivation
 
     /// <summary>
-    /// A class that declares '==' but not '!=' gets '!=' as the negation of its own '==' - a direct
-    /// call to the declared operator wrapped in '!' - never the old silent fallback to reference
+    /// A class that declares '==' but not '!=' gets '!=' as the negation of its own '==' (a direct
+    /// call to the declared operator wrapped in '!'), never the old silent fallback to reference
     /// identity.
     /// </summary>
     [Fact]

@@ -3,8 +3,8 @@ namespace Appa;
 using System.Xml.Linq;
 
 // What a build produces / how it is hosted.
-//   GatOS - a bootable ISO (the kernel target).
-//   Hosted - C against the libc platform (the test/ASAN harness target).
+//   GatOS: a bootable ISO (the kernel target).
+//   Hosted: C against the libc platform (the test/ASAN harness target).
 enum Target { GatOS, Hosted }
 
 // Build mode. Debug allows the diagnostic floor (debug/panic) and ships unoptimized
@@ -20,12 +20,12 @@ enum Output { Framebuffer, Serial }
 enum Keyboard { Default, External, Hotplug }
 
 // On (default): CapabilityScan infers MEM/INPUT/THREADS, so the image carries only what it
-// uses. Off: assume all three - the escape valve for a raw native{} body that touches a
+// uses. Off: assume all three, the escape valve for a raw native{} body that touches a
 // capability through no Gata-visible call, where inference would under-declare.
 enum CapabilityDiscovery { On, Off }
 
 // A project's build configuration, read from its <project>.gconf: what to build, how, and the
-// explicitly-chosen knobs. gcc flags, env/entry paths and stdlib selection are not here - appa
+// explicitly-chosen knobs. gcc flags, env/entry paths and stdlib selection are not here, appa
 // owns the flags, @environment is discovered, and the entry is the src/main.g convention.
 sealed record Manifest(
     string Dir,

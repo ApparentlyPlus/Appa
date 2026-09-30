@@ -128,7 +128,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
 
     /// <summary>
     /// Returns true if the current token is an identifier spelled exactly as given. The test for a
-    /// contextual keyword - a word that only means something in one grammatical position, and is
+    /// contextual keyword: a word that only means something in one grammatical position, and is
     /// an ordinary identifier everywhere else.
     /// </summary>
     private bool AtValue(string word)
@@ -136,14 +136,10 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         return Cur.Kind == TK.Ident && Cur.Value == word;
     }
 
-    /// <summary>
-    /// Returns true if a process declaration starts here.
-    /// </summary>
     private bool AtProcessStart()
     {
         if (At(TK.Foreground) || At(TK.Background)) return true;
-        return AtValue("process") && Peek().Kind == TK.Ident
-            && (Peek(2).Kind == TK.LBrace || Peek(2).Kind == TK.Colon);
+        return AtValue("process") && Peek().Kind == TK.Ident && (Peek(2).Kind == TK.LBrace || Peek(2).Kind == TK.Colon);
     }
 
     /// <summary>
@@ -247,9 +243,6 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         }
     }
 
-    /// <summary>
-    /// Returns the source span an annotation was written at.
-    /// </summary>
     private static TextSpan AnnSpan(Annotation a)
     {
         return a switch
@@ -443,7 +436,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
 
     /// <summary>
     /// Parses a 'realm kernel { … }' or 'realm userspace { … }' block. There are exactly two
-    /// realms; 'kernel' is a keyword, 'userspace' is matched by value since nothing else may
+    /// realms. 'kernel' is a keyword, 'userspace' is matched by value since nothing else may
     /// follow 'realm'.
     /// </summary>
     private ContextDecl ParseRealmDecl()
@@ -481,8 +474,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     /// </summary>
     private void RequireRealmKeyword()
     {
-        Fail("expected 'realm' before 'kernel'", Codes.MissingRealmKeyword,
-             ["write 'realm kernel { ... }'"]);
+        Fail("expected 'realm' before 'kernel'", Codes.MissingRealmKeyword, ["write 'realm kernel { ... }'"]);
     }
 
     /// <summary>
@@ -1473,9 +1465,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         if (At(TK.ColonColon)) return true;
         if (At(TK.Kernel) || At(TK.Userspace)) return Peek().Kind == TK.Dot;
         if (!At(TK.Ident)) return false;
-        return Peek().Kind == TK.Ident
-            || Peek().Kind == TK.LBrack
-            || (Peek().Kind == TK.Punct && Peek().Value == "*");
+        return Peek().Kind == TK.Ident || Peek().Kind == TK.LBrack || (Peek().Kind == TK.Punct && Peek().Value == "*");
     }
 
     /// <summary>
@@ -1529,7 +1519,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     {
         Expect(TK.For);
 
-        // for x in col { } -- range loop, no parens
+        // for x in col { }: range loop, no parens
         if (At(TK.Ident) && Peek().Kind == TK.In)
         {
             string var = Advance().Value;
@@ -1540,8 +1530,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         // C-style for (init; cond; step) { }
         Expect(TK.LParen);
         
-        if ((At(TK.Ident) && Peek().Kind == TK.In)
-            || (At(TK.Let) && Peek().Kind == TK.Ident && Peek(2).Kind == TK.In))
+        if ((At(TK.Ident) && Peek().Kind == TK.In) || (At(TK.Let) && Peek().Kind == TK.Ident && Peek(2).Kind == TK.In))
             Fail("a 'for ... in' loop is written without parentheses",
                  hints: ["write 'for x in xs { ... }'",
                          "the parenthesised form is the C-style loop, which takes " +
@@ -1894,7 +1883,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Parses '[ ... ]' after an expression: an index, a generic type reference, or a node carrying
     /// both for the resolver. Only 'Ident[...].' can be a type, and a failed reading is rolled back
-    /// whole - cursor, depth and generic-use registrations.
+    /// whole: cursor, depth and generic-use registrations.
     /// </summary>
     private Expr ParseBracketed(Expr expr, int s)
     {
@@ -1952,12 +1941,11 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     /// True for a token that can only ever begin a type. The primitive spellings are split across
     /// several kinds rather than sharing one, so every branch has to be named.
     /// </summary>
-    private static bool IsTypeKeyword(TK k) =>
-        k is TK.TPrim or TK.TInt or TK.TBool or TK.TChar or TK.TFloat or TK.TDouble
+    private static bool IsTypeKeyword(TK k) => k is TK.TPrim or TK.TInt or TK.TBool or TK.TChar or TK.TFloat or TK.TDouble
              or TK.TShort or TK.TVoid;
 
     /// <summary>
-    /// Reports an attempt to pass explicit type arguments to a call - 'Sort[int](xs)'.
+    /// Reports an attempt to pass explicit type arguments to a call: 'Sort[int](xs)'.
     /// </summary>
     private void RejectExplicitTypeArgs()
     {
@@ -2102,7 +2090,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
 
         // Parenthesised expression or primitive cast. Unambiguous because the type must be a
         // primitive keyword or identifier and the cast must be followed by a unary expression.
-        // User-defined types are not allowed here - they would collide with a grouped expression.
+        // User-defined types are not allowed here. They would collide with a grouped expression.
         if (At(TK.LParen))
         {
             Advance();

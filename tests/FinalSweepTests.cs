@@ -39,7 +39,7 @@ public class FinalSweepTests
 
     /// <summary>
     /// The unused-local walk did not descend into a catch handler, so a variable read only there
-    /// was reported unused - a warning on correct code, at the exact spot the handler exists for.
+    /// was reported unused, a warning on correct code, at the exact spot the handler exists for.
     /// </summary>
     [Fact]
     public void CatchHandlerUseCounts()
@@ -87,8 +87,7 @@ public class FinalSweepTests
     [Fact]
     public void NewOnEnumHints()
     {
-        var d = AssertOne(Codes.NewOnNonClass,
-            "enum E { X } realm kernel { entry func Main() { let E e = new E(); } }");
+        var d = AssertOne(Codes.NewOnNonClass, "enum E { X } realm kernel { entry func Main() { let E e = new E(); } }");
         Assert.Contains("enum", d.Message);
         Assert.Contains(d.Hints, h => h.Contains("Member"));
     }
@@ -156,7 +155,7 @@ public class FinalSweepTests
 
     /// <summary>
     /// A scope qualifier and an explicit type argument list are each supported, and were not
-    /// supported together in expression position - a parse error, though the type position took it.
+    /// supported together in expression position, a parse error, though the type position took it.
     /// </summary>
     [Theory]
     [InlineData("union U[T] { A(T v), B }\nrealm kernel { entry func Main() { let U[int] u = ::U[int].A(1); } }")]
@@ -172,8 +171,7 @@ public class FinalSweepTests
     [Fact]
     public void ScopedUnionResolvesExplicitly()
     {
-        AssertClean("realm kernel { union U[T] { A(T v), B }\n" +
-                    " entry func Main() { let U[int] u = U[int].B(); } }");
+        AssertClean("realm kernel { union U[T] { A(T v), B }\n" + " entry func Main() { let U[int] u = U[int].B(); } }");
     }
 
     /// <summary>
@@ -194,7 +192,7 @@ public class FinalSweepTests
 
     /// <summary>
     /// Relational operators never derive from one another, so half a family is a type error at
-    /// every call site of the other half - reported at the declaration, where it is fixable.
+    /// every call site of the other half. Reported at the declaration, where it is fixable.
     /// </summary>
     [Fact]
     public void PartialRelationalWarns()
@@ -219,13 +217,12 @@ public class FinalSweepTests
     }
 
     /// <summary>
-    /// Declaring neither is fine - the warning is about an incomplete family, not a missing one.
+    /// Declaring neither is fine. The warning is about an incomplete family, not a missing one.
     /// </summary>
     [Fact]
     public void NoRelationalSilent()
     {
-        AssertNoDiagnostic(Codes.PartialOperatorSet,
-            "class V { public int n; } realm kernel { entry func Main() { } }");
+        AssertNoDiagnostic(Codes.PartialOperatorSet, "class V { public int n; } realm kernel { entry func Main() { } }");
     }
 
     #endregion

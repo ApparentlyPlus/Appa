@@ -27,7 +27,7 @@ public class GenericMethodsAndAmbiguityTests
     /// <summary>
     /// Compiles each file's source with every other file mutually visible, mirroring how
     /// Pipeline.BuildModule is driven once real import resolution has already produced a visibility
-    /// map - the exact mechanism SingleFileCompile.Check uses for one file.
+    /// map, the exact mechanism SingleFileCompile.Check uses for one file.
     /// </summary>
     private static (DiagnosticBag Diag, IrModule? Module) CheckMulti(params (string Path, string Src)[] files)
     {
@@ -82,7 +82,7 @@ public class GenericMethodsAndAmbiguityTests
 
     /// <summary>
     /// A generic INSTANCE method has a real 'self', usable inside the instantiated body to call an
-    /// ordinary sibling instance method - the full "self instantiation" fix, not just the
+    /// ordinary sibling instance method, the full "self instantiation" fix, covering more than the
     /// static/module case.
     /// </summary>
     [Fact]
@@ -109,8 +109,7 @@ public class GenericMethodsAndAmbiguityTests
         Assert.NotNull(module);
         var box = module!.Classes.Single(c => c.Name == "Box");
         Assert.Equal(2, box.Methods.Count(m => m.Name.StartsWith("Combine_")));
-        Assert.All(box.Methods.Where(m => m.Name.StartsWith("Combine_")),
-            m => Assert.False(m.IsStatic));
+        Assert.All(box.Methods.Where(m => m.Name.StartsWith("Combine_")), m => Assert.False(m.IsStatic));
     }
 
     [Fact]

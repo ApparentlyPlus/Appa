@@ -16,7 +16,7 @@ static class Spin
     static bool _cursorHidden;
 
     /// <summary>
-    /// True when the spinner has somewhere to animate - false under a pipe or a test harness, where
+    /// True when the spinner has somewhere to animate. False under a pipe or a test harness, where
     /// in-place redraws would be recorded as line noise.
     /// </summary>
     public static bool IsTty => Tty;

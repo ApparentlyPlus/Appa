@@ -81,7 +81,7 @@ public class CrossFileExecutionTests
             import "src/adder.g";
             import "src/fail.g";
 
-            // Same name as the private functions in box.g and adder.g; all three must mangle apart.
+            // Same name as the private functions in box.g and adder.g. All three must mangle apart.
             private int func Scale(int n) { return n * 5; }
             int func MainScale(int n) { return Scale(n); }
             """);

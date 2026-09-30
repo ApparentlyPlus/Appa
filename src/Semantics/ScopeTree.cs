@@ -143,8 +143,7 @@ internal sealed class ScopeTree
     /// The child scope for a segment, or null when this scope has no such child. Lookup only: a
     /// written qualifier must not bring a scope into existence.
     /// </summary>
-    public ScopeId? Child(ScopeId parent, string segment) =>
-        _index.TryGetValue((parent.Value, segment), out var id) ? id : null;
+    public ScopeId? Child(ScopeId parent, string segment) => _index.TryGetValue((parent.Value, segment), out var id) ? id : null;
 
     /// <summary>
     /// True when <paramref name="outer"/> is <paramref name="inner"/> or encloses it. The whole

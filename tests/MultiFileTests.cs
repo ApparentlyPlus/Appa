@@ -15,11 +15,7 @@ public class MultiFileTests
     /// <summary>
     /// The result of running the front end over a written-out project.
     /// </summary>
-    private sealed record BuildResult(
-        DiagnosticBag? Diag,
-        IrModule? Module,
-        IReadOnlyList<OutputFile>? Files,
-        string? Crash);
+    private sealed record BuildResult(DiagnosticBag? Diag, IrModule? Module, IReadOnlyList<OutputFile>? Files, string? Crash);
 
     /// <summary>
     /// Writes a case's files into the given directory and runs the same front-end sequence
@@ -62,16 +58,14 @@ public class MultiFileTests
         catch (Exception ex)
         {
             var frame = (ex.StackTrace ?? "").Split('\n').FirstOrDefault()?.Trim() ?? "<no stack>";
-            return new BuildResult(null, null, null,
-                $"{ex.GetType().Name}: {ex.Message.Replace('\n', ' ')} @ {frame}");
+            return new BuildResult(null, null, null, $"{ex.GetType().Name}: {ex.Message.Replace('\n', ' ')} @ {frame}");
         }
     }
 
     /// <summary>
     /// Renders a case's files for a failure message.
     /// </summary>
-    private static string Describe(MultiFileCase c) =>
-        string.Join("\n", c.Files.Select(f => $"--- {f.Path} ---\n{f.Content}"));
+    private static string Describe(MultiFileCase c) => string.Join("\n", c.Files.Select(f => $"--- {f.Path} ---\n{f.Content}"));
 
     /// <summary>
     /// Locates a usable host C compiler, or null.
@@ -223,8 +217,7 @@ public class MultiFileTests
             Directory.CreateDirectory(outDir);
             foreach (var f in r.Files) File.WriteAllText(Path.Combine(outDir, f.Name), f.Content);
 
-            var units = r.Files.Where(f => f.Name.EndsWith(".c", StringComparison.Ordinal))
-                               .Select(f => f.Name).ToList();
+            var units = r.Files.Where(f => f.Name.EndsWith(".c", StringComparison.Ordinal)).Select(f => f.Name).ToList();
             if (units.Count == 0) continue;
 
             bool hasMain = r.Files.Any(f => f.Content.Contains("int main(void)", StringComparison.Ordinal));
@@ -239,8 +232,7 @@ public class MultiFileTests
             linked++;
             if (p.ExitCode == 0) continue;
 
-            var first = err.Split('\n').FirstOrDefault(l =>
-                            l.Contains("error", StringComparison.OrdinalIgnoreCase)) ?? err;
+            var first = err.Split('\n').FirstOrDefault(l => l.Contains("error", StringComparison.OrdinalIgnoreCase)) ?? err;
             fails.Add($"[{c.Name}] {cc} failed on {string.Join(" + ", units)}: {first.Trim()}\n{Describe(c)}");
         }
 
@@ -305,8 +297,7 @@ public class MultiFileTests
             files.Add(("src/main.g", $"{mainImports}\nrealm userspace {{ entry func Main() {{ {mainBody} }} }}\n"));
 
             var shape = acyclic ? "acyclic" : "cyclic";
-            var c = new MultiFileCase($"graph/{shape}/seed{seed}", [.. files],
-                                      acyclic ? Expect.Accepted : Expect.Any);
+            var c = new MultiFileCase($"graph/{shape}/seed{seed}", [.. files], acyclic ? Expect.Accepted : Expect.Any);
 
             using var work = Scratch.Create("appa-multifile-");
             var r = Build(c, work);
@@ -326,7 +317,7 @@ public class MultiFileTests
     /// <summary>
     /// Shadowing across files is exactly as explicit as within one: unmarked is a hard error,
     /// '@shadows' accepts it, and a name from a file this build never imports is not shadowed at
-    /// all - so marking it is the error instead.
+    /// all, so marking it is the error instead.
     /// </summary>
     [Theory]
     [InlineData("imported-unmarked", true)]
@@ -344,8 +335,7 @@ public class MultiFileTests
         var files = shape.Split('-')[0] switch
         {
             "imported" => (("src/lib.g", widget), ("src/main.g", $"import \"src/lib.g\";\n{realm}\n")),
-            "own" => (("src/lib.g", "int func Unused() { return 1; }"),
-                      ("src/main.g", $"{widget}\n{realm}\n")),
+            "own" => (("src/lib.g", "int func Unused() { return 1; }"), ("src/main.g", $"{widget}\n{realm}\n")),
             _ => (("src/lib.g", widget), ("src/main.g", $"{realm}\n")),
         };
 
@@ -412,11 +402,7 @@ public class MultiFileTests
     /// </summary>
     private static IReadOnlyList<Diagnostic> Diagnose(string lib, string main)
     {
-        var c = new MultiFileCase("shadow/private",
-        [
-            ("src/lib.g", lib),
-            ("src/main.g", main),
-        ], Expect.Any);
+        var c = new MultiFileCase("shadow/private", [("src/lib.g", lib), ("src/main.g", main),], Expect.Any);
 
         using var work = Scratch.Create("appa-multifile-");
         var r = Build(c, work);
@@ -513,9 +499,7 @@ public class MultiFileTests
     [InlineData("private int func Clamp(int v) { return v; }\n", false)]
     public void NoWarningWithoutADisplacement(string prelude, bool expected)
     {
-        var all = Diagnose(
-            "int func Clamp(int v) { return v; }",
-            prelude + "realm userspace { entry func Main() { } }\n");
+        var all = Diagnose("int func Clamp(int v) { return v; }", prelude + "realm userspace { entry func Main() { } }\n");
 
         Assert.Equal(expected, all.Any(d => d.Code == Codes.ShadowedFunction));
     }

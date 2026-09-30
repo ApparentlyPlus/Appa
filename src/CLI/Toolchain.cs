@@ -69,7 +69,7 @@ internal static class Toolchain
         if (threads || input) mem = true;
 
         // The time source (get_uptime_ns) is the timer subsystem, which only ticks when
-        // the interrupt subsystem is up - TIME implies the same ACPI/APIC/heap floor.
+        // the interrupt subsystem is up. TIME implies the same ACPI/APIC/heap floor.
         if (time) mem = true;
 
         return (mem, input, threads, time, discover);
@@ -125,7 +125,7 @@ internal static class Toolchain
     /// kernel binary to the project build dir under the project's name, and optionally runs QEMU.
     /// </summary>
     internal static void BuildGatOSImage(IReadOnlyList<OutputFile> output, Manifest manifest,
-                                string projectRoot, List<string> defines, string capsNote,
+                                string root, List<string> defines, string capsNote,
                                 bool doRun, bool headless, int? timeout)
     {
         if (!Directory.Exists(AppaPaths.TemplateDir) || !Directory.GetDirectories(AppaPaths.TemplateDir).Any())
@@ -162,7 +162,7 @@ internal static class Toolchain
             LinkKernel(objFiles, kernelBin, targetsDir);
 
             string isoPath = MakeIso(kernelBin, isoDir, distDir);
-            string projectBuildDir = Path.Combine(projectRoot, "build");
+            string projectBuildDir = Path.Combine(root, "build");
             Directory.CreateDirectory(projectBuildDir);
             string stem = ArtifactStem(manifest.ProjectName);
             string outIso = Path.Combine(projectBuildDir, stem + ".iso");
@@ -178,7 +178,7 @@ internal static class Toolchain
 
             if (doRun)
             {
-                string artifactsDir = Path.Combine(projectRoot, "artifacts");
+                string artifactsDir = Path.Combine(root, "artifacts");
                 Directory.CreateDirectory(artifactsDir);
                 RunQemu(outIso, artifactsDir, headless, timeout);
             }
@@ -205,8 +205,7 @@ internal static class Toolchain
     /// Returns true if the given translation unit path belongs to the userspace realm rather than
     /// the kernel.
     /// </summary>
-    internal static bool IsUserspace(string rel) =>
-        rel.StartsWith("ulibc/") || rel == GeneratedUserTu;
+    internal static bool IsUserspace(string rel) => rel.StartsWith("ulibc/") || rel == GeneratedUserTu;
 
     /// <summary>
     /// The one userspace translation unit appa generates rather than GatOS shipping: the lowered
@@ -216,7 +215,7 @@ internal static class Toolchain
 
     /// <summary>
     /// The compiler flags for one GatOS translation unit. Split out from the compile loop so the
-    /// choices below can be asserted without a toolchain present - the flags that matter most here
+    /// choices below can be asserted without a toolchain present, the flags that matter most here
     /// are the ones whose effect is invisible in a build that succeeds.
     /// </summary>
     internal static List<string> CFlagsFor(
@@ -360,8 +359,7 @@ internal static class Toolchain
         if (r1.ExitCode != 0) Die($"grub-mkstandalone failed:\n{r1.Stderr}");
 
         string isoOut = Path.Combine(distDir, "GatOS.iso");
-        string mkrescueArgs =
-            $"--xorriso=\"{AppaPaths.XorrisoExe}\" --fonts=unicode --themes= -o \"{isoOut}\" \"{isoDir}\"";
+        string mkrescueArgs = $"--xorriso=\"{AppaPaths.XorrisoExe}\" --fonts=unicode --themes= -o \"{isoOut}\" \"{isoDir}\"";
 
         var r2 = Exec(AppaPaths.GrubTool("grub-mkrescue"), mkrescueArgs,
             AppaPaths.GrubDir, capture: true, spinner: "Creating ISO image");
@@ -382,7 +380,7 @@ internal static class Toolchain
         var qemuArgs = new System.Text.StringBuilder();
         qemuArgs.Append($"-cdrom \"{isoPath}\"");
 
-        // COM1 (mon:stdio - boot markers + serial output), COM2 (GatOS debug.log),
+        // COM1 (mon:stdio, boot markers + serial output), COM2 (GatOS debug.log),
         // COM3 (userspace debug channel).
         qemuArgs.Append($" -serial mon:stdio");
         qemuArgs.Append($" -serial \"file:{debugLog}\"");
@@ -391,8 +389,7 @@ internal static class Toolchain
         if (headless) qemuArgs.Append(" -nographic");
 
         string exe = AppaPaths.QemuExe;
-        string finalArgs = RuntimeInformation.IsOSPlatform(OSPlatform.Linux) &&
-                           exe.EndsWith(".AppImage")
+        string finalArgs = RuntimeInformation.IsOSPlatform(OSPlatform.Linux) && exe.EndsWith(".AppImage")
             ? $"qemu-system-x86_64 {qemuArgs}"
             : qemuArgs.ToString();
 

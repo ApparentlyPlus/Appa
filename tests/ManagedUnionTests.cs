@@ -2,8 +2,8 @@ namespace Appa.Tests;
 
 /// <summary>
 /// Execution tests for managed unions. These run the program because every way it breaks still
-/// compiles and prints the right answer - a leak, an over-release, a payload dropped at the wrong
-/// moment - so each prints from a _deinit and the transcript pins the order.
+/// compiles and prints the right answer (a leak, an over-release, a payload dropped at the wrong
+/// moment), so each prints from a _deinit and the transcript pins the order.
 /// </summary>
 public class ManagedUnionTests
 {
@@ -38,7 +38,7 @@ public class ManagedUnionTests
 
     /// <summary>
     /// The ownership sweep. Each section names itself, then whatever it drops appears between that
-    /// line and the next - so the expected output below is a transcript of when every object died,
+    /// line and the next, so the expected output below is a transcript of when every object died,
     /// which is precisely the contract managed unions have to keep.
     /// </summary>
     private const string OwnershipProgram = Prelude + """
@@ -130,7 +130,7 @@ public class ManagedUnionTests
     /// <summary>
     /// The paths where ownership is hardest: a value inside a Result, a throw past a live owner, a
     /// handler supplying a replacement, an early return with a defer, a ternary. The throw-past is
-    /// the sharp one - 'keep' is live when the next call fails.
+    /// the sharp one. 'keep' is live when the next call fails.
     /// </summary>
     private const string ControlFlowProgram = Prelude + """
 
@@ -317,7 +317,7 @@ public class ManagedUnionTests
 
     /// <summary>
     /// A managed union declared in one file and used from another. Its retain/release pair lands in
-    /// the shared header and every unit must see the same one - a per-file copy would fail to link,
+    /// the shared header and every unit must see the same one. A per-file copy would fail to link,
     /// or link and leave one file's unions uncounted.
     /// </summary>
     [Fact]
@@ -459,7 +459,7 @@ public class ManagedUnionTests
     }
 
     /// <summary>
-    /// 'Maybe[int].Found(7)' and the indexing it collides with, in one program - the same tokens
+    /// 'Maybe[int].Found(7)' and the indexing it collides with, in one program: the same tokens
     /// when the brackets hold one identifier, so both directions are asserted: getting one right by
     /// breaking the other is the easy mistake, and 'arr[i].n' is ordinary.
     /// </summary>
@@ -520,7 +520,7 @@ public class ManagedUnionTests
     }
 
     /// <summary>
-    /// A recursive generic sum type - a polymorphic AST - and a generic function over it. Needs a
+    /// A recursive generic sum type (a polymorphic AST) and a generic function over it. Needs a
     /// template reaching for another generic through its own parameter more than one level deep
     /// ('List[Node[T]]' inside 'Node[T]'), and inference from a stamped union. Both failed once.
     /// </summary>
@@ -587,7 +587,7 @@ public class ManagedUnionTests
     }
 
     /// <summary>
-    /// Leaks on purpose, so the file's leak checks cannot pass by never running - every other
+    /// Leaks on purpose, so the file's leak checks cannot pass by never running. Every other
     /// assertion here is satisfied by an absence, which a dead detector also satisfies. Not LSan,
     /// which misses a leaked pointer still sitting in a dead stack slot.
     /// </summary>
@@ -623,7 +623,7 @@ public class ManagedUnionTests
             }
             """, gata, cc);
 
-        // The program itself must still run to completion - the point is that it leaks, not
+        // The program itself must still run to completion. The point is that it leaks, not
         // that it crashes.
         HostedRun.AssertClean(r);
 

@@ -1,7 +1,7 @@
 namespace Appa.Tests;
 
 /// <summary>
-/// The same program built twice - Debug and Release - and required to compute the same answers.
+/// The same program built twice (Debug and Release) and required to compute the same answers.
 /// </summary>
 public class ReleaseModeExecutionTests
 {
@@ -79,7 +79,7 @@ public class ReleaseModeExecutionTests
                         Console.PrintLine($"vec {c.x} {a == b} {c == new Vec(7)}");
                     }
 
-                    // A container, iterated - the refcount of each element is touched twice.
+                    // A container, iterated: the refcount of each element is touched twice.
                     {
                         let List[Tracked] xs = new List[Tracked]();
                         for (let int i = 0; i < 4; i++) { xs.Add(new Tracked(10 + i)); }

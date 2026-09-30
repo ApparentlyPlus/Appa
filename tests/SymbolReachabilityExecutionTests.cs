@@ -51,7 +51,7 @@ public class SymbolReachabilityExecutionTests
                     Console.PrintLine($"pointer {f(1)}");
 
                     // The same extern through two declaring files, plus a second extern whose C is
-                    // 'static inline' - the case a generated prototype would have conflicted with.
+                    // 'static inline', the case a generated prototype would have conflicted with.
                     Console.PrintLine($"extern {ViaA()} {ViaB()} {TwiceViaA(21)}");
 
                     let func(int, int) -> int g = probe_add;

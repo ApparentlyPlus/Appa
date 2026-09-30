@@ -18,7 +18,7 @@ internal sealed record MultiFileCase(
 /// <summary>
 /// The multi-file torture corpus. Everything else compiles a single source string, leaving import
 /// resolution, per-file visibility, cross-file collisions, split realms and private-name mangling
-/// untested - none of it reachable without files on disk.
+/// untested, none of it reachable without files on disk.
 /// </summary>
 internal static class MultiFileCorpus
 {
@@ -139,8 +139,7 @@ internal static class MultiFileCorpus
     /// <summary>
     /// Builds src/main.g with the given imports and body.
     /// </summary>
-    private static string Main(string imports, string body) =>
-        imports + "\n" + string.Format(MainShell, body) + "\n";
+    private static string Main(string imports, string body) => imports + "\n" + string.Format(MainShell, body) + "\n";
 
     /// <summary>
     /// Builds src/main.g for a GatOS case: the given declarations go into this file's half of the
@@ -378,10 +377,7 @@ internal static class MultiFileCorpus
             F("src/main.g", Main("import NoSuchModule;", "")),
         ], Expect.Rejected, Codes.File);
 
-        yield return new("import/self",
-        [
-            F("src/main.g", Main("import \"src/main.g\";", "")),
-        ], Expect.Any);
+        yield return new("import/self", [F("src/main.g", Main("import \"src/main.g\";", "")),], Expect.Any);
 
         yield return new("import/cycle-two",
         [
@@ -413,15 +409,9 @@ internal static class MultiFileCorpus
                                  "let int v = Left() + Right();")),
         ], Expect.Accepted);
 
-        yield return new("import/parent-escape",
-        [
-            F("src/main.g", Main("import \"../outside.g\";", "")),
-        ], Expect.Rejected);
+        yield return new("import/parent-escape", [F("src/main.g", Main("import \"../outside.g\";", "")),], Expect.Rejected);
 
-        yield return new("import/directory-not-file",
-        [
-            F("src/main.g", Main("import \"src\";", "")),
-        ], Expect.Rejected);
+        yield return new("import/directory-not-file", [F("src/main.g", Main("import \"src\";", "")),], Expect.Rejected);
 
         #endregion
 

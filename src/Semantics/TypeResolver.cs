@@ -69,7 +69,7 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Resolves `ns.name(...)` where `ns` is an in-scope file's basename - the escape hatch for a
+    /// Resolves `ns.name(...)` where `ns` is an in-scope file's basename, the escape hatch for a
     /// collision that cannot be qualified through a class or module. Null if nothing matches, so
     /// the caller falls through to the instance-receiver path.
     /// </summary>
@@ -180,9 +180,6 @@ internal sealed class TypeResolver(
         return depth;
     }
 
-    /// <summary>
-    /// Nesting depth of a type spec.
-    /// </summary>
     private static int SpecDepth(NamedSpec s)
     {
         int deepest = 0;
@@ -237,8 +234,7 @@ internal sealed class TypeResolver(
                 return;
             case ArraySpec a:
                 if (!(TryParseIntLit(a.SizeText, out var n, out _, out _) && n > 0))
-                    diag.Error(Codes.UndefinedType, ctx.File, Sp(a, span),
-                        $"invalid fixed-array size in '{a.ToSpecString()}'");
+                    diag.Error(Codes.UndefinedType, ctx.File, Sp(a, span), $"invalid fixed-array size in '{a.ToSpecString()}'");
                 else
                     CheckType(a.Elem, ctx, Sp(a.Elem, span));
                 return;
@@ -413,7 +409,7 @@ internal sealed class TypeResolver(
             if (primary != null) CheckArgCount(primary.Sig, args.Count, display, ctx, span);
             return primary;
         }
-        // cheapest conversion wins; two different overloads at the same cost is ambiguous
+        // cheapest conversion wins. Two different overloads at the same cost is ambiguous
         Symbol? best = null;
         int bestCost = int.MaxValue;
         bool tie = false;
@@ -435,13 +431,11 @@ internal sealed class TypeResolver(
         }
         if (best == null)
         {
-            diag.Error(Codes.NoMatchingOverload, ctx.File, span,
-                $"no overload of '{display}' matches ({DescribeArgs(args)})");
+            diag.Error(Codes.NoMatchingOverload, ctx.File, span, $"no overload of '{display}' matches ({DescribeArgs(args)})");
             return null;
         }
         if (tie)
-            diag.Error(Codes.AmbiguousOverload, ctx.File, span,
-                $"call to '{display}' is ambiguous for ({DescribeArgs(args)})");
+            diag.Error(Codes.AmbiguousOverload, ctx.File, span, $"call to '{display}' is ambiguous for ({DescribeArgs(args)})");
         return best;
     }
 
@@ -586,7 +580,7 @@ internal sealed class TypeResolver(
 
     /// <summary>
     /// The inclusive range of an integer primitive, or null for a type whose range does not fit in a
-    /// long - 'bool', the 64-bit widths, and the non-integers.
+    /// long: 'bool', the 64-bit widths, and the non-integers.
     /// </summary>
     private static (long Lo, long Hi)? Range(IrPrimType t)
     {
@@ -685,8 +679,7 @@ internal sealed class TypeResolver(
         if (c.Type is IrResultType || c.Type.IsError) return;
         if (c.Type is not IrPrimType { CName: "bool" })
         {
-            diag.Error(Codes.ConditionNotBool, ctx.File, c.Span,
-                $"condition must be 'bool', got '{Describe(c.Type)}'");
+            diag.Error(Codes.ConditionNotBool, ctx.File, c.Span, $"condition must be 'bool', got '{Describe(c.Type)}'");
             return;
         }
         WarnConstCondition(c, ctx, allowConst);
@@ -735,8 +728,7 @@ internal sealed class TypeResolver(
     private void CheckLValue(IrExpr target, ResolveCtx ctx)
     {
         if (target is IrVar or IrGlobal or IrFieldLoad or IrIndex or IrDeref) return;
-        diag.Error(Codes.NotAnLvalue, ctx.File, target.Span,
-            "assignment target must be a variable, field, or element");
+        diag.Error(Codes.NotAnLvalue, ctx.File, target.Span, "assignment target must be a variable, field, or element");
     }
 
     /// <summary>
@@ -887,7 +879,7 @@ internal sealed class TypeResolver(
 
     /// <summary>
     /// Warns when a plain string literal contains '{name}' and 'name' is a variable actually in
-    /// scope - the signature of a '$' dropped from an interpolated string, which otherwise fails
+    /// scope: the signature of a '$' dropped from an interpolated string, which otherwise fails
     /// silently by printing the braces verbatim.
     /// </summary>
     private void WarnIfLooksInterpolated(StrLitExpr sl, ResolveCtx ctx)
@@ -969,10 +961,8 @@ internal sealed class TypeResolver(
             IrFor f => (f.Cond == null || f.Cond is IrLitBool { Value: true }) && !HasLoopBreak(f.Body),
             IrPanic => true,
             IrTryCatch t => DefinitelyReturns(t.Try) && DefinitelyReturns(t.Catch),
-            IrSwitch sw => sw.Default != null && sw.Cases.All(c => DefinitelyReturns(c.Body))
-                           && DefinitelyReturns(sw.Default),
-            IrMatch ms => ms.Cases.All(c => DefinitelyReturns(c.Body))
-                          && (ms.Default == null || DefinitelyReturns(ms.Default)),
+            IrSwitch sw => sw.Default != null && sw.Cases.All(c => DefinitelyReturns(c.Body)) && DefinitelyReturns(sw.Default),
+            IrMatch ms => ms.Cases.All(c => DefinitelyReturns(c.Body)) && (ms.Default == null || DefinitelyReturns(ms.Default)),
             IrDeclVar or IrAssign or IrExprStmt => false,
             IrForIn => false,
             IrDefer => false,
@@ -1051,8 +1041,7 @@ internal sealed class TypeResolver(
                "either make the whole body native - put 'native' after the signature instead of inside " +
                "the braces - or have the native block store its result in a local and return that local"]
             : [];
-        diag.Error(Codes.MissingReturn, ctx.File, span,
-            $"'{display}' must return '{Describe(ret)}' on every path", hints);
+        diag.Error(Codes.MissingReturn, ctx.File, span, $"'{display}' must return '{Describe(ret)}' on every path", hints);
     }
 
     /// <summary>
@@ -1192,7 +1181,7 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Returns true when the statement list leaves its handler on every path - either by supplying
+    /// Returns true when the statement list leaves its handler on every path: either by supplying
     /// a value with `assign`, or by transferring control out entirely.
     /// </summary>
     private static bool AssignsOrExitsList(IReadOnlyList<IrStmt> stmts)
@@ -1213,10 +1202,8 @@ internal sealed class TypeResolver(
             IrUnsafeBlock u => AssignsOrExitsList(u.Body.Stmts),
             IrIf i => i.Else != null && AssignsOrExits(i.Then) && AssignsOrExits(i.Else),
             IrTryCatch t => AssignsOrExits(t.Try) && AssignsOrExits(t.Catch),
-            IrSwitch sw => sw.Default != null && sw.Cases.All(c => AssignsOrExits(c.Body))
-                           && AssignsOrExits(sw.Default),
-            IrMatch ms => ms.Cases.All(c => AssignsOrExits(c.Body))
-                          && (ms.Default == null || AssignsOrExits(ms.Default)),
+            IrSwitch sw => sw.Default != null && sw.Cases.All(c => AssignsOrExits(c.Body)) && AssignsOrExits(sw.Default),
+            IrMatch ms => ms.Cases.All(c => AssignsOrExits(c.Body)) && (ms.Default == null || AssignsOrExits(ms.Default)),
             _ => DefinitelyReturns(s)
         };
     }
@@ -1344,8 +1331,7 @@ internal sealed class TypeResolver(
     {
         if (e == null) return;
         if (!allowRoot && e is IrThrowsCall or IrThrowsInstanceCall)
-            diag.Error(Codes.ThrowsOutsideTry, ctx.File, e.Span,
-                "throwing call cannot appear inside a larger expression");
+            diag.Error(Codes.ThrowsOutsideTry, ctx.File, e.Span, "throwing call cannot appear inside a larger expression");
 
         // everything below the root is nested by definition
         void Inner(params IEnumerable<IrExpr?> xs)
@@ -1417,8 +1403,7 @@ internal sealed class TypeResolver(
     /// assignment right-hand side. Both name storage the result lands in, which is what a handler's
     /// 'assign' needs and what makes propagation well-defined.
     /// </summary>
-    private IrExpr CheckRootThrowsValue(IrExpr value, IrType targetType, string what,
-                                        ResolveCtx ctx, TextSpan span)
+    private IrExpr CheckRootThrowsValue(IrExpr value, IrType targetType, string what, ResolveCtx ctx, TextSpan span)
     {
         ForbidNestedThrows(value, ctx, allowRoot: true);
 
@@ -1463,7 +1448,7 @@ internal sealed class TypeResolver(
     {
         if (value is not (IrCatchCall or IrThrowsCall or IrThrowsInstanceCall)) return;
         // Reported at the value's own span, which is where the per-body backstop would report it
-        // too - that is what stops the two from both firing.
+        // too. That is what stops the two from both firing.
         diag.Error(Codes.ThrowsOutsideTry, ctx.File, value.Span,
             $"a throwing call cannot be the value of {form}",
             ["bind it first: 'let T tmp = f() catch { assign <fallback>; };', then use 'tmp' here"]);
@@ -1488,7 +1473,7 @@ internal sealed class TypeResolver(
             IrDeref d => IsPure(d.Ptr),
 
             // Calls are assumed impure, but this one is compiler-generated and only reads its
-            // two by-value arguments - so 'u == v;' written where 'u = v;' was meant is still
+            // two by-value arguments, so 'u == v;' written where 'u = v;' was meant is still
             // reported as a statement with no effect, exactly as 'i == j;' is.
             IrStaticCall sc when IsUnionEqCall(sc) => sc.Args.All(IsPure),
 
@@ -1742,8 +1727,7 @@ internal sealed class TypeResolver(
     /// </summary>
     private void WarnUnsafeManagedTemporary(IrBlock body, ResolveCtx ctx)
     {
-        var finder = new UnsafeAllocFinder(IsManagedRef,
-            sym.IntrinsicOrNull(Roles.Retain), sym.IntrinsicOrNull(Roles.Release));
+        var finder = new UnsafeAllocFinder(IsManagedRef, sym.IntrinsicOrNull(Roles.Retain), sym.IntrinsicOrNull(Roles.Release));
         finder.Run(body);
         var site = finder.Found;
         if (finder.HandManaged || site == null) return;
@@ -1758,7 +1742,7 @@ internal sealed class TypeResolver(
     /// <summary>
     /// Finds the first expression in an unsafe block that allocates a managed value: an
     /// interpolation, a 'new', or a call handing one back. Reading an existing managed binding is
-    /// fine - nothing was allocated, so nothing leaks.
+    /// fine. Nothing was allocated, so nothing leaks.
     /// </summary>
     private sealed class UnsafeAllocFinder(Func<IrType, bool> isManaged, string? retain, string? release)
         : IrWalker
@@ -1802,8 +1786,7 @@ internal sealed class TypeResolver(
                 && (sc.CName == Mangler.UnionRetain(ut.Name) || sc.CName == Mangler.UnionRelease(ut.Name));
         }
 
-        private static bool Allocates(IrExpr e) =>
-            e is IrInterp or IrNew or IrNewInit or IrStaticCall or IrInstanceCall
+        private static bool Allocates(IrExpr e) => e is IrInterp or IrNew or IrNewInit or IrStaticCall or IrInstanceCall
                 or IrThrowsCall or IrThrowsInstanceCall or IrIndirectCall;
     }
 
@@ -1820,7 +1803,7 @@ internal sealed class TypeResolver(
              $"use 'List[{Describe(at.Elem)}]' for owned elements, or clear the slots by hand before it dies"]);
     }
 
-    // The four relational operators, which - unlike '==' and '!=' - never derive from one another.
+    // The four relational operators, which, unlike '==' and '!=', never derive from one another.
     private static readonly string[] Relational = ["<", ">", "<=", ">="];
 
     /// <summary>
@@ -2040,7 +2023,7 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Extracts the class name from a class-reference type only - unlike ClassNameOf, this does not
+    /// Extracts the class name from a class-reference type only. Unlike ClassNameOf, this does not
     /// follow pointer indirection.
     /// </summary>
     private static string? DirectClassNameOf(IrType t) => t is IrClassRef cr ? cr.ClassName : null;
@@ -2174,19 +2157,10 @@ internal sealed class TypeResolver(
         IrType? RetType = null,
         bool InProcessInit = false)
     {
-        /// <summary>
-        /// Returns a context with the current class updated.
-        /// </summary>
         public ResolveCtx WithClass(string c) => this with { CurClass = c };
 
-        /// <summary>
-        /// Returns a context with the current function name updated.
-        /// </summary>
         public ResolveCtx WithFunc(string f) => this with { CurFunc = f };
 
-        /// <summary>
-        /// Returns a context with the static flag updated.
-        /// </summary>
         public ResolveCtx WithStatic(bool s) => this with { InStatic = s };
 
         /// <summary>
@@ -2226,9 +2200,6 @@ internal sealed class TypeResolver(
         /// </summary>
         public ResolveCtx WithDefer() => this with { InDefer = true };
 
-        /// <summary>
-        /// Returns a context with a new child scope pushed.
-        /// </summary>
         public ResolveCtx PushScope(bool isParams = false) => this with { Locals = Locals.Push(isParams) };
     }
 
@@ -2280,7 +2251,7 @@ internal sealed class TypeResolver(
     }
 
     /// <summary>
-    /// Returns the module scope a top-level item resolves under - the enclosing file's, except for
+    /// Returns the module scope a top-level item resolves under: the enclosing file's, except for
     /// a stamped generic instance, which the Monomorphizer splices into the template's file though
     /// its type arguments were named at the use site.
     /// </summary>
@@ -2428,7 +2399,7 @@ internal sealed class TypeResolver(
     private readonly HashSet<(string File, string Name)> _wrongKind = [];
 
     /// <summary>
-    /// Reports a name that a scope does declare, but as something else - the function 'Kernel.X'
+    /// Reports a name that a scope does declare, but as something else: the function 'Kernel.X'
     /// where a type was wanted. A scope holds one meaning per name, so the outer declaration this
     /// one displaced is unreachable, and "unknown type" would be the one answer that is untrue.
     /// </summary>
@@ -2475,8 +2446,7 @@ internal sealed class TypeResolver(
     /// A type as the user would have written it: 'Box[int]', not the mangled 'Box_int'. Structural,
     /// so it works for an instantiation that was never stamped and so has no registered display.
     /// </summary>
-    private static string Written(NamedSpec nm) =>
-        nm.Args.Length == 0
+    private static string Written(NamedSpec nm) => nm.Args.Length == 0
             ? Mangler.DisplayName(nm.Name)
             : $"{Mangler.DisplayName(nm.Name)}[{string.Join(", ", nm.Args.Select(Written))}]";
 
@@ -2557,8 +2527,7 @@ internal sealed class TypeResolver(
 
         // A stamped generic instance is a machine-generated copy, so one bad type argument is
         // reported once rather than once per line of the template that happens to touch it.
-        using var instanceScope = diag.InstanceScope(
-            Mangler.TryGetGenericInstance(cd.Name, out _, out _) ? cd.Name : null);
+        using var instanceScope = diag.InstanceScope(Mangler.TryGetGenericInstance(cd.Name, out _, out _) ? cd.Name : null);
         using var instanceName = TrackInstance(cd.Name);
 
         var rawFields = new List<RawFieldBlock>();
@@ -2635,8 +2604,7 @@ internal sealed class TypeResolver(
         var pars = ResolveParams(md.Params);
 
         string cname = Mangler.Method(cls, md.Name, md.Params, sym.IsOverloadedMethod(cls, md.Name));
-        var mctx = ctx.WithClass(cls).WithFunc(md.Name).WithStatic(isStatic)
-            .WithThrowsFunc(md.Throws).PushScope(isParams: true);
+        var mctx = ctx.WithClass(cls).WithFunc(md.Name).WithStatic(isStatic).WithThrowsFunc(md.Throws).PushScope(isParams: true);
         if (!isStatic) mctx.Locals.Declare("self", IrTypes.ClassRef(cls));
         foreach (var p in md.Params) mctx.Locals.Declare(p.Name, ResolveType(p.Type), p.IsRef);
         var (body, native) = ResolveBodyOrNative(md.Body, mctx, ret);
@@ -2670,8 +2638,7 @@ internal sealed class TypeResolver(
                 $"and must return '{Mangler.DisplayName(cls)}', not '{Describe(ret)}'");
         
         if ((isCmp || od.Op == "!") && ret is not IrPrimType { CName: "bool" })
-            diag.Error(Codes.TypeMismatch, ctx.File, od.Span,
-                $"operator '{od.Op}' must return 'bool', not '{Describe(ret)}'");
+            diag.Error(Codes.TypeMismatch, ctx.File, od.Span, $"operator '{od.Op}' must return 'bool', not '{Describe(ret)}'");
         
         if (isMutator && ret is not IrVoidType)
             diag.Error(Codes.TypeMismatch, ctx.File, od.Span,
@@ -2732,15 +2699,13 @@ internal sealed class TypeResolver(
             null, body, native, [..fd.Annotations]);
     }
 
-    private List<IrParam> ResolveParams(Param[] ps) =>
-        [.. ps.Select(p => new IrParam(p.Name, ResolveType(p.Type), p.IsRef))];
+    private List<IrParam> ResolveParams(Param[] ps) => [.. ps.Select(p => new IrParam(p.Name, ResolveType(p.Type), p.IsRef))];
 
     /// <summary>
     /// The checks every resolved function body gets: redundant returns, unused names, definite
     /// assignment, and where throwing calls sit. A native body has none of this to check.
     /// </summary>
-    private void CheckResolvedBody(IrBlock? body, IrType ret, TextSpan span, ResolveCtx ctx,
-                                   Param[] ps, ResolveCtx bodyCtx)
+    private void CheckResolvedBody(IrBlock? body, IrType ret, TextSpan span, ResolveCtx ctx, Param[] ps, ResolveCtx bodyCtx)
     {
         if (body == null) return;
         CheckBodyQuality(body, ret, span, ctx, ps, span);
@@ -2916,8 +2881,7 @@ internal sealed class TypeResolver(
     /// True when some argument's type cannot be bound to a type parameter: the Result of a throwing
     /// call, or a type that is already an error.
     /// </summary>
-    private static bool AnyUnbindableArg(List<IrExpr> args) =>
-        args.Any(a => a.Type is IrResultType || a.Type.IsError);
+    private static bool AnyUnbindableArg(List<IrExpr> args) => args.Any(a => a.Type is IrResultType || a.Type.IsError);
 
     /// <summary>
     /// Infers a generic's type arguments from the argument types at a call. Reports a parameter
@@ -3112,7 +3076,7 @@ internal sealed class TypeResolver(
 
     /// <summary>
     /// Reports the two ways a union comparison can mean something other than "these hold the same
-    /// value" - worth saying only because the comparison is generated. Reported at the comparison,
+    /// value", worth saying only because the comparison is generated. Reported at the comparison,
     /// so a union nobody compares stays silent.
     /// </summary>
     private void WarnOnUnionComparison(string unionName, ResolveCtx ctx, TextSpan span)
@@ -3134,8 +3098,7 @@ internal sealed class TypeResolver(
                 $"comparing '{unionName}' compares {Describe(imprecise)} with floating-point '=='",
                 ["values produced by different arithmetic rarely compare equal; compare with a tolerance instead"]);
 
-        static string Describe(List<string> fields) =>
-            fields.Count == 1
+        static string Describe(List<string> fields) => fields.Count == 1
                 ? $"variant field {fields[0]}"
                 : $"variant fields {string.Join(", ", fields.Take(3))}" +
                   (fields.Count > 3 ? $" and {fields.Count - 3} more" : "");
@@ -3176,8 +3139,7 @@ internal sealed class TypeResolver(
                     break;
 
                 case IrUnionType nested:
-                    CollectComparisonHazards(
-                        nested.Name, $"{qualifier}{nested.Name}.", visiting, identity, imprecise);
+                    CollectComparisonHazards(nested.Name, $"{qualifier}{nested.Name}.", visiting, identity, imprecise);
                     break;
 
                 case IrClassRef cr when sym.IsClass(cr.ClassName) && !sym.Modules.Contains(cr.ClassName):
@@ -3270,8 +3232,7 @@ internal sealed class TypeResolver(
         foreach (var m in ed.Members)
         {
             if (!seen.Add(m.Name))
-                diag.Error(Codes.DuplicateName, ctx.File, m.Span,
-                    $"enum '{ed.Name}' already declares a member '{m.Name}'");
+                diag.Error(Codes.DuplicateName, ctx.File, m.Span, $"enum '{ed.Name}' already declares a member '{m.Name}'");
             string? cval = null;
             if (m.Value != null)
             {
@@ -3361,7 +3322,7 @@ internal sealed class TypeResolver(
 
     /// <summary>
     /// True if union <paramref name="from"/> stores <paramref name="target"/> by value, directly or
-    /// through other unions - a pointer is a fixed-size field and breaks the cycle. <paramref
+    /// through other unions. A pointer is a fixed-size field and breaks the cycle. <paramref
     /// name="visited"/> stops an already-cyclic graph looping forever.
     /// </summary>
     private bool UnionContains(string from, string target, HashSet<string> visited)
@@ -3384,8 +3345,7 @@ internal sealed class TypeResolver(
 
     private IrUnion ResolveUnion(UnionDecl ud, ResolveCtx ctx)
     {
-        using var instanceScope = diag.InstanceScope(
-            Mangler.TryGetGenericInstance(ud.Name, out _, out _) ? ud.Name : null);
+        using var instanceScope = diag.InstanceScope(Mangler.TryGetGenericInstance(ud.Name, out _, out _) ? ud.Name : null);
         using var instanceName = TrackInstance(ud.Name);
 
         if (ud.Variants.Length == 0)
@@ -3398,8 +3358,7 @@ internal sealed class TypeResolver(
         foreach (var v in ud.Variants)
         {
             if (!seen.Add(v.Name))
-                diag.Error(Codes.DuplicateName, ctx.File, v.Span,
-                    $"union '{ud.Name}' already declares a variant '{v.Name}'");
+                diag.Error(Codes.DuplicateName, ctx.File, v.Span, $"union '{ud.Name}' already declares a variant '{v.Name}'");
             var fields = new List<IrParam>();
             var seenFields = new HashSet<string>();
             foreach (var f in v.Fields)
@@ -3411,8 +3370,7 @@ internal sealed class TypeResolver(
                         $"union variant field '{f.Name}' has type '{Describe(ft)}', which is a module",
                         ["a module is a namespace for functions, not a value; it cannot be stored"]);
                 if (!seenFields.Add(f.Name))
-                    diag.Error(Codes.DuplicateName, ctx.File, f.Span,
-                        $"variant '{v.Name}' already declares a field '{f.Name}'");
+                    diag.Error(Codes.DuplicateName, ctx.File, f.Span, $"variant '{v.Name}' already declares a field '{f.Name}'");
                 if (f.Type is NamedSpec ns && UnionContains(ns.Mangled, ud.Name, []))
                     diag.Error(Codes.TypeMismatch, ctx.File, f.Span,
                         ns.Mangled == ud.Name
@@ -3541,8 +3499,7 @@ internal sealed class TypeResolver(
                 if (rs.Value == null)
                 {
                     if (retType is not IrVoidType && retType is not IrResultType)
-                        diag.Error(Codes.ReturnTypeMismatch, ctx.File, rs.Span,
-                            $"function must return '{Describe(retType)}'");
+                        diag.Error(Codes.ReturnTypeMismatch, ctx.File, rs.Span, $"function must return '{Describe(retType)}'");
                     return new IrReturn(null);
                 }
                 var retCtx = retType is IrResultType rrt
@@ -3676,8 +3633,7 @@ internal sealed class TypeResolver(
                     diag.Error(Codes.DiagInRelease, ctx.File, s.Span,
                         "'panic' is not allowed in a release build", ["remove it before shipping"]);
                 if (ctx.Realm != Realm.Kernel)
-                    diag.Error(Codes.PanicOutsideKernel, ctx.File, s.Span,
-                        "'panic' is only valid in the kernel realm");
+                    diag.Error(Codes.PanicOutsideKernel, ctx.File, s.Span, "'panic' is only valid in the kernel realm");
                 return new IrPanic(p.Raw) { Span = s.Span };
 
             default:
@@ -3790,8 +3746,7 @@ internal sealed class TypeResolver(
                     diag.Error(Codes.TypeMismatch, ctx.File, lbl.Span,
                         $"case label of type '{Describe(lbl.Type)}' is not comparable to the switch value '{Describe(scrut.Type)}'");
                 if (ConstLabelKey(lbl) is { } key && !seenLabels.Add(key))
-                    diag.Error(Codes.DuplicateName, ctx.File, lbl.Span,
-                        "this 'case' value is already handled by an earlier arm");
+                    diag.Error(Codes.DuplicateName, ctx.File, lbl.Span, "this 'case' value is already handled by an earlier arm");
             }
             cases.Add(new IrSwitchCase(labels, ResolveBlock(c.Body, ctx, retType)));
         }
@@ -3964,8 +3919,7 @@ internal sealed class TypeResolver(
                 CheckAssign(init, type, $"'{ls.Name}'", ctx, Codes.TypeMismatch);
         }
        
-        else if (init?.Type is IrResultType irt && ls.Type != null
-                 && !Assignable(new IrVar(ls.Name, irt.Inner), type))
+        else if (init?.Type is IrResultType irt && ls.Type != null && !Assignable(new IrVar(ls.Name, irt.Inner), type))
             diag.Error(Codes.TypeMismatch, ctx.File, init.Span,
                 $"this throwing call produces '{Describe(irt.Inner)}', which cannot initialize '{ls.Name}' of type '{Describe(type)}'");
 
@@ -4028,8 +3982,7 @@ internal sealed class TypeResolver(
                 return Poison(e.Span);
             case IntLitExpr il:
                 if (!TryParseIntLit(il.Value, out var ival, out var ity, out var ictext))
-                    diag.Error(Codes.TypeMismatch, ctx.File, e.Span,
-                        $"integer literal '{il.Value}' does not fit in 64 bits");
+                    diag.Error(Codes.TypeMismatch, ctx.File, e.Span, $"integer literal '{il.Value}' does not fit in 64 bits");
                 return new IrLitInt(ival, ity, ictext);
             case CharLitExpr cl: return new IrLitChar(cl.Value);
             case FloatLitExpr fl: return new IrLitFloat(fl.Value, FloatLitType(fl.Value));
@@ -4162,8 +4115,7 @@ internal sealed class TypeResolver(
         }
 
         if (un.Op == UnOp.Not && operand.Type is not IrPrimType { CName: "bool" })
-            diag.Error(Codes.TypeMismatch, ctx.File, un.Span,
-                $"operator '!' requires 'bool', got '{Describe(operand.Type)}'");
+            diag.Error(Codes.TypeMismatch, ctx.File, un.Span, $"operator '!' requires 'bool', got '{Describe(operand.Type)}'");
         else if (un.Op == UnOp.Neg && !IsArith(operand.Type))
             diag.Error(Codes.TypeMismatch, ctx.File, un.Span,
                 $"unary '-' requires a numeric operand, got '{Describe(operand.Type)}'");
@@ -4205,8 +4157,7 @@ internal sealed class TypeResolver(
             string stringClass = sym.Builtins.GetValueOrDefault(BuiltinTypes.String, BuiltinTypes.String);
             var sop = sym.LookupOperator(stringClass, "+");
             if (sop == null)
-                diag.Error(Codes.MissingIntrinsic, ctx.File, be.Span,
-                    "String defines no '+' operator for concatenation");
+                diag.Error(Codes.MissingIntrinsic, ctx.File, be.Span, "String defines no '+' operator for concatenation");
             string cn = sop?.CName ?? Mangler.Operator(stringClass, "+", [], false);
             return new IrStaticCall(cn, IrType.String, [EnsureString(left, ctx), EnsureString(right, ctx)]);
         }
@@ -4252,8 +4203,7 @@ internal sealed class TypeResolver(
             return new IrBinOp(be.Op, left, right, IrType.Bool);
         }
 
-        if (be.Op is BinOp.Eq or BinOp.Ne
-            && left.Type is IrUnionType lu && right.Type is IrUnionType ru && lu.Name == ru.Name)
+        if (be.Op is BinOp.Eq or BinOp.Ne && left.Type is IrUnionType lu && right.Type is IrUnionType ru && lu.Name == ru.Name)
         {
             WarnOnUnionComparison(lu.Name, ctx, be.Span);
             IrExpr call = new IrStaticCall(Mangler.UnionEq(lu.Name), IrType.Bool, [left, right]) { Span = be.Span };
@@ -4297,8 +4247,7 @@ internal sealed class TypeResolver(
             diag.Error(Codes.TypeMismatch, ctx.File, be.Span,
                 $"operator '{be.Op.Sym()}' cannot be applied to '{Describe(left.Type)}' and '{Describe(right.Type)}'");
 
-        if (be.Op == BinOp.Mod && IsArith(left.Type) && IsArith(right.Type)
-            && !(IsInteger(left.Type) && IsInteger(right.Type)))
+        if (be.Op == BinOp.Mod && IsArith(left.Type) && IsArith(right.Type) && !(IsInteger(left.Type) && IsInteger(right.Type)))
             diag.Error(Codes.TypeMismatch, ctx.File, be.Span,
                 $"operator '%' requires integer operands, got '{Describe(left.Type)}' and '{Describe(right.Type)}'",
                 ["for a floating-point remainder, call the library's Math function instead"]);
@@ -4437,16 +4386,14 @@ internal sealed class TypeResolver(
         v = unchecked((long)mag);
 
         bool isLong = lCount >= 1;
-        type =
-            hasU && isLong       ? IrTypes.Prim("uint64") :
+        type = hasU && isLong       ? IrTypes.Prim("uint64") :
             isLong               ? IrType.Long :
             hasU                 ? (mag <= uint.MaxValue ? IrTypes.Prim("uint") : IrTypes.Prim("uint64")) :
             mag <= int.MaxValue  ? IrType.Int :
             mag <= long.MaxValue ? IrType.Long :
                                    IrTypes.Prim("uint64");
 
-        ctext =
-            isHex || hasSuffix                     ? raw :
+        ctext = isHex || hasSuffix ? raw :
             type is IrPrimType { CName: "uint64" } ? mag.ToString(ci) + "ULL" :
                                                      null;
         return true;
@@ -4462,7 +4409,7 @@ internal sealed class TypeResolver(
 
     /// <summary>
     /// Infers a field's type from its initializer. Fields register their type before any body is
-    /// resolved, so this is limited to literals, optionally under a unary minus - the only
+    /// resolved, so this is limited to literals, optionally under a unary minus: the only
     /// initializers knowable without resolving expressions.
     /// </summary>
     internal static TypeSpec? InferFieldTypeSpec(Expr? init)
@@ -4486,9 +4433,9 @@ internal sealed class TypeResolver(
     private IrExpr ResolveIdent(IdentExpr ie, ResolveCtx ctx)
     {
         string name = ie.Name;
-        if (name == "true")  return new IrLitBool(true);
+        if (name == "true") return new IrLitBool(true);
         if (name == "false") return new IrLitBool(false);
-        if (name == "null")  return new IrLitNull(IrType.Void);
+        if (name == "null") return new IrLitNull(IrType.Void);
 
         if (name == "self")
         {
@@ -4522,8 +4469,7 @@ internal sealed class TypeResolver(
             }
             if (fsym.Sig!.IsEntry)
             {
-                diag.Error(Codes.CallToEntry, ctx.File, ie.Span,
-                    $"'{name}' is an entry point and cannot be used as a value");
+                diag.Error(Codes.CallToEntry, ctx.File, ie.Span, $"'{name}' is an entry point and cannot be used as a value");
                 return Poison(ie.Span);
             }
             if (fsym.Sig.IsThrows)
@@ -4569,8 +4515,7 @@ internal sealed class TypeResolver(
         if (ma.Object is IdentExpr eid && sym.IsEnum(eid.Name) && ctx.Locals.Lookup(eid.Name) == null)
         {
             if (!sym.IsEnumMember(eid.Name, ma.Member))
-                diag.Error(Codes.UndefinedVariable, ctx.File, ma.Span,
-                    $"enum '{eid.Name}' has no member '{ma.Member}'");
+                diag.Error(Codes.UndefinedVariable, ctx.File, ma.Span, $"enum '{eid.Name}' has no member '{ma.Member}'");
             return new IrEnumConst(eid.Name, ma.Member) { Span = ma.Span };
         }
 
@@ -4583,8 +4528,7 @@ internal sealed class TypeResolver(
                     $"'{uid.Name}.{ma.Member}' is a union variant, not a field",
                     [$"construct it by calling it: '{uid.Name}.{ma.Member}()'"]);
             else
-                diag.Error(Codes.UndefinedVariable, ctx.File, ma.Span,
-                    $"union '{uid.Name}' has no variant '{ma.Member}'");
+                diag.Error(Codes.UndefinedVariable, ctx.File, ma.Span, $"union '{uid.Name}' has no variant '{ma.Member}'");
 
             return new IrUnionConstruct(IrTypes.Union(uid.Name), 0, []) { Span = ma.Span };
         }
@@ -4771,8 +4715,7 @@ internal sealed class TypeResolver(
                     Mangler.Method(cls, ma.Member, [], false), recv, ctx, ce);
             }
             if (recv.Type.IsError) return Poison(ce.Span);
-            diag.Error(Codes.UndefinedMethod, ctx.File, ce.Span,
-                $"cannot call '{ma.Member}' on '{Describe(recv.Type)}'");
+            diag.Error(Codes.UndefinedMethod, ctx.File, ce.Span, $"cannot call '{ma.Member}' on '{Describe(recv.Type)}'");
             return new IrInstanceCall(recv, Mangler.FreeFunc(ma.Member, [], false, false, false), IrType.Error, args);
         }
 
@@ -4804,22 +4747,22 @@ internal sealed class TypeResolver(
 
                 var otherPf = sym.LookupPrivateFunc(ctx.File, id.Name);
                 var otherFsym = LookupFreeFuncVisible(id.Name);
-                bool otherFsymInScope = FuncInScope(otherFsym);
-                bool hasMethodCandidate = !string.IsNullOrEmpty(ctx.CurClass) &&
+                bool otherInScope = FuncInScope(otherFsym);
+                bool hasMethod = !string.IsNullOrEmpty(ctx.CurClass) &&
                     (sym.LookupMethod(ctx.CurClass, id.Name) != null || _methodTemplates.ContainsKey(new MemberKey(ctx.CurClass, id.Name)));
 
-                if (otherPf != null || otherFsymInScope || hasMethodCandidate)
+                if (otherPf != null || otherInScope || hasMethod)
                 {
                     string otherDesc;
                     if (otherPf != null)
                         otherDesc = $"a private free function in '{Path.GetFileNameWithoutExtension(ctx.File)}'";
-                    else if (otherFsymInScope)
+                    else if (otherInScope)
                         otherDesc = $"a free function in '{Path.GetFileNameWithoutExtension(otherFsym!.Module)}'";
                     else
                         otherDesc = $"a method of '{Mangler.DisplayName(ctx.CurClass)}'";
                     diag.Error(Codes.AmbiguousCall, ctx.File, ce.Span,
                         $"'{id.Name}' is ambiguous between the generic function declared in '{Path.GetFileNameWithoutExtension(tmpl.File)}' and {otherDesc}; qualify with '{Path.GetFileNameWithoutExtension(tmpl.File)}.{id.Name}(...)'" +
-                        (hasMethodCandidate ? $", 'self.{id.Name}(...)', or '{Mangler.DisplayName(ctx.CurClass)}.{id.Name}(...)' as appropriate" : ""));
+                        (hasMethod ? $", 'self.{id.Name}(...)', or '{Mangler.DisplayName(ctx.CurClass)}.{id.Name}(...)' as appropriate" : ""));
                     return new IrStaticCall(Mangler.FreeFunc(id.Name, [], false, false, false), IrType.Void, args);
                 }
 
@@ -4878,10 +4821,10 @@ internal sealed class TypeResolver(
                         Mangler.Method(ctx.CurClass, id.Name, [], false), null, ctx, ce);
                 }
             }
-            if (ctx.Locals.Lookup(id.Name) is { } shadowingLocal)
+            if (ctx.Locals.Lookup(id.Name) is { } shadowLocal)
             {
                 diag.Error(Codes.UndefinedMethod, ctx.File, ce.Span,
-                    $"'{id.Name}' is a '{Describe(shadowingLocal)}', which cannot be called",
+                    $"'{id.Name}' is a '{Describe(shadowLocal)}', which cannot be called",
                     ["only a function, or a variable of function-pointer type, can be called",
                      $"a callable variable is declared as 'let func(<params>) -> <ret> {id.Name} = ...;'"]);
                 return new IrStaticCall(Mangler.FreeFunc(id.Name, [], false, false, false), IrType.Error, args);
@@ -4943,8 +4886,7 @@ internal sealed class TypeResolver(
     private void CheckIndexIsInteger(IrExpr idx, ResolveCtx ctx, TextSpan span)
     {
         if (IsInteger(idx.Type) || idx.Type is IrEnumType) return;
-        diag.Error(Codes.TypeMismatch, ctx.File, span,
-            $"index must be an integer, got '{Describe(idx.Type)}'");
+        diag.Error(Codes.TypeMismatch, ctx.File, span, $"index must be an integer, got '{Describe(idx.Type)}'");
     }
 
     /// <summary>
@@ -5110,11 +5052,9 @@ internal sealed class TypeResolver(
         {
             string shown = Mangler.DisplayName(typeName);
             if (sym.IsClass(typeName))
-                diag.Error(Codes.NewOnNonClass, ctx.File, ne.Span,
-                    $"'{shown}' is not in scope; import its module");
+                diag.Error(Codes.NewOnNonClass, ctx.File, ne.Span, $"'{shown}' is not in scope; import its module");
             else if (SymbolTable.Primitives.Contains(typeName))
-                diag.Error(Codes.NewOnNonClass, ctx.File, ne.Span,
-                    $"'{shown}' is a primitive; use 'let', not 'new'");
+                diag.Error(Codes.NewOnNonClass, ctx.File, ne.Span, $"'{shown}' is a primitive; use 'let', not 'new'");
             else if (sym.IsUnion(typeName))
                 diag.Error(Codes.NewOnNonClass, ctx.File, ne.Span,
                     $"'{shown}' is a union and cannot be instantiated with 'new'",
@@ -5219,8 +5159,7 @@ internal sealed class TypeResolver(
                 $"'{g.Written}' is a type, not a value",
                 [$"to build one of its variants, call it: '{g.Written}.SomeVariant(...)'"]);
         else if (sym.IsUnion(g.Name) || sym.IsClass(g.Name) || sym.IsEnum(g.Name))
-            diag.Error(Codes.TypeMismatch, ctx.File, g.Span,
-                $"'{g.Name}' is not generic, so it takes no type arguments");
+            diag.Error(Codes.TypeMismatch, ctx.File, g.Span, $"'{g.Name}' is not generic, so it takes no type arguments");
         else
             diag.Error(Codes.UndefinedType, ctx.File, g.Span, $"unknown generic type '{g.Name}'");
 

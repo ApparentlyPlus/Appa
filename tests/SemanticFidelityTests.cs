@@ -5,7 +5,7 @@ using Appa;
 /// <summary>
 /// Cases where the program compiled and ran but computed the wrong answer, or where C reinterpreted
 /// something Gata had already decided. Each was found by running the same emitted C at several
-/// optimisation levels and under two compilers, which is the only oracle that sees them - a suite
+/// optimisation levels and under two compilers, which is the only oracle that sees them. A suite
 /// that stops at "gcc accepted it" cannot.
 /// </summary>
 public class SemanticFidelityTests
@@ -90,7 +90,7 @@ public class SemanticFidelityTests
 
     /// <summary>
     /// Both formatters took the magnitude by negating, which has no result for the most negative
-    /// value - so the digit loop saw a value still below zero and emitted nothing. The output
+    /// value, so the digit loop saw a value still below zero and emitted nothing. The output
     /// differed per optimisation level, which is what an unrepresentable negation buys.
     /// </summary>
     [Fact]
@@ -138,8 +138,7 @@ public class SemanticFidelityTests
             """, gata, cc);
 
         HostedRun.AssertClean(r);
-        Assert.Equal("4294967295\n18446744073709551615\n18446744073709551615\n" +
-                     "200 60000 0 -5 2147483647\n", r.Output);
+        Assert.Equal("4294967295\n18446744073709551615\n18446744073709551615\n" + "200 60000 0 -5 2147483647\n", r.Output);
     }
 
     #endregion
@@ -148,7 +147,7 @@ public class SemanticFidelityTests
 
     /// <summary>
     /// The conversion is well defined and silent, and the C compiler only objects under warning
-    /// flags the GatOS build does not pass - so 'let byte b = 300;' stored 44 and said nothing.
+    /// flags the GatOS build does not pass, so 'let byte b = 300;' stored 44 and said nothing.
     /// </summary>
     [Theory]
     [InlineData("let int x = 5000000000;", "int")]
@@ -165,7 +164,7 @@ public class SemanticFidelityTests
     }
 
     /// <summary>
-    /// The boundaries themselves stay legal - and the most negative one only became writable with
+    /// The boundaries themselves stay legal, and the most negative one only became writable with
     /// this check, because a negated literal was ranked as int64 and so fit no smaller type.
     /// </summary>
     [Theory]
@@ -175,8 +174,7 @@ public class SemanticFidelityTests
     [InlineData("let sbyte v = -128; let sbyte w = v;")]
     [InlineData("let uint u = 4294967295; let uint w = u;")]
     [InlineData("let int64 n = -9223372036854775808; let int64 m = n;")]
-    public void BoundaryLiteralsOk(string body) =>
-        AssertClean($"realm kernel {{ entry func Main() {{ {body} }} }}");
+    public void BoundaryLiteralsOk(string body) => AssertClean($"realm kernel {{ entry func Main() {{ {body} }} }}");
 
     [Fact]
     public void MostNegativeLiteralRuns()
@@ -215,8 +213,7 @@ public class SemanticFidelityTests
     [InlineData("enum E { A = 2147483647 }")]
     [InlineData("enum E { A = -2147483648 }")]
     [InlineData("enum E { A, B, C }")]
-    public void InRangeEnumValuesOk(string decl) =>
-        AssertClean($"realm kernel {{ {decl} entry func Main() {{ }} }}");
+    public void InRangeEnumValuesOk(string decl) => AssertClean($"realm kernel {{ {decl} entry func Main() {{ }} }}");
 
     #endregion
 
@@ -254,8 +251,7 @@ public class SemanticFidelityTests
     [Theory]
     [InlineData("realm kernel { throws entry func Main() { } }")]
     [InlineData("realm kernel { entry throws func Main() { } }")]
-    public void ThrowsOnEntryRejected(string src) =>
-        AssertOne(Codes.BadEntrySignature, src);
+    public void ThrowsOnEntryRejected(string src) => AssertOne(Codes.BadEntrySignature, src);
 
     [Theory]
     [InlineData("throws entry func R() { }")]
@@ -274,7 +270,7 @@ public class SemanticFidelityTests
 
     /// <summary>
     /// C's integer promotions widen anything below 'int' before the operator runs, so a sub-'int'
-    /// result came back unpromoted only when it was stored straight into a narrow variable - the store
+    /// result came back unpromoted only when it was stored straight into a narrow variable. The store
     /// truncated and hid it.
     /// </summary>
     [Fact]
@@ -338,7 +334,7 @@ public class SemanticFidelityTests
 
     /// <summary>
     /// Interpolation and '+' concatenation routed every signed value to the 32-bit formatter, which
-    /// narrowed anything wider on the way in - and being built straight into the IR, the call never
+    /// narrowed anything wider on the way in, and being built straight into the IR, the call never
     /// passed the check that would have reported the narrowing. 5000000000 printed as 705032704.
     /// </summary>
     [Fact]
@@ -366,7 +362,7 @@ public class SemanticFidelityTests
     }
 
     /// <summary>
-    /// 'b as String' gave "true" while '$"{b}"' gave "1" - two spellings of one conversion disagreeing,
+    /// 'b as String' gave "true" while '$"{b}"' gave "1", two spellings of one conversion disagreeing,
     /// because 'bool' is in the integer family and fell into the numeric formatter first.
     /// </summary>
     [Fact]
@@ -454,7 +450,7 @@ public class SemanticFidelityTests
     }
 
     /// <summary>
-    /// A function is not a generic type, so 'Sort[int](xs)' is not a call with type arguments - the
+    /// A function is not a generic type, so 'Sort[int](xs)' is not a call with type arguments. The
     /// brackets read as an index, which then failed on the type keyword with "expected an expression,
     /// found 'int'". The rule the reader needed was never stated.
     /// </summary>
@@ -464,8 +460,7 @@ public class SemanticFidelityTests
     [InlineData("Take[int64, bool](xs);")]
     public void ExplicitTypeArgsNamed(string body)
     {
-        var d = AssertOne(Codes.ExplicitTypeArgs,
-            $"realm kernel {{ entry func Main() {{ {body} }} }}");
+        var d = AssertOne(Codes.ExplicitTypeArgs, $"realm kernel {{ entry func Main() {{ {body} }} }}");
         Assert.Contains("inferred", string.Join(" ", d.Hints));
     }
 
@@ -511,7 +506,7 @@ public class SemanticFidelityTests
             DefiniteAssignmentPrelude + $"realm kernel {{ entry func Main() {{ {body} }} }}");
 
     /// <summary>
-    /// The half that matters more. The analysis is deliberately one-sided - a branch counts as
+    /// The half that matters more. The analysis is deliberately one-sided: a branch counts as
     /// assigning if any arm does, a loop counts before its body is walked, an address taken counts -
     /// so it reports only reads no store on any path could have preceded.
     /// </summary>

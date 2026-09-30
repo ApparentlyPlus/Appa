@@ -9,8 +9,7 @@ using System.Collections.Frozen;
 // one line that cannot drift across passes.
 internal static class PrimTypes
 {
-    internal readonly record struct PrimInfo(string CType, bool IsInt, bool IsFloatTy, int Rank,
-                                            bool IsUnsigned = false);
+    internal readonly record struct PrimInfo(string CType, bool IsInt, bool IsFloatTy, int Rank, bool IsUnsigned = false);
 
     private static readonly FrozenDictionary<string, PrimInfo> Table = FrozenDictionary.ToFrozenDictionary(
         new Dictionary<string, PrimInfo>
@@ -51,9 +50,6 @@ internal static class PrimTypes
         return TableLookup.ContainsKey(s);
     }
 
-    /// <summary>
-    /// Returns the fixed-width C type for a primitive spelling.
-    /// </summary>
     public static string ToC(string s)
     {
         return Table.TryGetValue(s, out var i) ? i.CType : s;
@@ -68,9 +64,6 @@ internal static class PrimTypes
         return Table.TryGetValue(canon, out var i) && i.IsInt;
     }
 
-    /// <summary>
-    /// Returns true if the canonical token is float or double.
-    /// </summary>
     public static bool IsFloat(string canon)
     {
         return Table.TryGetValue(canon, out var i) && i.IsFloatTy;
@@ -110,7 +103,7 @@ internal static class PrimTypes
         };
     }
 
-    // Every accepted spelling - the front-end's set of primitive type names.
+    // Every accepted spelling: the front-end's set of primitive type names.
     public static readonly FrozenSet<string> Spellings = FrozenSet.ToFrozenSet(Table.Keys);
 }
 
@@ -119,9 +112,6 @@ internal static class PrimTypes
 /// </summary>
 internal abstract record IrType
 {
-    /// <summary>
-    /// The C type spelling used in emitted output.
-    /// </summary>
     public string ToCType() => Mangler.CType(this);
 
     /// <summary>
@@ -188,7 +178,7 @@ internal static class IrTypes
 }
 
 /// <summary>
-/// The void type - used as a return type for functions that produce no value.
+/// The void type. Used as a return type for functions that produce no value.
 /// </summary>
 internal record IrVoidType : IrType
 {
@@ -284,7 +274,7 @@ internal record IrPtrType(IrType Inner) : IrType
 }
 
 /// <summary>
-/// A fixed-size array type [N]T - a value aggregate, not a heap reference. Monomorphized per
+/// A fixed-size array type [N]T, a value aggregate, not a heap reference. Monomorphized per
 /// (element, size) pair into a named C struct. Copies, returns, and iterates by value with the
 /// length carried in the type.
 /// </summary>
@@ -335,9 +325,6 @@ internal record IrFuncPtrType(IrType Ret, List<IrType> Params) : IrType
         }
     )}";
 
-    /// <summary>
-    /// Returns the typedef name for this function pointer type
-    /// </summary>
     protected internal override string ComposeCType()
     {
         return Mangler.Class(MangledName);
@@ -356,9 +343,6 @@ internal record IrFuncPtrType(IrType Ret, List<IrType> Params) : IrType
         return true;
     }
 
-    /// <summary>
-    /// Structural hash code over the parameter list.
-    /// </summary>
     public override int GetHashCode()
     {
         var h = new HashCode();
@@ -443,9 +427,6 @@ internal record IrGlobal(string CName, IrType T) : IrExpr(T);
 /// </summary>
 internal record IrSelfExpr(string ClassName) : IrExpr(IrTypes.ClassRef(ClassName));
 
-/// <summary>
-/// A field load from an object expression.
-/// </summary>
 internal record IrFieldLoad(IrExpr Obj, string Field, IrType FieldType) : IrExpr(FieldType);
 
 /// <summary>
@@ -453,10 +434,7 @@ internal record IrFieldLoad(IrExpr Obj, string Field, IrType FieldType) : IrExpr
 /// </summary>
 internal record IrIndex(IrExpr Obj, IrExpr Idx, IrType ElemType) : IrExpr(ElemType);
 
-// Calls - CName is the fully-qualified C function name
-/// <summary>
-/// A call to a static (free) C function.
-/// </summary>
+// Calls: CName is the fully-qualified C function name
 internal record IrStaticCall(string CName, IrType RetType, List<IrExpr> Args) : IrExpr(RetType);
 
 /// <summary>
@@ -600,7 +578,7 @@ internal record IrNativeStmt(string C) : IrStmt;
 /// <summary>
 /// `assign v;` inside a catch handler: stores the replacement value into the declaration the
 /// handler is attached to. The ARC pass rewrites it into a plain store, since only that pass knows
-/// the target's name - the handler is lowered as part of the declaration it belongs to.
+/// the target's name. The handler is lowered as part of the declaration it belongs to.
 /// </summary>
 internal record IrAssignValue(IrExpr Value) : IrStmt;
 
@@ -611,7 +589,7 @@ internal record IrAssignValue(IrExpr Value) : IrStmt;
 internal record IrGoto(string Label) : IrStmt;
 
 /// <summary>
-/// A label an IrGoto can target. Emitted as `name:;` - the trailing empty statement keeps a label
+/// A label an IrGoto can target. Emitted as `name:;`. The trailing empty statement keeps a label
 /// legal immediately before a closing brace, which C forbids otherwise.
 /// </summary>
 internal record IrLabel(string Name) : IrStmt;
@@ -661,9 +639,6 @@ internal record IrWhile(IrExpr Cond, IrBlock Body) : IrStmt;
 /// </summary>
 internal record IrFor(IrStmt? Init, IrExpr? Cond, IrStmt? Step, IrBlock Body) : IrStmt;
 
-/// <summary>
-/// A for-in loop over a collection or fixed array.
-/// </summary>
 internal record IrForIn(string Var, IrType ElemType, string LenCName, string GetCName,
                IrExpr Collection, IrBlock Body, int ArraySize = -1) : IrStmt;
 
@@ -689,7 +664,7 @@ internal record IrSwitchCase(List<IrExpr> Labels, IrBlock Body);
 internal record IrMatch(IrExpr Scrutinee, IrUnionType UnionT, List<IrMatchCase> Cases, IrBlock? Default) : IrStmt;
 
 /// <summary>
-/// A single binding introduced by a match pattern - maps a variant field to a local name.
+/// A single binding introduced by a match pattern. Maps a variant field to a local name.
 /// </summary>
 internal record IrMatchBind(string FieldName, string BindName, IrType Type);
 
@@ -744,7 +719,7 @@ internal enum Realm { None, Kernel, User }
 internal record IrParam(string Name, IrType Type, bool IsRef = false);
 
 /// <summary>
-/// An IR function - either a free function or a class method. Body is null for native functions;
+/// An IR function: either a free function or a class method. Body is null for native functions;
 /// Native carries the C text instead.
 /// </summary>
 internal record IrFunction(
@@ -768,14 +743,11 @@ internal record IrFunction(
 /// </summary>
 internal record IrField(string Name, IrType Type, IrExpr? Init);
 
-/// <summary>
-/// A raw native struct-field block.
-/// </summary>
 internal record RawFieldBlock(string C);
 
 /// <summary>
 /// An operator overload on a class. Body is null for native ones, which carry C text. IsStatic is
-/// true only for one-parameter 'as', a factory converting its parameter to self - every other
+/// true only for one-parameter 'as', a factory converting its parameter to self. Every other
 /// operator, zero-parameter 'as' included, is an instance operator.
 /// </summary>
 internal record IrOperator(
@@ -807,7 +779,7 @@ internal record IrClass(
     bool HasInit,
     Dictionary<string, IrExpr> FieldInits,
     bool IsModule = false,
-    // @keep - exempt from Dce reachability sweep and Densifier dense renaming.
+    // @keep: exempt from Dce reachability sweep and Densifier dense renaming.
     bool Keep = false
 );
 
@@ -848,21 +820,12 @@ internal record IrThread(string Name, string FullName, IrFunction? EntryFunc);
 // alongside structs. Preamble -> before #include "shared.h". Boot -> after all functions.
 internal enum NativeSection { Types, Preamble, Boot }
 
-/// <summary>
-/// A native C block with a target output section.
-/// </summary>
-internal record IrNativeBlock(string C, Visibility Vis,
-                     NativeSection Section = NativeSection.Types);
+internal record IrNativeBlock(string C, Visibility Vis, NativeSection Section = NativeSection.Types);
 
 /// <summary>
-/// A native type declaration - a C struct declared inside Gata source.
+/// A native type declaration, a C struct declared inside Gata source.
 /// </summary>
-internal record IrNativeType(
-    string Name,
-    string CName,
-    string C,
-    Visibility Vis
-);
+internal record IrNativeType(string Name, string CName, string C, Visibility Vis);
 
 /// <summary>
 /// An enum declaration. Members carry optional explicit C values.

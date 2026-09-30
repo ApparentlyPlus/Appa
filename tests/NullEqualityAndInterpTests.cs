@@ -58,10 +58,7 @@ public class NullEqualityAndInterpTests
     /// </summary>
     private static HashSet<string> EqOperatorCNames(IrModule module)
     {
-        return [.. module.Classes
-            .SelectMany(c => c.Operators)
-            .Where(o => o.Op is "==" or "!=")
-            .Select(o => o.CName)];
+        return [.. module.Classes.SelectMany(c => c.Operators).Where(o => o.Op is "==" or "!=").Select(o => o.CName)];
     }
 
     #region Null-literal equality
@@ -133,8 +130,7 @@ public class NullEqualityAndInterpTests
     [Fact]
     public void IntVsNullRejected()
     {
-        var (diag, _) = SingleFileCompile.Check(
-            "realm kernel { entry func Main() { let int n = 5; if (n == null) { } } }");
+        var (diag, _) = SingleFileCompile.Check("realm kernel { entry func Main() { let int n = 5; if (n == null) { } } }");
         Assert.Contains(diag.All, d => d.Severity == Severity.Error && d.Code == Codes.TypeMismatch);
     }
 

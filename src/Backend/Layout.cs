@@ -99,15 +99,11 @@ internal static class Layout
     /// first four are the unit's skeleton and are written whether or not they carry text. Anything
     /// after them is optional and an empty one contributes nothing, not even a blank line.
     /// </summary>
-    private static string Concat(string name, string s1, string s2, string s3, string s4,
-                                 params ReadOnlySpan<string> rest)
+    private static string Concat(string name, string s1, string s2, string s3, string s4, params ReadOnlySpan<string> rest)
     {
         var sb = new System.Text.StringBuilder();
-        sb.Append(Finesse.GenerateKewlHeader(name)).Append('\n')
-          .Append(s1).Append('\n')
-          .Append(s2).Append('\n')
-          .Append(s3).Append('\n')
-          .Append(s4);
+        sb.Append(Finesse.GenerateKewlHeader(name)).Append('\n').Append(s1).Append('\n').Append(s2).Append('\n')
+            .Append(s3).Append('\n').Append(s4);
         foreach (var section in rest)
         {
             if (section.Length > 0) sb.Append('\n').Append(section);

@@ -3,7 +3,7 @@ namespace Appa.Tests;
 using Appa;
 
 /// <summary>
-/// Coverage for a throwing call in assignment position - 'x = f() catch { assign v; }', and the
+/// Coverage for a throwing call in assignment position, 'x = f() catch { assign v; }', and the
 /// plain 'x = f()' that propagates or sits in a try. All three were rejected outright before, so
 /// the documented workaround for the scope problem catch exists to solve did not itself compile.
 /// The ARC cases run, because every way they break still produces valid C.
@@ -36,8 +36,7 @@ public class AssignCatchTests
     [InlineData("let [2]int a = [0,0]; a[1] = R(-1) catch { assign 6; }; let int y = a[1];")]
     [InlineData("let int x = 0; while (true) { x = R(-1) catch { break; }; } let int y = x;")]
     [InlineData("let int x = 0; for (let int i = 0; i < 2; i = i + 1) { x = R(-1) catch { continue; }; }")]
-    public void AssignHandlerOk(string body) =>
-        AssertClean(Throwing + $"realm kernel {{ entry func Main() {{ {body} }} }}");
+    public void AssignHandlerOk(string body) => AssertClean(Throwing + $"realm kernel {{ entry func Main() {{ {body} }} }}");
 
     [Fact]
     public void FieldAssignHandlerOk() =>
@@ -177,7 +176,7 @@ public class AssignCatchTests
 
     /// <summary>
     /// The target is written once and read once however it is spelled, so an index with a side
-    /// effect in it must not run twice - the value arm and the handler arm both store to it.
+    /// effect in it must not run twice. The value arm and the handler arm both store to it.
     /// </summary>
     [Fact]
     public void TargetEvaluatedOnce()

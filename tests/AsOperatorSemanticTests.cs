@@ -3,7 +3,7 @@ namespace Appa.Tests;
 using Appa;
 
 /// <summary>
-/// Semantic and codegen coverage for 'as' - user-defined explicit conversions written like a
+/// Semantic and codegen coverage for 'as': user-defined explicit conversions written like a
 /// built-in cast. Always a static factory on the class converted TO, so it only ever converts INTO
 /// itself. The other direction is a named method's job.
 /// </summary>
@@ -42,7 +42,7 @@ public class AsOperatorSemanticTests
 
     /// <summary>
     /// A class converting to another class via 'as' type-checks and transpiles cleanly. The
-    /// conversion is declared on the destination (Inches), not the source (Centimeters) - the
+    /// conversion is declared on the destination (Inches), not the source (Centimeters). The
     /// destination is what says whether it knows how to be built from a given source type.
     /// </summary>
     [Fact]
@@ -64,7 +64,7 @@ public class AsOperatorSemanticTests
 
     /// <summary>
     /// The return type defaults to the owner class exactly like every other operator's does, so it
-    /// doesn't need to be written out - 'as' always converts INTO its declaring class, so the
+    /// doesn't need to be written out. 'as' always converts INTO its declaring class, so the
     /// return type is never meaningfully anything else.
     /// </summary>
     [Fact]
@@ -103,7 +103,7 @@ public class AsOperatorSemanticTests
     /// <summary>
     /// A cast to the source's own type is identity (the existing SameType short-circuit in
     /// CheckCast), so declaring 'public operator func as(Self s) -> Self' is legal even though it
-    /// can never fire - it's dead code, not an error.
+    /// can never fire. It's dead code, not an error.
     /// </summary>
     [Fact]
     public void SelfConversionUnused()
@@ -122,7 +122,7 @@ public class AsOperatorSemanticTests
 
     /// <summary>
     /// A generic class's 'as' operator is substituted per instantiation, same as any other operator
-    /// or method - Box[int]'s 'as' converts FROM int, independently of what other instantiations of
+    /// or method, Box[int]'s 'as' converts FROM int, independently of what other instantiations of
     /// Box exist.
     /// </summary>
     [Fact]
@@ -174,7 +174,7 @@ public class AsOperatorSemanticTests
     #region Error programs
 
     /// <summary>
-    /// 'as' always takes exactly one parameter - the source value being converted. There is no
+    /// 'as' always takes exactly one parameter: the source value being converted. There is no
     /// zero-parameter form. A class can never declare how it converts itself OUT to something else
     /// via 'as', only how another type converts IN to it.
     /// </summary>
@@ -225,7 +225,7 @@ public class AsOperatorSemanticTests
     }
 
     /// <summary>
-    /// An explicit return type on 'as' that isn't the owner class is rejected - it would otherwise
+    /// An explicit return type on 'as' that isn't the owner class is rejected. It would otherwise
     /// let a cast's declared IR type disagree with what the C function actually returns, since
     /// dispatch finds this operator purely by the destination class's name.
     /// </summary>
@@ -282,7 +282,7 @@ public class AsOperatorSemanticTests
     }
 
     /// <summary>
-    /// A class converting itself to a primitive has no 'as' path at all - not "check the source,
+    /// A class converting itself to a primitive has no 'as' path at all, not "check the source,
     /// find nothing". There's structurally nowhere on the primitive side an 'as' could ever be
     /// declared, so this fails identically whether or not the class declares anything.
     /// </summary>
@@ -317,7 +317,7 @@ public class AsOperatorSemanticTests
     #region Codegen
 
     /// <summary>
-    /// Finds the entry function's body statements among the module's free functions - 'realm kernel {
+    /// Finds the entry function's body statements among the module's free functions, 'realm kernel {
     /// entry func Main() { ... } }' lowers to a free function with IsEntry set, not a class member,
     /// so this is where 'let' statements inside Main live in the IR.
     /// </summary>
@@ -363,7 +363,7 @@ public class AsOperatorSemanticTests
     /// <summary>
     /// Two 'as' overloads on the same class get distinct C names, keyed by their parameter type,
     /// since they'd otherwise collide under the single 'gata_Owner_op' name every other operator
-    /// uses - and the cast at each use site calls the one matching its own source type.
+    /// uses, and the cast at each use site calls the one matching its own source type.
     /// </summary>
     [Fact]
     public void OverloadsGetDistinctNames()

@@ -13,11 +13,7 @@ static class Urls
     public const string GataRef = "main";
     public const string Template = "https://github.com/ApparentlyPlus/GatOS/archive/refs/heads/appa-template.zip";
 
-    /// <summary>
-    /// Returns the platform toolchain bundle URL for the current OS.
-    /// </summary>
-    public static string Toolchain() =>
-        RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? Tc + "/x86_64-win.zip" :
+    public static string Toolchain() => RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? Tc + "/x86_64-win.zip" :
         RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? Tc + "/x86_64-macOS.zip" :
         Tc + "/x86_64-linux.zip";
 
@@ -155,8 +151,7 @@ static class Out
     /// Prints a finished step with its elapsed time pinned to the right edge, so every step in a run
     /// lines up however long its label runs.
     /// </summary>
-    public static void Step(string message, TimeSpan elapsed) =>
-        Fmt.Justify(message, $"{C.DIM}{Spin.Fmt(elapsed)}{C.NC}");
+    public static void Step(string message, TimeSpan elapsed) => Fmt.Justify(message, $"{C.DIM}{Spin.Fmt(elapsed)}{C.NC}");
 
     /// <summary>
     /// Prints a plain indented fact with no timing.

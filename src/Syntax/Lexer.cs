@@ -103,8 +103,7 @@ internal sealed class Lexer(string src)
     private char Peek(int n = 1) => _pp + n < src.Length ? src[_pp + n] : '\0';
     private void Advance(int n = 1) => _pp += n;
 
-    private void Emit(TK kind, string value) =>
-        _tokens.Add(new Token(kind, value, new TextSpan(_ts, _pp - _ts)));
+    private void Emit(TK kind, string value) => _tokens.Add(new Token(kind, value, new TextSpan(_ts, _pp - _ts)));
 
     private void Fail(string m, string code = Codes.Syntax, string[]? hints = null) =>
         throw new ParseException(new TextSpan(_ts, Math.Max(1, _pp - _ts)), m, code, hints);
@@ -221,7 +220,7 @@ internal sealed class Lexer(string src)
 
         if (IsIDStart(Cur)) { ReadID(); return; }
         if (Cur == '$' && Peek() == '"') { ReadInterp(); return; }
-        if (Cur == '"')  { Emit(TK.StrLit, ReadString()); return; }
+        if (Cur == '"') { Emit(TK.StrLit, ReadString()); return; }
         if (Cur == '\'') { ReadCharLit(); return; }
         if (Cur >= '0' && Cur <= '9') { ReadNumber(); return; }
 
@@ -433,7 +432,7 @@ internal sealed class Lexer(string src)
 
         bool isFloat = false;
 
-        // A '.' only starts a fraction when a digit follows; '1.f' is a member access on 1.
+        // A '.' only starts a fraction when a digit follows. '1.f' is a member access on 1.
         if (Cur == '.' && Peek() >= '0' && Peek() <= '9')
         {
             isFloat = true;

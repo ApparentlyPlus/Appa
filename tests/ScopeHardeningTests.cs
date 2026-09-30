@@ -112,7 +112,7 @@ public class ScopeHardeningTests
     /// <summary>
     /// A duplicate process is reported once and contributes nothing. It used to contribute
     /// everything when it happened to hold the only scoped declarations in the build, because the
-    /// rewrite that empties it was skipped as a no-op - so its names reached the emitter unqualified
+    /// rewrite that empties it was skipped as a no-op, so its names reached the emitter unqualified
     /// and collided with the root ones.
     /// </summary>
     [Theory]
@@ -149,7 +149,7 @@ public class ScopeHardeningTests
     /// <summary>
     /// Every duplicate-name diagnostic about a scoped declaration reads as the user wrote it.
     /// Only the class form went through Mangler.DisplayName, so the other five printed the internal
-    /// spelling - and no corpus case declared any of them twice inside a realm.
+    /// spelling, and no corpus case declared any of them twice inside a realm.
     /// </summary>
     [Theory]
     [InlineData("enum E { A } enum E { B }", "kernel.E")]
@@ -276,7 +276,7 @@ public class ScopeHardeningTests
     /// <summary>
     /// A visibility or 'static' modifier belongs on a free function, never on a type. Without a
     /// targeted message the modifier reads as the start of a function and the error lands on the
-    /// 'class' keyword, naming the wrong thing - and the book documented one of these forms.
+    /// 'class' keyword, naming the wrong thing, and the book documented one of these forms.
     /// </summary>
     [Theory]
     [InlineData("public class X { public int n; }")]

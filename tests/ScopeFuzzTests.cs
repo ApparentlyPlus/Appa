@@ -67,7 +67,7 @@ public class ScopeFuzzTests
 
     /// <summary>
     /// One scope's declarations. Each name is marked '@shadows' exactly when an enclosing scope
-    /// already declares it, so a program exercises both branches of the rule at once - and dropping
+    /// already declares it, so a program exercises both branches of the rule at once, and dropping
     /// the marks turns every one of those into an error the negative half must see.
     /// </summary>
     private static string Declarations(Random rng, string tag, string pad, Coverage cov,
@@ -121,8 +121,7 @@ public class ScopeFuzzTests
         {
             cov.Qualified++;
             var (path, otag) = outer[i];
-            reach.Append($"let {path}Cargo o{i} = new {path}Cargo(); ")
-                 .Append($"o{i}.{otag} = {path}Step({i}); ");
+            reach.Append($"let {path}Cargo o{i} = new {path}Cargo(); ").Append($"o{i}.{otag} = {path}Step({i}); ");
         }
         return $"let Cargo c = new Cargo(); c.{tag} = 1; " +
                $"let Phase p = Phase.Boot{tag}; let int n = Step(c.{tag}); " +
@@ -229,8 +228,7 @@ public class ScopeFuzzTests
 
                 if (diag.HasErrors)
                 {
-                    var errs = diag.All.Where(d => d.Severity == Severity.Error)
-                                       .Select(d => $"{d.Code} {d.Message}");
+                    var errs = diag.All.Where(d => d.Severity == Severity.Error).Select(d => $"{d.Code} {d.Message}");
                     failures.Add($"[seed {seed}] rejected a valid program: {string.Join("; ", errs)}\n{src}");
                     continue;
                 }
@@ -260,8 +258,7 @@ public class ScopeFuzzTests
             var dir = work.Combine("s" + seed);
             Directory.CreateDirectory(dir);
             foreach (var f in files) File.WriteAllText(Path.Combine(dir, f.Name), f.Content);
-            var units = files.Where(f => f.Name.EndsWith(".c", StringComparison.Ordinal))
-                             .Select(f => f.Name).ToList();
+            var units = files.Where(f => f.Name.EndsWith(".c", StringComparison.Ordinal)).Select(f => f.Name).ToList();
             if (units.Count == 0) continue;
 
             var psi = new ProcessStartInfo(cc,
@@ -273,8 +270,7 @@ public class ScopeFuzzTests
             linked++;
             if (p.ExitCode == 0) continue;
 
-            var first = err.Split('\n').FirstOrDefault(l =>
-                            l.Contains("error", StringComparison.OrdinalIgnoreCase)) ?? err;
+            var first = err.Split('\n').FirstOrDefault(l => l.Contains("error", StringComparison.OrdinalIgnoreCase)) ?? err;
             failures.Add($"[seed {seed}] emitted C did not build: {first.Trim()}\n{src}");
         }
 
@@ -297,7 +293,7 @@ public class ScopeFuzzTests
 
     /// <summary>
     /// The same programs with the marks dropped. Every one must be rejected, and every error must be
-    /// G088 - a generator whose programs are invalid for some unrelated reason would otherwise let
+    /// G088. A generator whose programs are invalid for some unrelated reason would otherwise let
     /// the positive half pass on a rule that never fires.
     /// </summary>
     [Fact]

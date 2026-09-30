@@ -43,7 +43,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     private bool FirstInto(CodeWriter w, char kind, string name) => _emitted.Add(new EmitKey(w, kind, name));
 
     /// <summary>
-    /// Returns true if the IR type participates in reference counting - a managed class reference,
+    /// Returns true if the IR type participates in reference counting: a managed class reference,
     /// or a union whose live variant may hold one.
     /// </summary>
     private bool IsManaged(IrType t) => _managed.IsManaged(t);
@@ -96,12 +96,12 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         }
 
         // a hosted build's main() calls the user entry, if there is one
-        string? userEntryCName = null;
+        string? userEntry = null;
         foreach (var fn in module.FreeFunctions)
         {
             if (fn.IsEntry && fn.Vis == Visibility.User)
             {
-                userEntryCName = fn.CName;
+                userEntry = fn.CName;
                 break;
             }
         }
@@ -110,7 +110,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             _sharedH.ToString(),
             _kPre.ToString(), _kTypes.ToString(), _kFwd.ToString(), _kFuncs.ToString(), _kBoot.ToString(),
             _uPre.ToString(), _uTypes.ToString(), _uFwd.ToString(), _uFunc.ToString(),
-            module.Processes, module.HasKernelRealm, module.HasUserRealm, userEntryCName);
+            module.Processes, module.HasKernelRealm, module.HasUserRealm, userEntry);
     }
 
     #region Reference-counting mode
@@ -405,7 +405,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Emits each union's structural equality: tags first, then one comparison per field of the
     /// live variant, by whatever '==' already means for that field's own type. memcmp would be
-    /// wrong, not just slow - it reads the payload's inactive members and padding.
+    /// wrong and slow. It reads the payload's inactive members and padding.
     /// </summary>
     private void EmitUnionEq()
     {
@@ -424,7 +424,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// True if every '==' this union's equality calls is declared in the given realm. A class
     /// inside 'user { }' is emitted only into uproc.c, so a kernel-side body would call an
-    /// undeclared function - a warning on the pinned gcc 7, fatal on anything newer.
+    /// undeclared function, a warning on the pinned gcc 7, fatal on anything newer.
     /// </summary>
     private bool EqEmittableIn(IrUnion u, Visibility realm)
     {
@@ -451,9 +451,6 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         }
     }
 
-    /// <summary>
-    /// Emits one union's equality body into the given writer.
-    /// </summary>
     private void EmitUnionEqBody(IrUnion u, CodeWriter w)
     {
         using (w.Block($"static inline bool {Mangler.UnionEq(u.Name)}({u.CName} _a, {u.CName} _b) {{"))
@@ -513,18 +510,12 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     private Dictionary<string, IrClass>? _classIndex;
     private Dictionary<string, IrUnion>? _unionIndex;
 
-    /// <summary>
-    /// Returns the declared class of that name, or null.
-    /// </summary>
     private IrClass? ClassByName(string name)
     {
         _classIndex ??= BuildIndex(module.Classes, c => c.Name);
         return _classIndex.GetValueOrDefault(name);
     }
 
-    /// <summary>
-    /// Returns the declared union of that name, or null.
-    /// </summary>
     private IrUnion? UnionByName(string name)
     {
         _unionIndex ??= BuildIndex(module.Unions, u => u.Name);
@@ -569,8 +560,8 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         var (kw, uw) = nb.Section switch
         {
             NativeSection.Preamble => (_kPre, _uPre),
-            NativeSection.Boot     => (_kBoot, (CodeWriter?)null),
-            _                      => (_kTypes, _uTypes),
+            NativeSection.Boot => (_kBoot, (CodeWriter?)null),
+            _ => (_kTypes, _uTypes),
         };
         // boot blocks have no user-side counterpart, so uw can be null
         if (nb.Vis != Visibility.User)
@@ -602,7 +593,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         switch (nt.Vis)
         {
             case Visibility.Kernel: EmitTo(_kTypes, nt.C); break;
-            case Visibility.User: EmitTo(_uTypes, nt.C);   break;
+            case Visibility.User: EmitTo(_uTypes, nt.C); break;
             default: EmitTo(_sharedH, nt.C); break;
         }
     }
@@ -626,13 +617,13 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         {
             bool isKernel = cls.Vis == Visibility.Kernel;
             EmitConcreteClass(cls, isKernel ? _kTypes : _uTypes,
-                                    isKernel ? _kFwd   : _uFwd,
+                                    isKernel ? _kFwd : _uFwd,
                                     isKernel ? _kFuncs : _uFunc, isLib: false);
             return;
         }
 
         bool toKernel = cls.Vis != Visibility.User;
-        bool toUser   = cls.Vis != Visibility.Kernel;
+        bool toUser = cls.Vis != Visibility.Kernel;
 
         // one copy in shared.h when it can go there, otherwise one per unit that needs it
         if (CanLiveInSharedHeader(cls) && toKernel && toUser)
@@ -641,7 +632,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             return;
         }
         if (toKernel) EmitConcreteClass(cls, _kTypes, _kFwd, _kFuncs, isLib: true);
-        if (toUser)   EmitConcreteClass(cls, _uTypes, _uFwd, _uFunc,  isLib: true);
+        if (toUser) EmitConcreteClass(cls, _uTypes, _uFwd, _uFunc, isLib: true);
     }
 
     /// <summary>
@@ -650,9 +641,9 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     private void EmitModule(IrClass cls)
     {
         bool toKernel = cls.Vis != Visibility.User;
-        bool toUser   = cls.Vis != Visibility.Kernel;
+        bool toUser = cls.Vis != Visibility.Kernel;
         if (toKernel) EmitModuleInto(cls, _kTypes, _kFuncs);
-        if (toUser)   EmitModuleInto(cls, _uTypes, _uFunc);
+        if (toUser) EmitModuleInto(cls, _uTypes, _uFunc);
     }
 
     /// <summary>
@@ -669,8 +660,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// Emits a concrete class into the given writers. Library classes use static-inline functions;
     /// context classes use regular linkage with separate forward declarations.
     /// </summary>
-    private void EmitConcreteClass(IrClass cls, CodeWriter types, CodeWriter fwd,
-                           CodeWriter funcs, bool isLib)
+    private void EmitConcreteClass(IrClass cls, CodeWriter types, CodeWriter fwd, CodeWriter funcs, bool isLib)
     {
         string prefix = isLib ? "static inline " : "";
 
@@ -694,7 +684,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
 
         if (isLib)
         {
-            foreach (var m in cls.Methods)   types.Line($"{prefix}{MethodSig(m)};");
+            foreach (var m in cls.Methods) types.Line($"{prefix}{MethodSig(m)};");
             foreach (var o in cls.Operators) types.Line($"{prefix}{OperatorSig(o)};");
             if (NeedsDtor(cls)) types.Line($"{prefix}{DtorSig(cls)};");
             types.Line($"{prefix}{AllocatorSig(cls)};");
@@ -748,13 +738,13 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             w.Blank();
         }
 
-        foreach (var m in cls.Methods)   w.Line($"static inline {MethodSig(m)};");
+        foreach (var m in cls.Methods) w.Line($"static inline {MethodSig(m)};");
         foreach (var o in cls.Operators) w.Line($"static inline {OperatorSig(o)};");
         if (NeedsDtor(cls)) w.Line($"static inline {DtorSig(cls)};");
         w.Line($"static inline {AllocatorSig(cls)};");
         w.Line("");
 
-        foreach (var m in cls.Methods)   EmitFunctionBody(m, w, isLib: true);
+        foreach (var m in cls.Methods) EmitFunctionBody(m, w, isLib: true);
         foreach (var o in cls.Operators) EmitOperatorBody(o, w, isLib: true);
         EmitDtor(cls, w, isLib: true);
         EmitAllocator(cls, w, isLib: true);
@@ -951,7 +941,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
 
     /// <summary>
     /// The full C signature for an operator overload, with a self parameter for every operator
-    /// except a static "as" - a factory, where self does not exist yet. Internal so tests can
+    /// except a static "as", a factory, where self does not exist yet. Internal so tests can
     /// assert the emitted shape directly.
     /// </summary>
     internal static string OperatorSig(IrOperator o)
@@ -1030,7 +1020,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         }
 
         bool isKernel = fn.Vis == Visibility.Kernel;
-        var fwd   = isKernel ? _kFwd   : _uFwd;
+        var fwd = isKernel ? _kFwd : _uFwd;
         var funcs = isKernel ? _kFuncs : _uFunc;
         fwd.Line($"{FuncSig(fn)};");
         if (fn.Body == null)
@@ -1089,8 +1079,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         using (w.Braces())
         {
             w.Line("int _st = 0;");
-            w.Line($"if (__atomic_compare_exchange_n(&{GateName(proc)}, &_st, 1, 0, " +
-                   "__ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))");
+            w.Line($"if (__atomic_compare_exchange_n(&{GateName(proc)}, &_st, 1, 0, " + "__ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))");
             using (w.Braces())
             {
                 w.Line($"{init.CName}();");
@@ -1184,12 +1173,12 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     {
         switch (s)
         {
-            case IrGoto g:        w.Line($"goto {g.Label};"); break;
-            case IrLabel l:       w.Line($"{l.Name}:;"); break;
+            case IrGoto g: w.Line($"goto {g.Label};"); break;
+            case IrLabel l: w.Line($"{l.Name}:;"); break;
             case IrNativeStmt ns: w.Line(TrimC(ns.C)); break;
-            case IrBlock b:       EmitBlock(b, w); break;
+            case IrBlock b: EmitBlock(b, w); break;
             case IrUnsafeBlock u: EmitBlock(u.Body, w); break;
-            case IrDeclVar dv:    EmitDeclVar(dv, w); break;
+            case IrDeclVar dv: EmitDeclVar(dv, w); break;
             case IrAssign a:
             {
                 using var line = w.Open();
@@ -1227,7 +1216,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
                 }
                 EmitBlock(ws.Body, w);
                 break;
-            case IrFor fr:        EmitFor(fr, w); break;
+            case IrFor fr: EmitFor(fr, w); break;
             default: throw new System.Diagnostics.UnreachableException($"[Emitter] unhandled IrStmt: {s.GetType().Name}");
         }
     }
@@ -1270,9 +1259,6 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         Write(a.Value, sb);
     }
 
-    /// <summary>
-    /// Emits an if/else statement with optional else branch.
-    /// </summary>
     private void EmitIf(IrIf ifs, CodeWriter w)
     {
         using (var line = w.Open())
@@ -1301,7 +1287,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             switch (fr.Init)
             {
                 case IrDeclVar dv: WriteDecl(dv, sb, withDefault: false); break;
-                case IrAssign aa:  WriteAssign(aa, sb); break;
+                case IrAssign aa: WriteAssign(aa, sb); break;
                 case IrExprStmt e: Write(e.Expr, sb); break;
             }
             sb.Append("; ");
@@ -1309,7 +1295,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
             sb.Append("; ");
             switch (fr.Step)
             {
-                case IrAssign sa:  WriteAssign(sa, sb); break;
+                case IrAssign sa: WriteAssign(sa, sb); break;
                 case IrExprStmt e: Write(e.Expr, sb); break;
                 case null: break;
                 default: throw new InvalidOperationException($"[Emitter] for-step must be an assignment or expression, got {fr.Step.GetType().Name}");
@@ -1510,8 +1496,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// The C type an operator result is narrowed to, or null when the type is boolean or not
     /// numeric and C's own choice already agrees.
     /// </summary>
-    private static string? NarrowTo(IrType t) =>
-        t is IrPrimType p && p.IsNumeric && p.CName != "bool" ? p.ToCType() : null;
+    private static string? NarrowTo(IrType t) => t is IrPrimType p && p.IsNumeric && p.CName != "bool" ? p.ToCType() : null;
 
     /// <summary>
     /// Writes a comma-separated argument list, with an optional leading receiver.
@@ -1640,8 +1625,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
         var n = module.Symbols.IntrinsicOrNull(role);
         if (n != null) return n;
         if (_missingRoles.Add(role))
-            _diag.Error(Codes.MissingIntrinsic, "<runtime>", TextSpan.None,
-                $"no libgata symbol provides @intrinsic({role})");
+            _diag.Error(Codes.MissingIntrinsic, "<runtime>", TextSpan.None, $"no libgata symbol provides @intrinsic({role})");
         return $"/*MISSING_INTRINSIC:{role}*/";
     }
 

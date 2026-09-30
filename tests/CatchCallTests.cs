@@ -3,7 +3,7 @@ namespace Appa.Tests;
 using Appa;
 
 /// <summary>
-/// Coverage for `f() catch { ... assign v; }` - handling a throwing call in place so its value
+/// Coverage for `f() catch { ... assign v; }`. Handling a throwing call in place so its value
 /// stays in the enclosing scope. The emitted-C assertions pin the shape the ARC pass produces,
 /// because that shape is the feature a try block would not give.
 /// </summary>
@@ -38,8 +38,7 @@ public class CatchCallTests
     [Fact]
     public void SatisfiesThrowsRule()
     {
-        AssertClean(Throwing +
-            "realm kernel { entry func Main() { let int a = P(1) catch { assign 0; }; } }");
+        AssertClean(Throwing + "realm kernel { entry func Main() { let int a = P(1) catch { assign 0; }; } }");
     }
 
     /// <summary>
@@ -119,15 +118,13 @@ public class CatchCallTests
     [Fact]
     public void StatementNeedsNoAssign()
     {
-        AssertClean(Throwing +
-            "realm kernel { entry func Main() { P(-1) catch { let int logged = 1; }; } }");
+        AssertClean(Throwing + "realm kernel { entry func Main() { P(-1) catch { let int logged = 1; }; } }");
     }
 
     [Fact]
     public void AssignWidens()
     {
-        AssertClean(Throwing +
-            "realm kernel { entry func Main() { let int64 a = P(1) catch { assign 0; }; } }");
+        AssertClean(Throwing + "realm kernel { entry func Main() { let int64 a = P(1) catch { assign 0; }; } }");
     }
 
     #endregion
@@ -155,15 +152,13 @@ public class CatchCallTests
     [Fact]
     public void AssignOutsideRejected()
     {
-        AssertError(Codes.AssignOutsideCatch,
-            "realm kernel { entry func Main() { assign 5; } }");
+        AssertError(Codes.AssignOutsideCatch, "realm kernel { entry func Main() { assign 5; } }");
     }
 
     [Fact]
     public void AssignAsStatementRejected()
     {
-        AssertError(Codes.AssignOutsideCatch, Throwing +
-            "realm kernel { entry func Main() { P(1) catch { assign 3; }; } }");
+        AssertError(Codes.AssignOutsideCatch, Throwing + "realm kernel { entry func Main() { P(1) catch { assign 3; }; } }");
     }
 
     [Fact]
@@ -179,8 +174,7 @@ public class CatchCallTests
     [Fact]
     public void NonCallRejected()
     {
-        AssertError(Codes.Syntax,
-            "realm kernel { entry func Main() { let int a = 5 catch { assign 0; }; } }");
+        AssertError(Codes.Syntax, "realm kernel { entry func Main() { let int a = 5 catch { assign 0; }; } }");
     }
 
     [Fact]
@@ -203,7 +197,7 @@ public class CatchCallTests
     /// <summary>
     /// A field initializer is spliced into the allocator, which has nowhere to put a failure
     /// branch. A bare throwing call is already rejected there, but a `catch` satisfies that check
-    /// by design - so this position needs its own guard.
+    /// by design, so this position needs its own guard.
     /// </summary>
     [Fact]
     public void FieldInitRejected()
@@ -234,7 +228,7 @@ public class CatchCallTests
 
     /// <summary>
     /// The construct is a statement like any other, so it works unchanged inside a loop body, an
-    /// unsafe block, a nested block, and even inside a try - where the handler wins and the
+    /// unsafe block, a nested block, and even inside a try, where the handler wins and the
     /// enclosing catch is never reached.
     /// </summary>
     [Theory]
@@ -301,7 +295,7 @@ public class CatchCallTests
 
     /// <summary>
     /// Returns the fully-lowered body of the kernel entry function. SingleFileCompile has no
-    /// environment, so it emits no translation unit to string-match against - but the module it
+    /// environment, so it emits no translation unit to string-match against, but the module it
     /// returns has already been through ARC lowering, which is the pass under test here.
     /// </summary>
     private static List<IrStmt> LoweredMain(string src)
@@ -347,8 +341,7 @@ public class CatchCallTests
     [Fact]
     public void AssignStoresIntoDecl()
     {
-        var body = LoweredMain(Throwing +
-            "realm kernel { entry func Main() { let int a = P(1) catch { assign 9; }; } }");
+        var body = LoweredMain(Throwing + "realm kernel { entry func Main() { let int a = P(1) catch { assign 9; }; } }");
 
         var branch = Assert.IsType<IrIf>(body[2]);
         var store = Assert.IsType<IrAssign>(branch.Then.Stmts.Single());
@@ -454,8 +447,7 @@ public class CatchCallTests
     [Fact]
     public void DiscardedValueStillReported()
     {
-        var (diag, _) = SingleFileCompile.Check(
-            Throwing + "realm kernel { entry func Main() { P(1) catch { assign 0; }; } }");
+        var (diag, _) = SingleFileCompile.Check(Throwing + "realm kernel { entry func Main() { P(1) catch { assign 0; }; } }");
 
         var d = Assert.Single(diag.All, x => x.Severity == Severity.Error);
         Assert.Equal(Codes.AssignOutsideCatch, d.Code);

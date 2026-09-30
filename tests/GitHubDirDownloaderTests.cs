@@ -28,7 +28,7 @@ internal sealed class FakeGitHubHandler : HttpMessageHandler
 
 /// <summary>
 /// Exercises GitHubDirDownloader's pure logic (tree filtering, the truncation fallback, LFS-pointer
-/// detection, and clear failures on 404/401) against a fake HTTP handler - no real network access.
+/// detection, and clear failures on 404/401) against a fake HTTP handler. No real network access.
 /// </summary>
 public class GitHubDirDownloaderTests
 {

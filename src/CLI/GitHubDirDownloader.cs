@@ -208,7 +208,7 @@ internal static class GitHubDirDownloader
 
     /// <summary>
     /// Sends a GET to the GitHub REST API, attaching a bearer token from GITHUB_TOKEN if one is set
-    /// (optional - raises the rate limit from 60/hr to 5000/hr).
+    /// (optional, raises the rate limit from 60/hr to 5000/hr).
     /// </summary>
     private static Task<HttpResponseMessage> ApiGet(string url, HttpClient client, CancellationToken ct)
     {
@@ -228,8 +228,7 @@ internal static class GitHubDirDownloader
     /// </summary>
     private static async Task WaitOutRateLimit(HttpResponseMessage resp, CancellationToken ct)
     {
-        if (!resp.Headers.TryGetValues("X-RateLimit-Remaining", out var remaining) ||
-            remaining.FirstOrDefault() != "0")
+        if (!resp.Headers.TryGetValues("X-RateLimit-Remaining", out var remaining) || remaining.FirstOrDefault() != "0")
             return;
 
         if (!resp.Headers.TryGetValues("X-RateLimit-Reset", out var reset) ||

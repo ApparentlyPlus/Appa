@@ -17,7 +17,7 @@ internal static class ToolchainProbe
         CanStart(AppaPaths.QemuExe, "--version");
 
     /// <summary>
-    /// Starts a process and returns true if it launched and exited, regardless of exit code - false
+    /// Starts a process and returns true if it launched and exited, regardless of exit code. False
     /// only when the executable itself could not be found/run.
     /// </summary>
     private static bool CanStart(string exe, string args)

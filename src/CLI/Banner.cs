@@ -44,7 +44,7 @@ static class Banner
     private static readonly int FullWidth = Widest(Full), TextWidth = Widest(AppaText);
 
     /// <summary>
-    /// Sets the wordmark beside the cat, vertically centred against it - with an odd number of rows
+    /// Sets the wordmark beside the cat, vertically centred against it, with an odd number of rows
     /// left over the extra one goes above, which is what puts "Appa" on the cat's third row.
     /// </summary>
     private static string[] Lockup()
@@ -69,10 +69,9 @@ static class Banner
     private static int Widest(string[] block) => block.Max(row => Visible(row.TrimEnd()));
 
     /// <summary>
-    /// Pads a row out to a column count - by what the terminal draws, not by String.Length.
+    /// Pads a row out to a column count, by what the terminal draws, not by String.Length.
     /// </summary>
-    private static string PadTo(string row, int width) =>
-        row + new string(' ', Math.Max(0, width - Visible(row)));
+    private static string PadTo(string row, int width) => row + new string(' ', Math.Max(0, width - Visible(row)));
 
     /// <summary>
     /// Prints the banner.
@@ -119,7 +118,7 @@ static class Banner
     }
 
     /// <summary>
-    /// Letterspaces a line - one space between letters, three between words - so a short string reads
+    /// Letterspaces a line (one space between letters, three between words), so a short string reads
     /// as a masthead rather than as a sentence.
     /// </summary>
     private static string Spaced(string s)

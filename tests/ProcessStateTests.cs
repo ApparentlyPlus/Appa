@@ -28,8 +28,7 @@ public class ProcessStateTests
     /// <summary>
     /// A throwing function, for the initialiser positions that need one.\
     /// </summary>
-    private const string Throwing =
-        "throws int func Boom(int x) { if (x < 0) { throw; } return x; }\n";
+    private const string Throwing = "throws int func Boom(int x) { if (x < 0) { throw; } return x; }\n";
 
     private static (DiagnosticBag Diag, string[] Errors) Check(string src)
     {
@@ -72,7 +71,7 @@ public class ProcessStateTests
     /// <summary>
     /// The rule the feature turns on. A process variable is read by threads that did not run the
     /// line declaring it, so no definite-assignment analysis can decide whether a store happened
-    /// first - which is why this is an error rather than the warning a local gets.
+    /// first, which is why this is an error rather than the warning a local gets.
     /// </summary>
     [Theory]
     [InlineData("let int n;")]
@@ -103,14 +102,13 @@ public class ProcessStateTests
     }
 
     /// <summary>
-    /// A throwing call has no handler at this point - the initialiser runs before any thread, in
+    /// A throwing call has no handler at this point. The initialiser runs before any thread, in
     /// generated code with nowhere to propagate to.
     /// </summary>
     [Fact]
     public void ThrowingInitialiserRejected()
     {
-        AssertError(Codes.ThrowsOutsideTry,
-            InProcess("let int n = F();", "throws int func F() { return 1; }"));
+        AssertError(Codes.ThrowsOutsideTry, InProcess("let int n = F();", "throws int func F() { return 1; }"));
     }
 
     [Fact]
@@ -201,7 +199,7 @@ public class ProcessStateTests
     }
 
     /// <summary>
-    /// The threads of the process see it, and so do the functions the process declares - which is
+    /// The threads of the process see it, and so do the functions the process declares, which is
     /// what makes it state rather than a variable that happens to live longer.
     /// </summary>
     [Fact]
@@ -385,7 +383,7 @@ public class ProcessStateTests
     /// <summary>
     /// A process variable holding a function pointer is called through its name, the same as a
     /// local holding one. Resolution used to consider only locals, so this came back "'f' is a
-    /// process variable here, not a function" - which reads like a language rule, while copying it
+    /// process variable here, not a function", which reads like a language rule, while copying it
     /// into a local first worked fine.
     /// </summary>
     [Fact]
@@ -482,7 +480,7 @@ public class ProcessStateTests
     }
 
     /// <summary>
-    /// A process with no variables gains nothing - no gate, no initialiser, no per-thread call.
+    /// A process with no variables gains nothing. No gate, no initialiser, no per-thread call.
     /// </summary>
     [Fact]
     public void NoStateNoInitialiser()

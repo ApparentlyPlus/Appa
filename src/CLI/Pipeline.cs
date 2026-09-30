@@ -14,9 +14,9 @@ internal static class Pipeline
     /// Finds the project file marked @environment in the project root. Parses the top-level *.g
     /// files and returns the first one carrying the marker.
     /// </summary>
-    public static string? DiscoverEnv(string projectRoot, List<string>? unreadable = null)
+    public static string? DiscoverEnv(string root, List<string>? unreadable = null)
     {
-        foreach (var f in Directory.GetFiles(projectRoot, "*.g").OrderBy(x => x, StringComparer.Ordinal))
+        foreach (var f in Directory.GetFiles(root, "*.g").OrderBy(x => x, StringComparer.Ordinal))
             try
             {
                 var prog = new Parser(new Lexer(File.ReadAllText(f)).Tokenize()).ParseProgram();
@@ -31,9 +31,9 @@ internal static class Pipeline
     /// <summary>
     /// Returns the entry point path (src/main.g convention), or null if it does not exist.
     /// </summary>
-    public static string? DiscoverEntry(string projectRoot)
+    public static string? DiscoverEntry(string root)
     {
-        string p = Path.Combine(projectRoot, "src", "main.g");
+        string p = Path.Combine(root, "src", "main.g");
         return File.Exists(p) ? Path.GetFullPath(p) : null;
     }
 
@@ -51,8 +51,7 @@ internal static class Pipeline
     /// Resolves an unquoted library import name to a file path in the libgata directory. Reports a
     /// diagnostic and returns an empty string if the module file is missing.
     /// </summary>
-    public static string ResolveLibgata(string name, string libgataDir, string fromFile,
-                                        DiagnosticBag diag, TextSpan span)
+    public static string ResolveLibgata(string name, string libgataDir, string fromFile, DiagnosticBag diag, TextSpan span)
     {
         string candidate = Path.Combine(libgataDir, name + ".g");
         if (File.Exists(candidate)) return candidate;
@@ -96,7 +95,7 @@ internal static class Pipeline
 
             Mangler.BeginRound();
             new ScopeBinder(diag).Bind(programs, visible);
-            var genericRequestFile = new Monomorphizer(diag).Process(programs, seeds);
+            var reqFile = new Monomorphizer(diag).Process(programs, seeds);
             collected = new SymbolCollector(diag).Collect([.. programs.Select(t => (t.path, t.prog))]);
             var seedScopes = seeds.ToDictionary(
                 s => s.Key,
@@ -104,7 +103,7 @@ internal static class Pipeline
                 StringComparer.Ordinal);
             var resolver = new TypeResolver(collected.Sym, collected.HasInit,
                                             collected.PreDefinedStructs, collected.OpaqueFieldClasses, visible,
-                                            genericRequestFile, seedScopes, releaseMode: mode == Mode.Release, diag);
+                                            reqFile, seedScopes, releaseMode: mode == Mode.Release, diag);
             module = resolver.Resolve([.. programs.Select(t => (t.prog, t.path))]);
 
             if (round >= MaxMonomorphizationRounds) break;
@@ -131,7 +130,7 @@ internal static class Pipeline
     /// </summary>
     public static (List<(string path, Program prog)> programs, List<string> attempted,
             Dictionary<string, List<string>> imports, DiagnosticBag diag)
-        Transpile(List<string> inputFiles, string projectRoot, string libgataDir)
+        Transpile(List<string> inputFiles, string root, string libgataDir)
     {
         var sources = new SourceSet();
         var diag = new DiagnosticBag(sources);
@@ -161,7 +160,7 @@ internal static class Pipeline
                 foreach (var imp in prog.Items.OfType<ImportDecl>())
                 {
                     string resolved = imp.IsPath
-                        ? Path.Combine(projectRoot, imp.Name)
+                        ? Path.Combine(root, imp.Name)
                         : ResolveLibgata(imp.Name, libgataDir, path, diag, imp.Span);
                     if (resolved == "") continue;
                     resolved = Path.GetFullPath(resolved);
@@ -201,9 +200,7 @@ internal static class Pipeline
     /// </summary>
     public static void ValidateEnvironment(List<(string path, Program prog)> programs, DiagnosticBag diag)
     {
-        var envs = programs
-            .SelectMany(t => t.prog.Items.OfType<EnvironmentDecl>().Select(e => (t.path, e.Span)))
-            .ToList();
+        var envs = programs.SelectMany(t => t.prog.Items.OfType<EnvironmentDecl>().Select(e => (t.path, e.Span))).ToList();
         if (envs.Count == 0)
             diag.Error(Codes.File, ProjectWide, TextSpan.None, "no @environment file in the build",
                 ["exactly one .g file in the build must be marked '@environment'; pass it with --env, or put it in the project directory"]);
@@ -241,8 +238,7 @@ internal static class Pipeline
     }
 
     // The reference-counting runtime as one contract, not five knobs.
-    private static readonly string[] ArcRoles =
-        [Roles.Alloc, Roles.Retain, Roles.Release, Roles.ObjHeader, Roles.ObjInit];
+    private static readonly string[] ArcRoles = [Roles.Alloc, Roles.Retain, Roles.Release, Roles.ObjHeader, Roles.ObjInit];
 
 
     /// <summary>
@@ -278,8 +274,7 @@ internal static class Pipeline
         {
             Claim(e.CName, $"enum '{Mangler.DisplayName(e.Name)}'");
             foreach (var (member, _) in e.Members)
-                Claim(Mangler.EnumMember(e.Name, member),
-                      $"enum member '{Mangler.DisplayName(e.Name)}.{member}'");
+                Claim(Mangler.EnumMember(e.Name, member), $"enum member '{Mangler.DisplayName(e.Name)}.{member}'");
         }
         foreach (var u in module.Unions) Claim(u.CName, $"union '{Mangler.DisplayName(u.Name)}'");
         foreach (var n in module.NativeTypes) Claim(n.CName, $"native type '{Mangler.DisplayName(n.Name)}'");
@@ -315,8 +310,7 @@ internal static class Pipeline
             }
             foreach (var t in p.Threads)
                 if (t.EntryFunc is { } e)
-                    Claim(e.CName,
-                          $"thread '{(e.Vis == Visibility.Kernel ? "kernel" : "userspace")}.{p.Name}.{t.Name}'");
+                    Claim(e.CName, $"thread '{(e.Vis == Visibility.Kernel ? "kernel" : "userspace")}.{p.Name}.{t.Name}'");
         }
     }
 
@@ -400,19 +394,18 @@ internal static class Pipeline
                     "the 'realm userspace { }' block declares no 'entry func'");
             else
                 foreach (var (file, span) in entryFuncs.Skip(1))
-                    diag.Error(Codes.DuplicateEntry, file, span,
-                        "the userspace realm declares more than one 'entry func'");
+                    diag.Error(Codes.DuplicateEntry, file, span, "the userspace realm declares more than one 'entry func'");
             return;
         }
 
-        var kernelEntryFuncs = new List<(string file, TextSpan span)>();
+        var kernelEntries = new List<(string file, TextSpan span)>();
         foreach (var (path, prog) in programs)
             foreach (var item in prog.Items)
                 if (item is ContextDecl c && c.Kind == Realm.Kernel)
                 {
                     foreach (var inner in c.Items)
                         if (inner is FuncDecl { IsEntry: true } ef)
-                            kernelEntryFuncs.Add((path, ef.Span));
+                            kernelEntries.Add((path, ef.Span));
                 }
                 else if (item is ContextDecl u && u.Kind == Realm.User)
                 {
@@ -437,13 +430,12 @@ internal static class Pipeline
             return;
         }
 
-        if (kernelEntryFuncs.Count == 0)
+        if (kernelEntries.Count == 0)
             diag.Error(Codes.MissingEntryPoint, kernelBlocks[0].file, kernelBlocks[0].span,
                 "the 'realm kernel { }' block declares no 'entry func'");
         else
-            foreach (var (file, span) in kernelEntryFuncs.Skip(1))
-                diag.Error(Codes.DuplicateEntry, file, span,
-                    "the kernel realm declares more than one 'entry func'");
+            foreach (var (file, span) in kernelEntries.Skip(1))
+                diag.Error(Codes.DuplicateEntry, file, span, "the kernel realm declares more than one 'entry func'");
     }
 
     /// <summary>
@@ -479,7 +471,7 @@ internal static class Pipeline
     }
 
     /// <summary>
-    /// Whether a path lies inside the standard library - code the author cannot edit. A null
+    /// Whether a path lies inside the standard library, code the author cannot edit. A null
     /// libgataDir treats every file as theirs.
     /// </summary>
     public static Func<string, bool> LibraryPredicate(string? libgataDir)
@@ -487,8 +479,7 @@ internal static class Pipeline
         string? libRoot = libgataDir == null
             ? null
             : Path.TrimEndingDirectorySeparator(Path.GetFullPath(libgataDir)) + Path.DirectorySeparatorChar;
-        return path => libRoot != null &&
-                       Path.GetFullPath(path).StartsWith(libRoot, StringComparison.OrdinalIgnoreCase);
+        return path => libRoot != null && Path.GetFullPath(path).StartsWith(libRoot, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -576,10 +567,7 @@ internal static class Pipeline
         // Which member of the cycle to point at
         (string? File, TextSpan Span) Locate(List<string> comp)
         {
-            var sites = comp.OrderBy(x => x, StringComparer.Ordinal)
-                            .Select(Where)
-                            .Where(w => w.File != null)
-                            .ToList();
+            var sites = comp.OrderBy(x => x, StringComparer.Ordinal).Select(Where).Where(w => w.File != null).ToList();
             if (sites.Count == 0) return (null, TextSpan.None);
             return sites.FirstOrDefault(w => !IsLibrary(w.File!), sites[0]);
         }
@@ -590,8 +578,7 @@ internal static class Pipeline
     /// preferring one the author wrote, since dependency order puts the library first and an error
     /// there is nearly always a symptom. A null libgataDir treats every file as theirs.
     /// </summary>
-    public static void ReportGataFiles(List<string> attempted, DiagnosticBag diag, bool warnAsError,
-                                       string? libgataDir = null)
+    public static void ReportGataFiles(List<string> attempted, DiagnosticBag diag, bool werror, string? libgataDir = null)
     {
         var known = new HashSet<string>(attempted);
         bool tty = !Console.IsOutputRedirected;
@@ -604,7 +591,7 @@ internal static class Pipeline
             int errs = list.Count(d => d.Severity == Severity.Error);
             int warns = list.Count(d => d.Severity == Severity.Warning);
             Console.Error.WriteLine(CountSummary(errs, warns) +
-                (errs == 0 && warns > 0 && warnAsError ? " (--werror: treated as errors)" : ""));
+                (errs == 0 && warns > 0 && werror ? " (--werror: treated as errors)" : ""));
             Environment.Exit(1);
         }
 
@@ -621,7 +608,7 @@ internal static class Pipeline
                 if (d.Severity == Severity.Error) err = true;
                 else if (d.Severity == Severity.Warning) warn = true;
             }
-            return err || (warnAsError && warn && !IsLibrary(path));
+            return err || (werror && warn && !IsLibrary(path));
         }
 
         // Pick the file to report from before walking, preferring the author's own.
@@ -633,8 +620,7 @@ internal static class Pipeline
             if (!IsLibrary(path)) { reportFrom = path; break; }
         }
         if (reportFrom != null)
-            Fail(byFile[reportFrom].Where(d => d.Severity == Severity.Error
-                                               || (warnAsError && d.Severity == Severity.Warning)));
+            Fail(byFile[reportFrom].Where(d => d.Severity == Severity.Error || (werror && d.Severity == Severity.Warning)));
 
         int i = 0;
         foreach (var path in attempted)
@@ -655,26 +641,23 @@ internal static class Pipeline
 
         // Report diagnostics that do not belong to any of the files in the build
         var orphan = diag.All.Where(d => !known.Contains(d.Loc.File)).ToList();
-        var orphanErrors = orphan.Where(d => d.Severity == Severity.Error).ToList();
-        var orphanWarnings = orphan.Where(d => d.Severity == Severity.Warning).ToList();
+        var orphanErrs = orphan.Where(d => d.Severity == Severity.Error).ToList();
+        var orphanWarns = orphan.Where(d => d.Severity == Severity.Warning).ToList();
 
-        if (orphanErrors.Count > 0 || (warnAsError && orphanWarnings.Count > 0))
-            Fail([.. orphanErrors, .. orphanWarnings]);
+        if (orphanErrs.Count > 0 || (werror && orphanWarns.Count > 0))
+            Fail([.. orphanErrs, .. orphanWarns]);
 
         // Fail exits, so this runs only when the build is allowed to continue
-        if (orphanWarnings.Count > 0)
+        if (orphanWarns.Count > 0)
         {
             if (tty) Out.ClearRedraw();
-            foreach (var w in orphanWarnings) Console.WriteLine(diag.Render(w));
+            foreach (var w in orphanWarns) Console.WriteLine(diag.Render(w));
         }
 
         if (tty) Out.ClearRedraw();
         Spin.Done($"Checked {attempted.Count} file{(attempted.Count == 1 ? "" : "s")}", sw.Elapsed);
     }
 
-    /// <summary>
-    /// Formats an error/warning count as a human-readable summary line.
-    /// </summary>
     public static string CountSummary(int errors, int warnings)
     {
         string e = errors > 0 ? $"{errors} error{(errors == 1 ? "" : "s")}" : "";
@@ -699,7 +682,7 @@ sealed class EnvProbe(SymbolTable sym) : IrRewriter
     }
 
     /// <summary>
-    /// Collects debug/panic statements' bound C names (never a hardcoded literal - whatever
+    /// Collects debug/panic statements' bound C names (never a hardcoded literal, whatever
     /// libgata's @intrinsic(env_debug)/@intrinsic(env_panic) resolve to).
     /// </summary>
     protected override IrStmt RewriteStmt(IrStmt s)

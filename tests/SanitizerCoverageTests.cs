@@ -8,7 +8,7 @@ public class SanitizerCoverageTests
     /// <summary>
     /// If any compiler on this machine can link with ASan/UBSan, the harness must have chosen one
     /// of them. Distributions commonly ship gcc with libasan in a separate package while clang next
-    /// to it is complete, and 'cc' is probed first - so picking the first compiler that answers
+    /// to it is complete, and 'cc' is probed first, so picking the first compiler that answers
     /// --version silently disarmed every execution test on exactly those machines.
     /// </summary>
     [Fact]

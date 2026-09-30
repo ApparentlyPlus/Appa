@@ -3,7 +3,7 @@ namespace Appa.Tests;
 /// <summary>
 /// Miscompiles and emission-quality defects found while porting a Span[T]-shaped library to Gata
 /// and scaffolding a self-hosting example, each confirmed against a real gcc compile of the
-/// emitted C (not just "appa accepted it").
+/// emitted C (appa accepting it proves nothing).
 /// </summary>
 public class CompilerBugRegressionTests
 {

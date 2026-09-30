@@ -56,7 +56,7 @@ internal sealed class ManagedTypes
 
     /// <summary>
     /// True if values of this type carry reference counts the compiler maintains. Fixed arrays are
-    /// excluded even with a managed element type - an array is raw storage the author counts by
+    /// excluded even with a managed element type. An array is raw storage the author counts by
     /// hand, and managing it here would be a feature, not a consistency fix.
     /// </summary>
     public bool IsManaged(IrType t)

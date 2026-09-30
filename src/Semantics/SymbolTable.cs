@@ -177,25 +177,16 @@ internal sealed class SymbolTable
 
     #region Registration
 
-    /// <summary>
-    /// Registers a class declaration from the given source file.
-    /// </summary>
     public void RegisterClass(string name, string module)
     {
         _classes[name] = new Symbol(name, SymKind.Class, null, null, null) { CName = Mangler.Class(name), Module = module };
     }
 
-    /// <summary>
-    /// Registers a field on the named class.
-    /// </summary>
     public void RegisterField(string cls, string field, TypeSpec type)
     {
         _fields[new(cls, field)] = new Symbol(field, SymKind.Field, type, cls, null);
     }
 
-    /// <summary>
-    /// Registers a method overload on the named class.
-    /// </summary>
     public void RegisterMethod(string cls, string name, MethodSig sig)
     {
         Bucket(_methods, new(cls, name)).Add(new Symbol(name, SymKind.Method, sig.ReturnType, cls, sig));
@@ -211,7 +202,7 @@ internal sealed class SymbolTable
 
     /// <summary>
     /// Registers an operator overload. Every operator but 'as' has one declaration per (class,
-    /// symbol) in a well-formed program, the caller rejecting duplicates; 'as' can have several.
+    /// symbol) in a well-formed program, the caller rejecting duplicates. 'as' can have several.
     /// CNames are assigned in AssignCNames, once the whole bucket is known.
     /// </summary>
     public void RegisterOperator(string cls, string op, TypeSpec returnType, List<Param> @params)
@@ -221,7 +212,7 @@ internal sealed class SymbolTable
     }
 
     /// <summary>
-    /// Records that a throws function returns the given type, ensuring a Result typedef is emitted.
+    /// Records that a throws function returns the given type, so a Result typedef is emitted.
     /// The typedef's inner-name derivation is shared with IrResultType.ResultName (void folds to
     /// int) so a declaration and its call sites can never disagree.
     /// </summary>
@@ -315,23 +306,14 @@ internal sealed class SymbolTable
     // Enum types: name -> member names. Globally visible like primitives.
     public Dictionary<string, HashSet<string>> Enums { get; } = [];
 
-    /// <summary>
-    /// Registers an enum type and its member names.
-    /// </summary>
     public void RegisterEnum(string name, IEnumerable<string> members)
     {
         Enums[name] = [.. members];
     }
 
-    /// <summary>
-    /// Returns true if the name is a declared enum type.
-    /// </summary>
     public bool IsEnum(string name) => Enums.ContainsKey(name);
 
 
-    /// <summary>
-    /// Returns true if the member belongs to the named enum.
-    /// </summary>
     public bool IsEnumMember(string e, string m)
     {
         return Enums.TryGetValue(e, out var ms) && ms.Contains(m);
@@ -340,17 +322,11 @@ internal sealed class SymbolTable
     // Union types: name -> variant list. Globally visible and not generic.
     public Dictionary<string, List<UnionVariant>> Unions { get; } = [];
 
-    /// <summary>
-    /// Registers a union type and its variants.
-    /// </summary>
     public void RegisterUnion(string name, List<UnionVariant> variants)
     {
         Unions[name] = variants;
     }
 
-    /// <summary>
-    /// Returns true if the name is a declared union type.
-    /// </summary>
     public bool IsUnion(string name) => Unions.ContainsKey(name);
 
 
@@ -366,9 +342,6 @@ internal sealed class SymbolTable
 
     #region Lookup
 
-    /// <summary>
-    /// Returns true if the name is a declared class.
-    /// </summary>
     public bool IsClass(string name) => _classes.ContainsKey(name);
 
 
@@ -464,9 +437,6 @@ internal sealed class SymbolTable
         return _funcs.TryGetValue(name, out var l) ? l : [];
     }
 
-    /// <summary>
-    /// Returns all overloads of the named free function.
-    /// </summary>
     public IReadOnlyList<Symbol> FuncOverloads(string name)
     {
         if (!_funcs.TryGetValue(name, out var l)) return [];
@@ -557,9 +527,6 @@ internal sealed class SymbolTable
         return _privateFuncs.TryGetValue((file, name), out var l) ? l[^1] : null;
     }
 
-    /// <summary>
-    /// Returns all overloads of the named file-local function.
-    /// </summary>
     public IReadOnlyList<Symbol> PrivateFuncOverloads(string file, string name)
     {
         return _privateFuncs.TryGetValue((file, name), out var l) ? l : [];
@@ -569,9 +536,6 @@ internal sealed class SymbolTable
 
     #region Type utilities
 
-    /// <summary>
-    /// Returns the C type string for a Gata type name.
-    /// </summary>
     public string CType(string t)
     {
         if (string.IsNullOrEmpty(t) || t == "void") return "void";

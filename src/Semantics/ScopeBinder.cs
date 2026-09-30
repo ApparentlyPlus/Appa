@@ -7,7 +7,7 @@ internal sealed record ScopeBindResult(ScopeTree Tree, ScopeIndex Index);
 
 /// <summary>
 /// Maps a written name to the globally unique name it refers to, from a given scope. Lookup walks
-/// outward - process, then realm, then root - and the innermost match wins, so an inner declaration
+/// outward (process, then realm, then root) and the innermost match wins, so an inner declaration
 /// shadows an outer one silently.
 /// </summary>
 internal sealed class ScopeIndex(ScopeTree tree)
@@ -62,8 +62,7 @@ internal sealed class ScopeIndex(ScopeTree tree)
     /// The scope a qualified name was declared in, or root if it is an ordinary global name. Used
     /// to reject a scoped name reached from outside its scope.
     /// </summary>
-    public ScopeId ScopeOf(string qualified) =>
-        _declScopeOf.TryGetValue(qualified, out var s) ? s : ScopeId.Root;
+    public ScopeId ScopeOf(string qualified) => _declScopeOf.TryGetValue(qualified, out var s) ? s : ScopeId.Root;
 }
 
 /// <summary>
@@ -87,8 +86,7 @@ internal sealed class ScopeBinder(DiagnosticBag diag)
     /// declarations and every type position naming them to the qualified spelling. Two sweeps,
     /// because a declaration may reference a sibling declared later in the same block.
     /// </summary>
-    public ScopeBindResult Bind(List<(string path, Program prog)> programs,
-                                Dictionary<string, HashSet<string>>? visible = null)
+    public ScopeBindResult Bind(List<(string path, Program prog)> programs, Dictionary<string, HashSet<string>>? visible = null)
     {
         var tree = new ScopeTree();
         Mangler.SetScopes(tree);
@@ -214,7 +212,7 @@ internal sealed class ScopeBinder(DiagnosticBag diag)
 
     /// <summary>
     /// Records a single declaration's name in its scope, and rejects the forms that cannot be
-    /// scoped yet. Anything unnamed - a native block, an import - contributes nothing.
+    /// scoped yet. Anything unnamed (a native block, an import) contributes nothing.
     /// </summary>
     private void DeclareItem(ScopeTree tree, ScopeIndex index, ScopeId scope, TopLevel item, string file)
     {
@@ -230,8 +228,7 @@ internal sealed class ScopeBinder(DiagnosticBag diag)
         };
         if (name == null)
         {
-            RejectStrayShadows(item, file, "it belongs on a class, module, enum, union, native type " +
-                                           "or free function");
+            RejectStrayShadows(item, file, "it belongs on a class, module, enum, union, native type " + "or free function");
             return;
         }
         string qualified = tree.Qualify(scope, name);
@@ -242,14 +239,13 @@ internal sealed class ScopeBinder(DiagnosticBag diag)
     }
 
     /// <summary>
-    /// What a name means in the scope that declares it. A scope holds one meaning per name - a type
+    /// What a name means in the scope that declares it. A scope holds one meaning per name. A type
     /// and a function of one name would each be reachable at root, but a scoped declaration takes
     /// over the whole name, so the two spellings could not both survive being shadowed.
     /// </summary>
     private enum NameKind { Type, Generic, Func, Process, State }
 
-    private readonly record struct Named(string Name, ScopeId Scope, NameKind Kind, bool Private,
-                                         string File, TextSpan Span);
+    private readonly record struct Named(string Name, ScopeId Scope, NameKind Kind, bool Private, string File, TextSpan Span);
 
     // Qualifiers already rejected, per file
     private readonly HashSet<(string File, string Path, string Name)> _badQualifier = [];
@@ -399,7 +395,7 @@ internal sealed class ScopeBinder(DiagnosticBag diag)
 
     /// <summary>
     /// Where an enclosing scope declares this name, rendered for a diagnostic, or null. Walks out to
-    /// root, then falls back to the file's imports - the two ways a name can already mean something.
+    /// root, then falls back to the file's imports: the two ways a name can already mean something.
     /// </summary>
     private string? OuterDeclaring(ScopeTree tree, ScopeId scope, string name, string file, Dictionary<string, List<RootDecl>> atRoot,
                                     Dictionary<string, HashSet<string>>? visible)
@@ -652,8 +648,7 @@ internal sealed class ScopeBinder(DiagnosticBag diag)
     /// <summary>
     /// A scope path as a diagnostic names it.
     /// </summary>
-    private static string Where(List<string> path) =>
-        path.Count == 0 ? "the top level" : $"'{Spell(path)}'";
+    private static string Where(List<string> path) => path.Count == 0 ? "the top level" : $"'{Spell(path)}'";
 
     /// <summary>
     /// Builds the name-to-qualified-type map visible from a scope. Reuses the Monomorphizer's
@@ -809,8 +804,7 @@ internal sealed class ScopeBinder(DiagnosticBag diag)
     /// <summary>
     /// Rewrites a process: its own declarations and its threads, both under the process scope.
     /// </summary>
-    private TopLevel RewriteProcess(ProcessDecl pd, ScopeTree tree, ScopeIndex index,
-                                    ScopeId realmScope, string file)
+    private TopLevel RewriteProcess(ProcessDecl pd, ScopeTree tree, ScopeIndex index, ScopeId realmScope, string file)
     {
         if (_duplicates.Contains(pd)) return pd with { Items = [], Threads = [] };
 

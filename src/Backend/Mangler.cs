@@ -14,7 +14,7 @@ internal static class Mangler
     public const string KernelEntry = "gata_kernelspace_main";
 
     // C keywords and the standard macros that behave like them. None is a Gata keyword, so a
-    // program may use them all - and the names emitted verbatim (locals, parameters, and the
+    // program may use them all, and the names emitted verbatim (locals, parameters, and the
     // members of a generated struct) are therefore the ones that can collide.
     private static readonly System.Collections.Frozen.FrozenSet<string> CReserved =
         System.Collections.Frozen.FrozenSet.ToFrozenSet(
@@ -193,11 +193,10 @@ internal static class Mangler
     public static bool IsGenericTemplate(string baseName) => _names.Templates.Contains(baseName);
 
     /// <summary>
-    /// Every stamped instantiation of a generic base name, ordinally sorted - which instance
+    /// Every stamped instantiation of a generic base name, ordinally sorted, which instance
     /// 'Maybe.Found(7)' means once the template is gone.
     /// </summary>
-    public static IReadOnlyList<string> InstancesOf(string baseName) =>
-        _names.StampedByBase.GetValueOrDefault(baseName) ?? [];
+    public static IReadOnlyList<string> InstancesOf(string baseName) => _names.StampedByBase.GetValueOrDefault(baseName) ?? [];
 
     /// <summary>
     /// What a scope-qualified name was declared as, or null when nothing scoped declares it.
@@ -326,9 +325,6 @@ internal static class Mangler
         return $"gata_{Sanitize(procFull)}_state_init";
     }
 
-    /// <summary>
-    /// Returns the C typedef name for a Gata enum type.
-    /// </summary>
     public static string Enum(string name)
     {
         return $"gata_{Sanitize(name)}";
@@ -342,9 +338,6 @@ internal static class Mangler
         return $"gata_{Sanitize(enumName)}_{member}";
     }
 
-    /// <summary>
-    /// Returns the C typedef name for a Gata union type.
-    /// </summary>
     public static string Union(string name)
     {
         return $"gata_{Sanitize(name)}";
@@ -400,7 +393,7 @@ internal static class Mangler
     /// </summary>
     public static string FreeFunc(string name, IReadOnlyList<Param> ps, bool overloaded, bool isEntry, bool isExtern)
     {
-        if (isEntry)  return KernelEntry;
+        if (isEntry) return KernelEntry;
         if (isExtern) return name;
         string b = name.StartsWith("gata_") ? name : $"gata_{Sanitize(name)}";
         return b + (overloaded ? "_" + OverloadSuffix(ps) : "");
@@ -436,7 +429,7 @@ internal static class Mangler
     }
 
     /// <summary>
-    /// The C name for an operator overload. 'overloaded' appends a disambiguating suffix - only
+    /// The C name for an operator overload. 'overloaded' appends a disambiguating suffix. Only
     /// 'as' can have more than one per class today, distinguished by parameter type as every other
     /// parameterized overload already is.
     /// </summary>

@@ -18,7 +18,7 @@ internal sealed class Ownership(IrModule module)
     }
 
     /// <summary>
-    /// Returns true if the type participates in reference counting - a managed class reference, or
+    /// Returns true if the type participates in reference counting: a managed class reference, or
     /// a union whose live variant may hold one.
     /// </summary>
     private bool IsManaged(IrType t)
@@ -189,7 +189,7 @@ internal sealed class Ownership(IrModule module)
     private static IrVar IndexVar => new(IndexName, IrType.Int);
 
     /// <summary>
-    /// Builds `for (int _fi = 0; _fi &lt; limit; _fi++) body` - the counted loop both for-in shapes
+    /// Builds `for (int _fi = 0; _fi &lt; limit; _fi++) body`, the counted loop both for-in shapes
     /// iterate with.
     /// </summary>
     private static IrFor CountedFor(IrExpr limit, IrBlock body)
@@ -318,7 +318,7 @@ internal sealed class Ownership(IrModule module)
     }
 
     /// <summary>
-    /// Splices this frame's defers in LIFO order, then releases its owning locals - that order so a
+    /// Splices this frame's defers in LIFO order, then releases its owning locals, that order so a
     /// defer can still use a local before ARC touches its refcount. Re-lowered at each splice site
     /// so every occurrence gets its own hoisted-temp names.
     /// </summary>
@@ -361,7 +361,7 @@ internal sealed class Ownership(IrModule module)
 
     /// <summary>
     /// Wraps an expression in a release call. A class goes to the runtime intrinsic, a managed
-    /// union to its own generated release - both plain static calls, so every exit path here gets
+    /// union to its own generated release, both plain static calls, so every exit path here gets
     /// union support without a union case of its own.
     /// </summary>
     private IrExprStmt ReleaseStmt(IrExpr e)
@@ -488,8 +488,8 @@ internal sealed class Ownership(IrModule module)
 
     /// <summary>
     /// Lowers `let T x = f() catch {...};` to a bare `T x;` plus an if/else over the Result,
-    /// `assign v` becoming `x = v`. x is owned by the enclosing block - the whole point, since a
-    /// try would trap it - and starts null, so the give-up path is safe.
+    /// `assign v` becoming `x = v`. x is owned by the enclosing block (the whole point, since a
+    /// try would trap it) and starts null, so the give-up path is safe.
     /// </summary>
     private void LowerCatchDecl(IrDeclVar dv, IrCatchCall cc, bool managed, List<IrStmt> outs)
     {
@@ -502,8 +502,7 @@ internal sealed class Ownership(IrModule module)
         outs.Add(new IrDeclVar(dv.Name, dv.Type, null) { Span = dv.Span });
         if (managed) RegisterOwner(dv.Name, dv.Type);
 
-        CatchBranch(cc, new IrVar(dv.Name, dv.Type), $"__res_{dv.Name}", call, clStart,
-                    ownsOldValue: false, outs);
+        CatchBranch(cc, new IrVar(dv.Name, dv.Type), $"__res_{dv.Name}", call, clStart, ownsOldValue: false, outs);
     }
 
     /// <summary>
@@ -518,8 +517,7 @@ internal sealed class Ownership(IrModule module)
         var call = FlattenThrows(cc.Call);
         DrainPre(preStart, outs);
 
-        CatchBranch(cc, target, Tmp("__res_asg"), call, clStart,
-                    ownsOldValue: IsManaged(a.Target.Type) && !_inUnsafe, outs);
+        CatchBranch(cc, target, Tmp("__res_asg"), call, clStart, ownsOldValue: IsManaged(a.Target.Type) && !_inUnsafe, outs);
     }
 
     /// <summary>
@@ -672,7 +670,7 @@ internal sealed class Ownership(IrModule module)
 
     /// <summary>
     /// Lowers `x = f();` where f throws and no handler is attached: the Result is bound, the
-    /// failure path taken by ThrowsCheck, and only then is the value stored - so a propagating
+    /// failure path taken by ThrowsCheck, and only then is the value stored, so a propagating
     /// failure leaves the target holding whatever it held before.
     /// </summary>
     private void LowerThrowsAssign(IrAssign a, List<IrStmt> outs)
@@ -691,8 +689,7 @@ internal sealed class Ownership(IrModule module)
         DrainCleanup(clStart, outs);
 
         ThrowsCheck(res, rt, outs);
-        StoreInto(target, ResultValueOf(res, rt),
-                  IsManaged(a.Target.Type) && !_inUnsafe && IsManaged(target.Type), outs);
+        StoreInto(target, ResultValueOf(res, rt), IsManaged(a.Target.Type) && !_inUnsafe && IsManaged(target.Type), outs);
     }
 
     /// <summary>
@@ -937,8 +934,7 @@ internal sealed class Ownership(IrModule module)
         var b2 = new List<IrStmt>();
         var f2 = new Frame { Loop = true };
         _frames.Push(f2);
-        b2.Add(new IrDeclVar(fi.Var, fi.ElemType,
-            new IrStaticCall(fi.GetCName, fi.ElemType, [colVar, IndexVar])));
+        b2.Add(new IrDeclVar(fi.Var, fi.ElemType, new IrStaticCall(fi.GetCName, fi.ElemType, [colVar, IndexVar])));
         if (IsManaged(fi.ElemType)) RegisterOwner(fi.Var, fi.ElemType);
         LowerBodyInto(fi.Body, b2);
         ReleaseFrame(f2, b2);
@@ -1095,7 +1091,7 @@ internal sealed class Ownership(IrModule module)
         int elsePreCount = _pre.Count - elsePreStart;
         int elseClCount = _cl.Count - elseClStart;
 
-        // Fast path: no conditional sequencing needed - a pure C conditional expression.
+        // Fast path: no conditional sequencing needed, a pure C conditional expression.
         if (!managed && thenPreCount == 0 && thenClCount == 0 && elsePreCount == 0 && elseClCount == 0)
         {
             _pre.RemoveRange(thenPreStart, _pre.Count - thenPreStart);

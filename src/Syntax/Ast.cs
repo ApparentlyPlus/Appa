@@ -171,14 +171,14 @@ internal record KeepAnnotation(TextSpan Span) : Annotation;
 
 /// <summary>
 /// @shadows: declares that this scoped declaration deliberately displaces one of the same name from
-/// an enclosing scope. Shadowing is legal but never silent - unmarked, it is a hard error, so a name
+/// an enclosing scope. Shadowing is legal but never silent. Unmarked, it is a hard error, so a name
 /// changing meaning is always something the author wrote down.
 /// </summary>
 internal record ShadowsAnnotation(TextSpan Span) : Annotation;
 
 /// <summary>
 /// @builtin(name): binds a class or native type declaration to a named compiler builtin type slot
-/// (eg. "String", "Process", "Thread"), the same way @intrinsic binds a role - the compiler never
+/// (eg. "String", "Process", "Thread"), the same way @intrinsic binds a role. The compiler never
 /// hardcodes these names, it resolves them from this declaration.
 /// </summary>
 internal record BuiltinAnnotation(string Name, TextSpan Span) : Annotation;
@@ -661,8 +661,8 @@ internal record IndexExpr(Expr Object, Expr Index, TextSpan Span) : Expr(Span);
 
 /// <summary>
 /// 'Name[Args]' where a value is expected, as in 'Maybe[int].Found(7)'. With one identifier in the
-/// brackets this is the same tokens as an index, so the parser keeps both readings - Args and
-/// IndexForm - and the resolver picks, knowing what is in scope.
+/// brackets this is the same tokens as an index, so the parser keeps both readings (Args and
+/// IndexForm) and the resolver picks, knowing what is in scope.
 /// </summary>
 internal record GenericTypeRefExpr(string Name, NamedSpec[] Args, Expr? IndexForm, TextSpan Span) : Expr(Span)
 {
@@ -672,7 +672,7 @@ internal record GenericTypeRefExpr(string Name, NamedSpec[] Args, Expr? IndexFor
     public string Mangled => NamedSpec.Flatten(Name, Args);
 
     /// <summary>
-    /// The reference as written, e.g. Maybe[int] - for diagnostics, which must never show a mangled
+    /// The reference as written, e.g. Maybe[int], for diagnostics, which must never show a mangled
     /// name for a type the author never spelled that way.
     /// </summary>
     public string Written => $"{Name}[{string.Join(", ", Args.Select(a => Mangler.DisplayName(a.Mangled)))}]";

@@ -73,8 +73,7 @@ internal static class Installer
         {
             string tcZip = scratch.Combine("toolchain.zip");
             DownloadWithProgress(Urls.Toolchain(), tcZip, Tag("Downloading cross-toolchain"));
-            Spin.While(Tag("Extracting cross-toolchain"),
-                () => ZipFile.ExtractToDirectory(tcZip, AppaPaths.ToolchainDir, true));
+            Spin.While(Tag("Extracting cross-toolchain"), () => ZipFile.ExtractToDirectory(tcZip, AppaPaths.ToolchainDir, true));
             File.Delete(tcZip);
 
             using (var ghClient = new HttpClient { Timeout = TimeSpan.FromMinutes(5) })
@@ -91,8 +90,7 @@ internal static class Installer
 
             string tmplZip = scratch.Combine("template.zip");
             DownloadWithProgress(Urls.Template, tmplZip, Tag("Downloading GatOS template"));
-            Spin.While(Tag("Extracting GatOS template"),
-                () => ExtractTemplate(tmplZip, AppaPaths.TemplateDir));
+            Spin.While(Tag("Extracting GatOS template"), () => ExtractTemplate(tmplZip, AppaPaths.TemplateDir));
             File.Delete(tmplZip);
 
             if (!isWin)
@@ -161,7 +159,7 @@ internal static class Installer
     }
 
     /// <summary>
-    /// Re-runs the whole install elevated and exits with whatever that run returns - `sudo` on Unix,
+    /// Re-runs the whole install elevated and exits with whatever that run returns: `sudo` on Unix,
     /// a UAC prompt on Windows. 
     /// </summary>
     [System.Diagnostics.CodeAnalysis.DoesNotReturn]
@@ -203,8 +201,7 @@ internal static class Installer
             }
 
             Console.Clear();
-            using var proc = Process.Start(psi)
-                ?? throw new InvalidOperationException("the elevated process did not start");
+            using var proc = Process.Start(psi) ?? throw new InvalidOperationException("the elevated process did not start");
             proc.WaitForExit();
             Environment.Exit(proc.ExitCode);
         }
@@ -220,7 +217,7 @@ internal static class Installer
 
     /// <summary>
     /// The binary this run was started from, when it is a duplicate left over in Downloads rather
-    /// than the copy that now lives in the install directory - and null when there is nothing to
+    /// than the copy that now lives in the install directory, and null when there is nothing to
     /// clean up, or no one at the keyboard to ask.
     /// </summary>
     private static string? StaleSelfCopy()
@@ -296,8 +293,7 @@ internal static class Installer
     /// True for the failures 'appa install' can hit through no fault of the compiler: the network, the
     /// GitHub API, a corrupt download, or the filesystem it installs into.
     /// </summary>
-    internal static bool IsExpectedSetupFailure(Exception ex) =>
-        ex is HttpRequestException
+    internal static bool IsExpectedSetupFailure(Exception ex) => ex is HttpRequestException
               or TaskCanceledException
               or InvalidOperationException
               or InvalidDataException
@@ -314,8 +310,7 @@ internal static class Installer
             "check the network connection and run 'appa install' again; the install is incomplete until it succeeds",
         UnauthorizedAccessException =>
             $"check the permissions on the path named above; if it is inside {AppaPaths.Root}, removing that directory and running 'appa install' again is the clean fix",
-        InvalidDataException =>
-            "the download was corrupt; run 'appa install' again to fetch it fresh",
+        InvalidDataException => "the download was corrupt; run 'appa install' again to fetch it fresh",
         InvalidOperationException when ex.Message.Contains("rate limit") =>
             "set GITHUB_TOKEN to a personal access token to raise the limit from 60 to 5000 requests an hour",
         _ => "the install is incomplete; run 'appa install' again once the cause is fixed",
