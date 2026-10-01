@@ -23,8 +23,7 @@ public class ArithmeticFidelityFuzzTests
     ];
 
     private static BigInteger Lo(Prim t) => t.Signed ? -BigInteger.Pow(2, t.Bits - 1) : 0;
-    private static BigInteger Hi(Prim t) =>
-        t.Signed ? BigInteger.Pow(2, t.Bits - 1) - 1 : BigInteger.Pow(2, t.Bits) - 1;
+    private static BigInteger Hi(Prim t) => t.Signed ? BigInteger.Pow(2, t.Bits - 1) - 1 : BigInteger.Pow(2, t.Bits) - 1;
     private static bool Fits(BigInteger v, Prim t) => v >= Lo(t) && v <= Hi(t);
 
     /// <summary>
@@ -40,7 +39,7 @@ public class ArithmeticFidelityFuzzTests
     private static Prim Result(Prim a, Prim b) => a.Rank >= b.Rank ? a : b;
 
     /// <summary>
-    /// C truncates division toward zero; BigInteger.Divide already does.
+    /// C truncates division toward zero. BigInteger.Divide already does.
     /// </summary>
     private static BigInteger CDiv(BigInteger a, BigInteger b) => BigInteger.Divide(a, b);
 
@@ -48,7 +47,7 @@ public class ArithmeticFidelityFuzzTests
 
     /// <summary>
     /// A literal written so the checker gives it exactly the type wanted. A bare literal is typed by
-    /// its own magnitude - 'int' when it fits, 'int64' otherwise - and a leading '-' is an operator
+    /// its own magnitude ('int' when it fits, 'int64' otherwise) and a leading '-' is an operator
     /// over the magnitude rather than part of it, so only non-negative in-range values go bare.
     /// </summary>
     private static Node Leaf(Random rng, Prim t)
@@ -94,7 +93,7 @@ public class ArithmeticFidelityFuzzTests
             {
                 case "/" or "%":
                     if (rv == 0) continue;
-                    if (t.Signed && lv == Lo(t) && rv == -1) continue;  // overflows; C leaves it undefined
+                    if (t.Signed && lv == Lo(t) && rv == -1) continue;  // overflows. C leaves it undefined
                     v = op == "/" ? CDiv(lv, rv) : lv - CDiv(lv, rv) * rv;
                     break;
                 case "<<" or ">>":
@@ -143,12 +142,10 @@ public class ArithmeticFidelityFuzzTests
         if (Binary(rng, l, r) is { } e) return e;
 
         var one = One(l.Type);
-        return Binary(rng, l, one)
-               ?? new Node($"({l.Text} * {one.Text})", l.Type, l.Value);
+        return Binary(rng, l, one) ?? new Node($"({l.Text} * {one.Text})", l.Type, l.Value);
     }
 
-    private static Node One(Prim t) =>
-        new(t.Name == "int" ? "(1)" : $"((1) as {t.Name})", t, BigInteger.One);
+    private static Node One(Prim t) => new(t.Name == "int" ? "(1)" : $"((1) as {t.Name})", t, BigInteger.One);
 
     private static string[] Shuffled(Random rng, string[] items)
     {
@@ -181,7 +178,7 @@ public class ArithmeticFidelityFuzzTests
     /// <summary>
     /// Generated arithmetic must give the reference answer at every optimisation level and under every
     /// available compiler. A level-dependent answer means the emitted C relies on something C does not
-    /// define; a level-independent wrong answer means the emitter and the type checker disagree, which
+    /// define. A level-independent wrong answer means the emitter and the type checker disagree, which
     /// is what the promotion and signedness defects were.
     /// </summary>
     [Fact]
@@ -251,7 +248,7 @@ public class ArithmeticFidelityFuzzTests
 
     /// <summary>
     /// Compares run output against the reference line by line, reporting the first few mismatches with
-    /// the expression that produced each - a bare value diff over 400 generated expressions is not
+    /// the expression that produced each. A bare value diff over 400 generated expressions is not
     /// something anyone can act on.
     /// </summary>
     private static void AssertMatches(string[] expected, Node[] nodes, string output, string config)
@@ -262,8 +259,7 @@ public class ArithmeticFidelityFuzzTests
         {
             string got = i < actual.Length ? actual[i] : "<missing>";
             if (got == expected[i]) continue;
-            wrong.Add($"  [{i}] {nodes[i].Type.Name}\n      expected {expected[i]}, got {got}\n" +
-                      $"      {nodes[i].Text}");
+            wrong.Add($"  [{i}] {nodes[i].Type.Name}\n      expected {expected[i]}, got {got}\n" + $"      {nodes[i].Text}");
         }
         Assert.True(wrong.Count == 0,
             $"at {config}, {wrong.Count}+ of {expected.Length} generated expressions computed a value " +

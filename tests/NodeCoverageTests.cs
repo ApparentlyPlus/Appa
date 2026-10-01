@@ -16,8 +16,7 @@ public class NodeCoverageTests
         false;
 #endif
 
-    private const string NotInRelease =
-        "NodeCoverage's guards are [Conditional(\"DEBUG\")] and compile out of a Release build";
+    private const string NotInRelease = "NodeCoverage's guards are [Conditional(\"DEBUG\")] and compile out of a Release build";
 
     [Fact]
     public void InertNodesOk()
@@ -40,8 +39,7 @@ public class NodeCoverageTests
         var lit = new IrLitInt(1);
         Assert.Throws<System.Diagnostics.UnreachableException>(() =>
             NodeCoverage.AssertInertIrExpr(new IrBinOp(BinOp.Add, lit, lit, IrType.Int), "test"));
-        Assert.Throws<System.Diagnostics.UnreachableException>(() =>
-            NodeCoverage.AssertInertIrStmt(new IrExprStmt(lit), "test"));
+        Assert.Throws<System.Diagnostics.UnreachableException>(() => NodeCoverage.AssertInertIrStmt(new IrExprStmt(lit), "test"));
         Assert.Throws<System.Diagnostics.UnreachableException>(() =>
             NodeCoverage.AssertInertAstStmt(new ReturnStmt(null, TextSpan.None)));
     }

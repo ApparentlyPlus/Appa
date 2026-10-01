@@ -43,7 +43,7 @@ internal sealed class NameTable
 
     /// <summary>
     /// Drops what one front-end round decided, for the round replacing it. A round starts from the
-    /// unstamped programs again; what a name means does not change between them.
+    /// unstamped programs again. What a name means does not change between them.
     /// </summary>
     public void BeginRound()
     {

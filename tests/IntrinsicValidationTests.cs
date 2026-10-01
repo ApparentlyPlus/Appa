@@ -3,7 +3,7 @@ namespace Appa.Tests;
 using Appa;
 
 /// <summary>
-/// Coverage for Pipeline.ValidateIntrinsics - the ARC runtime contract check. It lives at the CLI
+/// Coverage for Pipeline.ValidateIntrinsics, the ARC runtime contract check. It lives at the CLI
 /// layer rather than in BuildModule, which legitimately runs over stdlib-free input, so these drive
 /// it the way RunBuild does: check a source, then run the validator over the module.
 /// </summary>
@@ -51,7 +51,7 @@ public class IntrinsicValidationTests
     }
 
     /// <summary>
-    /// With every role unbound, nothing in the build provides ARC at all - which is the author
+    /// With every role unbound, nothing in the build provides ARC at all, which is the author
     /// importing no libgata, not a broken libgata. Blaming the standard library there sends the
     /// reader to a file that is fine.
     /// </summary>
@@ -70,8 +70,8 @@ public class IntrinsicValidationTests
     }
 
     /// <summary>
-    /// Some roles bound and some not is a genuinely incomplete standard library, and the hint says
-    /// so - that is the case the reader cannot fix from their own file.
+    /// Some roles bound and some not is a truly incomplete standard library, and the hint says
+    /// so. That is the case the reader cannot fix from their own file.
     /// </summary>
     [Fact]
     public void PartialArcBlamesLibrary()
@@ -123,7 +123,7 @@ public class IntrinsicValidationTests
 
     /// <summary>
     /// A partially-bound standard library is the case this check exists for: binding some of the
-    /// set is not partially working. Only the genuinely absent roles are named, so the message
+    /// set is not partially working. Only the roles that are really absent are named, so the message
     /// points at what to add rather than restating the whole contract as missing.
     /// </summary>
     [Fact]

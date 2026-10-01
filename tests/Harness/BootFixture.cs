@@ -4,7 +4,7 @@ using Appa;
 
 /// <summary>
 /// Downloads envs/ and libgata/ from the Gata repo once per run into a temp directory, so BootTests
-/// needs no checked-in duplicate of env.GatOS.g. Only when the toolchain is installed - BootTests
+/// needs no checked-in duplicate of env.GatOS.g. Only when the toolchain is installed. BootTests
 /// skips otherwise, so the fetch would be wasted.
 /// </summary>
 public sealed class BootFixture : IAsyncLifetime

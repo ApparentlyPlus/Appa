@@ -43,7 +43,7 @@ public class ToolchainFlagsTests
 
     /// <summary>
     /// The interrupt path runs before the FPU is in a usable state, so it must be compiled with no
-    /// floating-point registers at all - and the generated Gata must never land in that set.
+    /// floating-point registers at all, and the generated Gata must never land in that set.
     /// </summary>
     [Fact]
     public void InterruptPathHasNoFpu()
@@ -59,7 +59,7 @@ public class ToolchainFlagsTests
 
     /// <summary>
     /// A build's artifacts are filed under the project's name, so the name has to be usable as one
-    /// path component - and a .gconf is a text file anyone can edit.
+    /// path component, and a .gconf is a text file anyone can edit.
     /// </summary>
     [Theory]
     [InlineData("myos", "myos")]

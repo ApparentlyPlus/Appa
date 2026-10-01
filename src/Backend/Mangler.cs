@@ -1,6 +1,7 @@
 namespace Appa;
 
 using System.Collections.Immutable;
+using System.Text;
 
 /// <summary>
 /// A generic instantiation's structure. The template it stamps and the arguments it stamps it over,
@@ -13,7 +14,7 @@ internal static class Mangler
     public const string KernelEntry = "gata_kernelspace_main";
 
     // C keywords and the standard macros that behave like them. None is a Gata keyword, so a
-    // program may use them all - and the names emitted verbatim (locals, parameters, and the
+    // program may use them all, and the names emitted verbatim (locals, parameters, and the
     // members of a generated struct) are therefore the ones that can collide.
     private static readonly System.Collections.Frozen.FrozenSet<string> CReserved =
         System.Collections.Frozen.FrozenSet.ToFrozenSet(
@@ -44,7 +45,7 @@ internal static class Mangler
 
     /// <summary>
     /// Returns the C spelling of a local or parameter name. Names printed as written can collide
-    /// with C's vocabulary; those get a trailing underscore. Apply at every site that prints the
+    /// with C's vocabulary. Those get a trailing underscore. Apply at every site that prints the
     /// name.
     /// </summary>
     public static string Local(string name)
@@ -192,11 +193,10 @@ internal static class Mangler
     public static bool IsGenericTemplate(string baseName) => _names.Templates.Contains(baseName);
 
     /// <summary>
-    /// Every stamped instantiation of a generic base name, ordinally sorted - which instance
+    /// Every stamped instantiation of a generic base name, ordinally sorted, which instance
     /// 'Maybe.Found(7)' means once the template is gone.
     /// </summary>
-    public static IReadOnlyList<string> InstancesOf(string baseName) =>
-        _names.StampedByBase.GetValueOrDefault(baseName) ?? [];
+    public static IReadOnlyList<string> InstancesOf(string baseName) => _names.StampedByBase.GetValueOrDefault(baseName) ?? [];
 
     /// <summary>
     /// What a scope-qualified name was declared as, or null when nothing scoped declares it.
@@ -325,9 +325,6 @@ internal static class Mangler
         return $"gata_{Sanitize(procFull)}_state_init";
     }
 
-    /// <summary>
-    /// Returns the C typedef name for a Gata enum type.
-    /// </summary>
     public static string Enum(string name)
     {
         return $"gata_{Sanitize(name)}";
@@ -341,9 +338,6 @@ internal static class Mangler
         return $"gata_{Sanitize(enumName)}_{member}";
     }
 
-    /// <summary>
-    /// Returns the C typedef name for a Gata union type.
-    /// </summary>
     public static string Union(string name)
     {
         return $"gata_{Sanitize(name)}";
@@ -395,11 +389,11 @@ internal static class Mangler
 
     /// <summary>
     /// Returns the C function name for a free function. Entry functions use the kernel entry
-    /// constant; extern functions use their bare C name; all others get the gata_ prefix.
+    /// constant. Extern functions use their bare C name. All others get the gata_ prefix.
     /// </summary>
     public static string FreeFunc(string name, IReadOnlyList<Param> ps, bool overloaded, bool isEntry, bool isExtern)
     {
-        if (isEntry)  return KernelEntry;
+        if (isEntry) return KernelEntry;
         if (isExtern) return name;
         string b = name.StartsWith("gata_") ? name : $"gata_{Sanitize(name)}";
         return b + (overloaded ? "_" + OverloadSuffix(ps) : "");
@@ -435,7 +429,7 @@ internal static class Mangler
     }
 
     /// <summary>
-    /// The C name for an operator overload. 'overloaded' appends a disambiguating suffix - only
+    /// The C name for an operator overload. 'overloaded' appends a disambiguating suffix. Only
     /// 'as' can have more than one per class today, distinguished by parameter type as every other
     /// parameterized overload already is.
     /// </summary>
@@ -499,78 +493,35 @@ internal static class Mangler
         return sb.ToString();
     }
 
-    private static readonly System.Buffers.SearchValues<char> IdentChars =
-        System.Buffers.SearchValues.Create(
-            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_");
-
     /// <summary>
     /// Converts a Gata type name to a C-identifier fragment. Every non-identifier character becomes
-    /// a separating underscore (collapsed to prevent runs); pointer stars become _p markers so
+    /// a separating underscore (collapsed to prevent runs). Pointer stars become _p markers so
     /// distinct pointer types never collapse to the same suffix.
     /// </summary>
     internal static string MangleTypeName(string t)
     {
-        ReadOnlySpan<char> span = t.AsSpan().Trim();
-        if (span.IsEmpty) return "x";
-
-        int maxLen = span.Length * 2;
-        char[]? rented = null;
-        Span<char> dest = maxLen <= 256
-            ? stackalloc char[256]
-            : (rented = System.Buffers.ArrayPool<char>.Shared.Rent(maxLen));
-
-        try
+        var sb = new StringBuilder();
+        bool lastSep = false;
+        foreach (char c in t.Trim())
         {
-            int destIdx = 0;
-            bool lastWasSep = false;
-
-            while (!span.IsEmpty)
+            if (char.IsAsciiLetterOrDigit(c) || c == '_')
             {
-                int at = span.IndexOfAnyExcept(IdentChars);
-                int run = at < 0 ? span.Length : at;
-                if (run > 0)
-                {
-                    span[..run].CopyTo(dest[destIdx..]);
-                    destIdx += run;
-                    lastWasSep = false;
-                    span = span[run..];
-                    if (span.IsEmpty) break;
-                }
-
-                if (span[0] == '*')
-                {
-                    dest[destIdx++] = '_';
-                    dest[destIdx++] = 'p';
-                    lastWasSep = false;
-                }
-                else if (!lastWasSep)
-                {
-                    dest[destIdx++] = '_';
-                    lastWasSep = true;
-                }
-                span = span[1..];
+                sb.Append(c);
+                lastSep = false;
             }
-
-            while (destIdx > 0 && dest[destIdx - 1] == '_')
+            else if (c == '*')
             {
-                destIdx--;
+                sb.Append("_p");
+                lastSep = false;
             }
-
-            int startIdx = 0;
-            while (startIdx < destIdx && dest[startIdx] == '_')
+            else if (!lastSep)
             {
-                startIdx++;
-            }
-
-            int finalLen = destIdx - startIdx;
-            return finalLen <= 0 ? "x" : new string(dest.Slice(startIdx, finalLen));
-        }
-        finally
-        {
-            if (rented != null)
-            {
-                System.Buffers.ArrayPool<char>.Shared.Return(rented);
+                sb.Append('_');
+                lastSep = true;
             }
         }
+
+        string r = sb.ToString().Trim('_');
+        return r.Length == 0 ? "x" : r;
     }
 }

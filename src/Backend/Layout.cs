@@ -20,12 +20,13 @@ internal static class Layout
 
     /// <summary>
     /// Composes the emitter output into the set of translation-unit files for the build.
-    /// Kernel-only builds produce kmain.c; user-only produce program.c; both produce kmain.c,
+    /// Kernel-only builds produce kmain.c. User-only produce program.c. Both produce kmain.c,
     /// uproc.c, uproc.h, and umain.c.
     public static IReadOnlyList<OutputFile> Compose(EmitOutput o, SymbolTable sym)
     {
         // Seed the header generator with a static hash of the content
         Finesse.Seed(ContentSeed(o));
+
         var files = new List<OutputFile> { new("shared.h", SharedHeader(o)) };
         bool launch = o.Processes.Count > 0;
 
@@ -70,51 +71,16 @@ internal static class Layout
     }
 
     /// <summary>
-    /// A stable SHA hash of the emitted content, used to seed the decorative header generator. Fed
-    /// section by section, so the program text is not materialised a third time to be hashed.
+    /// A stable SHA-256 hash of the emitted content, used to seed the decorative header generator.
     /// </summary>
     private static int ContentSeed(EmitOutput o)
     {
-        using var hash = System.Security.Cryptography.IncrementalHash.CreateHash(
-            System.Security.Cryptography.HashAlgorithmName.SHA256);
-
-        ReadOnlySpan<string> sections =
-        [
+        string all = string.Concat(
             o.SharedHeader, o.KernelPreamble, o.KernelTypes, o.KernelFwd, o.KernelFuncs,
-            o.KernelBoot, o.UserPreamble, o.UserTypes, o.UserFwd, o.UserFuncs,
-        ];
+            o.KernelBoot, o.UserPreamble, o.UserTypes, o.UserFwd, o.UserFuncs);
 
-        byte[] buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(64 * 1024);
-        try
-        {
-            foreach (var section in sections) Feed(hash, section, buffer);
-        }
-        finally
-        {
-            System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
-        }
-
-        Span<byte> digest = stackalloc byte[32];
-        hash.GetHashAndReset(digest);
-        return BitConverter.ToInt32(digest[..4]);
-    }
-
-    /// <summary>
-    /// Feeds one section's UTF-8 bytes to the hash in buffer-sized chunks, splitting on whole
-    /// characters so a surrogate pair is never encoded across two chunks.
-    /// </summary>
-    private static void Feed(System.Security.Cryptography.IncrementalHash hash, string section, byte[] buffer)
-    {
-        var utf8 = System.Text.Encoding.UTF8;
-        ReadOnlySpan<char> rest = section.AsSpan();
-        int chunk = buffer.Length / 3;
-        while (rest.Length > chunk)
-        {
-            int take = char.IsHighSurrogate(rest[chunk - 1]) ? chunk - 1 : chunk;
-            hash.AppendData(buffer.AsSpan(0, utf8.GetBytes(rest[..take], buffer)));
-            rest = rest[take..];
-        }
-        if (!rest.IsEmpty) hash.AppendData(buffer.AsSpan(0, utf8.GetBytes(rest, buffer)));
+        byte[] digest = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(all));
+        return BitConverter.ToInt32(digest, 0);
     }
 
     /// <summary>
@@ -130,18 +96,14 @@ internal static class Layout
 
     /// <summary>
     /// Concatenates sections into a single translation unit string with a file header comment. The
-    /// first four are the unit's skeleton and are written whether or not they carry text; anything
+    /// first four are the unit's skeleton and are written whether or not they carry text. Anything
     /// after them is optional and an empty one contributes nothing, not even a blank line.
     /// </summary>
-    private static string Concat(string name, string s1, string s2, string s3, string s4,
-                                 params ReadOnlySpan<string> rest)
+    private static string Concat(string name, string s1, string s2, string s3, string s4, params ReadOnlySpan<string> rest)
     {
         var sb = new System.Text.StringBuilder();
-        sb.Append(Finesse.GenerateKewlHeader(name)).Append('\n')
-          .Append(s1).Append('\n')
-          .Append(s2).Append('\n')
-          .Append(s3).Append('\n')
-          .Append(s4);
+        sb.Append(Finesse.GenerateKewlHeader(name)).Append('\n').Append(s1).Append('\n').Append(s2).Append('\n')
+            .Append(s3).Append('\n').Append(s4);
         foreach (var section in rest)
         {
             if (section.Length > 0) sb.Append('\n').Append(section);
@@ -156,16 +118,11 @@ internal static class Layout
     {
         var w = new CodeWriter();
         w.Lines(Finesse.GenerateKewlHeader("uproc.h"), "#pragma once", "");
-        for (int i = 0; i < procs.Count; i++)
+        foreach (var p in procs)
         {
-            var p = procs[i];
-            for (int j = 0; j < p.Threads.Count; j++)
+            foreach (var t in p.Threads)
             {
-                var t = p.Threads[j];
-                if (t.EntryFunc is { } e)
-                {
-                    w.Line($"void {e.CName}(void* arg);");
-                }
+                if (t.EntryFunc != null) w.Line($"void {t.EntryFunc.CName}(void* arg);");
             }
         }
         return w.ToString();
@@ -174,7 +131,7 @@ internal static class Layout
     /// <summary>
     /// Builds the userspace launcher that creates processes and spawns their threads through
     /// environment bindings, so porting the OS is an edit to env.*.g and never to this file. No C
-    /// name is hardcoded here; they come from whatever @intrinsic binds.
+    /// name is hardcoded here. They come from whatever @intrinsic binds.
     /// </summary>
     private static string Launcher(IReadOnlyList<IrProcess> procs, SymbolTable sym, bool ownUnit)
     {
@@ -204,14 +161,13 @@ internal static class Layout
                 w.Line($"void* {handle} = {procCreate}(\"{proc.Name}\");");
                 if (proc.Mode == "background")
                     w.Line($"{procHide}({handle});");
-                for (int j = 0; j < proc.Threads.Count; j++)
+
+                foreach (var t in proc.Threads)
                 {
-                    var t = proc.Threads[j];
-                    if (t.EntryFunc is { } e)
-                    {
-                        string isUser = e.Vis == Visibility.Kernel ? "0" : "1";
-                        w.Line($"{threadSpawn}({handle}, \"{t.Name}\", {e.CName}, {isUser});");
-                    }
+                    if (t.EntryFunc == null) continue;
+
+                    string isUser = t.EntryFunc.Vis == Visibility.Kernel ? "0" : "1";
+                    w.Line($"{threadSpawn}({handle}, \"{t.Name}\", {t.EntryFunc.CName}, {isUser});");
                 }
             }
         }

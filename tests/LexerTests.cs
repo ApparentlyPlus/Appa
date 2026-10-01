@@ -257,7 +257,7 @@ public class LexerTests
 
     /// <summary>
     /// A backslash escape inside an interpolated string's literal segment is validated but kept raw
-    /// in the token value, same as a plain string literal - decoding is a later stage's job, not
+    /// in the token value, same as a plain string literal. Decoding is a later stage's job, not
     /// the lexer's.
     /// </summary>
     [Fact]
@@ -294,7 +294,7 @@ public class LexerTests
     }
 
     /// <summary>
-    /// A native { ... } block is captured verbatim as one NativeContent token; braces inside a
+    /// A native { ... } block is captured verbatim as one NativeContent token. Braces inside a
     /// string or comment within the block do not affect the balance count.
     /// </summary>
     [Fact]

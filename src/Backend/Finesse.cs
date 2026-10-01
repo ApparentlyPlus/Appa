@@ -392,7 +392,7 @@ internal static class Finesse
 			12 => GameOver(fileName),
 			13 => NightLog(fileName),
 			14 => StatusBoard(fileName),
-			_  => WarningLabel(fileName)
+			_ => WarningLabel(fileName)
 		};
 	}
 
@@ -401,8 +401,8 @@ internal static class Finesse
     /// </summary>
     private static string Card(string fileName)
 	{
-		string tagline     = Pick(Taglines);
-		string fact        = Pick(Facts);
+		string tagline = Pick(Taglines);
+		string fact = Pick(Facts);
 		string observation = Pick(Observations);
 		string[] rows =
 		[
@@ -415,7 +415,7 @@ internal static class Finesse
 		int w = 60;
 		for (int i = 0; i < rows.Length; i++)
 			if (rows[i].Length > w) w = rows[i].Length;
-		string bar   = Sep('═', w + 2);
+		string bar = Sep('═', w + 2);
 		string blank = $"║{Sep(' ', w + 2)}║";
 		string Row(string s) => $"║ {s.PadRight(w)} ║";
 		return $"""
@@ -754,7 +754,7 @@ internal static class Finesse
     /// </summary>
     private static string StatusBoard(string fileName)
 	{
-		int w   = Math.Max(fileName.Length + 8, 50);
+		int w = Math.Max(fileName.Length + 8, 50);
 		string sep = Sep('=', w);
 		return $"""
 /*
@@ -798,7 +798,7 @@ internal static class Finesse
     /// </summary>
     private static string LegendaryHeader(string fileName)
 	{
-		int w   = Math.Max(fileName.Length + 14, 68);
+		int w = Math.Max(fileName.Length + 14, 68);
 		string bar = Sep('*', w);
 		return $"""
 /*

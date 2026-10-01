@@ -12,7 +12,7 @@ public class BootTests(BootFixture fixture)
 {
     /// <summary>
     /// How long the booted image gets to reach its idle loop. Passed to 'appa run', so it
-    /// bounds the QEMU run alone - the cross-compile ahead of it is not on this clock.
+    /// bounds the QEMU run alone. The cross-compile ahead of it is not on this clock.
     /// </summary>
     private static readonly TimeSpan BootTimeout = TimeSpan.FromSeconds(35);
 
@@ -62,7 +62,7 @@ public class BootTests(BootFixture fixture)
 
     /// <summary>
     /// User-realm trace markers. A user 'debug' is a syscall bypassing the TTY for COM3, which appa
-    /// points at artifacts/user-debug.log - checking that file is what proves the userspace
+    /// points at artifacts/user-debug.log. Checking that file is what proves the userspace
     /// _env_dbg bind works, rather than inferring it from console output.
     /// </summary>
     private static readonly string[] UserMarkers =
@@ -124,10 +124,9 @@ public class BootTests(BootFixture fixture)
         AssertMarkers(KernelMarkers, "[DEBUG] ", log, "COM1/stdio", log, userLog);
         AssertMarkers(UserMarkers, "[USER DEBUG] ", userLog, "COM3/user-debug.log", log, userLog);
 
-        // Markers prove the code ran; these prove it computed the right thing.
+        // Markers prove the code ran. These prove it computed the right thing.
         foreach (var expected in ExpectedOutput)
-            Assert.True(log.Contains(expected),
-                $"expected output line not found: '{expected}'{Logs(log, userLog)}");
+            Assert.True(log.Contains(expected), $"expected output line not found: '{expected}'{Logs(log, userLog)}");
     }
 
     /// <summary>
@@ -144,7 +143,7 @@ public class BootTests(BootFixture fixture)
     ];
 
     /// <summary>
-    /// Builds the same source twice - Debug and Release - into two ISOs, boots both, and requires
+    /// Builds the same source twice (Debug and Release) into two ISOs, boots both, and requires
     /// them to print the same thing.
     /// </summary>
     [Fact]
@@ -178,8 +177,7 @@ public class BootTests(BootFixture fixture)
             string b = i < r.Count ? r[i] : "<none>";
             if (a != b) diff.Add($"  line {i + 1}: debug '{a}' vs release '{b}'");
         }
-        Assert.Fail($"the release image computed something the debug image did not:\n" +
-                    string.Join("\n", diff.Take(20)));
+        Assert.Fail($"the release image computed something the debug image did not:\n" + string.Join("\n", diff.Take(20)));
     }
 
     /// <summary>
@@ -201,7 +199,7 @@ public class BootTests(BootFixture fixture)
     /// <summary>
     /// Where this line's fixture marker begins, or -1. What follows the prefix is checked as well
     /// as the prefix itself: every marker is 'R:' plus a lowercase name or 'drop ' plus a count, so
-    /// unrelated console text that merely contains the letters - 'ERROR: ...' ends in 'R:'.
+    /// unrelated console text that merely contains the letters. 'ERROR: ...' ends in 'R:'.
     /// </summary>
     private static int MarkerStart(string line)
     {
@@ -240,8 +238,7 @@ public class BootTests(BootFixture fixture)
             """);
 
         // No --stdlib
-        var psi = new ProcessStartInfo("dotnet",
-            $"\"{appaDll}\" run headless timeout={(int)BootTimeout.TotalSeconds}s")
+        var psi = new ProcessStartInfo("dotnet", $"\"{appaDll}\" run headless timeout={(int)BootTimeout.TotalSeconds}s")
         {
             UseShellExecute = false,
             RedirectStandardOutput = true,
@@ -256,8 +253,7 @@ public class BootTests(BootFixture fixture)
         try { await proc.WaitForExitAsync(cts.Token); }
         catch (OperationCanceledException) { try { proc.Kill(entireProcessTree: true); } catch { } }
 
-        return (await outTask + await errTask,
-                ReadIfPresent(Path.Combine(work.Path, "artifacts", "user-debug.log")));
+        return (await outTask + await errTask, ReadIfPresent(Path.Combine(work.Path, "artifacts", "user-debug.log")));
     }
 
     /// <summary>

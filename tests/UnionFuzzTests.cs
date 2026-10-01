@@ -5,7 +5,7 @@ using System.Text;
 
 /// <summary>
 /// Grammar-directed fuzzer over union <i>shapes</i>, which everything unions grew is generated
-/// from. Programs are valid by construction, so a rejection fails too; the oracle is a real gcc
+/// from. Programs are valid by construction, so a rejection fails too. The oracle is a real gcc
 /// compile with -Werror=return-type, and seeds are fixed.
 /// </summary>
 public class UnionFuzzTests
@@ -86,7 +86,7 @@ public class UnionFuzzTests
         public int Next(int n) => _r.Next(n);
 
         /// <summary>
-        /// Builds unions in dependency order - union i may only mention earlier ones - which makes
+        /// Builds unions in dependency order (union i may only mention earlier ones), which makes
         /// a by-value cycle impossible without reasoning about one. A rejection is a failure here,
         /// so the generator must stay inside the language.
         /// </summary>
@@ -115,8 +115,8 @@ public class UnionFuzzTests
 
         /// <summary>
         /// Picks a payload type. The weighting is deliberate: primitives keep programs cheap, but
-        /// every category that changes what the compiler generates - a managed class, one with its
-        /// own equality, a nested union, an aggregate - stays well represented.
+        /// every category that changes what the compiler generates (a managed class, one with its
+        /// own equality, a nested union, an aggregate) stays well represented.
         /// </summary>
         private string FieldType(List<Union> declared)
         {
@@ -167,8 +167,8 @@ public class UnionFuzzTests
 
         /// <summary>
         /// Builds a match over a variable of the given union: either exhaustive with no default, or
-        /// a subset plus a default. Both shapes are legal and they lower differently - the
-        /// exhaustive one collapses its last arm to a bare else - so both need generating.
+        /// a subset plus a default. Both shapes are legal and they lower differently (the
+        /// exhaustive one collapses its last arm to a bare else), so both need generating.
         /// </summary>
         public string Match(Union u, string scrutinee, bool allArmsReturn)
         {
@@ -282,7 +282,7 @@ public class UnionFuzzTests
 
     /// <summary>
     /// Assembles one generic-union program: several templates over two argument sets each, plus a
-    /// body building, matching and comparing them. Two instantiations is the point - one never
+    /// body building, matching and comparing them. Two instantiations is the point. One never
     /// exercises which stamped union 'G.V(...)' means, nor catches bleed.
     /// </summary>
     private static string GenerateGeneric(int seed, GenericCoverage? coverage = null)
@@ -379,8 +379,7 @@ public class UnionFuzzTests
 
         int open = field.IndexOf('[');
         string b = field[..open];
-        var args = field[(open + 1)..^1].Split(", ")
-            .Select(a => binding.GetValueOrDefault(a, a));
+        var args = field[(open + 1)..^1].Split(", ").Select(a => binding.GetValueOrDefault(a, a));
         return $"{b}[{string.Join(", ", args)}]";
     }
 
@@ -455,8 +454,7 @@ public class UnionFuzzTests
 
                 if (diag.HasErrors)
                 {
-                    var errs = diag.All.Where(d => d.Severity == Severity.Error)
-                                       .Select(d => $"{d.Code} {d.Message}");
+                    var errs = diag.All.Where(d => d.Severity == Severity.Error).Select(d => $"{d.Code} {d.Message}");
                     failures.Add($"[seed {seed}] rejected a valid program: {string.Join("; ", errs)}\n{src}");
                     continue;
                 }
@@ -491,8 +489,7 @@ public class UnionFuzzTests
             foreach (var unit in files.Where(f => f.Name.EndsWith(".c", StringComparison.Ordinal)))
             {
                 string devNull = OperatingSystem.IsWindows() ? "NUL" : "/dev/null";
-                var psi = new ProcessStartInfo(cc,
-                    $"-c -std=c11 -Werror=return-type -I. -o {devNull} {unit.Name}")
+                var psi = new ProcessStartInfo(cc, $"-c -std=c11 -Werror=return-type -I. -o {devNull} {unit.Name}")
                 { WorkingDirectory = dir, RedirectStandardError = true, UseShellExecute = false };
                 using var p = Process.Start(psi)!;
                 var err = p.StandardError.ReadToEnd();
@@ -576,8 +573,7 @@ public class UnionFuzzTests
 
                 if (diag.HasErrors)
                 {
-                    var errs = diag.All.Where(d => d.Severity == Severity.Error)
-                                       .Select(d => $"{d.Code} {d.Message}");
+                    var errs = diag.All.Where(d => d.Severity == Severity.Error).Select(d => $"{d.Code} {d.Message}");
                     failures.Add($"[seed {seed}] rejected a valid program: {string.Join("; ", errs)}\n{src}");
                     continue;
                 }
@@ -612,8 +608,7 @@ public class UnionFuzzTests
             foreach (var unit in files.Where(f => f.Name.EndsWith(".c", StringComparison.Ordinal)))
             {
                 string devNull = OperatingSystem.IsWindows() ? "NUL" : "/dev/null";
-                var psi = new ProcessStartInfo(cc,
-                    $"-c -std=c11 -Werror=return-type -I. -o {devNull} {unit.Name}")
+                var psi = new ProcessStartInfo(cc, $"-c -std=c11 -Werror=return-type -I. -o {devNull} {unit.Name}")
                 { WorkingDirectory = dir, RedirectStandardError = true, UseShellExecute = false };
                 using var p = Process.Start(psi)!;
                 var err = p.StandardError.ReadToEnd();
@@ -648,7 +643,7 @@ public class UnionFuzzTests
     /// <summary>
     /// Runs randomly shaped unions against three laws that hold whatever the payloads are, so the
     /// generator predicts nothing: reflexive, '==' and '!=' never agree, and different variants are
-    /// never equal - the last catching a payload read from the wrong arm.
+    /// never equal, the last catching a payload read from the wrong arm.
     /// </summary>
     [Fact]
     public void UnionsObeyEqualityLaws()

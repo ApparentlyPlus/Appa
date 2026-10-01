@@ -3,9 +3,9 @@ namespace Appa.Tests;
 using Appa;
 
 /// <summary>
-/// Two lowerings that pick a cheaper or safer shape than the source's surface form: null equality
-/// always compiling to a pointer check, so a class's own '==' cannot recurse through its null
-/// guards; and interpolation past two parts going through a StringBuilder.
+/// Two lowerings that pick a cheaper or safer shape than the source's surface form. Null equality
+/// always compiles to a pointer check, so a class's own '==' cannot recurse through its null
+/// guards, and interpolation past two parts goes through a StringBuilder.
 /// </summary>
 public class NullEqualityAndInterpTests
 {
@@ -58,10 +58,7 @@ public class NullEqualityAndInterpTests
     /// </summary>
     private static HashSet<string> EqOperatorCNames(IrModule module)
     {
-        return [.. module.Classes
-            .SelectMany(c => c.Operators)
-            .Where(o => o.Op is "==" or "!=")
-            .Select(o => o.CName)];
+        return [.. module.Classes.SelectMany(c => c.Operators).Where(o => o.Op is "==" or "!=").Select(o => o.CName)];
     }
 
     #region Null-literal equality
@@ -133,8 +130,7 @@ public class NullEqualityAndInterpTests
     [Fact]
     public void IntVsNullRejected()
     {
-        var (diag, _) = SingleFileCompile.Check(
-            "realm kernel { entry func Main() { let int n = 5; if (n == null) { } } }");
+        var (diag, _) = SingleFileCompile.Check("realm kernel { entry func Main() { let int n = 5; if (n == null) { } } }");
         Assert.Contains(diag.All, d => d.Severity == Severity.Error && d.Code == Codes.TypeMismatch);
     }
 

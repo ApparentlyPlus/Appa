@@ -13,14 +13,12 @@ internal sealed class Scratch : IDisposable
     /// Creates a uniquely named, private directory under the system temp root. The prefix is for
     /// the human who finds one left behind after a kill -9, so name it after the work.
     /// </summary>
-    public static Scratch Create(string prefix) =>
-        new(Directory.CreateTempSubdirectory(prefix).FullName);
+    public static Scratch Create(string prefix) => new(Directory.CreateTempSubdirectory(prefix).FullName);
 
     /// <summary>
     /// Combines a relative path against this directory.
     /// </summary>
-    public string Combine(params string[] parts) =>
-        System.IO.Path.Combine([Path, .. parts]);
+    public string Combine(params string[] parts) => System.IO.Path.Combine([Path, .. parts]);
 
     public void Dispose()
     {

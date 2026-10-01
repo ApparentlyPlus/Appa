@@ -127,8 +127,8 @@ static void RunNew(string[] args)
 #region appa clean
 
 /// <summary>
-/// Removes the directories a build writes into the project root - transpilation/, artifacts/, and
-/// build/ - leaving sources and the .gconf untouched.
+/// Removes the directories a build writes into the project root: transpilation/, artifacts/, and
+/// build/, leaving sources and the .gconf untouched.
 /// </summary>
 static void RunClean(string[] args)
 {
@@ -137,24 +137,23 @@ static void RunClean(string[] args)
         if (a.StartsWith("--")) Cli.Fail($"unknown option '{a}'");
         else dirArg = a;
 
-    string projectRoot = Path.GetFullPath(dirArg ?? ".");
-    if (!Directory.Exists(projectRoot)) Cli.Fail($"'{dirArg}' does not exist");
+    string root = Path.GetFullPath(dirArg ?? ".");
+    if (!Directory.Exists(root)) Cli.Fail($"'{dirArg}' does not exist");
 
     string? manifestPath = null;
-    try { manifestPath = ManifestReader.Discover(projectRoot); }
+    try { manifestPath = ManifestReader.Discover(root); }
     catch (ManifestError e) { Cli.Fail(e.Message); }
     if (manifestPath == null)
-        Cli.Fail($"no <project>.gconf found in {projectRoot}",
-                 "clean only removes build output from a project directory");
+        Cli.Fail($"no <project>.gconf found in {root}", "clean only removes build output from a project directory");
 
     Console.WriteLine();
-    Console.WriteLine($"{C.EMBER}Cleaning{C.NC} {Path.GetFileNameWithoutExtension(manifestPath)} {C.DIM}({projectRoot}){C.NC}");
+    Console.WriteLine($"{C.EMBER}Cleaning{C.NC} {Path.GetFileNameWithoutExtension(manifestPath)} {C.DIM}({root}){C.NC}");
     Console.WriteLine();
 
     int removed = 0;
     foreach (var name in Cli.GeneratedDirs)
     {
-        string path = Path.Combine(projectRoot, name);
+        string path = Path.Combine(root, name);
         if (!Directory.Exists(path)) continue;
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try { Directory.Delete(path, true); }
@@ -184,7 +183,7 @@ static void RunClean(string[] args)
 static void RunBuild(string[] args, bool doRun)
 {
     string? manifestArg = null, envOverride = null, entryOverride = null, stdlibOverride = null;
-    bool warnAsError = false, headless = false, pureTranspile = false, emitSourcemap = false;
+    bool werror = false, headless = false, pureTranspile = false, emitSourcemap = false;
     int? timeout = null;
 
     for (int i = 0; i < args.Length; i++)
@@ -193,7 +192,7 @@ static void RunBuild(string[] args, bool doRun)
             case "--env" when i+1 < args.Length: envOverride = args[++i]; break;
             case "--entry" when i+1 < args.Length: entryOverride = args[++i]; break;
             case "--stdlib" when i+1 < args.Length: stdlibOverride = args[++i]; break;
-            case "--werror": warnAsError = true; break;
+            case "--werror": werror = true; break;
             case "headless":
             case "--headless": headless = RunOnly(args[i]); break;
             case "--pure-transpile": pureTranspile = true; break;
@@ -213,7 +212,7 @@ static void RunBuild(string[] args, bool doRun)
     }
 
     bool looseTranspile = pureTranspile && envOverride != null && entryOverride != null;
-    var (manifest, envPath, entryPath, projectRoot, stdlibDir) = Cli.ResolveInputs(
+    var (manifest, envPath, entryPath, root, stdlibDir) = Cli.ResolveInputs(
         manifestArg, envOverride, entryOverride, stdlibOverride, looseTranspile,
         "--pure-transpile --env <file> --entry <file>", "--pure-transpile --env --entry");
 
@@ -223,7 +222,7 @@ static void RunBuild(string[] args, bool doRun)
         Console.WriteLine($"{C.EMBER}Building{C.NC} {C.DIM}(--pure-transpile){C.NC}");
     Console.WriteLine();
 
-    var (module, sourcemap, caps, diag) = RunFrontEnd(envPath, entryPath, projectRoot, stdlibDir, manifest, warnAsError);
+    var (module, sourcemap, caps, diag) = RunFrontEnd(envPath, entryPath, root, stdlibDir, manifest, werror);
 
     var output = Layout.Compose(new Emitter(module, diag).Build(), module.Symbols);
 
@@ -239,7 +238,7 @@ static void RunBuild(string[] args, bool doRun)
         Log.Warn("'appa run' only launches a GatOS image; there is nothing to boot here (this build just writes C)");
     if (!emitIso)
     {
-        string outDir = Path.Combine(projectRoot, Cli.TranspileDir);
+        string outDir = Path.Combine(root, Cli.TranspileDir);
         Cli.WriteOutputs(output, outDir);
         if (emitSourcemap) Cli.WriteSourcemap(sourcemap, outDir);
         Console.WriteLine();
@@ -248,9 +247,9 @@ static void RunBuild(string[] args, bool doRun)
         return;
     }
 
-    if (emitSourcemap) Cli.WriteSourcemap(sourcemap, projectRoot);
+    if (emitSourcemap) Cli.WriteSourcemap(sourcemap, root);
     var defines = Toolchain.CapabilityDefines(caps, manifest!);
-    Toolchain.BuildGatOSImage(output, manifest!, projectRoot, defines, Toolchain.CapabilitiesNote(caps, manifest!), doRun, headless, timeout);
+    Toolchain.BuildGatOSImage(output, manifest!, root, defines, Toolchain.CapabilitiesNote(caps, manifest!), doRun, headless, timeout);
 }
 
 #endregion
@@ -264,7 +263,7 @@ static void RunBuild(string[] args, bool doRun)
 static void RunCheck(string[] args)
 {
     string? manifestArg = null, envOverride = null, entryOverride = null, stdlibOverride = null;
-    bool warnAsError = false;
+    bool werror = false;
 
     for (int i = 0; i < args.Length; i++)
         switch (args[i])
@@ -272,7 +271,7 @@ static void RunCheck(string[] args)
             case "--env" when i + 1 < args.Length: envOverride = args[++i]; break;
             case "--entry" when i + 1 < args.Length: entryOverride = args[++i]; break;
             case "--stdlib" when i + 1 < args.Length: stdlibOverride = args[++i]; break;
-            case "--werror": warnAsError = true; break;
+            case "--werror": werror = true; break;
             default:
                 if (args[i].StartsWith("--")) Cli.Fail($"unknown option '{args[i]}'");
                 else manifestArg = args[i];
@@ -280,7 +279,7 @@ static void RunCheck(string[] args)
         }
 
     bool loose = envOverride != null && entryOverride != null;
-    var (manifest, envPath, entryPath, projectRoot, stdlibDir) = Cli.ResolveInputs(
+    var (manifest, envPath, entryPath, root, stdlibDir) = Cli.ResolveInputs(
         manifestArg, envOverride, entryOverride, stdlibOverride, loose,
         "--env <file> --entry <file>", "--env --entry");
 
@@ -290,7 +289,7 @@ static void RunCheck(string[] args)
         Console.WriteLine($"{C.EMBER}Checking{C.NC} {C.DIM}(--env/--entry){C.NC}");
     Console.WriteLine();
 
-    RunFrontEnd(envPath, entryPath, projectRoot, stdlibDir, manifest, warnAsError);
+    RunFrontEnd(envPath, entryPath, root, stdlibDir, manifest, werror);
 }
 
 /// <summary>
@@ -298,11 +297,10 @@ static void RunCheck(string[] args)
 /// environment/floor/structure, then report diagnostics.
 /// </summary>
 static (IrModule Module, IReadOnlyDictionary<string, string> Sourcemap, CapabilityScan Caps, DiagnosticBag Diag)
-    RunFrontEnd(string envPath, string entryPath, string projectRoot, string stdlibDir,
-                Manifest? manifest, bool warnAsError)
+    RunFrontEnd(string envPath, string entryPath, string root, string stdlibDir, Manifest? manifest, bool werror)
 {
     var inputFiles = new List<string> { Path.GetFullPath(envPath), Path.GetFullPath(entryPath) };
-    var (programs, attempted, imports, diag) = Pipeline.Transpile(inputFiles, projectRoot, stdlibDir);
+    var (programs, attempted, imports, diag) = Pipeline.Transpile(inputFiles, root, stdlibDir);
     bool loaded = !diag.HasErrors;
     int afterLoad = diag.All.Count;
 
@@ -312,7 +310,7 @@ static (IrModule Module, IReadOnlyDictionary<string, string> Sourcemap, Capabili
     if (!loaded)
     {
         diag.TruncateTo(afterLoad);
-        Pipeline.ReportGataFiles(attempted, diag, warnAsError, stdlibDir);
+        Pipeline.ReportGataFiles(attempted, diag, werror, stdlibDir);
         return (module, sourcemap, caps, diag);
     }
 
@@ -326,7 +324,7 @@ static (IrModule Module, IReadOnlyDictionary<string, string> Sourcemap, Capabili
         diag.Error(Codes.KernelBlockInHosted, "<environment>", TextSpan.None,
             "the active environment declares a kernel preamble, which is not allowed for a Hosted build");
     if (!diag.HasErrors) Pipeline.WarnReferenceCycles(module, diag, programs, stdlibDir);
-    Pipeline.ReportGataFiles(attempted, diag, warnAsError, stdlibDir);
+    Pipeline.ReportGataFiles(attempted, diag, werror, stdlibDir);
 
     return (module, sourcemap, caps, diag);
 }
@@ -344,7 +342,7 @@ static string[] Commands() => ["install", "update", "new", "check", "build", "ru
 
 /// <summary>
 /// Prints the top-level usage: commands, options, and examples. The text is data, laid out by Fmt
-/// against the real terminal width - no line in here is wrapped or padded by hand.
+/// against the real terminal width. No line in here is wrapped or padded by hand.
 /// </summary>
 static void PrintHelp()
 {
@@ -406,9 +404,6 @@ static void PrintHelp()
 
 static class Templates
 {
-    /// <summary>
-    /// Returns the .gconf file content for a new GatOS project.
-    /// </summary>
     public static string GatOSGconf(string name) => $"""
 <!--
   TargetBackend:        GatOS | Hosted
@@ -462,8 +457,7 @@ static class GatosFlags
         ["-m64", "-ffreestanding", "-nostdlib", "-fno-pic", "-mcmodel=kernel",
          "-mno-red-zone", "-ffunction-sections", "-fdata-sections"];
 
-    public static readonly string[] FpuRestrictions =
-        ["-mno-sse", "-mno-sse2", "-mno-mmx", "-mno-80387"];
+    public static readonly string[] FpuRestrictions = ["-mno-sse", "-mno-sse2", "-mno-mmx", "-mno-80387"];
 
     public static readonly HashSet<string> InterruptPath = new(StringComparer.Ordinal)
     {
@@ -478,9 +472,6 @@ static class GatosFlags
         "klibc/avl.c",
     };
 
-    /// <summary>
-    /// Returns the optimization flags for the given build mode.
-    /// </summary>
     public static string[] For(Mode mode) => mode == Mode.Release
         ? ["-O3", "-fpredictive-commoning", "-fstrict-aliasing",
            "-fno-delete-null-pointer-checks", "-fomit-frame-pointer", "-fno-stack-protector"]
@@ -499,9 +490,6 @@ static class Log
     /// </summary>
     public static void Ok(string m) => Console.WriteLine($"{C.EMBER}✓{C.NC} {m}");
 
-    /// <summary>
-    /// Prints a step message in cyan.
-    /// </summary>
     public static void Step(string m) => Console.WriteLine($"{C.GOLD}{m}{C.NC}");
 
     /// <summary>

@@ -18,7 +18,7 @@ public partial class TortureTests
     private static partial Regex ScopeQualifiedName();
 
     /// <summary>
-    /// Every single-quoted run in a diagnostic message - how the compiler names things.
+    /// Every single-quoted run in a diagnostic message: how the compiler names things.
     /// </summary>
     [GeneratedRegex(@"'([^']*)'")]
     private static partial Regex Quoted();
@@ -26,7 +26,7 @@ public partial class TortureTests
     /// <summary>
     /// The first quoted name that is a mangled instantiation rather than the 'Box[int]' the user
     /// wrote, or null. Either the Mangler knows a readable form and the raw key was printed anyway,
-    /// or the name is a registered template plus a suffix - an instantiation never stamped.
+    /// or the name is a registered template plus a suffix, an instantiation never stamped.
     /// </summary>
     private static string? RawInternalName(string text)
     {
@@ -117,8 +117,7 @@ public partial class TortureTests
     /// <summary>
     /// Trims a source down to something that fits in a failure message.
     /// </summary>
-    private static string Excerpt(string src) =>
-        src.Length <= 400 ? src : src[..400] + " ...";
+    private static string Excerpt(string src) => src.Length <= 400 ? src : src[..400] + " ...";
 
     #endregion
 
@@ -211,14 +210,13 @@ public partial class TortureTests
 
     /// <summary>
     /// One mistake, one error. A repeated process merges its twin's scope, and an unresolved call
-    /// has no type - both used to report again at every declaration or expression they touched.
+    /// has no type. Both used to report again at every declaration or expression they touched.
     /// </summary>
     [Theory]
     [InlineData("realm kernel { foreground process P { class A { int n; } thread T { entry func R() { } } } " +
                 "foreground process P { class A { int m; } thread U { entry func R() { } } } entry func Main() { } }",
                 Codes.DuplicateName)]
-    [InlineData("realm kernel { entry func Main() { let int n = Nope(1) + 2; if (Nope(3)) { } } }",
-                Codes.UndefinedMethod)]
+    [InlineData("realm kernel { entry func Main() { let int n = Nope(1) + 2; if (Nope(3)) { } } }", Codes.UndefinedMethod)]
     [InlineData("realm kernel { class A { public int n; } entry func Main() { } } " +
                 "void func Use() { let A a = new A(); let int m = a.n + 1; }",
                 Codes.ScopedNameNotVisible)]
@@ -234,7 +232,7 @@ public partial class TortureTests
     /// <summary>
     /// A generic instantiated over another instantiation of a scoped type must reach a stamp that
     /// exists. The request carries the argument as one flat mangled string, which no scope declares,
-    /// so only the structural spec can be requalified - and G007 is what a missed one looks like.
+    /// so only the structural spec can be requalified, and G007 is what a missed one looks like.
     /// </summary>
     [Fact]
     public void NestedScopedInstantiationsResolve()
@@ -265,7 +263,7 @@ public partial class TortureTests
 
     /// <summary>
     /// A process body means the same thing in either realm, so every declaration probe must get the
-    /// same verdict in each. The realm picks a translation unit and nothing else; it must never
+    /// same verdict in each. The realm picks a translation unit and nothing else. It must never
     /// decide whether a declaration is legal, so asymmetry is a bug in the rule, not the input.
     /// </summary>
     [Fact]
@@ -307,7 +305,7 @@ public partial class TortureTests
 
     /// <summary>
     /// Cases the corpus marks <see cref="Expect.Rejected"/> must produce an error, and the named
-    /// one where a code is given. A case that silently passes is a missing diagnostic - the
+    /// one where a code is given. A case that silently passes is a missing diagnostic. The
     /// compiler is about to emit C for nonsense.
     /// </summary>
     [Fact]
@@ -372,7 +370,7 @@ public partial class TortureTests
     /// <summary>
     /// The same structural check with a realm forced on. Units come from the environment's
     /// @preamble targets and a single-file case declares none, so Layout.Compose emits only
-    /// shared.h; a kernel preamble puts the real emitted code under the same assertions.
+    /// shared.h. A kernel preamble puts the real emitted code under the same assertions.
     /// </summary>
     [Fact]
     public void EmittedCValidWithRealm()
@@ -623,7 +621,7 @@ public partial class TortureTests
             int i = 0;
             while ((i = code.IndexOf(kw, i, StringComparison.Ordinal)) >= 0)
             {
-                // Only a whole word counts; "union" inside "reunion" does not.
+                // Only a whole word counts. "union" inside "reunion" does not.
                 bool wordStart = i == 0 || (!char.IsLetterOrDigit(code[i - 1]) && code[i - 1] != '_');
                 int j = i + kw.Length;
                 if (wordStart)

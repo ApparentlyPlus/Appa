@@ -1,7 +1,5 @@
 namespace Appa;
 
-using System.Runtime.InteropServices;
-
 internal abstract class IrRewriter
 {
     public IrModule Run(IrModule m)
@@ -36,7 +34,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites a function body; returns the function unchanged if it is native.
+    /// Rewrites a function body. Returns the function unchanged if it is native.
     /// </summary>
     private IrFunction RewriteFunction(IrFunction f)
     {
@@ -46,7 +44,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites an operator body; returns the operator unchanged if it is native.
+    /// Rewrites an operator body. Returns the operator unchanged if it is native.
     /// </summary>
     private IrOperator RewriteOperator(IrOperator o)
     {
@@ -145,7 +143,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the object child of an IrFieldLoad; returns the original if unchanged.
+    /// Rewrites the object child of an IrFieldLoad. Returns the original if unchanged.
     /// </summary>
     private IrFieldLoad UpdateFieldLoad(IrFieldLoad fl)
     {
@@ -154,7 +152,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the object and index children of an IrIndex; returns the original if unchanged.
+    /// Rewrites the object and index children of an IrIndex. Returns the original if unchanged.
     /// </summary>
     private IrIndex UpdateIndex(IrIndex ix)
     {
@@ -164,7 +162,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the argument list of an IrStaticCall; returns the original if unchanged.
+    /// Rewrites the argument list of an IrStaticCall. Returns the original if unchanged.
     /// </summary>
     private IrStaticCall UpdateStaticCall(IrStaticCall sc)
     {
@@ -173,7 +171,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the receiver and arguments of an IrInstanceCall; returns the original if unchanged.
+    /// Rewrites the receiver and arguments of an IrInstanceCall. Returns the original if unchanged.
     /// </summary>
     private IrInstanceCall UpdateInstanceCall(IrInstanceCall ic)
     {
@@ -183,7 +181,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the argument list of an IrThrowsCall; returns the original if unchanged.
+    /// Rewrites the argument list of an IrThrowsCall. Returns the original if unchanged.
     /// </summary>
     private IrThrowsCall UpdateThrowsCall(IrThrowsCall tc)
     {
@@ -192,7 +190,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the receiver and arguments of an IrThrowsInstanceCall; returns the original if
+    /// Rewrites the receiver and arguments of an IrThrowsInstanceCall. Returns the original if
     /// unchanged.
     /// </summary>
     private IrThrowsInstanceCall UpdateThrowsInstanceCall(IrThrowsInstanceCall ti)
@@ -203,7 +201,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the inner call and the handler block of an IrCatchCall; returns the original if
+    /// Rewrites the inner call and the handler block of an IrCatchCall. Returns the original if
     /// unchanged.
     /// </summary>
     private IrCatchCall UpdateCatchCall(IrCatchCall cc)
@@ -216,7 +214,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the field values of an IrStructLit; returns the original if unchanged.
+    /// Rewrites the field values of an IrStructLit. Returns the original if unchanged.
     /// </summary>
     private IrStructLit UpdateStructLit(IrStructLit sl)
     {
@@ -236,7 +234,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the value of an IrAssignValue; returns the original if unchanged.
+    /// Rewrites the value of an IrAssignValue. Returns the original if unchanged.
     /// </summary>
     private IrAssignValue UpdateAssignValue(IrAssignValue av)
     {
@@ -245,7 +243,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites both operands of an IrBinOp; returns the original if unchanged.
+    /// Rewrites both operands of an IrBinOp. Returns the original if unchanged.
     /// </summary>
     private IrBinOp UpdateBinOp(IrBinOp b)
     {
@@ -255,7 +253,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites all three branches of an IrTernary; returns the original if unchanged.
+    /// Rewrites all three branches of an IrTernary. Returns the original if unchanged.
     /// </summary>
     private IrTernary UpdateTernary(IrTernary t)
     {
@@ -266,7 +264,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the operand of an IrUnaryOp; returns the original if unchanged.
+    /// Rewrites the operand of an IrUnaryOp. Returns the original if unchanged.
     /// </summary>
     private IrUnaryOp UpdateUnaryOp(IrUnaryOp u)
     {
@@ -275,7 +273,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the operand of an IrPostfix; returns the original if unchanged.
+    /// Rewrites the operand of an IrPostfix. Returns the original if unchanged.
     /// </summary>
     private IrPostfix UpdatePostfix(IrPostfix p)
     {
@@ -284,7 +282,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the value child of an IrCast; returns the original if unchanged.
+    /// Rewrites the value child of an IrCast. Returns the original if unchanged.
     /// </summary>
     private IrCast UpdateCast(IrCast c)
     {
@@ -293,7 +291,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the argument list of an IrNew; returns the original if unchanged.
+    /// Rewrites the argument list of an IrNew. Returns the original if unchanged.
     /// </summary>
     private IrNew UpdateNew(IrNew n)
     {
@@ -302,7 +300,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the constructor arguments and initializer elements of an IrNewInit; returns the
+    /// Rewrites the constructor arguments and initializer elements of an IrNewInit. Returns the
     /// original if unchanged.
     /// </summary>
     private IrNewInit UpdateNewInit(IrNewInit ni)
@@ -313,7 +311,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the element list of an IrArrayLit; returns the original if unchanged.
+    /// Rewrites the element list of an IrArrayLit. Returns the original if unchanged.
     /// </summary>
     private IrArrayLit UpdateArrayLit(IrArrayLit al)
     {
@@ -322,7 +320,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the parts list of an IrInterp; returns the original if unchanged.
+    /// Rewrites the parts list of an IrInterp. Returns the original if unchanged.
     /// </summary>
     private IrInterp UpdateInterp(IrInterp ip)
     {
@@ -331,7 +329,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the target of an IrAddrOf; returns the original if unchanged.
+    /// Rewrites the target of an IrAddrOf. Returns the original if unchanged.
     /// </summary>
     private IrAddrOf UpdateAddrOf(IrAddrOf a)
     {
@@ -340,7 +338,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the pointer child of an IrDeref; returns the original if unchanged.
+    /// Rewrites the pointer child of an IrDeref. Returns the original if unchanged.
     /// </summary>
     private IrDeref UpdateDeref(IrDeref d)
     {
@@ -349,7 +347,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the target and arguments of an IrIndirectCall; returns the original if unchanged.
+    /// Rewrites the target and arguments of an IrIndirectCall. Returns the original if unchanged.
     /// </summary>
     private IrIndirectCall UpdateIndirectCall(IrIndirectCall ic)
     {
@@ -359,7 +357,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the argument list of an IrUnionConstruct; returns the original if unchanged.
+    /// Rewrites the argument list of an IrUnionConstruct. Returns the original if unchanged.
     /// </summary>
     private IrUnionConstruct UpdateUnionConstruct(IrUnionConstruct uc)
     {
@@ -368,7 +366,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the union expression child of an IrUnionField; returns the original if unchanged.
+    /// Rewrites the union expression child of an IrUnionField. Returns the original if unchanged.
     /// </summary>
     private IrUnionField UpdateUnionField(IrUnionField uf)
     {
@@ -403,7 +401,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the statement list of an IrBlock; returns the original if unchanged.
+    /// Rewrites the statement list of an IrBlock. Returns the original if unchanged.
     /// </summary>
     private IrBlock UpdateBlock(IrBlock b)
     {
@@ -412,7 +410,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the initializer of an IrDeclVar; returns the original if unchanged.
+    /// Rewrites the initializer of an IrDeclVar. Returns the original if unchanged.
     /// </summary>
     private IrDeclVar UpdateDeclVar(IrDeclVar d)
     {
@@ -421,7 +419,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the target and value of an IrAssign; returns the original if unchanged.
+    /// Rewrites the target and value of an IrAssign. Returns the original if unchanged.
     /// </summary>
     private IrAssign UpdateAssign(IrAssign a)
     {
@@ -431,7 +429,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the expression of an IrExprStmt; returns the original if unchanged.
+    /// Rewrites the expression of an IrExprStmt. Returns the original if unchanged.
     /// </summary>
     private IrExprStmt UpdateExprStmt(IrExprStmt es)
     {
@@ -440,7 +438,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the return value of an IrReturn; returns the original if unchanged.
+    /// Rewrites the return value of an IrReturn. Returns the original if unchanged.
     /// </summary>
     private IrReturn UpdateReturn(IrReturn r)
     {
@@ -449,7 +447,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the condition, then-branch, and else-branch of an IrIf; returns the original if
+    /// Rewrites the condition, then-branch, and else-branch of an IrIf. Returns the original if
     /// unchanged.
     /// </summary>
     private IrIf UpdateIf(IrIf i)
@@ -461,7 +459,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the condition and body of an IrWhile; returns the original if unchanged.
+    /// Rewrites the condition and body of an IrWhile. Returns the original if unchanged.
     /// </summary>
     private IrWhile UpdateWhile(IrWhile w)
     {
@@ -471,7 +469,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the init, condition, step, and body of an IrFor; returns the original if unchanged.
+    /// Rewrites the init, condition, step, and body of an IrFor. Returns the original if unchanged.
     /// </summary>
     private IrFor UpdateFor(IrFor f)
     {
@@ -485,7 +483,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the collection and body of an IrForIn; returns the original if unchanged.
+    /// Rewrites the collection and body of an IrForIn. Returns the original if unchanged.
     /// </summary>
     private IrForIn UpdateForIn(IrForIn fi)
     {
@@ -495,7 +493,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the try and catch blocks of an IrTryCatch; returns the original if unchanged.
+    /// Rewrites the try and catch blocks of an IrTryCatch. Returns the original if unchanged.
     /// </summary>
     private IrTryCatch UpdateTryCatch(IrTryCatch t)
     {
@@ -505,7 +503,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the scrutinee, cases, and default block of an IrSwitch; returns the original if
+    /// Rewrites the scrutinee, cases, and default block of an IrSwitch. Returns the original if
     /// unchanged.
     /// </summary>
     private IrSwitch UpdateSwitch(IrSwitch sw)
@@ -519,7 +517,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the body of an IrUnsafeBlock; returns the original if unchanged.
+    /// Rewrites the body of an IrUnsafeBlock. Returns the original if unchanged.
     /// </summary>
     private IrUnsafeBlock UpdateUnsafeBlock(IrUnsafeBlock u)
     {
@@ -528,7 +526,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the scrutinee, cases, and default block of an IrMatch; returns the original if
+    /// Rewrites the scrutinee, cases, and default block of an IrMatch. Returns the original if
     /// unchanged.
     /// </summary>
     private IrMatch UpdateMatch(IrMatch m)
@@ -542,7 +540,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites the action of an IrDefer; returns the original if unchanged.
+    /// Rewrites the action of an IrDefer. Returns the original if unchanged.
     /// </summary>
     private IrDefer UpdateDefer(IrDefer d)
     {
@@ -559,31 +557,20 @@ internal abstract class IrRewriter
     {
         if (xs.Count == 0) return xs;
 
+        // stays null until the first element that actually changes
         List<T>? result = null;
-        var span = CollectionsMarshal.AsSpan(xs);
-        for (int i = 0; i < span.Length; i++)
+        for (int i = 0; i < xs.Count; i++)
         {
-            var orig = span[i];
-            var rewritten = f(orig);
-            if (!ReferenceEquals(orig, rewritten))
-            {
-                if (result == null)
-                {
-                    result = new List<T>(xs.Count);
-                    for (int j = 0; j < i; j++) result.Add(span[j]);
-                }
-                result.Add(rewritten);
-            }
-            else
-            {
-                result?.Add(orig);
-            }
+            var y = f(xs[i]);
+            if (result == null && !ReferenceEquals(y, xs[i]))
+                result = xs.GetRange(0, i);
+            result?.Add(y);
         }
         return result ?? xs;
     }
 
     // Cached element rewriter delegates. Held as fields so MapList does not allocate a fresh
-    // delegate on every list it walks; virtual dispatch to a subclass override still applies.
+    // delegate on every list it walks. Virtual dispatch to a subclass override still applies.
     private readonly Func<IrExpr, IrExpr> _fExpr;
     private readonly Func<IrStmt, IrStmt> _fStmt;
     private readonly Func<IrSwitchCase, IrSwitchCase> _fSwitchCase;
@@ -624,7 +611,7 @@ internal abstract class IrRewriter
     private List<IrField> MapFields(List<IrField> xs) => MapList(xs, _fField);
 
     /// <summary>
-    /// Rewrites one switch case's labels and body; returns the original if unchanged.
+    /// Rewrites one switch case's labels and body. Returns the original if unchanged.
     /// </summary>
     private IrSwitchCase RewriteSwitchCase(IrSwitchCase c)
     {
@@ -636,7 +623,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites one match case's body; returns the original if unchanged.
+    /// Rewrites one match case's body. Returns the original if unchanged.
     /// </summary>
     private IrMatchCase RewriteMatchCase(IrMatchCase c)
     {
@@ -645,7 +632,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites a thread's entry function; returns the original if unchanged or absent.
+    /// Rewrites a thread's entry function. Returns the original if unchanged or absent.
     /// </summary>
     private IrThread RewriteThread(IrThread t)
     {
@@ -655,7 +642,7 @@ internal abstract class IrRewriter
     }
 
     /// <summary>
-    /// Rewrites a field's initializer; returns the original if unchanged or absent.
+    /// Rewrites a field's initializer. Returns the original if unchanged or absent.
     /// </summary>
     private IrField RewriteField(IrField f)
     {

@@ -29,22 +29,19 @@ public class HardeningTests
     [Fact]
     public void EntryParamsRejected()
     {
-        AssertError(Codes.BadEntrySignature,
-            "realm kernel { entry func Main(int x) { } }");
+        AssertError(Codes.BadEntrySignature, "realm kernel { entry func Main(int x) { } }");
     }
 
     [Fact]
     public void EntryReturnRejected()
     {
-        AssertError(Codes.BadEntrySignature,
-            "realm kernel { entry int func Main() { return 1; } }");
+        AssertError(Codes.BadEntrySignature, "realm kernel { entry int func Main() { return 1; } }");
     }
 
     [Fact]
     public void EntryThrowsRejected()
     {
-        AssertError(Codes.BadEntrySignature,
-            "realm kernel { entry throws func Main() { } }");
+        AssertError(Codes.BadEntrySignature, "realm kernel { entry throws func Main() { } }");
     }
 
     [Fact]
@@ -96,7 +93,7 @@ public class HardeningTests
 
     /// <summary>
     /// A throws pointer/array return type has no legal Result_T typedef spelling (it used to emit
-    /// 'typedef ... Result_int*;' - invalid C).
+    /// 'typedef ... Result_int*;', invalid C).
     /// </summary>
     [Theory]
     [InlineData("throws int* func F() { throw; } realm kernel { entry func Main() { try { unsafe { let int* p = F(); } } catch { } } }")]
@@ -210,8 +207,7 @@ public class HardeningTests
     [Fact]
     public void ModuleFieldCode()
     {
-        AssertError(Codes.ModuleField,
-            "module M { int x; } realm kernel { entry func Main() { } }");
+        AssertError(Codes.ModuleField, "module M { int x; } realm kernel { entry func Main() { } }");
     }
 
     [Theory]
@@ -268,8 +264,7 @@ public class HardeningTests
     [Fact]
     public void ConcatNeedsOperator()
     {
-        AssertError(Codes.MissingIntrinsic,
-            """realm kernel { entry func Main() { let s = "a" + "b"; } }""");
+        AssertError(Codes.MissingIntrinsic, """realm kernel { entry func Main() { let s = "a" + "b"; } }""");
     }
 
     #endregion

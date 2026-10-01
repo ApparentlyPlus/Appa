@@ -47,7 +47,7 @@ public class MathFidelityTests
     /// <summary>
     /// The values worth testing: IEEE special cases, the exact thresholds fdlibm's own branch
     /// structure keys on, and both sides of every one of them. A uniform random sample would
-    /// essentially never land on these, and they are where the branch selection goes wrong.
+    /// almost never land on these, and they are where the branch selection goes wrong.
     /// </summary>
     private static double[] Inputs()
     {
@@ -134,10 +134,8 @@ public class MathFidelityTests
         for (int i = 0; i < pairs.Count; i++)
             foreach (var (gn, cn, _) in Binary)
             {
-                gCalls.Add($"    emit(\"{gn}/{i}\", Math.{gn}(frombits({Hex(pairs[i].A)}), " +
-                           $"frombits({Hex(pairs[i].B)})));");
-                cCalls.Add($"    emit(\"{gn}/{i}\", {cn}(frombits({Hex(pairs[i].A)}), " +
-                           $"frombits({Hex(pairs[i].B)})));");
+                gCalls.Add($"    emit(\"{gn}/{i}\", Math.{gn}(frombits({Hex(pairs[i].A)}), " + $"frombits({Hex(pairs[i].B)})));");
+                cCalls.Add($"    emit(\"{gn}/{i}\", {cn}(frombits({Hex(pairs[i].A)}), " + $"frombits({Hex(pairs[i].B)})));");
             }
 
         const int PerPart = 250;
@@ -171,8 +169,7 @@ public class MathFidelityTests
 
         using var work = Scratch.Create("appa-libm-ref-");
         File.WriteAllText(work.Combine("ref.c"), c.ToString());
-        var (refCode, refOut) = HostedRun.Run(cc,
-            $"-std=c11 -O1 -o ref ref.c {HostedRun.MathLib(cc)}", work.Path);
+        var (refCode, refOut) = HostedRun.Run(cc, $"-std=c11 -O1 -o ref ref.c {HostedRun.MathLib(cc)}", work.Path);
         Assert.True(refCode == 0, $"the libm reference program did not compile:\n{refOut}");
         var (runCode, refText) = HostedRun.Run(work.Combine("ref"), "", work.Path);
         Assert.True(runCode == 0, $"the libm reference program exited {runCode}");
@@ -216,13 +213,12 @@ public class MathFidelityTests
 
     /// <summary>
     /// Distance in representable steps. Bit patterns are mapped to a monotone integer first so
-    /// that the distance is a subtraction even across zero; NaN compares equal only to NaN.
+    /// that the distance is a subtraction even across zero. NaN compares equal only to NaN.
     /// </summary>
     private static long Ulps(ulong a, ulong b)
     {
         if (IsNaN(a) || IsNaN(b)) return IsNaN(a) && IsNaN(b) ? 0 : long.MaxValue;
-        static long Order(ulong x) =>
-            (x & 0x8000000000000000UL) != 0 ? -(long)(x & 0x7FFFFFFFFFFFFFFFUL) : (long)x;
+        static long Order(ulong x) => (x & 0x8000000000000000UL) != 0 ? -(long)(x & 0x7FFFFFFFFFFFFFFFUL) : (long)x;
         return Math.Abs(Order(a) - Order(b));
     }
 }

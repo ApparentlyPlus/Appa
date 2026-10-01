@@ -156,7 +156,7 @@ internal static class Suggest
 
     /// <summary>
     /// A one-element "did you mean 'X'?" hints array, or empty if nothing is close enough. Goes to
-    /// diag.Error's hints parameter, not the message - it renders on its own "= help:" line rather
+    /// diag.Error's hints parameter, not the message. It renders on its own "= help:" line rather
     /// than appended to the error text.
     /// </summary>
     public static string[] Hints(string typed, IEnumerable<string> candidates)
@@ -165,14 +165,13 @@ internal static class Suggest
     }
 
     /// <summary>
-    /// Classic iterative Levenshtein edit distance between two strings. Identifiers are short, so
-    /// the two work rows live on the stack. Absurdly long names fall back to heap.
+    /// Classic iterative Levenshtein edit distance between two strings, keeping two rows.
     /// </summary>
     private static int Distance(string a, string b)
     {
         int w = b.Length + 1;
-        Span<int> prev = w <= 128 ? stackalloc int[w] : new int[w];
-        Span<int> cur = w <= 128 ? stackalloc int[w] : new int[w];
+        var prev = new int[w];
+        var cur = new int[w];
         for (int j = 0; j < w; j++) prev[j] = j;
 
         for (int i = 1; i <= a.Length; i++)
@@ -183,7 +182,7 @@ internal static class Suggest
                 int cost = a[i - 1] == b[j - 1] ? 0 : 1;
                 cur[j] = Math.Min(Math.Min(cur[j - 1] + 1, prev[j] + 1), prev[j - 1] + cost);
             }
-            var tmp = prev; prev = cur; cur = tmp;
+            (prev, cur) = (cur, prev);
         }
         return prev[b.Length];
     }
@@ -260,9 +259,6 @@ internal sealed class DiagnosticBag(SourceSet sources)
         _warnCount++;
     }
 
-    /// <summary>
-    /// Gets the line number of the specified diagnostic.
-    /// </summary>
     public int LineOf(Diagnostic d)
     {
         return sources.Get(d.Loc.File) is { } s && !d.Loc.Span.IsNone ? s.LineCol(d.Loc.Span.Start).Line : 0;
@@ -294,51 +290,21 @@ internal sealed class DiagnosticBag(SourceSet sources)
         // Precompute the name span for the diagnostic header, like "file.g:12:34: error[G001]: "
         if (src == null || d.Loc.Span.IsNone)
         {
-            sb.Append(nspn)
-                .Append(": ")
-                .Append(color)
-                .Append(label)
-                .Append('[')
-                .Append(d.Code)
-                .Append(']')
-                .Append(C.NC)
-                .Append(": ")
-                .Append(d.Message);
+            sb.Append(nspn).Append(": ").Append(color).Append(label).Append('[').Append(d.Code).Append(']')
+                .Append(C.NC).Append(": ").Append(d.Message);
 
             for (int i = 0; i < d.Hints.Length; i++)
-                sb.AppendLine()
-                    .Append("  ")
-                    .Append(C.SAND)
-                    .Append('=')
-                    .Append(C.NC)
-                    .Append(' ')
-                    .Append(C.CYAN)
-                    .Append("help")
-                    .Append(C.NC)
-                    .Append(": ")
-                    .Append(d.Hints[i]);
+                sb.AppendLine().Append("  ").Append(C.SAND).Append('=').Append(C.NC).Append(' ').Append(C.CYAN)
+                    .Append("help").Append(C.NC).Append(": ").Append(d.Hints[i]);
 
             return sb.ToString();
         }
 
-        // Get the line and column of the diagnostic's span start
         var (line, col) = src.LineCol(d.Loc.Span.Start);
 
         // Render the diagnostic header, like "file.g:12:34: error[G001]: "
-        sb.Append(nspn)
-            .Append(':')
-            .Append(line)
-            .Append(':')
-            .Append(col)
-            .Append(": ")
-            .Append(color)
-            .Append(label)
-            .Append('[')
-            .Append(d.Code)
-            .Append(']')
-            .Append(C.NC)
-            .Append(": ")
-            .AppendLine(d.Message);
+        sb.Append(nspn).Append(':').Append(line).Append(':').Append(col).Append(": ").Append(color).Append(label)
+            .Append('[').Append(d.Code).Append(']').Append(C.NC).Append(": ").AppendLine(d.Message);
 
         // Retrieve the source line as a Span
         ReadOnlySpan<char> tspn = src.LineSpan(line);
@@ -347,60 +313,28 @@ internal sealed class DiagnosticBag(SourceSet sources)
         int gutterlen = GetDigitCount(line);
 
         // Draw empty gutter line
-        sb.Append(' ', gutterlen)
-            .Append(' ')
-            .Append(C.SAND)
-            .Append('|')
-            .AppendLine(C.NC);
+        sb.Append(' ', gutterlen).Append(' ').Append(C.SAND).Append('|').AppendLine(C.NC);
 
         // Draw source line with line number and gutter
-        sb.Append(C.SAND)
-            .Append(line)
-            .Append(" |")
-            .Append(C.NC)
-            .Append(' ')
-            .Append(tspn)
-            .AppendLine();
+        sb.Append(C.SAND).Append(line).Append(" |").Append(C.NC).Append(' ').Append(tspn).AppendLine();
 
         // Draw caret underline
         int caretLen = Math.Max(1, Math.Min(d.Loc.Span.Length, Math.Max(0, tspn.Length - (col - 1))));
-        sb.Append(' ', gutterlen)
-            .Append(' ')
-            .Append(C.SAND)
-            .Append('|')
-            .Append(C.NC)
-            .Append(' ');
+        sb.Append(' ', gutterlen).Append(' ').Append(C.SAND).Append('|').Append(C.NC).Append(' ');
 
         // Padding fix for tabs in the source line
         for (int i = 0; i < col - 1; i++)
             sb.Append(i < tspn.Length && tspn[i] == '\t' ? '\t' : ' ');
-        sb.Append(color)
-            .Append('^', caretLen)
-            .Append(C.NC);
+        sb.Append(color).Append('^', caretLen).Append(C.NC);
 
         // Render each hint as a rustc-style "= help: ..." line under a blank gutter row
         if (d.Hints.Length > 0)
         {
-            sb.AppendLine()
-                .Append(' ', gutterlen)
-                .Append(' ')
-                .Append(C.SAND)
-                .Append('|')
-                .Append(C.NC);
+            sb.AppendLine().Append(' ', gutterlen).Append(' ').Append(C.SAND).Append('|').Append(C.NC);
             for (int i = 0; i < d.Hints.Length; i++)
             {
-                sb.AppendLine()
-                    .Append(' ', gutterlen)
-                    .Append(' ')
-                    .Append(C.SAND)
-                    .Append('=')
-                    .Append(C.NC)
-                    .Append(' ')
-                    .Append(C.CYAN)
-                    .Append("help")
-                    .Append(C.NC)
-                    .Append(": ")
-                    .Append(d.Hints[i]);
+                sb.AppendLine().Append(' ', gutterlen).Append(' ').Append(C.SAND).Append('=').Append(C.NC).Append(' ')
+                    .Append(C.CYAN).Append("help").Append(C.NC).Append(": ").Append(d.Hints[i]);
             }
         }
 

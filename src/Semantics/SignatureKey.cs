@@ -21,8 +21,11 @@ internal readonly record struct SignatureKey(string Name, ImmutableArray<TypeSpe
     public bool Equals(SignatureKey other)
     {
         if (Name != other.Name || Params.Length != other.Params.Length) return false;
+
         for (int i = 0; i < Params.Length; i++)
+        {
             if (!SameShape(Params[i], other.Params[i])) return false;
+        }
         return true;
     }
 
@@ -46,7 +49,9 @@ internal readonly record struct SignatureKey(string Name, ImmutableArray<TypeSpe
             case (NamedSpec x, NamedSpec y):
                 if (x.Name != y.Name || x.Args.Length != y.Args.Length) return false;
                 for (int i = 0; i < x.Args.Length; i++)
+                {
                     if (!SameShape(x.Args[i], y.Args[i])) return false;
+                }
                 return true;
             case (PtrSpec x, PtrSpec y):
                 return SameShape(x.Inner, y.Inner);
@@ -55,7 +60,9 @@ internal readonly record struct SignatureKey(string Name, ImmutableArray<TypeSpe
             case (FuncSpec x, FuncSpec y):
                 if (x.Params.Length != y.Params.Length || !SameShape(x.Ret, y.Ret)) return false;
                 for (int i = 0; i < x.Params.Length; i++)
+                {
                     if (!SameShape(x.Params[i], y.Params[i])) return false;
+                }
                 return true;
             default:
                 return false;

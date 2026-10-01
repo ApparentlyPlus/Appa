@@ -5,7 +5,7 @@ using Appa;
 /// <summary>
 /// Naming a scope outright: 'kernel.Step', 'kernel.P.Config', '::Helper'. What '@shadows' declares,
 /// a qualifier undoes, so every level of a scope tree stays reachable from inside the one that
-/// displaced it - outward only, and never as a way into a sibling.
+/// displaced it, outward only, and never as a way into a sibling.
 /// </summary>
 public class ScopeQualifierTests
 {
@@ -59,7 +59,7 @@ public class ScopeQualifierTests
     }
 
     /// <summary>
-    /// A qualifier is legal wherever a name is, not only where one is shadowed.
+    /// A qualifier is legal wherever a name is, shadowed or not.
     /// </summary>
     [Theory]
     [InlineData("class Holder { public ::Cargo held; }")]
@@ -203,7 +203,7 @@ public class ScopeQualifierTests
     #region Boundaries
 
     /// <summary>
-    /// The qualifier reaches past a displacement; it never excuses declaring one. '@shadows' says
+    /// The qualifier reaches past a displacement. It never excuses declaring one. '@shadows' says
     /// the displacement is deliberate, and that is a separate statement from reaching past it.
     /// </summary>
     [Fact]
@@ -216,7 +216,7 @@ public class ScopeQualifierTests
 
     /// <summary>
     /// A local owns its name against a scoped declaration, and the qualifier reaches past the local
-    /// too - it names a scope, and a local is in none.
+    /// too. It names a scope, and a local is in none.
     /// </summary>
     [Fact]
     public void QualifierReachesPastLocal()
@@ -245,7 +245,7 @@ public class ScopeQualifierTests
 
     /// <summary>
     /// The lexer takes the longest run, so the conditional's ':' followed by '::' needs the space a
-    /// reader would write anyway - and says so instead of reporting a missing ':'.
+    /// reader would write anyway, and says so instead of reporting a missing ':'.
     /// </summary>
     [Fact]
     public void TightTernaryColonExplained()

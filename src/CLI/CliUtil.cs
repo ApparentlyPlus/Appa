@@ -31,11 +31,9 @@ internal static class Cli
             try
             {
                 if (manifestArg != null && !Directory.Exists(manifestArg) && !File.Exists(manifestArg))
-                    Cli.Fail($"'{manifestArg}' does not exist",
-                        "the argument is a project directory, or the path to its .gconf");
+                    Cli.Fail($"'{manifestArg}' does not exist", "the argument is a project directory, or the path to its .gconf");
 
-                string? manifestPath =
-                    manifestArg == null ? ManifestReader.Discover(Directory.GetCurrentDirectory())
+                string? manifestPath = manifestArg == null ? ManifestReader.Discover(Directory.GetCurrentDirectory())
                     : Directory.Exists(manifestArg) ? ManifestReader.Discover(manifestArg)
                     : manifestArg;
                 if (manifestPath != null) manifest = ManifestReader.Load(manifestPath);
@@ -48,8 +46,7 @@ internal static class Cli
             Log.Warn($"project argument '{manifestArg}' is ignored with {looseHint} (loose-file mode discovers nothing from a project)");
 
         var unreadableEnvs = new List<string>();
-        string? envPath = envOverride
-            ?? (manifest != null ? Pipeline.DiscoverEnv(manifest.Dir, unreadableEnvs) : null);
+        string? envPath = envOverride ?? (manifest != null ? Pipeline.DiscoverEnv(manifest.Dir, unreadableEnvs) : null);
         string? entryPath = entryOverride ?? (manifest != null ? Pipeline.DiscoverEntry(manifest.Dir) : null);
         if (envPath == null)
             Fail("no environment found - mark one project file @environment, or pass --env",
@@ -58,13 +55,13 @@ internal static class Cli
                      : null);
         if (entryPath == null) Fail("no entry point - expected src/main.g, or pass --entry");
 
-        string projectRoot = manifest?.Dir ?? Path.GetDirectoryName(Path.GetFullPath(entryPath))!;
+        string root = manifest?.Dir ?? Path.GetDirectoryName(Path.GetFullPath(entryPath))!;
         string? stdlibDir = stdlibOverride ?? Pipeline.FindLibgata();
         if (stdlibDir == null) Fail("cannot find libgata - run 'appa install' or pass --stdlib <dir>");
         foreach (var p in new[] { envPath, entryPath })
             if (!File.Exists(p)) Fail($"file not found: {p}");
 
-        return (manifest, envPath, entryPath, projectRoot, stdlibDir);
+        return (manifest, envPath, entryPath, root, stdlibDir);
     }
 
     /// <summary>
@@ -142,7 +139,7 @@ internal static class Cli
     internal static void Fail(string message, string? hint = null) { Log.Error(message, hint); Environment.Exit(1); }
 
     /// <summary>
-    /// Fail, in expression position - for the ?? arm of a value that has to exist.
+    /// Fail, in expression position, for the ?? arm of a value that has to exist.
     /// </summary>
     [DoesNotReturn]
     internal static T Fail<T>(string message, string? hint = null) { Fail(message, hint); return default!; }

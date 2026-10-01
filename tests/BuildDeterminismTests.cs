@@ -8,7 +8,7 @@ public class BuildDeterminismTests
     /// <summary>
     /// Broad on purpose: array and function-pointer types and unions (which the emitter orders
     /// through a dictionary), several generic templates stamped over several arguments, overload
-    /// sets, operators, process state, and containers - the passes with the most name-keyed
+    /// sets, operators, process state, and containers, the passes with the most name-keyed
     /// bookkeeping between them.
     /// </summary>
     private static Dictionary<string, string> Files() => new()

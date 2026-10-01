@@ -38,6 +38,7 @@ internal sealed class ScopeTree
     public ScopeId Intern(ScopeId parent, string segment, Realm realm)
     {
         if (_index.TryGetValue((parent.Value, segment), out var existing)) return existing;
+
         string suffix = parent.IsRoot ? $"@{segment}" : $"{Suffix(parent)}${segment}";
         var id = new ScopeId(_nodes.Count);
         _nodes.Add(new Node(parent, segment, realm, suffix, "_s" + Mangler.Hash(suffix)));
@@ -78,10 +79,13 @@ internal sealed class ScopeTree
     public string Qualify(ScopeId s, string name)
     {
         if (s.IsRoot) return name;
+
         string q = name + Suffix(s);
         _qualified[q] = new QualifiedName(s, name);
-        if (!_byBare.TryGetValue(name, out var scopes)) _byBare[name] = scopes = [];
-        if (!scopes.Contains(s)) scopes.Add(s);
+
+        if (!_byBare.ContainsKey(name)) _byBare[name] = [];
+        if (!_byBare[name].Contains(s)) _byBare[name].Add(s);
+
         return q;
     }
 
@@ -114,7 +118,8 @@ internal sealed class ScopeTree
     public List<string> Candidates(string bare)
     {
         if (!_byBare.TryGetValue(bare, out var scopes)) return [];
-        var paths = new List<string>(scopes.Count);
+
+        var paths = new List<string>();
         foreach (var s in scopes) paths.Add(Display(s, bare));
         paths.Sort(StringComparer.Ordinal);
         return paths;
@@ -129,9 +134,7 @@ internal sealed class ScopeTree
         if (s.IsRoot) return name;
         var parts = new List<string>();
         for (var cur = s; !cur.IsRoot; cur = Parent(cur))
-        {
             parts.Add(_nodes[cur.Value].Segment);
-        }
         parts.Reverse();
         return string.Join('.', parts) + "." + name;
     }
@@ -140,8 +143,7 @@ internal sealed class ScopeTree
     /// The child scope for a segment, or null when this scope has no such child. Lookup only: a
     /// written qualifier must not bring a scope into existence.
     /// </summary>
-    public ScopeId? Child(ScopeId parent, string segment) =>
-        _index.TryGetValue((parent.Value, segment), out var id) ? id : null;
+    public ScopeId? Child(ScopeId parent, string segment) => _index.TryGetValue((parent.Value, segment), out var id) ? id : null;
 
     /// <summary>
     /// True when <paramref name="outer"/> is <paramref name="inner"/> or encloses it. The whole

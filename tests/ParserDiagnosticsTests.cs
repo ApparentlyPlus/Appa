@@ -63,8 +63,8 @@ public class ParserDiagnosticsTests
     }
 
     /// <summary>
-    /// 'public' on a free function changes nothing - a free function is already visible to every
-    /// importer - so it is rejected the way 'public class C' already was.
+    /// 'public' on a free function changes nothing. A free function is already visible to every
+    /// importer, so it is rejected the way 'public class C' already was.
     /// </summary>
     [Theory]
     [InlineData("public int func F() { return 1; }")]
@@ -82,7 +82,7 @@ public class ParserDiagnosticsTests
 
     /// <summary>
     /// The two spellings that still mean something there, and the one member position where
-    /// 'public' is the modifier that does the work - so the rule above cannot have reached it.
+    /// 'public' is the modifier that does the work, so the rule above cannot have reached it.
     /// </summary>
     [Theory]
     [InlineData("int func F() { return 1; }")]
@@ -189,8 +189,8 @@ public class ParserDiagnosticsTests
     }
 
     /// <summary>
-    /// 'userspace' is close enough to 'user' that the old spelling should be suggested, not just
-    /// rejected - this is the first place Suggest is wired into a realm diagnostic.
+    /// 'userspace' is close enough to 'user' that the old spelling should be suggested and
+    /// rejected. This is the first place Suggest is wired into a realm diagnostic.
     /// </summary>
     [Fact]
     public void NearMissRealmSuggests()
@@ -235,7 +235,7 @@ public class ParserDiagnosticsTests
 
     /// <summary>
     /// The trailing-return-type mistake gets the same targeted message inside a class as it does
-    /// for a free function - not the generic "expected '{'" a bare unhandled '->' would otherwise
+    /// for a free function, not the generic "expected '{'" a bare unhandled '->' would otherwise
     /// produce.
     /// </summary>
     [Fact]
@@ -285,7 +285,7 @@ public class ParserDiagnosticsTests
 
     /// <summary>
     /// An operator whose return type is itself a function-pointer type is not mistaken for the
-    /// no-return-type form - 'func(' after 'operator' is a type, 'func' followed by a symbol is the
+    /// no-return-type form, 'func(' after 'operator' is a type, 'func' followed by a symbol is the
     /// declaration keyword.
     /// </summary>
     [Fact]
@@ -338,6 +338,5 @@ public class ParserDiagnosticsTests
     [InlineData("func F() { for (let int i = 0; i < 2; i = i + 1) { } }")]
     [InlineData("func F() { for (i = 0; i < 2; i = i + 1) { } }")]
     [InlineData("func F() { for (;;) { } }")]
-    public void ValidLoopFormsParse(string src) =>
-        Assert.NotEmpty(SingleFileCompile.Parse(src).Items);
+    public void ValidLoopFormsParse(string src) => Assert.NotEmpty(SingleFileCompile.Parse(src).Items);
 }

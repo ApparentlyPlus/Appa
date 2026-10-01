@@ -19,8 +19,8 @@ public class ScopeTreeTests
     }
 
     /// <summary>
-    /// Realm scopes are project-global, so the same realm named twice - which happens whenever two
-    /// files both open 'realm userspace' - must be one scope, not two.
+    /// Realm scopes are project-global, so the same realm named twice, which happens whenever two
+    /// files both open 'realm userspace', must be one scope, not two.
     /// </summary>
     [Fact]
     public void InterningIsIdempotent()
@@ -137,8 +137,7 @@ public class ScopeTreeTests
         var sources = new SourceSet();
         sources.Add("<test>", src);
         var prog = SingleFileCompile.Parse(src);
-        return new ScopeBinder(new DiagnosticBag(sources))
-            .Bind([("<test>", prog)]);
+        return new ScopeBinder(new DiagnosticBag(sources)).Bind([("<test>", prog)]);
     }
 
     [Fact]

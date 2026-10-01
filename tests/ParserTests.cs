@@ -245,7 +245,7 @@ public class ParserTests
     }
 
     /// <summary>
-    /// A type reference is structured - base plus arguments - and its mangled spelling is derived,
+    /// A type reference is structured (base plus arguments) and its mangled spelling is derived,
     /// never parsed back. Nesting must compose the same way at every depth.
     /// </summary>
     [Fact]

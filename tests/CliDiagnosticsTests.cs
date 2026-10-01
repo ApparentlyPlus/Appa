@@ -41,7 +41,7 @@ public class CliDiagnosticsTests
     }
 
     /// <summary>
-    /// Both flags, but to 'build', where they additionally need --pure-transpile. Telling the reader
+    /// Both flags, but to 'build', where they also need --pure-transpile. Telling the reader
     /// to pass --env and --entry here would be telling them to do what they did.
     /// </summary>
     [Fact]
@@ -102,8 +102,7 @@ public class CliDiagnosticsTests
         if (gata == null) return;
 
         using var work = Project("<appa><TargetBackend>Hosted</TargetBackend></appa>");
-        File.WriteAllText(work.Combine("src", "main.g"),
-            "realm userspace { entry func Main() { let int unusedLocal = 1; } }");
+        File.WriteAllText(work.Combine("src", "main.g"), "realm userspace { entry func Main() { let int unusedLocal = 1; } }");
 
         string stdlib = $"--stdlib \"{Path.Combine(gata, "libgata")}\"";
         Assert.Contains("--werror", Run($"check . {stdlib} --werror", work.Path));
@@ -115,7 +114,7 @@ public class CliDiagnosticsTests
     /// The project 'appa new' writes has to compile. It did not: the starter main.g still used the
     /// pre-realm 'kernel { }' and 'user { }' block syntax, so the very first thing a new user runs
     /// after creating a project was a syntax error in code they had not written. The book was swept
-    /// for that spelling; the template it was generated alongside was not.
+    /// for that spelling. The template it was generated alongside was not.
     /// </summary>
     [Fact]
     public void FreshProjectChecksClean()
@@ -132,7 +131,7 @@ public class CliDiagnosticsTests
     }
 
     /// <summary>
-    /// A well-formed project still checks cleanly - the other half of the test, without which
+    /// A well-formed project still checks cleanly. The other half of the test, without which
     /// rejecting everything would pass.
     /// </summary>
     [Fact]
@@ -230,7 +229,7 @@ public class CliDiagnosticsTests
 
         Assert.Contains("warning[G101]", got);
         Assert.Contains("'Left', 'Right'", got);
-        // A location, not just a message: the file, and a line inside the source rather than 0.
+        // Needs a location as well as a message: the file, and a line inside the source rather than 0.
         Assert.Contains("main.g:", got);
         Assert.DoesNotContain("main.g:0:", got);
     }
@@ -343,8 +342,7 @@ public class CliDiagnosticsTests
         Assert.DoesNotContain("Crate.g:", got);
 
         var appaDll = Path.Combine(AppContext.BaseDirectory, "Appa.dll");
-        var (code, output) = HostedRun.Run("dotnet",
-            $"\"{appaDll}\" check . --stdlib \"{stdlib.Path}\" --werror", work.Path);
+        var (code, output) = HostedRun.Run("dotnet", $"\"{appaDll}\" check . --stdlib \"{stdlib.Path}\" --werror", work.Path);
         Assert.True(code != 0, $"--werror let a library-closed cycle through with exit 0:\n{output}");
     }
 
@@ -381,7 +379,7 @@ public class CliDiagnosticsTests
 
     /// <summary>
     /// Builds a project whose entry function does <paramref name="body"/> to a class reference,
-    /// against the real libgata - so 'retain'/'release' are the standard library's own intrinsics
+    /// against the real libgata, so 'retain'/'release' are the standard library's own intrinsics
     /// and the operand is a managed reference rather than a raw pointer.
     /// </summary>
     private static string RunArcBody(string body, string gata)

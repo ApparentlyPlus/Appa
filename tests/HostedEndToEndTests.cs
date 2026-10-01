@@ -49,7 +49,7 @@ public class HostedEndToEndTests
     /// <summary>
     /// A program touching the parts of libgata most likely to break: generic containers, counted
     /// strings, interpolation, fixed arrays, an unsafe pointer round trip. Its output is asserted
-    /// exactly, so a miscompile is a wrong answer, not just a build failure.
+    /// exactly, so a miscompile is a wrong answer as well as a build failure.
     /// </summary>
     private const string ProgramSource = """
         import Console;

@@ -17,36 +17,47 @@ internal sealed class CodeWriter
     /// </summary>
     public void Line(string text = "")
     {
-        if (text.Length == 0) { _sb.Append('\n'); return; }
-        ReadOnlySpan<char> span = text.AsSpan();
-        int index;
-        while ((index = span.IndexOf('\n')) >= 0)
+        if (text.Length == 0)
         {
-            Indented(span[..index].TrimEnd('\r'));
-            span = span[(index + 1)..];
+            _sb.Append('\n');
+            return;
         }
-        Indented(span.TrimEnd('\r'));
+
+        ReadOnlySpan<char> rest = text.AsSpan();
+        int nl;
+        while ((nl = rest.IndexOf('\n')) >= 0)
+        {
+            Indented(rest[..nl].TrimEnd('\r'));
+            rest = rest[(nl + 1)..];
+        }
+        Indented(rest.TrimEnd('\r'));
     }
 
     /// <summary>
     /// Appends each string in the sequence as a separate indented line.
     /// </summary>
-    public void Lines(params ReadOnlySpan<string> lines) { foreach (var l in lines) Line(l); }
+    public void Lines(params ReadOnlySpan<string> lines)
+    {
+        foreach (var l in lines) Line(l);
+    }
 
     /// <summary>
     /// Appends a completely blank line with no indentation.
     /// </summary>
-    public void Blank()
-    {
-        _sb.Append('\n');
-    }
+    public void Blank() => _sb.Append('\n');
 
     /// <summary>
     /// Appends a line with the current indentation prefix, or a bare newline for empty input.
     /// </summary>
     private void Indented(ReadOnlySpan<char> s)
     {
-        if (s.Length == 0) { _sb.Append('\n'); return; }
+        // no trailing whitespace on blank lines
+        if (s.Length == 0)
+        {
+            _sb.Append('\n');
+            return;
+        }
+
         if (_depth > 0) _sb.Append(' ', _depth * Unit.Length);
         _sb.Append(s).Append('\n');
     }
@@ -54,7 +65,7 @@ internal sealed class CodeWriter
     /// <summary>
     /// Begins a line composed in pieces. The indent is written now and the newline on disposal, so a
     /// caller writes straight into the output rather than into a string of its own first. The text
-    /// written must not contain a newline; use Line for anything multi-line.
+    /// written must not contain a newline. Use Line for anything multi-line.
     /// </summary>
     public Pending Open()
     {
@@ -68,7 +79,6 @@ internal sealed class CodeWriter
     public readonly struct Pending(CodeWriter w) : IDisposable
     {
         public StringBuilder Buffer => w._sb;
-
         /// <summary>
         /// Closes the line.
         /// </summary>
@@ -79,23 +89,22 @@ internal sealed class CodeWriter
     /// Appends the header line, increases indentation, and returns a scope that decreases
     /// indentation and writes the closer string on disposal.
     /// </summary>
-    public Scope Block(string header, string closer = "}") { Line(header); _depth++; return new Scope(this, closer); }
+    public Scope Block(string header, string closer = "}")
+    {
+        Line(header);
+        _depth++;
+        return new Scope(this, closer);
+    }
 
     /// <summary>
     /// Opens a bare brace block, increasing indentation until the returned scope is disposed.
     /// </summary>
-    public Scope Braces(string closer = "}")
-    {
-        return Block("{", closer);
-    }
+    public Scope Braces(string closer = "}") => Block("{", closer);
 
     /// <summary>
     /// Returns the accumulated C text.
     /// </summary>
-    public override string ToString()
-    {
-        return _sb.ToString();
-    }
+    public override string ToString() => _sb.ToString();
 
     /// <summary>
     /// Disposable scope that restores indentation and writes the closing token on disposal.
@@ -105,6 +114,10 @@ internal sealed class CodeWriter
         /// <summary>
         /// Decreases indentation and writes the closing token.
         /// </summary>
-        public void Dispose() { w._depth--; w.Line(closer); }
+        public void Dispose()
+        {
+            w._depth--;
+            w.Line(closer);
+        }
     }
 }

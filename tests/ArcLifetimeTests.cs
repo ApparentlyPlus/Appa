@@ -288,10 +288,6 @@ public class ArcLifetimeTests
         HostedRun.AssertClean(r);
         var lines = r.Output.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
 
-        Assert.Equal(
-        [
-            "n=7 flag=true ch=z d=1.5 unset=0",
-            "kept=3 fromCtor=9 overwritten=2",
-        ], lines);
+        Assert.Equal(["n=7 flag=true ch=z d=1.5 unset=0", "kept=3 fromCtor=9 overwritten=2",], lines);
     }
 }

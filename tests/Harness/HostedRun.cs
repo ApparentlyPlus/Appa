@@ -104,8 +104,7 @@ internal static class HostedRun
             try
             {
                 using var probe = Scratch.Create("appa-libm-probe-");
-                File.WriteAllText(probe.Combine("p.c"),
-                    "#include <math.h>\nint main(void){return (int)sqrt(4.0) - 2;}");
+                File.WriteAllText(probe.Combine("p.c"), "#include <math.h>\nint main(void){return (int)sqrt(4.0) - 2;}");
                 var (code, _) = Run(cc, "-o probe p.c -lm", probe.Path);
                 if (code != 0) answer = "";
             }
@@ -250,7 +249,7 @@ internal static class HostedRun
 
     /// <summary>
     /// Asserts the program ran to completion with no sanitizer report: no use-after-free, double
-    /// free or undefined behaviour. Leaks are not this check's job - they are caught
+    /// free or undefined behaviour. Leaks are not this check's job. They are caught
     /// deterministically instead.
     /// </summary>
     public static void AssertClean(Result r)
@@ -265,7 +264,7 @@ internal static class HostedRun
 
     /// <summary>
     /// The exit code for a command that does not exist, borrowed from the shells. A caller probing
-    /// for an optional tool reads the exit code; Process.Start reports a missing binary by throwing
+    /// for an optional tool reads the exit code. Process.Start reports a missing binary by throwing
     /// instead, so every one of those probes used to sail past its guard and fail later as a crash.
     /// </summary>
     public const int NotFound = 127;

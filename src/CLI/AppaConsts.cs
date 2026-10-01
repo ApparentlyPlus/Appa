@@ -13,11 +13,7 @@ static class Urls
     public const string GataRef = "main";
     public const string Template = "https://github.com/ApparentlyPlus/GatOS/archive/refs/heads/appa-template.zip";
 
-    /// <summary>
-    /// Returns the platform toolchain bundle URL for the current OS.
-    /// </summary>
-    public static string Toolchain() =>
-        RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? Tc + "/x86_64-win.zip" :
+    public static string Toolchain() => RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? Tc + "/x86_64-win.zip" :
         RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? Tc + "/x86_64-macOS.zip" :
         Tc + "/x86_64-linux.zip";
 
@@ -26,13 +22,15 @@ static class Urls
     /// the latest GitHub release via the "releases/latest/download" alias. Mac distinguishes Apple
     /// Silicon (amac) from Intel (imac).
     /// </summary>
-    public static string AppaBinary() =>
-        RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? AppaRel + "/appa-win.exe" :
-        RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
-            ? (RuntimeInformation.OSArchitecture == Architecture.Arm64
-                ? AppaRel + "/appa-amac"
-                : AppaRel + "/appa-imac")
-            : AppaRel + "/appa-linux";
+    public static string AppaBinary()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return AppaRel + "/appa-win.exe";
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.OSX)) return AppaRel + "/appa-linux";
+
+        return RuntimeInformation.OSArchitecture == Architecture.Arm64
+            ? AppaRel + "/appa-amac"
+            : AppaRel + "/appa-imac";
+    }
 }
 
 #endregion
@@ -58,11 +56,9 @@ static class AppaPaths
             {
                 foreach (var line in File.ReadLines("/etc/passwd"))
                 {
+                    // name:pw:uid:gid:gecos:home:shell
                     var parts = line.Split(':');
-                    if (parts.Length >= 6 && parts[0] == username)
-                    {
-                        return parts[5];
-                    }
+                    if (parts.Length >= 6 && parts[0] == username) return parts[5];
                 }
             }
         }
@@ -89,8 +85,7 @@ static class AppaPaths
         return Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
     }
 
-    public static readonly string Root = Path.Combine(
-        GetLocalSharePath(), "appa");
+    public static readonly string Root = Path.Combine(GetLocalSharePath(), "appa");
 
     public static string ToolchainDir => Path.Combine(Root, "toolchain");
     public static string LibgataDir => Path.Combine(Root, "libgata");
@@ -156,8 +151,7 @@ static class Out
     /// Prints a finished step with its elapsed time pinned to the right edge, so every step in a run
     /// lines up however long its label runs.
     /// </summary>
-    public static void Step(string message, TimeSpan elapsed) =>
-        Fmt.Justify(message, $"{C.DIM}{Spin.Fmt(elapsed)}{C.NC}");
+    public static void Step(string message, TimeSpan elapsed) => Fmt.Justify(message, $"{C.DIM}{Spin.Fmt(elapsed)}{C.NC}");
 
     /// <summary>
     /// Prints a plain indented fact with no timing.

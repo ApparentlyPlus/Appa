@@ -1,5 +1,3 @@
-using System.Runtime.InteropServices;
-
 namespace Appa;
 
 internal record CollectionResult(SymbolTable Sym, HashSet<string> HasInit, HashSet<string> PreDefinedStructs,
@@ -28,10 +26,8 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
     /// </summary>
     public CollectionResult Collect(List<(string path, Program prog)> programs)
     {
-        var span = CollectionsMarshal.AsSpan(programs);
-        for (int i = 0; i < span.Length; i++)
+        foreach (var (path, prog) in programs)
         {
-            var (path, prog) = span[i];
             foreach (var item in prog.Items) P1Top(item, path);
         }
         _sym.AssignCNames();
@@ -91,9 +87,6 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
         }
     }
 
-    /// <summary>
-    /// Dispatches a single top-level item to the appropriate P1 handler.
-    /// </summary>
     private void P1Top(TopLevel item, string file)
     {
         switch (item)
@@ -219,8 +212,7 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
                     break;
                 case OperatorDecl od:
                 {
-                    TypeSpec retType = od.ReturnType
-                        ?? new NamedSpec(OperatorRules.DefaultReturn(od.Op, cd.Name), od.Span);
+                    TypeSpec retType = od.ReturnType ?? new NamedSpec(OperatorRules.DefaultReturn(od.Op, cd.Name), od.Span);
 
                     bool fresh = od.Op == "as" && od.Params.Length == 1
                         ? asConversions.Add(SignatureKey.Of("as", od.Params))
@@ -281,9 +273,6 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
         if (fd.Throws) _sym.RegisterThrows(fd.ReturnType);
     }
 
-    /// <summary>
-    /// Registers a native type declaration as a pre-defined C struct.
-    /// </summary>
     private void P1NativeType(NativeTypeDecl nd, string file)
     {
         if (!_declaredTypes.Add(nd.Name))
@@ -302,9 +291,6 @@ internal sealed class SymbolCollector(DiagnosticBag diag)
             _preDefinedStructs.Add(name);
     }
 
-    /// <summary>
-    /// Registers an extern function forward declaration.
-    /// </summary>
     private void P1Extern(ExternFuncDecl ed, string file)
     {
         if (_declaredFuncs.Contains(ed.Name))

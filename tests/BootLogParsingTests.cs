@@ -7,8 +7,8 @@ public class BootLogParsingTests
 {
     /// <summary>
     /// The real shape of the failure: GRUB's "  Booting `GatOS'" loses its closing quote and its
-    /// newline - they never reach the serial chardev, which was confirmed to happen before the
-    /// kernel runs - and the kernel's first line continues that same line.
+    /// newline. They never reach the serial chardev, which was confirmed to happen before the
+    /// kernel runs, and the kernel's first line continues that same line.
     /// </summary>
     [Fact]
     public void GluedFirstMarkerRead()
@@ -25,7 +25,7 @@ public class BootLogParsingTests
 
     /// <summary>
     /// And the clean capture reads identically, so the two are the same transcript rather than two
-    /// spellings of one - which is the entire premise of comparing the images.
+    /// spellings of one, which is the entire premise of comparing the images.
     /// </summary>
     [Fact]
     public void CleanAndGluedMatch()

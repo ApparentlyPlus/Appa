@@ -2,14 +2,8 @@ namespace Appa;
 
 internal sealed class SourceText
 {
-    /// <summary>
-    /// The absolute path of the source file
-    /// </summary>
     public string Path { get; }
 
-    /// <summary>
-    /// The full text of the source file
-    /// </summary>
     public string Text { get; }
 
     /// <summary>
@@ -25,38 +19,12 @@ internal sealed class SourceText
         Path = path;
         Text = text;
 
-        ReadOnlySpan<char> span = text.AsSpan();
-
-        // Rent a buffer from ArrayPool. Most files will have less than 512 lines.
-        int initialCapacity = Math.Max(512, span.Length / 40);
-        int[] rented = System.Buffers.ArrayPool<int>.Shared.Rent(initialCapacity);
-        try
+        var starts = new List<int> { 0 };
+        for (int i = 0; i < text.Length; i++)
         {
-            rented[0] = 0;
-            int count = 1;
-            int offset = 0;
-            int index;
-
-            while ((index = span[offset..].IndexOf('\n')) >= 0)
-            {
-                offset += index + 1;
-                if (count >= rented.Length)
-                {
-                    int[] newRented = System.Buffers.ArrayPool<int>.Shared.Rent(rented.Length * 2);
-                    Array.Copy(rented, newRented, count);
-                    System.Buffers.ArrayPool<int>.Shared.Return(rented);
-                    rented = newRented;
-                }
-                rented[count++] = offset;
-            }
-
-            _ls = new int[count];
-            Array.Copy(rented, _ls, count);
+            if (text[i] == '\n') starts.Add(i + 1);
         }
-        finally
-        {
-            System.Buffers.ArrayPool<int>.Shared.Return(rented);
-        }
+        _ls = starts.ToArray();
     }
 
     /// <summary>
@@ -69,10 +37,11 @@ internal sealed class SourceText
         // protect against out of bounds offsets
         offset = Math.Clamp(offset, 0, Text.Length);
 
-        // binsearch for the largest line start that is <= offset
-        int index = _ls.AsSpan().BinarySearch(offset);
-        int lo = index >= 0 ? index : ~index - 1;
-        return (lo + 1, offset - _ls[lo] + 1);
+        // last line start that is <= offset
+        int i = Array.BinarySearch(_ls, offset);
+        if (i < 0) i = ~i - 1;
+
+        return (i + 1, offset - _ls[i] + 1);
     }
 
     /// <summary>
@@ -97,14 +66,9 @@ internal sealed class SourceText
 /// </summary>
 internal sealed class SourceSet
 {
-    private readonly Dictionary<string, SourceText> _ff = new(StringComparer.OrdinalIgnoreCase);
-    public SourceText Add(string path, string text)
-    {
-        return _ff[path] = new SourceText(path, text);
-    }
+    private readonly Dictionary<string, SourceText> _files = new(StringComparer.OrdinalIgnoreCase);
 
-    public SourceText? Get(string? path)
-    {
-        return path != null ? _ff.GetValueOrDefault(path) : null;
-    }
+    public SourceText Add(string path, string text) => _files[path] = new SourceText(path, text);
+
+    public SourceText? Get(string? path) => path == null ? null : _files.GetValueOrDefault(path);
 }

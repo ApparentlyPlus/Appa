@@ -17,7 +17,7 @@ public class InstallerTests
 
     /// <summary>
     /// libgata and envs are mirrors of the Gata repo, but the sync only ever added files. A module
-    /// deleted or renamed upstream stayed installed forever - and a stale copy still imports and
+    /// deleted or renamed upstream stayed installed forever, and a stale copy still imports and
     /// still binds whatever @intrinsic roles it declares, so a rename left two claimants for one
     /// role. Files the download did write must survive untouched.
     /// </summary>
@@ -58,7 +58,7 @@ public class InstallerTests
     }
 
     /// <summary>
-    /// A nested layout prunes at depth, and a directory that does not exist is not an error - the
+    /// A nested layout prunes at depth, and a directory that does not exist is not an error. The
     /// first install creates it after this would run.
     /// </summary>
     [Fact]
@@ -128,8 +128,7 @@ public class InstallerTests
     /// dressed up as an install problem.
     /// </summary>
     [Fact]
-    public void UnexpectedFailureNotInstall() =>
-        Assert.False(Installer.IsExpectedSetupFailure(new NullReferenceException()));
+    public void UnexpectedFailureNotInstall() => Assert.False(Installer.IsExpectedSetupFailure(new NullReferenceException()));
 
     /// <summary>
     /// GitHub's archive zips wrap everything in a single "repo-branch/" folder that the install must
@@ -165,7 +164,7 @@ public class InstallerTests
     }
 
     /// <summary>
-    /// A zip with no single wrapper folder - which is what a hand-built archive looks like - is taken
+    /// A zip with no single wrapper folder, which is what a hand-built archive looks like, is taken
     /// as already being the root rather than having a level stripped off it.
     /// </summary>
     [Fact]
@@ -190,7 +189,7 @@ public class InstallerTests
 
     /// <summary>
     /// appa's staging directories used to be fixed names in the shared temp directory
-    /// (/tmp/appa_tc.zip). With fs.protected_regular - on by default - a file there owned by another
+    /// (/tmp/appa_tc.zip). With fs.protected_regular (on by default) a file there owned by another
     /// user cannot be re-created, root included, so installing as the user and then re-running under
     /// sudo failed on the leftover the *user* owned, reported as a permissions problem in the
     /// install directory. Every run must get its own directory, or that comes back.

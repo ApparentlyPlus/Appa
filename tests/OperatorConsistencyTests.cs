@@ -4,8 +4,8 @@ using Appa;
 
 /// <summary>
 /// The operator-consistency rules: '!=' derives from '==' by negation when only one is declared, so
-/// a class never gets identity for one spelling and value comparison for the other; and every
-/// comparison operator returns bool, defaulted when omitted.
+/// a class never gets identity for one spelling and value comparison for the other. Every
+/// comparison operator also returns bool, defaulted when omitted.
 /// </summary>
 public class OperatorConsistencyTests
 {
@@ -39,8 +39,8 @@ public class OperatorConsistencyTests
     #region '!=' / '==' derivation
 
     /// <summary>
-    /// A class that declares '==' but not '!=' gets '!=' as the negation of its own '==' - a direct
-    /// call to the declared operator wrapped in '!' - never the old silent fallback to reference
+    /// A class that declares '==' but not '!=' gets '!=' as the negation of its own '==' (a direct
+    /// call to the declared operator wrapped in '!'), never the old silent fallback to reference
     /// identity.
     /// </summary>
     [Fact]

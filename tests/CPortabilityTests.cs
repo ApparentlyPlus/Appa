@@ -82,8 +82,7 @@ public class CPortabilityTests
         var stdFlag = HostedRun.StdFlag(cc, std);
         if (stdFlag == null) Assert.Skip($"{cc} knows no spelling of -std={std}; skipping");
 
-        var (code, output) = HostedRun.Run(cc,
-            $"-std={stdFlag} -I. {opt} {Warnings} -c program.c -o program.o", outDir);
+        var (code, output) = HostedRun.Run(cc, $"-std={stdFlag} -I. {opt} {Warnings} -c program.c -o program.o", outDir);
         Assert.True(code == 0, $"{cc} {opt} -std={stdFlag} rejected the emitted C:\n{output}");
     }
 }

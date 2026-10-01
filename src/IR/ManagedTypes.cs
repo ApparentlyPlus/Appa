@@ -7,14 +7,15 @@ internal sealed class ManagedTypes
 
     public ManagedTypes(IrModule m)
     {
-        _classes = new HashSet<string>(m.Classes.Count);
+        _classes = [];
+        _unions = [];
+
         foreach (var c in m.Classes)
         {
             if (!c.IsModule) _classes.Add(c.Name);
         }
 
-        _unions = [];
-
+        // union name -> the unions that hold it in a variant
         var holders = new Dictionary<string, List<string>>();
         var work = new Queue<string>();
 
@@ -22,37 +23,47 @@ internal sealed class ManagedTypes
         {
             bool managed = false;
             foreach (var v in u.Variants)
+            {
                 foreach (var f in v.Fields)
                 {
-                    if (f.Type is IrClassRef cr && _classes.Contains(cr.ClassName)) managed = true;
+                    if (f.Type is IrClassRef cr && _classes.Contains(cr.ClassName))
+                    {
+                        managed = true;
+                    }
                     else if (f.Type is IrUnionType ut)
                     {
-                        if (!holders.TryGetValue(ut.Name, out var up)) holders[ut.Name] = up = [];
-                        up.Add(u.Name);
+                        if (!holders.ContainsKey(ut.Name)) holders[ut.Name] = [];
+                        holders[ut.Name].Add(u.Name);
                     }
                 }
-            if (managed && _unions.Add(u.Name)) work.Enqueue(u.Name);
+            }
+
+            if (managed && _unions.Add(u.Name))
+                work.Enqueue(u.Name);
         }
 
+        // anything holding a managed union is managed too
         while (work.Count > 0)
-            if (holders.TryGetValue(work.Dequeue(), out var up))
-                foreach (var h in up)
-                    if (_unions.Add(h)) work.Enqueue(h);
+        {
+            if (!holders.TryGetValue(work.Dequeue(), out var outer)) continue;
+
+            foreach (var h in outer)
+            {
+                if (_unions.Add(h)) work.Enqueue(h);
+            }
+        }
     }
 
     /// <summary>
     /// True if values of this type carry reference counts the compiler maintains. Fixed arrays are
-    /// excluded even with a managed element type - an array is raw storage the author counts by
+    /// excluded even with a managed element type. An array is raw storage the author counts by
     /// hand, and managing it here would be a feature, not a consistency fix.
     /// </summary>
     public bool IsManaged(IrType t)
     {
-        return t switch
-        {
-            IrClassRef cr => _classes.Contains(cr.ClassName),
-            IrUnionType ut => _unions.Contains(ut.Name),
-            _ => false
-        };
+        if (t is IrClassRef cr) return _classes.Contains(cr.ClassName);
+        if (t is IrUnionType ut) return _unions.Contains(ut.Name);
+        return false;
     }
 
     /// <summary>

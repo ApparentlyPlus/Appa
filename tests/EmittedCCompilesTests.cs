@@ -47,12 +47,11 @@ public class EmittedCCompilesTests
         """;
 
     /// <summary>
-    /// True if a C diagnostic is an artifact of the stub environment rather than a defect - only
+    /// True if a C diagnostic is an artifact of the stub environment rather than a defect: only
     /// libgata's String, since a corpus case imports no stdlib. Matching on the diagnostic text
     /// rather than case names keeps unrelated cases in those families in scope.
     /// </summary>
-    private static bool IsStubArtifact(string diagnostic) =>
-        diagnostic.Contains("gata_String", StringComparison.Ordinal);
+    private static bool IsStubArtifact(string diagnostic) => diagnostic.Contains("gata_String", StringComparison.Ordinal);
 
     /// <summary>
     /// Locates a usable host C compiler, or null.
