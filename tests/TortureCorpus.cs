@@ -1815,9 +1815,14 @@ public static class TortureCorpus
         yield return new("forin/wrong-get-arity",
             "class C { public int func Length() { return 0; } public int func Get() { return 0; } } realm kernel { entry func Main() { let C c = new C(); for x in c { } } }",
             Expect.Rejected);
+        const string arc = "@intrinsic(obj_header) native type obj { size_t __rc; } "
+            + "@intrinsic(alloc) void* func alloc(usize n) native { return 0; } "
+            + "@intrinsic(obj_init) void func obj_init(void* o, func(void*) -> void dtor) native { } "
+            + "@intrinsic(retain) void* func retain(void* p) native { return p; } "
+            + "@intrinsic(release) void func release(void* p) native { } ";
         yield return new("forin/full-protocol",
-            "class C { public int func Length() { return 0; } public int func Get(int i) { return i; } } realm kernel { entry func Main() { for x in new C() { } } }",
-            Expect.Any);
+            arc + "class C { public int func Length() { return 0; } public int func Get(int i) { return i; } } realm kernel { entry func Main() { for x in new C() { } } }",
+            Expect.Accepted);
         yield return new("forin/assign-to-binding",
             "realm kernel { entry func Main() { for x in [1, 2] { x = 5; } } }", Expect.Any);
         yield return new("forin/shadow-outer",

@@ -43,6 +43,12 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     // declares nothing scoped still needs its rewrite sweep.
     private bool _scopedRef;
 
+    // Set while reading the type after 'as', where a '*' can also be multiplication.
+    private bool _castType;
+
+    // Token index where a for-in collection or a case label starts, or -1.
+    private int _blockAfter = -1;
+
     #region Core stream helpers
 
     /// <summary>
@@ -790,7 +796,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         }
         if (At(TK.Func)) return ParseFuncTypeSpec();
         TypeSpec spec = ParseTypeName();
-        while (AtP("*"))
+        while (AtPtrStar())
         {
             Advance();
             spec = new PtrSpec(spec, To(s));
@@ -815,8 +821,25 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         Expect(TK.RParen);
         Expect(TK.Arrow);
         var spec = new FuncSpec([.. ps], ParseTypeSpec(), To(s));
-        if (AtP("*")) Fail("pointer to a function type is not supported; use the function type directly", Codes.BadDeclHeader);
+        if (AtPtrStar()) Fail("pointer to a function type is not supported; use the function type directly", Codes.BadDeclHeader);
         return spec;
+    }
+
+    /// <summary>
+    /// True at a '*' that belongs to the type.
+    /// </summary>
+    private bool AtPtrStar()
+    {
+        if (!AtP("*")) return false;
+        if (!_castType) return true;
+        int i = 1;
+        while (Peek(i).Kind == TK.Punct && Peek(i).Value == "*") i++;
+        var t = Peek(i);
+        bool operand = t.Kind is TK.Ident or TK.IntLit or TK.FloatLit or TK.StrLit or TK.BoolLit or TK.CharLit
+            or TK.InterpStrStart or TK.Null or TK.Sizeof or TK.Default or TK.New or TK.LParen
+            or TK.ColonColon or TK.Kernel or TK.Userspace
+            || t.Kind == TK.Punct && t.Value is "!" or "~";
+        return !operand;
     }
 
     /// <summary>
@@ -1174,7 +1197,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
             Fail("a thread entry cannot be 'throws' - the runtime starts it, so there is no caller to receive the error",
                  Codes.BadEntrySignature,
                  ["handle failure inside the thread: 'let T x = f() catch { assign <fallback>; };'"]);
-        TypeSpec? ret = At(TK.Func) && Peek().Kind == TK.Ident ? null : ParseTypeSpec();
+        bool named = Peek().Kind == TK.Ident, bare = Peek().Kind == TK.LParen && !FuncTypeAhead();
+        TypeSpec? ret = At(TK.Func) && (named || bare) ? null : ParseTypeSpec();
         Expect(TK.Func);
         if (At(TK.Ident)) Advance(); // entry name is documentation only. The thread is what names it
         var parms = ParseParenParams();
@@ -1183,6 +1207,21 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         if (parms.Length > 0)
             Fail("a thread entry takes no parameters; pass state through fields or module data instead", Codes.BadEntrySignature);
         return new EntryFuncDecl(mods, ret, parms, ParseBlock(), To(s));
+    }
+
+    /// <summary>
+    /// At 'func', true when the parens after it close onto '->', as in 'func(int) -> int'.
+    /// </summary>
+    private bool FuncTypeAhead()
+    {
+        int depth = 0;
+        for (int i = 1; Peek(i).Kind != TK.EOF; i++)
+        {
+            var k = Peek(i).Kind;
+            if (k == TK.LParen) depth++;
+            else if (k == TK.RParen && --depth == 0) return Peek(i + 1).Kind == TK.Arrow;
+        }
+        return false;
     }
 
     #endregion
@@ -1497,7 +1536,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         {
             string var = Advance().Value;
             Advance(); // consume 'in'
-            return new ForInStmt(var, ParseExpr(), ParseBlock(), To(s));
+            return new ForInStmt(var, ParseExprBeforeBlock(), ParseBlock(), To(s));
         }
 
         // C-style for (init; cond; step) { }
@@ -1790,7 +1829,13 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     {
         int s = Cur.Span.Start;
         var expr = ParseUnary();
-        while (At(TK.As)) { Advance(); expr = new CastExpr(ParseTypeSpec(), expr, To(s)); }
+        while (At(TK.As))
+        {
+            Advance();
+            _castType = true;
+            try { expr = new CastExpr(ParseTypeSpec(), expr, To(s)); }
+            finally { _castType = false; }
+        }
         return expr;
     }
 
@@ -2153,9 +2198,39 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
             args = ParseArgList();
             Expect(TK.RParen);
         }
-        if (At(TK.LBrace)) return new NewExpr(type, args, ParseCollectionInit(TK.RBrace), To(s));
+        if (At(TK.LBrace) && !BraceOpensBlock()) return new NewExpr(type, args, ParseCollectionInit(TK.RBrace), To(s));
         if (At(TK.LBrack)) return new NewExpr(type, args, ParseCollectionInit(TK.RBrack), To(s));
         return new NewExpr(type, args, [], To(s));
+    }
+
+    /// <summary>
+    /// Parses an expression that a block follows directly: a for-in collection or a case label.
+    /// </summary>
+    private Expr ParseExprBeforeBlock()
+    {
+        int saved = _blockAfter;
+        _blockAfter = _pp;
+        try { return ParseExpr(); }
+        finally { _blockAfter = saved; }
+    }
+
+    /// <summary>
+    /// True when the current '{' sits at the bracket level where ParseExprBeforeBlock started, so
+    /// it opens the block. Inside parens, brackets or a string hole it can still be an initializer.
+    /// </summary>
+    private bool BraceOpensBlock()
+    {
+        if (_blockAfter < 0) return false;
+        int depth = 0;
+        for (int i = _blockAfter; i < _pp; i++)
+        {
+            switch (_tokens[i].Kind)
+            {
+                case TK.LParen or TK.LBrack or TK.LBrace or TK.InterpStrStart: depth++; break;
+                case TK.RParen or TK.RBrack or TK.RBrace or TK.InterpStrEnd: depth--; break;
+            }
+        }
+        return depth == 0;
     }
 
     /// <summary>
@@ -2200,8 +2275,8 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
             }
             int cs = Cur.Span.Start;
             Expect(TK.Case);
-            List<Expr> labels = [ParseExpr()];
-            while (Try(TK.Comma)) labels.Add(ParseExpr());
+            List<Expr> labels = [ParseExprBeforeBlock()];
+            while (Try(TK.Comma)) labels.Add(ParseExprBeforeBlock());
             cases.Add(new SwitchCase([.. labels], ParseBlock(), To(cs)));
         }
         Expect(TK.RBrace);

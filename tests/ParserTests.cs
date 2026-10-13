@@ -271,4 +271,114 @@ public class ParserTests
     }
 
     #endregion
+
+    #region Ambiguities from the LR conflict report
+
+    private static Stmt[] Body(string src)
+    {
+        var func = (FuncDecl)SingleFileCompile.Parse(src).Items[0];
+        return ((BlockBody)func.Body).Block.Stmts;
+    }
+
+    [Fact]
+    public void AsThenStarMultiplies()
+    {
+        var let = (LetStmt)Body("func F() { let usize b = n as usize * 8; }")[0];
+        var bin = Assert.IsType<BinExpr>(let.Init);
+        Assert.Equal(BinOp.Mul, bin.Op);
+        Assert.Equal("usize", Assert.IsType<CastExpr>(bin.Left).TargetType.ToSpecString());
+        Assert.IsType<IntLitExpr>(bin.Right);
+    }
+
+    [Fact]
+    public void AsThenStarDerefMultiplies()
+    {
+        var let = (LetStmt)Body("func F() { let int b = n as int * *p; }")[0];
+        var bin = Assert.IsType<BinExpr>(let.Init);
+        Assert.Equal(BinOp.Mul, bin.Op);
+        Assert.Equal("int", Assert.IsType<CastExpr>(bin.Left).TargetType.ToSpecString());
+        Assert.IsType<DerefExpr>(bin.Right);
+    }
+
+    [Theory]
+    [InlineData("func F() { let q = p as int*; }")]
+    [InlineData("func F() { let q = p as int**; }")]
+    [InlineData("func F() { G(p as int*, 1); }")]
+    [InlineData("func F() { let q = p as u8* + 1; }")]
+    [InlineData("func F() { let b = p as int* == null; }")]
+    public void AsKeepsPointerSuffix(string src)
+    {
+        var st = Body(src)[0];
+        Expr e = st is LetStmt l ? l.Init! : ((CallExpr)((ExprStmt)st).E).Args[0];
+        if (e is BinExpr b) e = b.Left;
+        Assert.IsType<PtrSpec>(Assert.IsType<CastExpr>(e).TargetType);
+    }
+
+    [Fact]
+    public void ForInNewLeavesBody()
+    {
+        var forIn = Assert.IsType<ForInStmt>(Body("func F() { for x in new C() { Use(x); } }")[0]);
+        Assert.Empty(Assert.IsType<NewExpr>(forIn.Collection).CollectionInit);
+        Assert.Single(forIn.Body.Stmts);
+    }
+
+    [Fact]
+    public void ForInNewInsideParensKeepsInit()
+    {
+        var forIn = Assert.IsType<ForInStmt>(Body("func F() { for x in Wrap(new C() { 1, 2 }) { } }")[0]);
+        var call = Assert.IsType<CallExpr>(forIn.Collection);
+        Assert.Equal(2, Assert.IsType<NewExpr>(call.Args[0]).CollectionInit.Length);
+    }
+
+    [Fact]
+    public void ForInBodyKeepsInit()
+    {
+        var forIn = Assert.IsType<ForInStmt>(Body("func F() { for x in xs { let ys = new C() { 1 }; } }")[0]);
+        var let = Assert.IsType<LetStmt>(forIn.Body.Stmts[0]);
+        Assert.Single(Assert.IsType<NewExpr>(let.Init).CollectionInit);
+    }
+
+    [Fact]
+    public void CaseNewLeavesBody()
+    {
+        var sw = Assert.IsType<SwitchStmt>(Body("func F() { switch (b) { case new B() { } default { } } }")[0]);
+        Assert.Empty(Assert.IsType<NewExpr>(Assert.Single(sw.Cases).Labels[0]).CollectionInit);
+        Assert.NotNull(sw.Default);
+    }
+
+    [Fact]
+    public void NewInitOutsideLoops()
+    {
+        var let = (LetStmt)Body("func F() { let xs = new C() { 1, 2 }; }")[0];
+        Assert.Equal(2, Assert.IsType<NewExpr>(let.Init).CollectionInit.Length);
+    }
+
+    [Fact]
+    public void ThreadEntryNameOptional()
+    {
+        var prog = SingleFileCompile.Parse("""
+            realm userspace {
+                foreground process App {
+                    thread W { entry func() { } }
+                }
+            }
+            """);
+        var proc = Assert.IsType<ProcessDecl>(Assert.IsType<ContextDecl>(prog.Items[0]).Items[0]);
+        Assert.Null(proc.Threads[0].Entry.ReturnType);
+    }
+
+    [Fact]
+    public void ThreadEntryFuncReturnStillRejected()
+    {
+        var ex = Assert.Throws<ParseException>(() => SingleFileCompile.Parse("""
+            realm userspace {
+                foreground process App {
+                    thread W { entry func(int) -> int func Run() { } }
+                }
+            }
+            """));
+        Assert.Contains("no return value", ex.Message);
+    }
+
+    #endregion
 }
