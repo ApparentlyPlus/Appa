@@ -37,55 +37,34 @@ internal static class PrimTypes
     /// <summary>
     /// Returns true if the string is a recognised Gata primitive spelling.
     /// </summary>
-    public static bool IsPrim(string s)
-    {
-        return Table.ContainsKey(s);
-    }
+    public static bool IsPrim(string s) => Table.ContainsKey(s);
 
     /// <summary>
     /// Returns true if the span is a recognised Gata primitive spelling.
     /// </summary>
-    public static bool IsPrim(ReadOnlySpan<char> s)
-    {
-        return TableLookup.ContainsKey(s);
-    }
+    public static bool IsPrim(ReadOnlySpan<char> s) => TableLookup.ContainsKey(s);
 
-    public static string ToC(string s)
-    {
-        return Table.TryGetValue(s, out var i) ? i.CType : s;
-    }
+    public static string ToC(string s) => Table.TryGetValue(s, out var i) ? i.CType : s;
 
     /// <summary>
     /// Returns true if the canonical token belongs to the integer family (bool included, matching
     /// C's integral treatment).
     /// </summary>
-    public static bool IsIntCanon(string canon)
-    {
-        return Table.TryGetValue(canon, out var i) && i.IsInt;
-    }
+    public static bool IsIntCanon(string canon) => Table.TryGetValue(canon, out var i) && i.IsInt;
 
-    public static bool IsFloat(string canon)
-    {
-        return Table.TryGetValue(canon, out var i) && i.IsFloatTy;
-    }
+    public static bool IsFloat(string canon) => Table.TryGetValue(canon, out var i) && i.IsFloatTy;
 
     /// <summary>
     /// Returns the numeric promotion rank used to pick the wider operand type. Unknown names take
     /// int's rank, mirroring the resolver's historical default.
     /// </summary>
-    public static int Rank(string name)
-    {
-        return Table.TryGetValue(name, out var i) ? i.Rank : 4;
-    }
+    public static int Rank(string name) => Table.TryGetValue(name, out var i) ? i.Rank : 4;
 
     /// <summary>
     /// Returns true if the canonical token is an unsigned integer spelling. These need their own
     /// formatting path: handing one to a signed printer reinterprets the high bit.
     /// </summary>
-    public static bool IsUnsignedCanon(string canon)
-    {
-        return Table.TryGetValue(canon, out var i) && i.IsUnsigned;
-    }
+    public static bool IsUnsignedCanon(string canon) => Table.TryGetValue(canon, out var i) && i.IsUnsigned;
 
     /// <summary>
     /// Returns the width in bits of an integer primitive, or 0 for anything else.
@@ -182,10 +161,7 @@ internal static class IrTypes
 /// </summary>
 internal record IrVoidType : IrType
 {
-    protected internal override string ComposeCType()
-    {
-        return "void";
-    }
+    protected internal override string ComposeCType() => "void";
 
     public override string MangledName => "void";
     public override bool IsVoid => true;
@@ -215,10 +191,7 @@ internal record IrPrimType(string CName) : IrType
     private readonly bool _isChar = CName == "char";
     private readonly bool _isUnsigned = PrimTypes.IsUnsignedCanon(CName);
 
-    protected internal override string ComposeCType()
-    {
-        return _cType;
-    }
+    protected internal override string ComposeCType() => _cType;
 
     public override string MangledName => CName;
     public override bool IsNumeric => _isNumeric;
@@ -233,10 +206,7 @@ internal record IrPrimType(string CName) : IrType
 internal record IrClassRef(string ClassName) : IrType
 {
     private readonly bool _isString = ClassName == BuiltinTypes.String || ClassName == $"gata_{BuiltinTypes.String}";
-    protected internal override string ComposeCType()
-    {
-        return $"{Mangler.Class(ClassName)}*";
-    }
+    protected internal override string ComposeCType() => $"{Mangler.Class(ClassName)}*";
 
     public override string MangledName => ClassName;
     public override bool IsString => _isString;
@@ -252,10 +222,7 @@ internal record IrClassRef(string ClassName) : IrType
 /// </summary>
 internal record IrEnumType(string Name) : IrType
 {
-    protected internal override string ComposeCType()
-    {
-        return Mangler.Enum(Name);
-    }
+    protected internal override string ComposeCType() => Mangler.Enum(Name);
 
     public override string MangledName => Name;
 }
@@ -265,10 +232,7 @@ internal record IrEnumType(string Name) : IrType
 /// </summary>
 internal record IrPtrType(IrType Inner) : IrType
 {
-    protected internal override string ComposeCType()
-    {
-        return $"{Inner.ToCType()}*";
-    }
+    protected internal override string ComposeCType() => $"{Inner.ToCType()}*";
 
     public override string MangledName { get; } = Inner.MangledName + "_p";
 }
@@ -280,10 +244,7 @@ internal record IrPtrType(IrType Inner) : IrType
 /// </summary>
 internal record IrArrayType(IrType Elem, int Size) : IrType
 {
-    protected internal override string ComposeCType()
-    {
-        return Mangler.Class(MangledName);
-    }
+    protected internal override string ComposeCType() => Mangler.Class(MangledName);
 
     public override string MangledName { get; } = $"Arr_{Elem.MangledName}_{Size}";
 }
@@ -301,10 +262,7 @@ internal record IrResultType(IrType Inner) : IrType
     /// </summary>
     public string ResultName { get; } = $"Result_{(Inner is IrVoidType ? "int" : Inner.MangledName)}";
 
-    protected internal override string ComposeCType()
-    {
-        return ResultName;
-    }
+    protected internal override string ComposeCType() => ResultName;
 
     public override string MangledName { get; } = "Result_" + Inner.MangledName;
 }
@@ -325,10 +283,7 @@ internal record IrFuncPtrType(IrType Ret, List<IrType> Params) : IrType
         }
     )}";
 
-    protected internal override string ComposeCType()
-    {
-        return Mangler.Class(MangledName);
-    }
+    protected internal override string ComposeCType() => Mangler.Class(MangledName);
 
     /// <summary>
     /// Structural equality over the parameter list. The generated one compares Params by reference,
@@ -358,10 +313,7 @@ internal record IrFuncPtrType(IrType Ret, List<IrType> Params) : IrType
 /// </summary>
 internal record IrUnionType(string Name) : IrType
 {
-    protected internal override string ComposeCType()
-    {
-        return Mangler.Union(Name);
-    }
+    protected internal override string ComposeCType() => Mangler.Union(Name);
 
     public override string MangledName => Name;
 }

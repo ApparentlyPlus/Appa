@@ -159,10 +159,8 @@ internal static class Suggest
     /// diag.Error's hints parameter, not the message. It renders on its own "= help:" line rather
     /// than appended to the error text.
     /// </summary>
-    public static string[] Hints(string typed, IEnumerable<string> candidates)
-    {
-        return Closest(typed, candidates) is { } best ? [$"did you mean '{best}'?"] : [];
-    }
+    public static string[] Hints(string typed, IEnumerable<string> candidates) =>
+        Closest(typed, candidates) is { } best ? [$"did you mean '{best}'?"] : [];
 
     /// <summary>
     /// Classic iterative Levenshtein edit distance between two strings, keeping two rows.
@@ -259,10 +257,8 @@ internal sealed class DiagnosticBag(SourceSet sources)
         _warnCount++;
     }
 
-    public int LineOf(Diagnostic d)
-    {
-        return sources.Get(d.Loc.File) is { } s && !d.Loc.Span.IsNone ? s.LineCol(d.Loc.Span.Start).Line : 0;
-    }
+    public int LineOf(Diagnostic d) =>
+        sources.Get(d.Loc.File) is { } s && !d.Loc.Span.IsNone ? s.LineCol(d.Loc.Span.Start).Line : 0;
 
     /// <summary>
     /// Renders a diagnostic as a string, with source code context and ANSI colors. If the source

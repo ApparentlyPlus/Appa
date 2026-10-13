@@ -12,19 +12,13 @@ internal sealed class Ownership(IrModule module)
     /// design: this pass runs over stdlib-free input too, and a real build has
     /// Pipeline.ValidateIntrinsics demand the whole role set before emission.
     /// </summary>
-    private static string Role(IrModule m, string role)
-    {
-        return m.Symbols.IntrinsicOrNull(role) ?? $"gata_MISSING_{role}";
-    }
+    private static string Role(IrModule m, string role) => m.Symbols.IntrinsicOrNull(role) ?? $"gata_MISSING_{role}";
 
     /// <summary>
     /// Returns true if the type participates in reference counting: a managed class reference, or
     /// a union whose live variant may hold one.
     /// </summary>
-    private bool IsManaged(IrType t)
-    {
-        return _managed.IsManaged(t);
-    }
+    private bool IsManaged(IrType t) => _managed.IsManaged(t);
 
     /// <summary>
     /// Returns true if the expression is a producer of a managed value, false otherwise.
@@ -47,10 +41,7 @@ internal sealed class Ownership(IrModule module)
     /// <summary>
     /// Generates a unique temporary variable name with the given prefix.
     /// </summary>
-    private string Tmp(string prefix)
-    {
-        return $"{prefix}{_seq++}";
-    }
+    private string Tmp(string prefix) => $"{prefix}{_seq++}";
 
     // A frame represents a lexical scope in the lowered IR, tracking owning locals and deferred actions.
     private sealed class Frame
@@ -135,27 +126,20 @@ internal sealed class Ownership(IrModule module)
     /// <summary>
     /// Builds `res.value` for a Result-typed temp, typed as the underlying value.
     /// </summary>
-    private static IrFieldLoad ResultValueOf(string res, IrResultType rt)
-    {
-        return new IrFieldLoad(new IrVar(res, rt), ResultValue, rt.Inner);
-    }
+    private static IrFieldLoad ResultValueOf(string res, IrResultType rt) =>
+        new IrFieldLoad(new IrVar(res, rt), ResultValue, rt.Inner);
 
     /// <summary>
     /// Builds `res.has_error` for a Result-typed temp.
     /// </summary>
-    private static IrFieldLoad ResultHasErrorOf(string res, IrResultType rt)
-    {
-        return new IrFieldLoad(new IrVar(res, rt), ResultHasError, IrType.Bool);
-    }
+    private static IrFieldLoad ResultHasErrorOf(string res, IrResultType rt) =>
+        new IrFieldLoad(new IrVar(res, rt), ResultHasError, IrType.Bool);
 
     /// <summary>
     /// Builds the `(Result_T){ .has_error = true }` literal a failed throws call returns. The value
     /// field is deliberately omitted: C zero-initializes it.
     /// </summary>
-    private IrStructLit ErrorResult()
-    {
-        return new IrStructLit(_resultType!, [(ResultHasError, new IrLitBool(true))]);
-    }
+    private IrStructLit ErrorResult() => new IrStructLit(_resultType!, [(ResultHasError, new IrLitBool(true))]);
 
     /// <summary>
     /// Builds the success Result for a throws function's return, with or without a value.
@@ -170,18 +154,12 @@ internal sealed class Ownership(IrModule module)
     /// <summary>
     /// Wraps a condition in `if (cond) { body }` for the single-statement branches this pass emits.
     /// </summary>
-    private static IrIf IfThen(IrExpr cond, List<IrStmt> body)
-    {
-        return new IrIf(cond, new IrBlock(body), null);
-    }
+    private static IrIf IfThen(IrExpr cond, List<IrStmt> body) => new IrIf(cond, new IrBlock(body), null);
 
     /// <summary>
     /// Builds a logical negation of a bool-typed expression.
     /// </summary>
-    private static IrUnaryOp Not(IrExpr e)
-    {
-        return new IrUnaryOp(UnOp.Not, e, IrType.Bool);
-    }
+    private static IrUnaryOp Not(IrExpr e) => new IrUnaryOp(UnOp.Not, e, IrType.Bool);
 
     // The induction variable both for-in shapes count with. A nested for-in re-declares it in
     // its own C for-scope, which shadows the outer one exactly as the previous raw text did.
@@ -284,10 +262,7 @@ internal sealed class Ownership(IrModule module)
     /// <summary>
     /// Lowers a single operator body, tracking whether it is a throws operator.
     /// </summary>
-    private IrOperator LowerOperator(IrOperator o)
-    {
-        return o.Body == null ? o : o with { Body = LowerBlock(o.Body) };
-    }
+    private IrOperator LowerOperator(IrOperator o) => o.Body == null ? o : o with { Body = LowerBlock(o.Body) };
 
     #endregion
 

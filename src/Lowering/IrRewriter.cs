@@ -68,27 +68,18 @@ internal abstract class IrRewriter
     /// <summary>
     /// Rewrites a block by delegating to RewriteStmt and casting the result.
     /// </summary>
-    private IrBlock RewriteBlock(IrBlock b)
-    {
-        return (IrBlock)RewriteStmt(b);
-    }
+    private IrBlock RewriteBlock(IrBlock b) => (IrBlock)RewriteStmt(b);
 
     // Override points
     /// <summary>
     /// Override to transform specific expression kinds. Default delegates to MapExpr.
     /// </summary>
-    protected virtual IrExpr RewriteExpr(IrExpr e)
-    {
-        return MapExpr(e);
-    }
+    protected virtual IrExpr RewriteExpr(IrExpr e) => MapExpr(e);
 
     /// <summary>
     /// Override to transform specific statement kinds. Default delegates to MapStmt.
     /// </summary>
-    protected virtual IrStmt RewriteStmt(IrStmt s)
-    {
-        return MapStmt(s);
-    }
+    protected virtual IrStmt RewriteStmt(IrStmt s) => MapStmt(s);
 
     // Default structural recursion
     /// <summary>

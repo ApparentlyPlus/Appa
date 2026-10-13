@@ -56,10 +56,7 @@ internal static class Roles
     /// <summary>
     /// Returns the canonical floor C name for an environment role.
     /// </summary>
-    public static string FloorDefault(string role)
-    {
-        return FloorDefaults[role];
-    }
+    public static string FloorDefault(string role) => FloorDefaults[role];
 }
 
 // The lifecycle methods the compiler itself invokes from generated code: the allocator
@@ -160,20 +157,14 @@ internal sealed class SymbolTable
     /// <summary>
     /// Returns the C name bound to the given intrinsic role, or null if unbound.
     /// </summary>
-    public string? IntrinsicOrNull(string role)
-    {
-        return Intrinsics.TryGetValue(role, out var n) ? n : null;
-    }
+    public string? IntrinsicOrNull(string role) => Intrinsics.TryGetValue(role, out var n) ? n : null;
 
     /// <summary>
     /// Resolves an environment floor role to a C name: whatever libgata bound to it, or the role's
     /// canonical floor name when nothing did. See Roles.FloorDefaults for why an unbound env role
     /// is legitimate rather than a MissingIntrinsic error.
     /// </summary>
-    public string FloorName(string role)
-    {
-        return IntrinsicOrNull(role) ?? Roles.FloorDefault(role);
-    }
+    public string FloorName(string role) => IntrinsicOrNull(role) ?? Roles.FloorDefault(role);
 
     #region Registration
 
@@ -314,10 +305,7 @@ internal sealed class SymbolTable
     public bool IsEnum(string name) => Enums.ContainsKey(name);
 
 
-    public bool IsEnumMember(string e, string m)
-    {
-        return Enums.TryGetValue(e, out var ms) && ms.Contains(m);
-    }
+    public bool IsEnumMember(string e, string m) => Enums.TryGetValue(e, out var ms) && ms.Contains(m);
 
     // Union types: name -> variant list. Globally visible and not generic.
     public Dictionary<string, List<UnionVariant>> Unions { get; } = [];
@@ -333,10 +321,7 @@ internal sealed class SymbolTable
     /// <summary>
     /// Returns the variant list for the named union, or null if not declared.
     /// </summary>
-    public List<UnionVariant>? UnionDef(string name)
-    {
-        return Unions.GetValueOrDefault(name);
-    }
+    public List<UnionVariant>? UnionDef(string name) => Unions.GetValueOrDefault(name);
 
     #endregion
 
@@ -348,19 +333,14 @@ internal sealed class SymbolTable
     /// <summary>
     /// Returns the source file that declared the named class, or null if not found.
     /// </summary>
-    public string? ClassModule(string name)
-    {
-        return _classes.TryGetValue(name, out var s) ? s.Module : null;
-    }
+    public string? ClassModule(string name) => _classes.TryGetValue(name, out var s) ? s.Module : null;
 
 
     /// <summary>
     /// Returns the last registered overload of the named method, or null if not found.
     /// </summary>
-    public Symbol? LookupMethod(string cls, string method)
-    {
-        return _methods.TryGetValue(new(cls, method), out var l) ? l[^1] : null;
-    }
+    public Symbol? LookupMethod(string cls, string method) =>
+        _methods.TryGetValue(new(cls, method), out var l) ? l[^1] : null;
 
     /// <summary>
     /// Every '@extern' declaration in the build, as (Gata name, C name)
@@ -388,10 +368,8 @@ internal sealed class SymbolTable
     /// 'as' has at most one in a well-formed program, so this is the whole answer. For 'as',
     /// callers picking among several should use OperatorOverloads.
     /// </summary>
-    public Symbol? LookupOperator(string cls, string op)
-    {
-        return _operators.TryGetValue(new(cls, op), out var l) ? l[^1] : null;
-    }
+    public Symbol? LookupOperator(string cls, string op) =>
+        _operators.TryGetValue(new(cls, op), out var l) ? l[^1] : null;
 
     /// <summary>
     /// Returns the overload of the given operator with the given parameter count, or null. Unary
@@ -408,34 +386,24 @@ internal sealed class SymbolTable
     /// <summary>
     /// Returns all overloads of the named operator on the given class.
     /// </summary>
-    public IReadOnlyList<Symbol> OperatorOverloads(string cls, string op)
-    {
-        return _operators.TryGetValue(new(cls, op), out var l) ? l : [];
-    }
+    public IReadOnlyList<Symbol> OperatorOverloads(string cls, string op) =>
+        _operators.TryGetValue(new(cls, op), out var l) ? l : [];
 
     /// <summary>
     /// Returns true if the named operator has more than one overload on the given class.
     /// </summary>
-    public bool IsOverloadedOperator(string cls, string op)
-    {
-        return OperatorOverloads(cls, op).Count > 1;
-    }
+    public bool IsOverloadedOperator(string cls, string op) => OperatorOverloads(cls, op).Count > 1;
 
     /// <summary>
     /// Returns all overloads of the named method on the given class.
     /// </summary>
-    public IReadOnlyList<Symbol> MethodOverloads(string cls, string method)
-    {
-        return _methods.TryGetValue(new(cls, method), out var l) ? l : [];
-    }
+    public IReadOnlyList<Symbol> MethodOverloads(string cls, string method) =>
+        _methods.TryGetValue(new(cls, method), out var l) ? l : [];
 
     /// <summary>
     /// Every registration of the named free function, one per declaring file, before any collapsing of overloads.
     /// </summary>
-    public IReadOnlyList<Symbol> FuncDeclarations(string name)
-    {
-        return _funcs.TryGetValue(name, out var l) ? l : [];
-    }
+    public IReadOnlyList<Symbol> FuncDeclarations(string name) => _funcs.TryGetValue(name, out var l) ? l : [];
 
     public IReadOnlyList<Symbol> FuncOverloads(string name)
     {
@@ -453,10 +421,7 @@ internal sealed class SymbolTable
     /// <summary>
     /// Returns true if the named method has more than one overload.
     /// </summary>
-    public bool IsOverloadedMethod(string cls, string method)
-    {
-        return MethodOverloads(cls, method).Count > 1;
-    }
+    public bool IsOverloadedMethod(string cls, string method) => MethodOverloads(cls, method).Count > 1;
 
     /// <summary>
     /// Returns the distinct method names declared directly on the given class/module, for "did you
@@ -471,26 +436,18 @@ internal sealed class SymbolTable
     /// <summary>
     /// Returns true if the named free function has more than one overload.
     /// </summary>
-    public bool IsOverloadedFunc(string name)
-    {
-        return FuncOverloads(name).Count > 1;
-    }
+    public bool IsOverloadedFunc(string name) => FuncOverloads(name).Count > 1;
 
     /// <summary>
     /// Returns the declared type of the named field, or null if not found.
     /// </summary>
-    public TypeSpec? FieldType(string cls, string field)
-    {
-        return _fields.TryGetValue(new(cls, field), out var s) ? s.Type : null;
-    }
+    public TypeSpec? FieldType(string cls, string field) =>
+        _fields.TryGetValue(new(cls, field), out var s) ? s.Type : null;
 
     /// <summary>
     /// Returns true if the named field exists on the given class.
     /// </summary>
-    public bool IsField(string cls, string field)
-    {
-        return _fields.ContainsKey(new(cls, field));
-    }
+    public bool IsField(string cls, string field) => _fields.ContainsKey(new(cls, field));
 
     #endregion
 
@@ -502,10 +459,7 @@ internal sealed class SymbolTable
     /// <summary>
     /// Returns true if the named member on the given owner was declared private.
     /// </summary>
-    public bool IsPrivateMember(string owner, string member)
-    {
-        return PrivateMembers.Contains(new(owner, member));
-    }
+    public bool IsPrivateMember(string owner, string member) => PrivateMembers.Contains(new(owner, member));
 
     // File-local free functions. They are registered per declaring file so unrelated files may
     // reuse a name, and mangled uniquely so they never clash in the C output.
@@ -522,15 +476,11 @@ internal sealed class SymbolTable
     /// <summary>
     /// Returns the last registered overload of the named file-local function, or null if not found.
     /// </summary>
-    public Symbol? LookupPrivateFunc(string file, string name)
-    {
-        return _privateFuncs.TryGetValue((file, name), out var l) ? l[^1] : null;
-    }
+    public Symbol? LookupPrivateFunc(string file, string name) =>
+        _privateFuncs.TryGetValue((file, name), out var l) ? l[^1] : null;
 
-    public IReadOnlyList<Symbol> PrivateFuncOverloads(string file, string name)
-    {
-        return _privateFuncs.TryGetValue((file, name), out var l) ? l : [];
-    }
+    public IReadOnlyList<Symbol> PrivateFuncOverloads(string file, string name) =>
+        _privateFuncs.TryGetValue((file, name), out var l) ? l : [];
 
     #endregion
 

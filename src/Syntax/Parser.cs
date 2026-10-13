@@ -55,10 +55,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     /// Returns the token n positions ahead of the current position, or the last token if the offset
     /// exceeds the stream length.
     /// </summary>
-    private Token Peek(int n = 1)
-    {
-        return (_pp + n) < _tokens.Length ? _tokens[_pp + n] : _tokens[^1];
-    }
+    private Token Peek(int n = 1) => (_pp + n) < _tokens.Length ? _tokens[_pp + n] : _tokens[^1];
 
     /// <summary>
     /// Consumes the current token, updates _pe for span construction, and advances _pp.
@@ -74,10 +71,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Builds a TextSpan from a saved start offset to the end of the last consumed token.
     /// </summary>
-    private TextSpan To(int start)
-    {
-        return new(start, Math.Max(0, _pe - start));
-    }
+    private TextSpan To(int start) => new(start, Math.Max(0, _pe - start));
 
     /// <summary>
     /// Consumes a token of the expected kind, or throws if the current token doesn't match.
@@ -91,10 +85,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Describes the current token for an error message: its quoted source text, or 'end of file'.
     /// </summary>
-    private string Found()
-    {
-        return Cur.Kind == TK.EOF ? "end of file" : $"'{Cur.Value}'";
-    }
+    private string Found() => Cur.Kind == TK.EOF ? "end of file" : $"'{Cur.Value}'";
 
     /// <summary>
     /// Maps a token kind to the human-readable form used in "expected X" messages.
@@ -121,20 +112,14 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Returns true if the current token has the given kind.
     /// </summary>
-    private bool At(TK k)
-    {
-        return Cur.Kind == k;
-    }
+    private bool At(TK k) => Cur.Kind == k;
 
     /// <summary>
     /// Returns true if the current token is an identifier spelled exactly as given. The test for a
     /// contextual keyword: a word that only means something in one grammatical position, and is
     /// an ordinary identifier everywhere else.
     /// </summary>
-    private bool AtValue(string word)
-    {
-        return Cur.Kind == TK.Ident && Cur.Value == word;
-    }
+    private bool AtValue(string word) => Cur.Kind == TK.Ident && Cur.Value == word;
 
     private bool AtProcessStart()
     {
@@ -157,10 +142,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     /// Returns true if the current token is TK.Punct with the given value. Only for operator tokens
     /// kept as TK.Punct: + - * / % and | ^ less-than greater-than ! ~
     /// </summary>
-    private bool AtP(string v)
-    {
-        return Cur.Kind == TK.Punct && Cur.Value == v;
-    }
+    private bool AtP(string v) => Cur.Kind == TK.Punct && Cur.Value == v;
 
     /// <summary>
     /// Throws a ParseException with the given message at the current token's span.
@@ -402,10 +384,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Wraps a raw native block token into a NativeBody.
     /// </summary>
-    private static NativeBody ParseNativeBody(Token tok)
-    {
-        return new NativeBody(tok.Value);
-    }
+    private static NativeBody ParseNativeBody(Token tok) => new NativeBody(tok.Value);
 
     /// <summary>
     /// Parses a native type declaration. The lexer encodes the type name and body separated by \x1F
@@ -982,10 +961,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     /// Parses an optional return type before 'func'. Returns null when 'func' is immediately
     /// followed by an identifier (no return type). Otherwise parses and returns the type spec.
     /// </summary>
-    private TypeSpec? ParseOptionalReturnType()
-    {
-        return At(TK.Func) && Peek().Kind == TK.Ident ? null : ParseTypeSpec();
-    }
+    private TypeSpec? ParseOptionalReturnType() => At(TK.Func) && Peek().Kind == TK.Ident ? null : ParseTypeSpec();
 
     /// <summary>
     /// Parses a method body. Either a native C block or a Gata statement block.
@@ -1092,10 +1068,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     /// resolver can reject it as G043 with a message about modes, rather than the parser rejecting
     /// it as an unknown declaration.
     /// </summary>
-    private bool AtThreadStart()
-    {
-        return AtValue("thread") || At(TK.Foreground) || At(TK.Background);
-    }
+    private bool AtThreadStart() => AtValue("thread") || At(TK.Foreground) || At(TK.Background);
 
     /// <summary>
     /// True if a process declaration starts here, including the foreground/background-prefixed form
@@ -1646,10 +1619,7 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     /// <summary>
     /// Entry point for all expression parsing.
     /// </summary>
-    public Expr ParseExpr()
-    {
-        return ParseTernary();
-    }
+    public Expr ParseExpr() => ParseTernary();
 
     /// <summary>
     /// Parses a ternary conditional. Right-associative so nested ternaries chain without parens.

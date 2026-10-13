@@ -626,23 +626,13 @@ internal sealed class Lexer(string src)
         Emit(TK.CharLit, val.ToString());
     }
 
-    private static bool IsWhiteSpace(char c)
-    {
-        return c == ' ' || (c >= '\t' && c <= '\r');
-    }
+    private static bool IsWhiteSpace(char c) => c == ' ' || (c >= '\t' && c <= '\r');
 
-    private static bool IsIDStart(char c)
-    {
-        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
-    }
+    private static bool IsIDStart(char c) => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
 
-    private static bool IsIdentPart(char c)
-    {
-        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
-    }
+    private static bool IsIdentPart(char c) =>
+        (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
 
-    private static bool IsHexDigit(char c)
-    {
-        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
-    }
+    private static bool IsHexDigit(char c) =>
+        (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
 }

@@ -800,10 +800,8 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Returns true if the raw C text mentions the gata_String type or string runtime helpers.
     /// </summary>
-    private static bool MentionsString(string? c)
-    {
-        return c != null && (c.Contains("gata_String") || c.Contains("gata_str_"));
-    }
+    private static bool MentionsString(string? c) =>
+        c != null && (c.Contains("gata_String") || c.Contains("gata_str_"));
 
     #endregion
 
@@ -913,10 +911,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// Returns the C type for a parameter, adding one level of pointer indirection for ref
     /// parameters.
     /// </summary>
-    private static string ParamCType(IrParam p)
-    {
-        return p.IsRef ? $"{p.Type.ToCType()}*" : p.Type.ToCType();
-    }
+    private static string ParamCType(IrParam p) => p.IsRef ? $"{p.Type.ToCType()}*" : p.Type.ToCType();
 
     /// <summary>
     /// Returns the full C function signature for a method, including the implicit self parameter.
@@ -963,10 +958,7 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Returns the C signature for the destructor of a class.
     /// </summary>
-    private static string DtorSig(IrClass cls)
-    {
-        return $"void {Mangler.Dtor(cls.Name)}(void* _vp)";
-    }
+    private static string DtorSig(IrClass cls) => $"void {Mangler.Dtor(cls.Name)}(void* _vp)";
 
     /// <summary>
     /// Returns the full C function signature for a free function.
@@ -1538,10 +1530,8 @@ internal sealed class Emitter(IrModule module, DiagnosticBag diag)
     /// <summary>
     /// Returns the struct field name for a union variant at the given index.
     /// </summary>
-    private string UnionVariantName(IrType unionType, int idx)
-    {
-        return unionType is IrUnionType ut ? Mangler.Member(module.UnionNamed(ut.Name).Variants[idx].Name) : "?";
-    }
+    private string UnionVariantName(IrType unionType, int idx) =>
+        unionType is IrUnionType ut ? Mangler.Member(module.UnionNamed(ut.Name).Variants[idx].Name) : "?";
 
     #endregion
 

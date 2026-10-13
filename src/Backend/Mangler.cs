@@ -48,37 +48,25 @@ internal static class Mangler
     /// with C's vocabulary. Those get a trailing underscore. Apply at every site that prints the
     /// name.
     /// </summary>
-    public static string Local(string name)
-    {
-        return CReserved.Contains(name) ? name + "_" : name;
-    }
+    public static string Local(string name) => CReserved.Contains(name) ? name + "_" : name;
 
     /// <summary>
     /// Returns the C spelling of a struct member: a class field, a union variant, or a variant's
     /// payload field.
     /// </summary>
-    public static string Member(string name)
-    {
-        return CReserved.Contains(name) ? name + "_" : name;
-    }
+    public static string Member(string name) => CReserved.Contains(name) ? name + "_" : name;
 
     /// <summary>
     /// True if the name is a C keyword or a standard macro behaving like one, and so cannot stand
     /// as an identifier in emitted C. For the names this compiler cannot rename because the author
     /// pinned them to C text of their own.
     /// </summary>
-    public static bool IsCReserved(string name)
-    {
-        return CReserved.Contains(name);
-    }
+    public static bool IsCReserved(string name) => CReserved.Contains(name);
 
     /// <summary>
     /// True if a user-written local would collide with a compiler temporary.
     /// </summary>
-    public static bool IsReservedLocal(string name)
-    {
-        return name.StartsWith("__", StringComparison.Ordinal);
-    }
+    public static bool IsReservedLocal(string name) => name.StartsWith("__", StringComparison.Ordinal);
 
     [field: ThreadStatic]
     private static NameTable _names
@@ -278,114 +266,76 @@ internal static class Mangler
     /// <summary>
     /// Returns the C struct typedef name for a Gata class, using the dense token if available.
     /// </summary>
-    public static string Class(string name)
-    {
-        return _names.Dense.GetValueOrDefault(name, $"gata_{Sanitize(name)}");
-    }
+    public static string Class(string name) => _names.Dense.GetValueOrDefault(name, $"gata_{Sanitize(name)}");
 
     /// <summary>
     /// Returns the C allocator function name for a class, using the dense token if available.
     /// </summary>
-    public static string Allocator(string cls)
-    {
-        return _names.Dense.TryGetValue(cls, out var d) ? d + "_n" : $"new_{Sanitize(cls)}";
-    }
+    public static string Allocator(string cls) =>
+        _names.Dense.TryGetValue(cls, out var d) ? d + "_n" : $"new_{Sanitize(cls)}";
 
     /// <summary>
     /// Returns the C destructor function name for a class, using the dense token if available.
     /// </summary>
-    public static string Dtor(string cls)
-    {
-        return _names.Dense.TryGetValue(cls, out var d) ? d + "_d" : $"gata_{Sanitize(cls)}__dtor";
-    }
+    public static string Dtor(string cls) =>
+        _names.Dense.TryGetValue(cls, out var d) ? d + "_d" : $"gata_{Sanitize(cls)}__dtor";
 
     /// <summary>
     /// Returns the C thread entry function name for a fully-qualified thread path.
     /// </summary>
-    public static string ThreadEntry(string full)
-    {
-        return $"gata_{full}_main";
-    }
+    public static string ThreadEntry(string full) => $"gata_{full}_main";
 
     /// <summary>
     /// Returns the C name of the static holding a process variable, given the process's fully
     /// qualified name and the variable's written name.
     /// </summary>
-    public static string ProcessVar(string procFull, string name)
-    {
-        return $"gata_{Sanitize(procFull)}_state_{Sanitize(name)}";
-    }
+    public static string ProcessVar(string procFull, string name) =>
+        $"gata_{Sanitize(procFull)}_state_{Sanitize(name)}";
 
     /// <summary>
     /// Returns the C name of the generated function that assigns a process's variables their
     /// initial values. External linkage: the launcher lives in its own translation unit.
     /// </summary>
-    public static string ProcessStateInit(string procFull)
-    {
-        return $"gata_{Sanitize(procFull)}_state_init";
-    }
+    public static string ProcessStateInit(string procFull) => $"gata_{Sanitize(procFull)}_state_init";
 
-    public static string Enum(string name)
-    {
-        return $"gata_{Sanitize(name)}";
-    }
+    public static string Enum(string name) => $"gata_{Sanitize(name)}";
 
     /// <summary>
     /// Returns the C enumerator name for a member of a Gata enum type.
     /// </summary>
-    public static string EnumMember(string enumName, string member)
-    {
-        return $"gata_{Sanitize(enumName)}_{member}";
-    }
+    public static string EnumMember(string enumName, string member) => $"gata_{Sanitize(enumName)}_{member}";
 
-    public static string Union(string name)
-    {
-        return $"gata_{Sanitize(name)}";
-    }
+    public static string Union(string name) => $"gata_{Sanitize(name)}";
 
     /// <summary>
     /// Returns the C tag enumerator name for a variant of a Gata union type.
     /// </summary>
-    public static string UnionTag(string unionName, string variant)
-    {
-        return $"gata_{Sanitize(unionName)}_{variant}";
-    }
+    public static string UnionTag(string unionName, string variant) => $"gata_{Sanitize(unionName)}_{variant}";
 
     /// <summary>
     /// The C name of a managed union's generated retain, which switches on the tag and returns the
     /// union unchanged so it composes like the runtime intrinsic. Not densified, since unions keep
     /// their readable typedef name and one type must be spelled one way.
     /// </summary>
-    public static string UnionRetain(string name)
-    {
-        return $"gata_{Sanitize(name)}__retain";
-    }
+    public static string UnionRetain(string name) => $"gata_{Sanitize(name)}__retain";
 
     /// <summary>
     /// Returns the C function name for a managed union's generated release, which switches on the
     /// tag and releases whatever the live variant holds.
     /// </summary>
-    public static string UnionRelease(string name)
-    {
-        return $"gata_{Sanitize(name)}__release";
-    }
+    public static string UnionRelease(string name) => $"gata_{Sanitize(name)}__release";
 
     /// <summary>
     /// Returns the C function name for a union's generated structural equality, which compares tags
     /// first and then the live variant's fields.
     /// </summary>
-    public static string UnionEq(string name)
-    {
-        return $"gata_{Sanitize(name)}__eq";
-    }
+    public static string UnionEq(string name) => $"gata_{Sanitize(name)}__eq";
 
     /// <summary>
     /// Returns the C function name for a method, appending the overload suffix when overloaded.
     /// </summary>
-    public static string Method(string owner, string name, IReadOnlyList<Param> ps, bool overloaded)
-    {
-        return $"gata_{Sanitize(owner)}_{name}" + (overloaded ? "_" + OverloadSuffix(ps) : "");
-    }
+    public static string Method(string owner, string name, IReadOnlyList<Param> ps, bool overloaded) =>
+        $"gata_{Sanitize(owner)}_{name}" + (overloaded ? "_" + OverloadSuffix(ps) : "");
 
     /// <summary>
     /// Returns the C function name for a free function. Entry functions use the kernel entry
@@ -403,19 +353,14 @@ internal static class Mangler
     /// Returns the C function name for a file-local private free function, prefixed by a stable
     /// per-file token so two files may reuse the same name without clashing.
     /// </summary>
-    public static string PrivateFreeFunc(string fileToken, string name, IReadOnlyList<Param> ps, bool overloaded)
-    {
-        return $"gata_f{fileToken}_{Sanitize(name)}" + (overloaded ? "_" + OverloadSuffix(ps) : "");
-    }
+    public static string PrivateFreeFunc(string fileToken, string name, IReadOnlyList<Param> ps, bool overloaded) =>
+        $"gata_f{fileToken}_{Sanitize(name)}" + (overloaded ? "_" + OverloadSuffix(ps) : "");
 
     /// <summary>
     /// Returns a stable 8-hex C-identifier fragment derived from the declaring file path via a
     /// 32-bit FNV-1a hash, used to namespace file-local function names.
     /// </summary>
-    public static string FileToken(string file)
-    {
-        return Hash(file);
-    }
+    public static string FileToken(string file) => Hash(file);
 
     /// <summary>
     /// A stable 8-hex C-identifier fragment derived from a string via 32-bit FNV-1a. Stable across

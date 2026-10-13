@@ -355,18 +355,12 @@ internal static class Finesse
     /// <summary>
     /// Returns a random element from the given array.
     /// </summary>
-    private static string Pick(string[] values)
-    {
-        return values[_random.Next(values.Length)];
-    }
+    private static string Pick(string[] values) => values[_random.Next(values.Length)];
 
     /// <summary>
     /// Returns a string of the given character repeated width times.
     /// </summary>
-    private static string Sep(char c, int width)
-    {
-        return new string(c, width);
-    }
+    private static string Sep(char c, int width) => new string(c, width);
 
     /// <summary>
     /// Returns a randomly chosen decorative header comment for the given output file name. One in

@@ -430,18 +430,12 @@ internal static class OperatorRules
     /// True for the comparison operators, which must return bool (and whose '=='/'!=' pair is
     /// derived by negation when only one is declared).
     /// </summary>
-    public static bool IsComparison(string op)
-    {
-        return op is "==" or "!=" or "<" or ">" or "<=" or ">=";
-    }
+    public static bool IsComparison(string op) => op is "==" or "!=" or "<" or ">" or "<=" or ">=";
 
     /// <summary>
     /// True for the in-place mutators, which must return void.
     /// </summary>
-    public static bool IsMutator(string op)
-    {
-        return op is "++" or "--";
-    }
+    public static bool IsMutator(string op) => op is "++" or "--";
 
     /// <summary>
     /// The return type an operator defaults to when the declaration omits one.

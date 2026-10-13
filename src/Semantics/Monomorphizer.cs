@@ -505,10 +505,8 @@ internal sealed class Monomorphizer(DiagnosticBag diag)
     /// changed. Shared with the ScopeBinder, which rewrites scoped type names through exactly the
     /// same walker rather than duplicating knowledge of where type positions live.
     /// </summary>
-    internal static ClassMember[] SubMembers(ClassMember[] members, SubstitutionContext ctx)
-    {
-        return MapArray(members, m => SubMember(m, ctx));
-    }
+    internal static ClassMember[] SubMembers(ClassMember[] members, SubstitutionContext ctx) =>
+        MapArray(members, m => SubMember(m, ctx));
 
     /// <summary>
     /// Substitutes every type mentioned in a union's variant payloads.

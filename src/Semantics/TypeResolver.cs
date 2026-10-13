@@ -29,10 +29,7 @@ internal sealed class TypeResolver(
     /// <summary>
     /// Returns true when a free-function symbol is in scope for the current file.
     /// </summary>
-    private bool FuncInScope(Symbol? f)
-    {
-        return f != null && _scope.Contains(f.Module);
-    }
+    private bool FuncInScope(Symbol? f) => f != null && _scope.Contains(f.Module);
 
     /// <summary>
     /// Looks up a free function, preferring a registration this file can actually see.
@@ -108,10 +105,7 @@ internal sealed class TypeResolver(
     /// <summary>
     /// Allocates a unique temporary variable name with the given prefix.
     /// </summary>
-    private string Tmp(string prefix)
-    {
-        return $"{prefix}{_tmpSeq++}";
-    }
+    private string Tmp(string prefix) => $"{prefix}{_tmpSeq++}";
 
     /// <summary>
     /// Records a fixed-array type usage and returns the IrArrayType node.
@@ -204,18 +198,12 @@ internal sealed class TypeResolver(
     /// <summary>
     /// Returns true when the class was declared as a native type with no Gata-visible fields.
     /// </summary>
-    private bool IsOpaqueStruct(string cls)
-    {
-        return nativeStructs.Contains(cls);
-    }
+    private bool IsOpaqueStruct(string cls) => nativeStructs.Contains(cls);
 
     /// <summary>
     /// Returns true when the class has either a native struct body or raw C field blocks.
     /// </summary>
-    private bool HasOpaqueFields(string cls)
-    {
-        return nativeStructs.Contains(cls) || opaqueFieldClasses.Contains(cls);
-    }
+    private bool HasOpaqueFields(string cls) => nativeStructs.Contains(cls) || opaqueFieldClasses.Contains(cls);
 
     /// <summary>
     /// Validates that a type spec refers to real, in-scope types, node by node. Each node carries
@@ -326,10 +314,7 @@ internal sealed class TypeResolver(
     /// Prefers the spec node's own span. Falls back to the declaration span when the node was
     /// synthesized without one.
     /// </summary>
-    private static TextSpan Sp(TypeSpec t, TextSpan fallback)
-    {
-        return t.Span.IsNone ? fallback : t.Span;
-    }
+    private static TextSpan Sp(TypeSpec t, TextSpan fallback) => t.Span.IsNone ? fallback : t.Span;
 
     /// <summary>
     /// Validates that no two parameters in the list share the same name.
@@ -479,18 +464,12 @@ internal sealed class TypeResolver(
     /// Returns the numeric promotion rank of the type, used to resolve binary operator widening.
     /// Ranks live in the primitive table (PrimTypes) alongside each type's other facts.
     /// </summary>
-    private static int NumRank(IrType t)
-    {
-        return t is IrPrimType p ? PrimTypes.Rank(p.CName) : 4;
-    }
+    private static int NumRank(IrType t) => t is IrPrimType p ? PrimTypes.Rank(p.CName) : 4;
 
     /// <summary>
     /// Formats the argument type list as a comma-separated string for use in diagnostic messages.
     /// </summary>
-    private static string DescribeArgs(List<IrExpr> args)
-    {
-        return string.Join(", ", args.Select(a => Describe(a.Type)));
-    }
+    private static string DescribeArgs(List<IrExpr> args) => string.Join(", ", args.Select(a => Describe(a.Type)));
 
     #endregion
 
@@ -539,10 +518,8 @@ internal sealed class TypeResolver(
     /// <summary>
     /// Returns the human-readable signature string for a function pointer type.
     /// </summary>
-    private static string DescribeFuncPtr(IrFuncPtrType f)
-    {
-        return $"func({string.Join(", ", f.Params.Select(Describe))}) -> {Describe(f.Ret)}";
-    }
+    private static string DescribeFuncPtr(IrFuncPtrType f) =>
+        $"func({string.Join(", ", f.Params.Select(Describe))}) -> {Describe(f.Ret)}";
 
     /// <summary>
     /// Reports a type-mismatch diagnostic when value cannot be assigned to the target type.
@@ -595,10 +572,7 @@ internal sealed class TypeResolver(
     /// True when a known constant is representable in the given primitive. A type whose range Range
     /// cannot express holds any long, which is every constant this pass can see.
     /// </summary>
-    private static bool FitsIn(long n, IrPrimType t)
-    {
-        return Range(t) is not var (lo, hi) || (n >= lo && n <= hi);
-    }
+    private static bool FitsIn(long n, IrPrimType t) => Range(t) is not var (lo, hi) || (n >= lo && n <= hi);
 
     /// <summary>
     /// The constant an expression denotes when it is an integer literal, optionally negated. Only
@@ -908,10 +882,8 @@ internal sealed class TypeResolver(
     /// Returns true for a bare constant, the one place a same-type cast is written on purpose (to
     /// pin a literal's width where inference would otherwise decide it).
     /// </summary>
-    private static bool IsLiteral(IrExpr e)
-    {
-        return e is IrLitInt or IrLitFloat or IrLitChar or IrLitBool or IrLitString or IrLitNull or IrEnumConst;
-    }
+    private static bool IsLiteral(IrExpr e) =>
+        e is IrLitInt or IrLitFloat or IrLitChar or IrLitBool or IrLitString or IrLitNull or IrEnumConst;
 
     /// <summary>
     /// Returns true when both expressions are comparable with == or !=.
@@ -940,10 +912,7 @@ internal sealed class TypeResolver(
     /// <summary>
     /// Returns true when at least one statement in the list definitely returns on every path.
     /// </summary>
-    private static bool ReturnsList(IReadOnlyList<IrStmt> stmts)
-    {
-        return stmts.Any(DefinitelyReturns);
-    }
+    private static bool ReturnsList(IReadOnlyList<IrStmt> stmts) => stmts.Any(DefinitelyReturns);
 
     /// <summary>
     /// Returns true when the statement definitely returns or throws on every execution path.
@@ -1184,10 +1153,7 @@ internal sealed class TypeResolver(
     /// Returns true when the statement list leaves its handler on every path: either by supplying
     /// a value with `assign`, or by transferring control out entirely.
     /// </summary>
-    private static bool AssignsOrExitsList(IReadOnlyList<IrStmt> stmts)
-    {
-        return stmts.Any(AssignsOrExits);
-    }
+    private static bool AssignsOrExitsList(IReadOnlyList<IrStmt> stmts) => stmts.Any(AssignsOrExits);
 
     /// <summary>
     /// Returns true when a statement definitely ends its enclosing `catch` handler.
@@ -1664,10 +1630,7 @@ internal sealed class TypeResolver(
         /// The sub-expressions of a node, gathered through IrWalker so a new expression kind cannot
         /// hide a read from this pass.
         /// </summary>
-        private static IEnumerable<IrExpr> Children(IrExpr e)
-        {
-            return new ChildCollector().Of(e);
-        }
+        private static IEnumerable<IrExpr> Children(IrExpr e) => new ChildCollector().Of(e);
 
         private sealed class ChildCollector : IrWalker
         {
@@ -1907,10 +1870,8 @@ internal sealed class TypeResolver(
     /// Collapses a statement list to a single statement when the list has exactly one entry,
     /// avoiding an unnecessary nested block in the common case.
     /// </summary>
-    private static IrStmt Seq(List<IrStmt> stmts, TextSpan span)
-    {
-        return stmts.Count == 1 ? stmts[0] with { Span = span } : new IrBlock(stmts) { Span = span };
-    }
+    private static IrStmt Seq(List<IrStmt> stmts, TextSpan span) =>
+        stmts.Count == 1 ? stmts[0] with { Span = span } : new IrBlock(stmts) { Span = span };
 
     /// <summary>
     /// Computes the common type for two ternary arms, or null when they cannot be unified.
@@ -2073,10 +2034,7 @@ internal sealed class TypeResolver(
         /// Returns true when declaring the name here would collide with a parameter of the
         /// enclosing function rather than shadow it, because both land in the same C scope.
         /// </summary>
-        public bool CollidesWithParam(string name)
-        {
-            return _parent is { _isParams: true } p && p._vars.ContainsKey(name);
-        }
+        public bool CollidesWithParam(string name) => _parent is { _isParams: true } p && p._vars.ContainsKey(name);
 
         /// <summary>
         /// Declares a variable with the given name and type in the current scope. When isRef is
@@ -2091,10 +2049,7 @@ internal sealed class TypeResolver(
         /// <summary>
         /// Returns true when the name is declared in this (not a parent) scope.
         /// </summary>
-        public bool DeclaredHere(string name)
-        {
-            return _vars.ContainsKey(name);
-        }
+        public bool DeclaredHere(string name) => _vars.ContainsKey(name);
 
         /// <summary>
         /// Returns true when the name is declared in an enclosing scope but not in this one, i.e.
@@ -4402,10 +4357,8 @@ internal sealed class TypeResolver(
     /// <summary>
     /// Returns the IR type for a floating-point literal: float for an f/F suffix, double otherwise.
     /// </summary>
-    private static IrPrimType FloatLitType(string raw)
-    {
-        return raw.Length > 0 && raw[^1] is 'f' or 'F' ? IrType.Float : IrType.Double;
-    }
+    private static IrPrimType FloatLitType(string raw) =>
+        raw.Length > 0 && raw[^1] is 'f' or 'F' ? IrType.Float : IrType.Double;
 
     /// <summary>
     /// Infers a field's type from its initializer. Fields register their type before any body is
