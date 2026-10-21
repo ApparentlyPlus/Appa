@@ -28,6 +28,8 @@ internal static class Roles
     public const string EnvProcHide    = "env_proc_hide";
     public const string EnvThreadSpawn = "env_thread_spawn";
     public const string EnvRead        = "env_read";
+    public const string EnvKeyRead     = "env_key_read";
+    public const string EnvKeyPending  = "env_key_pending";
     public const string EnvAlloc       = "env_alloc";
     public const string EnvTime        = "env_time";
 
@@ -35,7 +37,8 @@ internal static class Roles
     [
         Alloc, Retain, Release, ObjHeader, ObjInit,
         StringifyInt, StringifyLong, StringifyUint, StringifyFloat, StringifyChar,
-        EnvDebug, EnvPanic, EnvProcCreate, EnvProcHide, EnvThreadSpawn, EnvRead, EnvAlloc, EnvTime
+        EnvDebug, EnvPanic, EnvProcCreate, EnvProcHide, EnvThreadSpawn, EnvRead, EnvKeyRead, EnvKeyPending,
+        EnvAlloc, EnvTime
     ]);
 
     // The floor's canonical C names. Unlike the ARC roles an unbound env role is not an error -
@@ -49,6 +52,8 @@ internal static class Roles
         [EnvProcHide]    = "_env_proc_hide",
         [EnvThreadSpawn] = "_env_thread_spawn",
         [EnvRead]        = "_env_read",
+        [EnvKeyRead]     = "_env_key_read",
+        [EnvKeyPending]  = "_env_key_pending",
         [EnvAlloc]       = "_env_alloc",
         [EnvTime]        = "_env_time_ns",
     };

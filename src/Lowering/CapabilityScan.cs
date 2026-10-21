@@ -70,7 +70,9 @@ internal sealed class CapabilityScan(IrModule m) : IrWalker
     /// </summary>
     private void Call(string cname)
     {
-        if (cname == m.Symbols.FloorName(Roles.EnvRead)) Input = true;
+        if (cname == m.Symbols.FloorName(Roles.EnvRead) ||
+            cname == m.Symbols.FloorName(Roles.EnvKeyRead) ||
+            cname == m.Symbols.FloorName(Roles.EnvKeyPending)) Input = true;
         if (cname == m.Symbols.FloorName(Roles.EnvAlloc)) Mem = true;
         if (cname == m.Symbols.FloorName(Roles.EnvTime)) Time = true;
         if (_funcs.TryGetValue(cname, out var f)) Enter(cname, f.Body);
