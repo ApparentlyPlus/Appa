@@ -21,6 +21,12 @@ public class CapabilityScanTests
         @intrinsic(env_read)
         @extern int func _env_read();
 
+        @intrinsic(env_key_read)
+        @extern int func _env_key_read();
+
+        @intrinsic(env_key_pending)
+        @extern int func _env_key_pending();
+
         """;
 
     private static CapabilityScan Scan(string src)
@@ -72,6 +78,21 @@ public class CapabilityScanTests
             }
             realm kernel { entry func Main() { let Prompt p = new Prompt(1); } }
             """).Input);
+
+    /// <summary>
+    /// A raw key read is input just like a line read. Missing it would build an image with no
+    /// keyboard IRQ, and the read would block forever.
+    /// </summary>
+    [Fact]
+    public void KeyReadDeclaresInput() =>
+        Assert.True(Scan("realm kernel { entry func Main() { let int k = _env_key_read(); } }").Input);
+
+    /// <summary>
+    /// So is only polling for one, since the count stays at zero without the IRQ.
+    /// </summary>
+    [Fact]
+    public void KeyPendingDeclaresInput() =>
+        Assert.True(Scan("realm kernel { entry func Main() { let int n = _env_key_pending(); } }").Input);
 
     /// <summary>
     /// The other half: a program that touches neither must not have them declared, or the scan would
