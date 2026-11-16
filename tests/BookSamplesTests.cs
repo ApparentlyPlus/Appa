@@ -20,7 +20,7 @@ public partial class BookSamplesTests
     {
         for (var d = new DirectoryInfo(AppContext.BaseDirectory); d != null; d = d.Parent)
         {
-            var path = Path.Combine(d.FullName, "Gata", "The Gata Programming Language.md");
+            var path = Path.Combine(d.FullName, "Gata", "docs", "The Gata Programming Language.md");
             if (File.Exists(path)) return path;
         }
         return null;
@@ -69,7 +69,7 @@ public partial class BookSamplesTests
     public void SamplesAreValid()
     {
         var book = FindBook();
-        if (book == null) { Assert.Skip("no sibling Gata checkout found; skipping book samples"); return; }
+        if (book == null) { Assert.Skip("Gata book not found (Gata/docs/The Gata Programming Language.md); skipping book samples"); return; }
 
         var samples = Samples(book);
         Assert.True(samples.Count > 50, $"only {samples.Count} samples found; the extractor stopped matching");
@@ -181,7 +181,7 @@ public partial class BookSamplesTests
     public void NoRetiredSyntax(string pattern, string why)
     {
         var book = FindBook();
-        if (book == null) { Assert.Skip("no sibling Gata checkout found"); return; }
+        if (book == null) { Assert.Skip("Gata book not found (Gata/docs/The Gata Programming Language.md)"); return; }
 
         var rx = new Regex(pattern);
         var bad = Samples(book).Where(s => rx.IsMatch(s.Source)).Select(s => s.Line).ToList();
