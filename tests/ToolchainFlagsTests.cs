@@ -23,7 +23,7 @@ public class ToolchainFlagsTests
     public void IeeeSemanticsKept(string forbidden)
     {
         foreach (var rel in (string[])["kernel/kmain.c", "ulibc/string.c",
-                                       Toolchain.GeneratedUserTu, .. GatosFlags.InterruptPath])
+                                       Toolchain.GeneratedUserTu, "kernel/sys/scheduler.c", .. GatosFlags.FpuAllowed])
             Assert.DoesNotContain(forbidden, Flags(rel));
     }
 
@@ -42,19 +42,22 @@ public class ToolchainFlagsTests
     }
 
     /// <summary>
-    /// The interrupt path runs before the FPU is in a usable state, so it must be compiled with no
-    /// floating-point registers at all, and the generated Gata must never land in that set.
+    /// Kernel code borrows whatever FPU state the interrupted thread left, so only the allowlisted
+    /// files get floats, and those can't be auto-vectorized behind the program's back.
     /// </summary>
     [Fact]
-    public void InterruptPathHasNoFpu()
+    public void KernelFpuAllowlist()
     {
-        Assert.NotEmpty(GatosFlags.InterruptPath);
-        foreach (var rel in GatosFlags.InterruptPath)
+        foreach (var r in GatosFlags.FpuRestrictions) Assert.Contains(r, Flags("kernel/sys/scheduler.c"));
+        Assert.NotEmpty(GatosFlags.FpuAllowed);
+        foreach (var rel in GatosFlags.FpuAllowed)
         {
             Assert.False(Toolchain.IsUserspace(rel));
-            foreach (var r in GatosFlags.FpuRestrictions) Assert.Contains(r, Flags(rel));
+            Assert.Contains("-fno-tree-vectorize", Flags(rel));
+            foreach (var r in GatosFlags.FpuRestrictions) Assert.DoesNotContain(r, Flags(rel));
         }
-        Assert.DoesNotContain(Toolchain.GeneratedUserTu, GatosFlags.InterruptPath);
+        Assert.Contains("kernel/kmain.c", GatosFlags.FpuAllowed);
+        foreach (var r in GatosFlags.FpuRestrictions) Assert.DoesNotContain(r, Flags(Toolchain.GeneratedUserTu));
     }
 
     /// <summary>

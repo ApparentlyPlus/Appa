@@ -459,17 +459,12 @@ static class GatosFlags
 
     public static readonly string[] FpuRestrictions = ["-mno-sse", "-mno-sse2", "-mno-mmx", "-mno-80387"];
 
-    public static readonly HashSet<string> InterruptPath = new(StringComparer.Ordinal)
+    // Kernel code runs without the FPU, its registers belong to whatever thread got interrupted.
+    // These are the exceptions, they need floats. Mirrors KERNEL_FPU_ALLOWED in GatOS's run.py
+    public static readonly HashSet<string> FpuAllowed = new(StringComparer.Ordinal)
     {
-        "arch/x86_64/cpu/interrupts.c",
-        "kernel/sys/scheduler.c",
-        "kernel/sys/timers.c",
-        "kernel/drivers/keyboard.c",
-        "kernel/drivers/xhci.c",
-        "tests/test_timers.c",
-        "kernel/memory/vmm.c",
-        "kernel/memory/pmm.c",
-        "klibc/avl.c",
+        "klibc/stdio.c",
+        "kernel/kmain.c",
     };
 
     public static string[] For(Mode mode) => mode == Mode.Release

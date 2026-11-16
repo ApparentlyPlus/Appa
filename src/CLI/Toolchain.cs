@@ -227,7 +227,8 @@ internal static class Toolchain
         if (!IsUserspace(rel))
         {
             if (!isMac) cflags.Add("-flto");
-            if (GatosFlags.InterruptPath.Contains(rel)) cflags.AddRange(GatosFlags.FpuRestrictions);
+            if (GatosFlags.FpuAllowed.Contains(rel)) cflags.Add("-fno-tree-vectorize");
+            else cflags.AddRange(GatosFlags.FpuRestrictions);
         }
         return cflags;
     }
